@@ -9,6 +9,7 @@ if ((test-path $path_build) -eq $false) {
 
 $armips      = 'armips'
 $bin2exe_lua = join-path $path_scripts 'bin2exe.lua'
+$bin2exe_py  = join-path $path_scripts 'bin2exe.py'
 
 $path_fillmem = join-path $path_code    'fillmem'
 $src_fillmem  = join-path $path_fillmem 'fillmem.s'
@@ -21,6 +22,7 @@ write-host "Assembling: $src_fillmem`n"
 
 write-host 'Generating executable..'
 & lua $bin2exe_lua $bin_fillmem $exe_fillmem
+# & py $bin2exe_py $bin_fillmem $exe_fillmem
 
 write-host 'Done!'
 pop-location
