@@ -33,4 +33,6 @@ function build-program { param(
 	pop-location
 }
 # build-program 'fillmem' 'fillmem'
-build-program 'warmup' 'exercise1'
+# build-program 'warmup' 'exercise_1'
+# build-program 'warmup' 'exercise_2'
+build-program 'warmup' 'exercise_3'
