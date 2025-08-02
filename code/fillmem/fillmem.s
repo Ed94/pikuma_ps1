@@ -9,7 +9,7 @@ BASE_ADDR equ 0x0000
 
 Main:
 	li $t0, 0xA000 ; $t0 = 0xA000
-	li $t1, 0xA0FF ; $t1 = 0xA0FF
+	li $t1, 0xA100 ; $t1 = 0xA100
 	li $t2, 0x11   ; $t2 = 0x11
 
 Loop:
