@@ -32,7 +32,7 @@ function build-program { param(
 	write-host 'Done!'
 	pop-location
 }
-# build-program 'fillmem' 'fillmem'
-# build-program 'warmup' 'exercise_1'
-# build-program 'warmup' 'exercise_2'
+build-program 'fillmem' 'fillmem'
+build-program 'warmup' 'exercise_1'
+build-program 'warmup' 'exercise_2'
 build-program 'warmup' 'exercise_3'

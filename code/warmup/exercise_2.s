@@ -20,7 +20,8 @@ add_u  equ add   ; dst_reg, reg_a, reg_b (unsigned)
 add_si equ addi  ; dst_reg, src_reg, immediate value (signed)
 add_ui equ addiu ; dst_reg, src_reg, immediate value (unsigned)
 ; Branch
-branch_equal equ beq ; reg, value(reg, immediate), dst_label
+branch_equal    equ beq ; reg, value(reg, immediate), dst_label
+branch_lt_equal equ ble ; reg, value(reg, immediate), dst_label
 
 ; Registers
 ; Temporaries, may be changed by subroutines
@@ -36,12 +37,15 @@ main:
 
 	; Attempt:
 	load_imm rtemp_0, 1
-	load_imm rtemp_1, 0
+	; load_imm rtemp_1, 0
+	move     rtemp_1, $zero
 loop:
-	add_s        rtemp_1, rtemp_1, rtemp_0
-	add_si       rtemp_0, rtemp_0, 1
-	branch_equal rtemp_0, 10, end
+	add_s  rtemp_1, rtemp_1, rtemp_0
+	add_si rtemp_0, rtemp_0, 1
+	branch_lt_equal rtemp_0, 10, loop
 	nop
-	j            loop
+	; branch_equal rtemp_0, 10, end
+	; nop
+	; j            loop
 end:
 .close

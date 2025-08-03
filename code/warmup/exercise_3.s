@@ -56,13 +56,13 @@ main:
 ; 5. Subtract $t0-$t1 and store it back into $t0
 ; 6. Increment $t2
 ; 7. }
-
 ; Attempt:
+	move     rtemp_2, $zero
 	load_imm rtemp_0, 27
 	load_imm rtemp_1, 3
-	load_imm rtemp_2, 0
+	// load_imm rtemp_2, 0
 	loop: :: branch_lt rtemp_0, rtemp_1, loop_break :: nop ; loop if < rtemp_0, rtemp_1 {
-		sub_s  rtemp_0, rtemp_0, rtemp_1                   ; 	-= rtemp_0, rtemp_1
-		add_si rtemp_2, rtemp_2, 1                         ;    ++ rtemp_2
+		sub_s  rtemp_0, rtemp_0, rtemp_1                   ;	-= rtemp_0, rtemp_1
+		add_si rtemp_2, rtemp_2, 1                         ;	++ rtemp_2
 	j loop :: loop_break:                                  ; }
 .close
