@@ -13,7 +13,7 @@ IO_BASE_ADDR equ 0x1F80 ; IO Ports Memory map base address
 gpio_port0 equ 0x1810 ; 1F801810h-Write GP0: Send GP0 Commands/Packets (Rendering and VRAM Access)
 gpio_port1 equ 0x1814 ; 1F801814h-Write GP1: Send GP1 Commands (Display Control) (and DMA Control)
 
-; GPU Display Control Command Format: [7:8] Command (8-bit), [0:6] Paraemter (24-bit)
+; GPU Command Format: [7:8] Command (8-bit), [0:6] Paraemter (24-bit)
 
 gcmd_offset equ 24
 
@@ -21,8 +21,8 @@ gp_Reset equ 0x0 << gcmd_offset
 
 ; On:  0x0
 ; Off: 0x1
-gp_DisplayEnabled                 equ (0x03 << gcmd_offset)  | 0x0
-gp_DisplayDisabled                equ (0x03 << gcmd_offset)  | 0x1
+gp_DisplayEnabled  equ (0x03 << gcmd_offset)  | 0x0
+gp_DisplayDisabled equ (0x03 << gcmd_offset)  | 0x1
 
 ; GP1(08h) - Display mode
 ; 0-1   Horizontal Resolution 1     (0=256, 1=320, 2=512, 3=640) ;GPUSTAT.17-18
@@ -48,8 +48,6 @@ gp_HorizontalDisplayRange_3168_608 equ 0x06 << gcmd_offset | 0xC60 << 12 | 0x260
 ; 20 - 23 Not used (zero)
 gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 264 << 10 | 24
 
-; GPU Draw Comamnd Format: [7:8] Command (8-bit), [0:6] Parameter (24-bit)
-
 ;GP0(E1h) - Draw Mode setting (aka "Texpage")
 ; 0 - 3   Texture page X Base       (N * 64)  (ie. in 64-halfword steps)                       ; GPUSTAT.0-3
 ; 4       Texture page Y Base 1     (N * 256) (ie. 0, 256, 512 or 768)                         ; GPUSTAT.4
@@ -63,7 +61,7 @@ gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 264 << 10 | 24
 ; 14 - 23 Not used (should be 0)
 ; 24 - 31 Command  (E1h)
 gp_ModeSetting_DrawAllowed equ 10
-gp_ModeSetting_DipArea equ 0xE1 << gcmd_offset | 0x1 << gp_ModeSetting_DrawAllowed
+gp_ModeSetting_DipArea     equ 0xE1 << gcmd_offset | 0x1 << gp_ModeSetting_DrawAllowed
 
 ; GP0(E3h) - Set Drawing Area top left (X1,Y1)
 ; GP0(E4h) - Set Drawing Area bottom right (X2,Y2)
@@ -74,8 +72,6 @@ gp_ModeSetting_DipArea equ 0xE1 << gcmd_offset | 0x1 << gp_ModeSetting_DrawAllow
 ; 10 - 19  Y-coordinate (0..1023)  ; \ on v2 GPU (max 2 MB VRAM)
 ; 20 - 23  Not used (zero)         ; /
 ; 24 - 31  Command  (Exh)
-gp_SetArea_XCoord equ 0
-gp_SetArea_YCoord equ 10
 gp_SetArea_TopLeft     equ 0xE3 << gcmd_offset
 gp_SetArea_BottomRight equ 0xE4 << gcmd_offset
 
@@ -86,8 +82,6 @@ gp_SetArea_BottomRight equ 0xE4 << gcmd_offset
 ; 10-19  Y-coordinate (0..1023)  ;\on v2 GPU (max 2 MB VRAM)
 ; 20-23  Not used (zero)         ;/
 ; 24-31  Command  (Exh)
-gp_SetOffset_XCoord equ 0
-gp_SetOffset_YCoord equ 10
 gp_SetOffset equ 0xE5 << gcmd_offset
 
 ; GPU Memory Transfer Commands
@@ -97,14 +91,39 @@ gp_SetOffset equ 0xE5 << gcmd_offset
 ; 1st  Color+Command     (CcBbGgRrh)  ;24bit RGB value (see note)
 ; 2nd  Top Left Corner   (YyyyXxxxh)  ;Xpos counted in halfwords, steps of 10h
 ; 3rd  Width+Height      (YsizXsizh)  ;Xsiz counted in halfwords, steps of 10h
- ; Fills the area in the frame buffer with the value in RGB. Horizontally the filling is done in 16-pixel (32-bytes) units 
- ; (see below masking/rounding).
+ ; Fills the area in the frame buffer with the value in RGB. 
+ ; Horizontally the filling is done in 16-pixel (32-bytes) units (see below masking/rounding).
  ; The "Color" parameter is a 24bit RGB value, however, the actual fill data is 16bit: 
  ; The hardware automatically converts the 24bit RGB value to 15bit RGB (with bit15=0).
  ; Fill is NOT affected by the Mask settings (acts as if Mask.Bit0,1 are both zero).
-gp_RectFillVM_XCoord equ 0
-gp_RectFillVM_YCoord equ 16
-gp_RectFillVM equ 0x02 << gcmd_offset
+gp_RectFillVM  equ 0x02 << gcmd_offset
+
+; GPU Render Polygon Commands
+
+; When the upper 3 bits of the first GP0 command are set to 1 (001), 
+; then the command can be decoded using the following bitfield:
+; bit number   value   meaning
+; 31-29        001     polygon render
+; 28           1/0     gouraud / flat shading
+; 27           1/0     4 / 3 vertices
+; 26           1/0     textured / untextured
+; 25           1/0     semi-transparent / opaque
+; 24           1/0     raw texture / modulation
+; 23-0         rgb     first color value.
+gp_Poly_FirstColor   equ          0
+gp_Poly_RawTexture   equ 1    << 24
+gp_Poly_SemiTrans    equ 1    << 25
+gp_Poly_Textured     equ 1    << 26
+gp_Poly_Quad         equ 1    << 27
+gp_Poly_Tri          equ 0    << 27
+gp_Poly_ShadeFlat    equ 0    << 28
+gp_Poly_ShadeGourand equ 1    << 28
+gp_Polygon           equ 0x20 << gcmd_offset
+
+gp_b10_X equ 0
+gp_b10_Y equ 10
+gp_b16_X equ 0
+gp_b16_Y equ 16
 
 .macro gp_push_pak, port, packet, reg_scratch
 	load_imm   reg_scratch, packet
@@ -115,10 +134,14 @@ gp_RectFillVM equ 0x02 << gcmd_offset
 	store_word reg_scratch, port 
 .endmacro
 
-// Color_PS_GoldenPoppy equ 0xF3C300
+Color_RedFF          equ 0x0000FF
 Color_PS_GoldenPoppy equ 0x00C3F3
+Color_PS_CelticBlue  equ 0x723F00
 
-Color_RedFF equ 0x0000FF
+Display_Width      equ 320
+Display_Height     equ 239
+Display_HalfWidth  equ 320 / 2
+Display_HalfHeight equ 240 / 2
 
 main:
 	reg_io_offset equ rtmp_0
@@ -145,24 +168,32 @@ main:
 	load_imm   rtmp_1, gp_ModeSetting_DipArea
 	store_word rtmp_1, gpio_port0(reg_io_offset)
 ; 2. GP0: Drawing area Top-Left
-	load_imm   rtmp_1, gp_SetArea_TopLeft | 0x0
+	load_imm   rtmp_1, gp_SetArea_TopLeft | 0 << gp_b10_Y | 0 << gp_b10_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
 ; 3. GP0: Drawing area Bottom-Right
-	load_imm   rtmp_1, gp_SetArea_BottomRight | 239 << gp_SetArea_YCoord | 319 << gp_SetArea_XCoord
+	load_imm   rtmp_1, gp_SetArea_BottomRight | Display_Height << gp_b10_Y | Display_Width << gp_b10_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
 ; 4. GP0: Drawing area offset X & Y
-	load_imm   rtmp_1, gp_SetOffset | 0 << gp_SetOffset_YCoord | 0 << gp_SetOffset_XCoord
+	load_imm   rtmp_1, gp_SetOffset | 0 << gp_b10_Y | 0 << gp_b10_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
 ; Clear the screen
 ; 1. GP0: Fill rectangle on display area
-	load_imm   rtmp_1, gp_RectFillVM | Color_PS_GoldenPoppy
+	load_imm   rtmp_1, gp_RectFillVM | Color_PS_CelticBlue
 	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, 0 << gp_RectFillVM_YCoord | 0 << gp_RectFillVM_XCoord
+	load_imm   rtmp_1, 0 << gp_b16_Y | 0 << gp_b16_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, 239 << gp_RectFillVM_YCoord | 319 << gp_RectFillVM_XCoord
+	load_imm   rtmp_1, Display_Height << gp_b16_Y | Display_Width << gp_b16_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
-; TODO: Draw a flat-shaded triangle
+; Draw a flat-shaded triangle
 ; 1. GP0: Send packets to GP0 to draw a triangle
+	load_imm   rtmp_1, gp_Polygon | Color_PS_GoldenPoppy
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1, -100 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1,   20 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1,  -50 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
+	store_word rtmp_1, gpio_port0(reg_io_offset)
 
 idle:
 	jump idle :: nop
