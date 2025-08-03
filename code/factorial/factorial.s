@@ -48,10 +48,15 @@ rarg_3 equ $a3
 ; Subroutine return values
 rret_0 equ $v0
 rret_1 equ $v1
+; Subroutine return address when doing a sub
+rret_addr equ $ra
 
 main:
 		li rarg_0, 5
-	jump_nlink factorial
+	jump_nlink factorial :: nop
+
+idle:
+	jump idle :: nop
 
 ; args:
 ;	num: rarg_0
@@ -74,7 +79,8 @@ sum        equ rtmp_3
 		move   term,    sum
 		add_si id_term, id_term, 1
 	jump loop_term :: nop :: break_loop_term:
-	move rret_0, sum
+	move     rret_0, sum
+	jump_reg rret_addr
 .endfunc	
 
 .close
