@@ -21,10 +21,10 @@ function build-program { param(
 	$bin         = join-path $path_build  "$unit.bin"
 	$exe         = join-path $path_build  "$unit.exe"
 
-	push-location $path_build
+	push-location $root
 	write-host "Assembling: $src`n"
 	& $armips $src
-
+	
 	write-host 'Generating executable..'
 	& lua $bin2exe_lua $bin $exe
 	# & py $bin2exe_py $bin $exe
@@ -36,4 +36,5 @@ function build-program { param(
 # build-program 'warmup' 'exercise_1'
 # build-program 'warmup' 'exercise_2'
 # build-program 'warmup' 'exercise_3'
-build-program 'factorial' 'factorial' 
+# build-program 'factorial' 'factorial' 
+build-program 'graphics_system' 'hellogpu'

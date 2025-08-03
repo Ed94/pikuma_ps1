@@ -1,17 +1,9 @@
-.psx
-.create "./build/factorial.bin", 0x80010000
-
-; Entry Point of Code
-.org 0x80010000
-
-; Constant declaration
-BASE_ADDR equ 0x0000
-
 ; Symbol Alias Table
 
 ; Instructions
 ; Load
-load_imm   equ li ; dst_reg, immeidate value
+load_imm   equ li  ; dst_reg, immeidate value (signed)
+load_uimm  equ lui ; dst_reg, immediate value (unsigned)
 ; Store
 store_word equ sw ; src_reg, dst_address 
 ; Addition
@@ -50,37 +42,3 @@ rret_0 equ $v0
 rret_1 equ $v1
 ; Subroutine return address when doing a sub
 rret_addr equ $ra
-
-main:
-		li rarg_0, 5
-	jump_nlink factorial :: nop
-
-idle:
-	jump idle :: nop
-
-; args:
-;	num: rarg_0
-.func factorial
-num        equ rarg_0
-id_term    equ rtmp_0
-id_product equ rtmp_1
-term       equ rtmp_2
-sum        equ rtmp_3
-	li term,    1
-	li sum,     1
-	li id_term, 1
-	loop_term: branch_gt id_term, num, break_loop_term :: nop
-		li sum,        0
-		li id_product, 0
-		loop_prod: branch_gt_equal id_product, id_term, break_loop_prod :: nop
-			add_s  sum,        sum,        term
-			add_si id_product, id_product, 1
-		jump loop_prod :: nop :: break_loop_prod:
-		move   term,    sum
-		add_si id_term, id_term, 1
-	jump loop_term :: nop :: break_loop_term:
-	move     rret_0, sum
-	jump_reg rret_addr
-.endfunc	
-
-.close

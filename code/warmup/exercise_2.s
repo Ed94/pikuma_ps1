@@ -1,5 +1,5 @@
 .psx
-.create "exercise_2.bin", 0x80010000
+.create "./build/exercise_2.bin", 0x80010000
 
 ; Entry Point of Code
 .org 0x80010000
