@@ -26,8 +26,8 @@ function build-program { param(
 	& $armips $src
 	
 	write-host 'Generating executable..'
-	& lua $bin2exe_lua $bin $exe
-	# & py $bin2exe_py $bin $exe
+	# & lua $bin2exe_lua $bin $exe
+	& py $bin2exe_py $bin $exe
 
 	write-host 'Done!'
 	pop-location

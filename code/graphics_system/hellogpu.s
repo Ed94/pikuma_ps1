@@ -17,6 +17,8 @@ gpio_port1 equ 0x1814 ; 1F801814h-Write GP1: Send GP1 Commands (Display Control)
 
 gcmd_offset equ 24
 
+gp_Reset equ 0x0 << gcmd_offset
+
 ; On:  0x0
 ; Off: 0x1
 gp_DisplayEnabled                 equ (0x03 << gcmd_offset)  | 0x0
@@ -44,7 +46,7 @@ gp_HorizontalDisplayRange_3168_608 equ 0x06 << gcmd_offset | 0xC60 << 12 | 0x260
 ; 0  - 9  Y1 (NTSC = 88h - (240 / 2), (PAL = A3h - (288 / 2))  ; \ scanline numbers on screen,
 ; 10 - 19 Y2 (NTSC = 88h + (240 / 2), (PAL = A3h + (288 / 2))  ; / relative to VSYNC
 ; 20 - 23 Not used (zero)
-gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 0x042 << 12 | 0x018
+gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 264 << 10 | 24
 
 ; GPU Draw Comamnd Format: [7:8] Command (8-bit), [0:6] Parameter (24-bit)
 
@@ -60,8 +62,8 @@ gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 0x042 << 12 | 0x018
 ; 13      Textured Rectangle Y-Flip (BIOS does set it equal to GPUSTAT.13...?)
 ; 14 - 23 Not used (should be 0)
 ; 24 - 31 Command  (E1h)
-@gp_ModeSetting_DrawAllowed equ 10
-gp_ModeSetting_DipArea equ 0xE1 << gcmd_offset | 0x1 << @gp_ModeSetting_DrawAllowed
+gp_ModeSetting_DrawAllowed equ 10
+gp_ModeSetting_DipArea equ 0xE1 << gcmd_offset | 0x1 << gp_ModeSetting_DrawAllowed
 
 ; GP0(E3h) - Set Drawing Area top left (X1,Y1)
 ; GP0(E4h) - Set Drawing Area bottom right (X2,Y2)
@@ -100,7 +102,9 @@ gp_SetOffset equ 0xE5 << gcmd_offset
  ; The "Color" parameter is a 24bit RGB value, however, the actual fill data is 16bit: 
  ; The hardware automatically converts the 24bit RGB value to 15bit RGB (with bit15=0).
  ; Fill is NOT affected by the Mask settings (acts as if Mask.Bit0,1 are both zero).
-gvm_FillRect equ 0x02 << gcmd_offset
+gp_RectFillVM_XCoord equ 0
+gp_RectFillVM_YCoord equ 16
+gp_RectFillVM equ 0x02 << gcmd_offset
 
 .macro gp_push_pak, port, packet, reg_scratch
 	load_imm   reg_scratch, packet
@@ -111,26 +115,31 @@ gvm_FillRect equ 0x02 << gcmd_offset
 	store_word reg_scratch, port 
 .endmacro
 
-Color_PS_GoldenPoppy equ 0xF3C300
+// Color_PS_GoldenPoppy equ 0xF3C300
+Color_PS_GoldenPoppy equ 0x00C3F3
+
+Color_RedFF equ 0x0000FF
 
 main:
-	reg_io_offset equ rtmp_0 :: load_uimm rtmp_0, IO_BASE_ADDR
+	reg_io_offset equ rtmp_0
+	load_uimm rtmp_0, IO_BASE_ADDR
+
 ; Setup Display Control
 ; 1. GP1: Reset GPU
-	load_imm   rtmp_1, 0x00000000                 ; 00 = Reset GPU
-	store_word rtmp_1, gpio_port0(reg_io_offset) ; Writing to GP1
+	load_imm   rtmp_1, gp_Reset                  ; 00 = Reset GPU
+	store_word rtmp_1, gpio_port1(reg_io_offset) ; Writing to GP1
 ; 2. GP1: Display Enable
 	load_imm   rtmp_1, gp_DisplayEnabled
-	store_word rtmp_1, gpio_port0(reg_io_offset)  ; Write to GP1
+	store_word rtmp_1, gpio_port1(reg_io_offset)  ; Write to GP1
 ; 3. GP1: Dispaly Mode (320x240, 15-bit, NTSC)
 	load_imm   rtmp_1, gp_DisplayMode_320x240_15bit_NTSC
-	store_word rtmp_1, gpio_port0(reg_io_offset) ; Write to GP1
+	store_word rtmp_1, gpio_port1(reg_io_offset) ; Write to GP1
 ; 4. GP1: Horizontal Range
 	load_imm   rtmp_1, gp_HorizontalDisplayRange_3168_608
-	store_word rtmp_1, gpio_port0(reg_io_offset)
+	store_word rtmp_1, gpio_port1(reg_io_offset)
 ; 5. GP1: Vertical Range
 	load_imm   rtmp_1, gp_VerticalDisplayRange_264_24
-	store_word rtmp_1, gpio_port0(reg_io_offset)
+	store_word rtmp_1, gpio_port1(reg_io_offset)
 ; Setup VRAM Access
 ; 1. GP0: Drawing mode settings
 	load_imm   rtmp_1, gp_ModeSetting_DipArea
@@ -139,13 +148,19 @@ main:
 	load_imm   rtmp_1, gp_SetArea_TopLeft | 0x0
 	store_word rtmp_1, gpio_port0(reg_io_offset)
 ; 3. GP0: Drawing area Bottom-Right
-	load_imm   rtmp_1, gp_SetArea_BottomRight | 239 << gp_SetArea_XCoord | 319 << gp_SetArea_XCoord
+	load_imm   rtmp_1, gp_SetArea_BottomRight | 239 << gp_SetArea_YCoord | 319 << gp_SetArea_XCoord
 	store_word rtmp_1, gpio_port0(reg_io_offset)
 ; 4. GP0: Drawing area offset X & Y
 	load_imm   rtmp_1, gp_SetOffset | 0 << gp_SetOffset_YCoord | 0 << gp_SetOffset_XCoord
 	store_word rtmp_1, gpio_port0(reg_io_offset)
-; TODO: Clear the screen
+; Clear the screen
 ; 1. GP0: Fill rectangle on display area
+	load_imm   rtmp_1, gp_RectFillVM | Color_PS_GoldenPoppy
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1, 0 << gp_RectFillVM_YCoord | 0 << gp_RectFillVM_XCoord
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1, 239 << gp_RectFillVM_YCoord | 319 << gp_RectFillVM_XCoord
+	store_word rtmp_1, gpio_port0(reg_io_offset)
 ; TODO: Draw a flat-shaded triangle
 ; 1. GP0: Send packets to GP0 to draw a triangle
 
