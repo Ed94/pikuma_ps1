@@ -135,6 +135,7 @@ gp_b16_Y equ 16
 .endmacro
 
 Color_RedFF          equ 0x0000FF
+Color_PS_CadmiumRed  equ 0x2400DF
 Color_PS_GoldenPoppy equ 0x00C3F3
 Color_PS_CelticBlue  equ 0x723F00
 
@@ -188,11 +189,20 @@ main:
 ; 1. GP0: Send packets to GP0 to draw a triangle
 	load_imm   rtmp_1, gp_Polygon | Color_PS_GoldenPoppy
 	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -100 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
+	load_imm   rtmp_1, -1 * 100 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1,   20 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
+	load_imm   rtmp_1, -1 *  20 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1,  -50 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
+	load_imm   rtmp_1, -1 *  50 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	; Bonus traingle
+	load_imm   rtmp_1, gp_Polygon | Color_PS_CadmiumRed
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1, -1 *   50 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1, -1 *    0 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
+	store_word rtmp_1, gpio_port0(reg_io_offset)
+	load_imm   rtmp_1, -1 * -100 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
 	store_word rtmp_1, gpio_port0(reg_io_offset)
 
 idle:
