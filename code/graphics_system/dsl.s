@@ -4,6 +4,7 @@
 ; Load
 load_imm   equ li  ; dst_reg, immeidate value (signed)
 load_uimm  equ lui ; dst_reg, immediate value (unsigned)
+load_word  equ lw  ; dst_reg, offset(src_reg0) (offset is immediate value)
 ; Store
 store_word equ sw ; src_reg, dst_address 
 ; Addition
@@ -26,6 +27,8 @@ jump_reg   equ jr  ; address:    register
 jump_nreg  equ jrl ; subroutine: register
 
 ; Registers
+; Stack
+rstack_ptr equ $sp ; I have this but won't really use the alias..
 ; Temporaries, may be changed by subroutines
 rtmp_0 equ $t0
 rtmp_1 equ $t1
@@ -51,3 +54,15 @@ rret_0 equ $v0
 rret_1 equ $v1
 ; Subroutine return address when doing a sub
 rret_addr equ $ra
+
+; Data Widths
+byte equ 1
+word equ 4
+
+.macro stack_alloc, amount
+	add_ui $sp, - amount
+.endmacro
+
+.macro stack_release, amount
+	add_ui $sp, amount
+.endmacro

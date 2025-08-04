@@ -119,6 +119,8 @@ gp_b10_Y equ 10
 gp_b16_X equ 0
 gp_b16_Y equ 16
 
+gp_vec2 equ word
+
 .macro gp_push_pak, port, reg_scratch, packet
 	load_imm   reg_scratch, packet
 	store_word reg_scratch, port 
@@ -131,23 +133,23 @@ gp_b16_Y equ 16
 .org 0x80010000 + 2000
 
 .func gp_draw_tri_flat ;(
-	@@io_offset equ rarg_0
-	@@color     equ rarg_1
-	@@vert_1    equ rarg_2
-	@@vert_2    equ rarg_3
-	@@vert_3    equ rstatic_0
+	gp_draw_tri_flat__sp_size equ (3 * gp_vec2)
+	@@io_offset equ rarg_0 ; io_offset: word
+	@@color     equ rarg_1 ; color:     word
+	@@verts     equ $sp    ; verts:     [3]gp_vec2
 ;)
-	@@cmd equ rtmp_2
-	load_imm @@cmd, gp_Polygon
-	or       @@cmd, @@cmd, @@color
-	store_word @@cmd,    gpio_port0(@@io_offset)
-	store_word @@vert_1, gpio_port0(@@io_offset)
-	store_word @@vert_2, gpio_port0(@@io_offset)
-	store_word @@vert_3, gpio_port0(@@io_offset)
+	@@vert_id equ rtmp_1
+	@@cmd     equ rtmp_2
+	load_imm   @@cmd, gp_Polygon
+	or         @@cmd, @@cmd, @@color
+	store_word @@cmd, gpio_port0(@@io_offset)
+	load_word  @@vert_id, 0 * gp_vec2(@@verts) :: nop :: store_word @@vert_id, gpio_port0(@@io_offset)
+	load_word  @@vert_id, 1 * gp_vec2(@@verts) :: nop :: store_word @@vert_id, gpio_port0(@@io_offset)
+	load_word  @@vert_id, 2 * gp_vec2(@@verts) :: nop :: store_word @@vert_id, gpio_port0(@@io_offset)
 	jump_reg rret_addr :: nop
 .endfunc
 
-.func gp_draw_tri_grouand ;(
+.func gp_draw_tri_gouraud ;(
 	@@io_offset equ rarg_0
 	@@color     equ rarg_1
 	@@color_2   equ rstatic_1
