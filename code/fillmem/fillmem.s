@@ -1,5 +1,5 @@
 .psx
-.create "fillmem.bin", 0x80010000
+.create "./build/fillmem.bin", 0x80010000
 
 ; Entry Point of Code
 .org 0x80010000

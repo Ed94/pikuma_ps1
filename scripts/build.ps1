@@ -32,10 +32,10 @@ function build-program { param(
 	write-host 'Done!'
 	pop-location
 }
-# build-program 'fillmem' 'fillmem'
-# build-program 'warmup' 'exercise_1'
-# build-program 'warmup' 'exercise_2'
-# build-program 'warmup' 'exercise_3'
-# build-program 'factorial' 'factorial' 
-# build-program 'graphics_system' 'hellogpu'
+build-program 'fillmem' 'fillmem'
+build-program 'warmup' 'exercise_1'
+build-program 'warmup' 'exercise_2'
+build-program 'warmup' 'exercise_3'
+build-program 'factorial' 'factorial' 
+build-program 'graphics_system' 'hellogpu'
 build-program 'graphics_system' 'hello_gouraud'
