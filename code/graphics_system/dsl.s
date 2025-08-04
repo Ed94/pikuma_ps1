@@ -8,6 +8,10 @@ load_uimm  equ lui ; dst_reg, immediate value (unsigned)
 load_word  equ lw  ; dst_reg, offset(src_reg0) (offset is immediate value)
 ; Store
 store_word equ sw ; src_reg, dst_address 
+; Shift
+shift_ll equ sll ;
+shift_rl equ srl ;
+shift_ra equ sra ;
 ; Addition
 add_s  equ add   ; dst_reg, reg_a, reg_b (signed)
 add_u  equ add   ; dst_reg, reg_a, reg_b (unsigned)

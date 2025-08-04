@@ -66,7 +66,8 @@ gp_ModeSetting_DipArea     equ 0xE1 << gcmd_offset | 0x1 << gp_ModeSetting_DrawA
 
 ; GP0(E3h) - Set Drawing Area top left (X1,Y1)
 ; GP0(E4h) - Set Drawing Area bottom right (X2,Y2)
-; Sets the drawing area corners. The Render commands GP0(20h..7Fh) are automatically clipping any pixels that are outside of this region.
+; Sets the drawing area corners. The Render commands GP0(20h..7Fh) 
+; are automatically clipping any pixels that are outside of this region.
 ; 0  - 9   X-coordinate (0..1023)
 ; 10 - 18  Y-coordinate (0..511)   ; \ on v0 GPU (max 1 MB VRAM)
 ; 19 - 23  Not used (zero)         ; /

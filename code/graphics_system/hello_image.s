@@ -92,15 +92,15 @@ main:
 	stack_alloc gp_draw_tri_flat__sp_size ; (used for following call)
 		move     rarg_0, reg_io_offset      ; (used for following call)
 		load_imm rarg_1, Color_PS_GoldenPoppy
-		load_imm rarg_2, 100 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X :: sw rarg_2, 0 * gp_vec2($sp)
-		load_imm rarg_2,  20 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X :: sw rarg_2, 1 * gp_vec2($sp)
-		load_imm rarg_2,  50 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X :: sw rarg_2, 2 * gp_vec2($sp)
+		load_imm rarg_2, 100 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X :: store_word rarg_2, 0 * gp_vec2($sp)
+		load_imm rarg_2,  20 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X :: store_word rarg_2, 1 * gp_vec2($sp)
+		load_imm rarg_2,  50 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X :: store_word rarg_2, 2 * gp_vec2($sp)
 	jump_nlink gp_draw_tri_flat :: nop
 ; Bonus traingle
 		load_imm rarg_1,  Color_PS_CadmiumRed
-		load_imm rarg_2,   50 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X :: sw rarg_2, 0 * gp_vec2($sp)
-		load_imm rarg_2,    0 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X :: sw rarg_2, 1 * gp_vec2($sp)
-		load_imm rarg_2, -100 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X :: sw rarg_2, 2 * gp_vec2($sp)
+		load_imm rarg_2,   50 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X :: store_word rarg_2, 0 * gp_vec2($sp)
+		load_imm rarg_2,    0 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X :: store_word rarg_2, 1 * gp_vec2($sp)
+		load_imm rarg_2, -100 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X :: store_word rarg_2, 2 * gp_vec2($sp)
 	jump_nlink gp_draw_tri_flat :: nop
 	stack_release gp_draw_tri_flat__sp_size
 ; Gourand shaded triangle
@@ -114,16 +114,13 @@ main:
 
 ; Copy image contents to vram
 	gcmd_push gp0, rtmp_1, gp_Blit_CPU_VM
-	gcmd_push gp0, rtmp_1, 		(Image_SizeY / 2) * -1 + Display_HalfHeight << gp_b16_Y | -(Image_SizeX / 2) + Display_HalfWidth << gp_b16_X
+	gcmd_push gp0, rtmp_1, 		0 << gp_b16_Y | Display_Width << gp_b16_X
 	gcmd_push gp0, rtmp_1, 		Image_SizeY << gp_b16_Y | Image_SizeX << gp_b16_X
 	; DMA commands
 	@id         equ rtmp_2
 	@img_cursor equ rtmp_3
-	@divisor    equ rtmp_3
-		load_imm      @id,      Image_ByteSize
-		load_imm      @divisor, word
-		div           @id,      @divisor
-		mov_from_high @id
+		load_imm @id, Image_ByteSize
+		shift_rl @id, @id, (word / 2)
 		load_addr @img_cursor, Image
 	loop_dma: 
 		load_word  rtmp_1, (@img_cursor) :: nop :: store_word rtmp_1, gp0 ; @img_curor -> gp_dma_cpu_vm(word)
