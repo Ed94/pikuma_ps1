@@ -39,4 +39,5 @@ function build-program { param(
 # build-program 'factorial' 'factorial' 
 # build-program 'graphics_system' 'hellogpu'
 # build-program 'graphics_system' 'hello_gouraud'
-build-program 'graphics_system' 'hello_gp_routines'
+# build-program 'graphics_system' 'hello_gp_routines'
+build-program 'graphics_system' 'hello_image'

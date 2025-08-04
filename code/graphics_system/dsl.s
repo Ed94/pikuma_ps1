@@ -2,6 +2,7 @@
 
 ; Instructions
 ; Load
+load_addr  equ la  ; 
 load_imm   equ li  ; dst_reg, immeidate value (signed)
 load_uimm  equ lui ; dst_reg, immediate value (unsigned)
 load_word  equ lw  ; dst_reg, offset(src_reg0) (offset is immediate value)
@@ -15,11 +16,19 @@ add_ui equ addiu ; dst_reg, src_reg, immediate value (unsigned)
 ; Subtraction
 sub_s equ sub    ; 
 sub_u equ subu   ; 
+; Multiplication
+
+; Division
+div_s         equ div    ;
+div_u         equ divu   ;
+mov_from_high equ mfhi   ;
+mov_from_low  equ mflo   ;
 ; Branch
-branch_equal    equ beq ; reg, value(reg, immediate), dst_label
-branch_gt_equal equ bge ; reg, value(reg, immediate), dst_label
-branch_gt       equ bgt ; reg, value(reg, immediate), dst_label
-branch_lt       equ blt ; reg, value(reg, immediate), dst_label
+branch_ne_zero  equ bnez ; 
+branch_equal    equ beq  ; reg, value(reg, immediate), dst_label
+branch_gt_equal equ bge  ; reg, value(reg, immediate), dst_label
+branch_gt       equ bgt  ; reg, value(reg, immediate), dst_label
+branch_lt       equ blt  ; reg, value(reg, immediate), dst_label
 ; Jump
 jump       equ j   ; address:    immediate
 jump_nlink equ jal ; subroutine: immeidate

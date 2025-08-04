@@ -11,22 +11,19 @@ gcmd_offset equ 24
 
 gp_Reset equ 0x0 << gcmd_offset
 
+; GP1(03h) - Display Enable
 ; On:  0x0
 ; Off: 0x1
-gp_DisplayEnabled  equ (0x03 << gcmd_offset)  | 0x0
-gp_DisplayDisabled equ (0x03 << gcmd_offset)  | 0x1
+gp_DisplayEnabled  equ 0x03 << gcmd_offset | 0x0
+gp_DisplayDisabled equ 0x03 << gcmd_offset | 0x1
 
-; GP1(08h) - Display mode
-; 0-1   Horizontal Resolution 1     (0=256, 1=320, 2=512, 3=640) ;GPUSTAT.17-18
-; 2     Vertical Resolution         (0=240, 1=480, when Bit5=1)  ;GPUSTAT.19
-; 3     Video Mode                  (0=NTSC/60Hz, 1=PAL/50Hz)    ;GPUSTAT.20
-; 4     Display Area Color Depth    (0=15bit, 1=24bit)           ;GPUSTAT.21
-; 5     Vertical Interlace          (0=Off, 1=On)                ;GPUSTAT.22
-; 6     Horizontal Resolution 2     (0=256/320/512/640, 1=368)   ;GPUSTAT.16
-; 7     Flip screen horizontally    (0=Off, 1=On, v1 only)       ;GPUSTAT.14
-; 8-23  Not used (zero)
-@DisplayMode equ 0x08
-gp_DisplayMode_320x240_15bit_NTSC equ @DisplayMode << gcmd_offset | 0x0 << 7 | 0x0 << 6 | 0x0 << 5 | 0x0 << 4 | 0x0 << 3 | 0x0 << 2 | 0x1
+; GP1(04h) - DMA Direction / Data Request
+; 0-1  DMA Direction (0=Off, 1=FIFO, 2=CPUtoGP0, 3=GPUREADtoCPU) ;GPUSTAT.29-30
+; 2-23 Not used (zero)
+gp_DMA_FIFO        equ 1
+gp_DMA_CPU_to_GPU  equ 2
+gp_DMA_GPU_to_CPU  equ 3
+gp_DMA_Request     equ 0x04 << gcmd_offset
 
 ; GP1(06h) - Horizontal Display range (on Screen)
 ; X2 = X1 + pixels * cycles_per_pix
@@ -39,6 +36,18 @@ gp_HorizontalDisplayRange_3168_608 equ 0x06 << gcmd_offset | 0xC60 << 12 | 0x260
 ; 10 - 19 Y2 (NTSC = 88h + (240 / 2), (PAL = A3h + (288 / 2))  ; / relative to VSYNC
 ; 20 - 23 Not used (zero)
 gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 264 << 10 | 24
+
+; GP1(08h) - Display mode
+; 0-1   Horizontal Resolution 1     (0=256, 1=320, 2=512, 3=640) ;GPUSTAT.17-18
+; 2     Vertical Resolution         (0=240, 1=480, when Bit5=1)  ;GPUSTAT.19
+; 3     Video Mode                  (0=NTSC/60Hz, 1=PAL/50Hz)    ;GPUSTAT.20
+; 4     Display Area Color Depth    (0=15bit, 1=24bit)           ;GPUSTAT.21
+; 5     Vertical Interlace          (0=Off, 1=On)                ;GPUSTAT.22
+; 6     Horizontal Resolution 2     (0=256/320/512/640, 1=368)   ;GPUSTAT.16
+; 7     Flip screen horizontally    (0=Off, 1=On, v1 only)       ;GPUSTAT.14
+; 8-23  Not used (zero)
+@DisplayMode equ 0x08
+gp_DisplayMode_320x240_15bit_NTSC equ @DisplayMode << gcmd_offset | 0x0 << 7 | 0x0 << 6 | 0x0 << 5 | 0x0 << 4 | 0x0 << 3 | 0x0 << 2 | 0x1
 
 ;GP0(E1h) - Draw Mode setting (aka "Texpage")
 ; 0 - 3   Texture page X Base       (N * 64)  (ie. in 64-halfword steps)                       ; GPUSTAT.0-3
@@ -90,6 +99,18 @@ gp_SetOffset equ 0xE5 << gcmd_offset
  ; Fill is NOT affected by the Mask settings (acts as if Mask.Bit0,1 are both zero).
 gp_RectFillVM  equ 0x02 << gcmd_offset
 
+; GP0(A0h) - Copy Rectangle (CPU to VRAM)
+; Transfers data from CPU to frame buffer. 
+; If the number of halfwords to be sent is odd, an extra halfword should be sent, 
+; as packets consist of 32bits words. The transfer is affected by Mask setting.
+; 1st  Command           (Cc000000h)
+; 2nd  Destination Coord (YyyyXxxxh)  ;Xpos counted in halfwords
+; 3rd  Width+Height      (YsizXsizh)  ;Xsiz counted in halfwords
+; ...  Data              (...)      <--- usually transferred via DMA
+gp_Blit_VM_VM  equ 0x80 << gcmd_offset
+gp_Blit_CPU_VM equ 0xA0 << gcmd_offset
+gp_Blit_VM_CPU equ 0xC0 << gcmd_offset
+
 ; GPU Render Polygon Commands
 
 ; When the upper 3 bits of the first GP0 command are set to 1 (001), 
@@ -119,7 +140,8 @@ gp_b10_Y equ 10
 gp_b16_X equ 0
 gp_b16_Y equ 16
 
-gp_vec2 equ word
+gp_pixel equ (2 * byte)
+gp_vec2  equ word
 
 .macro gp_push_pak, port, reg_scratch, packet
 	load_imm   reg_scratch, packet
@@ -130,7 +152,7 @@ gp_vec2 equ word
 	store_word reg_scratch, port 
 .endmacro
 
-.org 0x80010000 + 2000
+.org 0x80010000 + 3000
 
 .func gp_draw_tri_flat ;(
 	gp_draw_tri_flat__sp_size equ (3 * gp_vec2)
