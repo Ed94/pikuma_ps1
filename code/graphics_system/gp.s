@@ -1,11 +1,3 @@
-.psx
-.create "./build/hellogpu.bin", 0x80010000
-
-.include "./code/graphics_system/dsl.s"
-
-; Entry Point of Code
-.org 0x80010000
-
 ; IO PORT
 IO_BASE_ADDR equ 0x1F80 ; IO Ports Memory map base address
 
@@ -127,99 +119,11 @@ gp_b10_Y equ 10
 gp_b16_X equ 0
 gp_b16_Y equ 16
 
-.macro gp_push_pak, port, packet, reg_scratch
+.macro gp_push_pak, port, reg_scratch, packet
 	load_imm   reg_scratch, packet
 	store_word reg_scratch, port 
 .endmacro
-.macro gcmd_push, port, cmd, reg_scratch
+.macro gcmd_push, port, reg_scratch, cmd
 	load_imm   reg_scratch, cmd
 	store_word reg_scratch, port 
 .endmacro
-
-Color_RedFF          equ 0x0000FF
-Color_22             equ 0x222222
-Color_PS_CadmiumRed  equ 0x2400DF
-Color_PS_GoldenPoppy equ 0x00C3F3
-Color_PS_CelticBlue  equ 0x723F00
-
-Display_Width      equ 320
-Display_Height     equ 239
-Display_HalfWidth  equ 320 / 2
-Display_HalfHeight equ 240 / 2
-
-main:
-	reg_io_offset equ rtmp_0
-	load_uimm rtmp_0, IO_BASE_ADDR
-
-; Setup Display Control
-; 1. GP1: Reset GPU
-	load_imm   rtmp_1, gp_Reset                  ; 00 = Reset GPU
-	store_word rtmp_1, gpio_port1(reg_io_offset) ; Writing to GP1
-; 2. GP1: Display Enable
-	load_imm   rtmp_1, gp_DisplayEnabled
-	store_word rtmp_1, gpio_port1(reg_io_offset)  ; Write to GP1
-; 3. GP1: Dispaly Mode (320x240, 15-bit, NTSC)
-	load_imm   rtmp_1, gp_DisplayMode_320x240_15bit_NTSC
-	store_word rtmp_1, gpio_port1(reg_io_offset) ; Write to GP1
-; 4. GP1: Horizontal Range
-	load_imm   rtmp_1, gp_HorizontalDisplayRange_3168_608
-	store_word rtmp_1, gpio_port1(reg_io_offset)
-; 5. GP1: Vertical Range
-	load_imm   rtmp_1, gp_VerticalDisplayRange_264_24
-	store_word rtmp_1, gpio_port1(reg_io_offset)
-; Setup VRAM Access
-; 1. GP0: Drawing mode settings
-	load_imm   rtmp_1, gp_ModeSetting_DipArea
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-; 2. GP0: Drawing area Top-Left
-	load_imm   rtmp_1, gp_SetArea_TopLeft | 0 << gp_b10_Y | 0 << gp_b10_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-; 3. GP0: Drawing area Bottom-Right
-	load_imm   rtmp_1, gp_SetArea_BottomRight | Display_Height << gp_b10_Y | Display_Width << gp_b10_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-; 4. GP0: Drawing area offset X & Y
-	load_imm   rtmp_1, gp_SetOffset | 0 << gp_b10_Y | 0 << gp_b10_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-; Clear the screen
-; 1. GP0: Fill rectangle on display area
-	load_imm   rtmp_1, gp_RectFillVM | Color_22
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, 0 << gp_b16_Y | 0 << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, Display_Height << gp_b16_Y | Display_Width << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-; Draw a flat-shaded quad
-	load_imm   rtmp_1, gp_Quad | Color_PS_CelticBlue
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 *  15 + Display_HalfHeight << gp_b16_Y |    0 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 *  24 + Display_HalfHeight << gp_b16_Y |  100 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 * -30 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 * -50 + Display_HalfHeight << gp_b16_Y |   55 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-; Draw a flat-shaded triangle
-; 1. GP0: Send packets to GP0 to draw a triangle
-	load_imm   rtmp_1, gp_Polygon | Color_PS_GoldenPoppy
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 * 100 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 *  20 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 *  50 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	; Bonus traingle
-	load_imm   rtmp_1, gp_Polygon | Color_PS_CadmiumRed
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 *   50 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 *    0 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-	load_imm   rtmp_1, -1 * -100 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
-	store_word rtmp_1, gpio_port0(reg_io_offset)
-
-idle:
-	jump idle :: nop
-
-.close

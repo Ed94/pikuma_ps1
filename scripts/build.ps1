@@ -37,4 +37,5 @@ function build-program { param(
 # build-program 'warmup' 'exercise_2'
 # build-program 'warmup' 'exercise_3'
 # build-program 'factorial' 'factorial' 
-build-program 'graphics_system' 'hellogpu'
+# build-program 'graphics_system' 'hellogpu'
+build-program 'graphics_system' 'hello_gouraud'
