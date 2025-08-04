@@ -32,6 +32,15 @@ rtmp_1 equ $t1
 rtmp_2 equ $t2
 rtmp_3 equ $t3
 rtmp_4 equ $t4
+; Static Variables
+rstatic_0 equ $s0
+rstatic_1 equ $s1
+rstatic_2 equ $s2
+rstatic_3 equ $s3
+rstatic_4 equ $s4
+rstatic_5 equ $s5
+rstatic_6 equ $s6
+rstatic_7 equ $s7
 ; Subroutine arguments
 rarg_0 equ $a0
 rarg_1 equ $a1

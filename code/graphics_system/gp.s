@@ -127,3 +127,43 @@ gp_b16_Y equ 16
 	load_imm   reg_scratch, cmd
 	store_word reg_scratch, port 
 .endmacro
+
+.org 0x80010000 + 2000
+
+.func gp_draw_tri_flat ;(
+	@@io_offset equ rarg_0
+	@@color     equ rarg_1
+	@@vert_1    equ rarg_2
+	@@vert_2    equ rarg_3
+	@@vert_3    equ rstatic_0
+;)
+	@@cmd equ rtmp_2
+	load_imm @@cmd, gp_Polygon
+	or       @@cmd, @@cmd, @@color
+	store_word @@cmd,    gpio_port0(@@io_offset)
+	store_word @@vert_1, gpio_port0(@@io_offset)
+	store_word @@vert_2, gpio_port0(@@io_offset)
+	store_word @@vert_3, gpio_port0(@@io_offset)
+	jump_reg rret_addr :: nop
+.endfunc
+
+.func gp_draw_tri_grouand ;(
+	@@io_offset equ rarg_0
+	@@color     equ rarg_1
+	@@color_2   equ rstatic_1
+	@@color_3   equ rstatic_2
+	@@vert_1    equ rarg_2
+	@@vert_2    equ rarg_3
+	@@vert_3    equ rstatic_0
+;)
+	@@cmd equ rtmp_2
+	load_imm @@cmd, gp_Polygon | gp_Poly_ShadeGourand
+	or       @@cmd, @@cmd, @@color
+	store_word @@cmd,     gpio_port0(@@io_offset)
+	store_word @@vert_1,  gpio_port0(@@io_offset)
+	store_word @@color_2, gpio_port0(@@io_offset)
+	store_word @@vert_2,  gpio_port0(@@io_offset)
+	store_word @@color_3, gpio_port0(@@io_offset)
+	store_word @@vert_3,  gpio_port0(@@io_offset)
+	jump_reg rret_addr :: nop
+.endfunc

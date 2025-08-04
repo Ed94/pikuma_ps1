@@ -1,5 +1,5 @@
 .psx
-.create "./build/hello_gouraud.bin", 0x80010000
+.create "./build/hello_gp_routines.bin", 0x80010000
 
 .include "./code/graphics_system/dsl.s"
 .include "./code/graphics_system/gp.s"
@@ -46,22 +46,26 @@ main:
 	gcmd_push gp0, rtmp_1, 		-30 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
 	gcmd_push gp0, rtmp_1, 		-50 * -1 + Display_HalfHeight << gp_b16_Y |   55 + Display_HalfWidth << gp_b16_X
 ; Draw a flat-shaded triangle
-	gcmd_push gp0, rtmp_1, gp_Polygon | Color_PS_GoldenPoppy
-	gcmd_push gp0, rtmp_1, 		100 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
-	gcmd_push gp0, rtmp_1, 		 20 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
-	gcmd_push gp0, rtmp_1, 		 50 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
-	; Bonus traingle
-	gcmd_push gp0, rtmp_1, gp_Polygon | Color_PS_CadmiumRed
-	gcmd_push gp0, rtmp_1, 		  50 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
-	gcmd_push gp0, rtmp_1, 		   0 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
-	gcmd_push gp0, rtmp_1, 		-100 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
-	; Gourand shaded triangle
-	gcmd_push gp0, rtmp_1, gp_Polygon | gp_Poly_ShadeGourand | Color_PS_PersianGreen
-	gcmd_push gp0, rtmp_1, 		-35 * -1 + Display_HalfHeight << gp_b16_Y |  145 + Display_HalfWidth << gp_b16_X
-	gcmd_push gp0, rtmp_1, 0x00 << 16 | Color_PS_GoldenPoppy
-	gcmd_push gp0, rtmp_1, 		  0 * -1 + Display_HalfHeight << gp_b16_Y |   50 + Display_HalfWidth << gp_b16_X
-	gcmd_push gp0, rtmp_1, 0x00 << 16 | Color_PS_CadmiumRed
-	gcmd_push gp0, rtmp_1, 		 40 * -1 + Display_HalfHeight << gp_b16_Y |   60 + Display_HalfWidth << gp_b16_X
+		move rarg_0,         reg_io_offset ; arg 1 for gp_draw_tri_flat
+		load_imm rarg_1,     Color_PS_GoldenPoppy
+		load_imm rarg_2,     100 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
+		load_imm rarg_3,      20 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
+		load_imm rstatic_0,   50 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
+	jump_nlink gp_draw_tri_flat :: nop
+; Bonus traingle
+		load_imm rarg_1,     Color_PS_CadmiumRed
+		load_imm rarg_2,      50 * -1 + Display_HalfHeight << gp_b16_Y | -100 + Display_HalfWidth << gp_b16_X
+		load_imm rarg_3,       0 * -1 + Display_HalfHeight << gp_b16_Y |   20 + Display_HalfWidth << gp_b16_X
+		load_imm rstatic_0, -100 * -1 + Display_HalfHeight << gp_b16_Y |   30 + Display_HalfWidth << gp_b16_X
+	jump_nlink gp_draw_tri_flat :: nop
+; Gourand shaded triangle
+		load_imm rarg_1,     Color_PS_PersianGreen
+		load_imm rstatic_1,  Color_PS_GoldenPoppy
+		load_imm rstatic_2,  Color_PS_CadmiumRed
+		load_imm rarg_2,      -35 * -1 + Display_HalfHeight << gp_b16_Y |  145 + Display_HalfWidth << gp_b16_X
+		load_imm rarg_3,        0 * -1 + Display_HalfHeight << gp_b16_Y |   50 + Display_HalfWidth << gp_b16_X
+		load_imm rstatic_0,    40 * -1 + Display_HalfHeight << gp_b16_Y |   60 + Display_HalfWidth << gp_b16_X
+	jump_nlink gp_draw_tri_grouand :: nop
 
 idle:
 	jump idle :: nop
