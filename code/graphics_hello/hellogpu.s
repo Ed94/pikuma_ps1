@@ -1,7 +1,7 @@
 .psx
 .create "./build/hellogpu.bin", 0x80010000
 
-.include "./code/graphics_system/dsl.s"
+.include "./code/graphics_hello/dsl.s"
 
 ; Entry Point of Code
 .org 0x80010000

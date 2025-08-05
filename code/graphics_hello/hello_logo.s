@@ -1,8 +1,8 @@
 .psx
 .create "./build/hello_logo.bin", 0x80010000
 
-.include "./code/graphics_system/dsl.s"
-.include "./code/graphics_system/gp.s"
+.include "./code/graphics_hello/dsl.s"
+.include "./code/graphics_hello/gp.s"
 
 Color_RedFF           equ 0x0000FF
 Color_22              equ 0x222222

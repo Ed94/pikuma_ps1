@@ -1,8 +1,8 @@
 .psx
 .create "./build/hello_image.bin", 0x80010000
 
-.include "./code/graphics_system/dsl.s"
-.include "./code/graphics_system/gp.s"
+.include "./code/graphics_hello/dsl.s"
+.include "./code/graphics_hello/gp.s"
 
 Color_RedFF           equ 0x0000FF
 Color_22              equ 0x222222
@@ -21,7 +21,7 @@ Display_HalfHeight equ 239 / 2
 
 Image_SizeX    equ 32
 Image_SizeY    equ 32
-Image_ByteSize equ Image_SizeX * Image_SizeY * gp_pixel
+Image_ByteSize equ Image_SizeX * Image_SizeY * gp_pixel16
 
 Image:
   ; 32 * 32 * 2 = 2048 bytes 
