@@ -37,7 +37,7 @@ main:
 ; Setup Display Control
 	gcmd_push gp1, rtmp_1, gp_Reset
 	gcmd_push gp1, rtmp_1, gp_DisplayEnabled
-	gcmd_push gp1, rtmp_1, gp_DisplayMode | gp_Disp_Color15 | gp_Disp_VInterlace | gp_Disp_VRes_480 | gp_Disp_HRes_640
+	gcmd_push gp1, rtmp_1, gp_DisplayMode | gp_Disp_Color24 | gp_Disp_VInterlace | gp_Disp_VRes_480 | gp_Disp_HRes_640
 	// gcmd_push gp1, rtmp_1, gp_DisplayMode_320x240_15bit_NTSC
 	// gcmd_push gp1, rtmp_1, gp_DisplayMode_640x480_24bbp_NTSC
 	gcmd_push gp1, rtmp_1, gp_HorizontalDisplayRange_3168_608
@@ -58,9 +58,10 @@ main:
 		shift_rl @id, @id, (word / 2)
 		load_addr @img_cursor, Image
 	loop_dma: 
-		load_word  rtmp_1, (@img_cursor) :: nop :: store_word rtmp_1, gp0 ; @img_curor -> gp_dma_cpu_vm(word)
-		add_si @img_cursor, @img_cursor, word                             ; @img_cursor ++
-	add_ui @id, @id, -1 :: branch_ne_zero @id, loop_dma :: nop          ; @id -- :: if != @id, 0 goto loop_dma
+		load_word  rtmp_1, (@img_cursor) 
+		add_si @img_cursor, @img_cursor, word             ; @img_cursor ++ (delay slot filled)
+		store_word rtmp_1, gp0                            ; @img_curor -> gp_dma_cpu_vm(word)
+	branch_ne_zero @id, loop_dma :: add_ui @id, @id, -1 ; if != @id, 0 goto loop_dma :: -- @id (delay slot filled)
 
 idle:
 	jump idle :: nop
