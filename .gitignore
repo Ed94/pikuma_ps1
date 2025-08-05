@@ -1,5 +1,8 @@
-﻿toolchain/pcsx-redux
-# toolchain/armips
-build
-toolchain/armips
+﻿build
+psxdev_sample
 toolchain/pcsx_redux
+toolchain/armips
+
+*.o
+*.exe
+*.ps-exe
