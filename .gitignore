@@ -1,3 +1,5 @@
 ﻿toolchain/pcsx-redux
 # toolchain/armips
 build
+toolchain/armips
+toolchain/pcsx_redux

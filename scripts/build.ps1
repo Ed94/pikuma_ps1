@@ -8,7 +8,7 @@ if ((test-path $path_build) -eq $false) {
 	new-item -itemtype directory -path $path_build
 }
 
-$armips      = join-path $path_toolchain 'armips/armips.exe'
+$armips      = join-path $path_toolchain 'armips/build/Debug/armips.exe'
 $bin2exe_lua = join-path $path_scripts 'bin2exe.lua'
 $bin2exe_py  = join-path $path_scripts 'bin2exe.py'
 

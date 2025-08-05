@@ -12,6 +12,9 @@ A rest from the usual.
 scoop bucket add extras
 scoop install armips
 scoop install lua
+
+powershell -c "& { iwr -UseBasicParsing https://bit.ly/mips-ps1 | iex }"
+mips install 14.2.0
 ```
 
 [pscx-redux](https://github.com/grumpycoders/pcsx-redux/): A collection of tools, research, hardware design, and libraries aiming at development and reverse engineering on the PlayStation 1.
