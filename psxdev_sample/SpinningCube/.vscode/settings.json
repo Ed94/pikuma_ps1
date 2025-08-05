@@ -1,0 +1,10 @@
+{
+	"files.associations": {
+		"*.rmd": "markdown",
+		"*.s": "armips",
+		"stdlib.h": "c",
+		"libgte.h": "c",
+		"libgpu.h": "c",
+		"libetc.h": "c"
+	}
+}

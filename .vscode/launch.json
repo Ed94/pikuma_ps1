@@ -1,0 +1,32 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Debug: Spinning Cube",
+			"type": "gdb",
+			"request": "attach",
+			"target": "localhost:3333",
+			"remote": true,
+			"cwd": "${workspaceRoot}/psxdev_sample/SpinningCube",
+			"valuesFormatting": "parseText",
+			"stopAtConnect": true,
+			"gdbpath": "gdb-multiarch",
+			"windows": {
+				"gdbpath": "gdb-multiarch.exe"
+			},
+			"osx": {
+				"gdbpath": "gdb"
+			},
+			"executable": "${workspaceRoot}/psxdev_sample/SpinningCube/SpinningCube.elf",
+			"autorun": [
+				"monitor reset shellhalt",
+				"load SpinningCube.elf",
+				"tbreak main",
+				"continue"
+			]
+		}
+	]
+}
