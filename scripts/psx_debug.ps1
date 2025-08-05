@@ -4,4 +4,4 @@ $path_code      = join-path $path_root 'code'
 $path_scripts   = join-path $path_root 'scripts'
 $path_toolchain = join-path $path_root 'toolchain'
 
-
+# TODO(Ed): Custom hookup to launching pcsx-redux for hooking up to vscode with gdb server?
