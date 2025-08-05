@@ -35,7 +35,9 @@ gp_HorizontalDisplayRange_3168_608 equ 0x06 << gcmd_offset | 0xC60 << 12 | 0x260
 ; 0  - 9  Y1 (NTSC = 88h - (240 / 2), (PAL = A3h - (288 / 2))  ; \ scanline numbers on screen,
 ; 10 - 19 Y2 (NTSC = 88h + (240 / 2), (PAL = A3h + (288 / 2))  ; / relative to VSYNC
 ; 20 - 23 Not used (zero)
-gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 264 << 10 | 24
+gp_VerticalDiplayRange         equ 0x07 << gcmd_offset
+gp_VerticalDisplayRange_264_24 equ gp_VerticalDiplayRange | 264 << 10 | 24
+gp_VerticalDisplayRange_504_24 equ gp_VerticalDiplayRange | 504 << 10 | 24
 
 ; GP1(08h) - Display mode
 ; 0-1   Horizontal Resolution 1     (0=256, 1=320, 2=512, 3=640) ;GPUSTAT.17-18
@@ -46,8 +48,18 @@ gp_VerticalDisplayRange_264_24 equ 0x07 << gcmd_offset | 264 << 10 | 24
 ; 6     Horizontal Resolution 2     (0=256/320/512/640, 1=368)   ;GPUSTAT.16
 ; 7     Flip screen horizontally    (0=Off, 1=On, v1 only)       ;GPUSTAT.14
 ; 8-23  Not used (zero)
-@DisplayMode equ 0x08
-gp_DisplayMode_320x240_15bit_NTSC equ @DisplayMode << gcmd_offset | 0x0 << 7 | 0x0 << 6 | 0x0 << 5 | 0x0 << 4 | 0x0 << 3 | 0x0 << 2 | 0x1
+gp_DisplayMode     equ 0x8 << gcmd_offset
+gp_Disp_HRes_256   equ 0x0      
+gp_Disp_HRes_320   equ 0x1      
+gp_Disp_HRes_512   equ 0x2 
+gp_Disp_HRes_640   equ 0x3
+gp_Disp_VRes_240   equ 0x0 << 2 
+gp_Disp_VRes_480   equ 0x1 << 2
+gp_Disp_Color15    equ 0x0 << 4
+gp_Disp_Color24    equ 0x1 << 4
+gp_Disp_VInterlace equ 0x1 << 5
+gp_DisplayMode_320x240_15bit_NTSC equ gp_DisplayMode | gp_Disp_HRes_320 | gp_Disp_VRes_240 | gp_Disp_Color15
+gp_DisplayMOde_640x480_24bbp_NTSC equ gp_DisplayMode | gp_Disp_HRes_640 | gp_Disp_VRes_480 | gp_Disp_Color24 | gp_Disp_VInterlace
 
 ;GP0(E1h) - Draw Mode setting (aka "Texpage")
 ; 0 - 3   Texture page X Base       (N * 64)  (ie. in 64-halfword steps)                       ; GPUSTAT.0-3
@@ -141,8 +153,9 @@ gp_b10_Y equ 10
 gp_b16_X equ 0
 gp_b16_Y equ 16
 
-gp_pixel equ (2 * byte)
-gp_vec2  equ word
+gp_pixel16 equ (2 * byte)
+gp_pixel24 equ (3 * byte)
+gp_vec2    equ word
 
 .macro gp_push_pak, port, reg_scratch, packet
 	load_imm   reg_scratch, packet
@@ -153,7 +166,8 @@ gp_vec2  equ word
 	store_word reg_scratch, port 
 .endmacro
 
-.org 0x80010000 + 3000
+// TODO(Ed): Figure out an auto region?
+.org 0x80010000 + 2000
 
 .func gp_draw_tri_flat ;(
 	gp_draw_tri_flat__sp_size equ (3 * gp_vec2)
