@@ -82,39 +82,69 @@ $units = @(
 	$unit_main
 )
 
-
 write-host "--- Compiling Source Files ---" -ForegroundColor Cyan
 
-$compile_args = @()
-$compile_args += $f_debug
+$compile_args_c = @()
+$compile_args_c += $f_debug
+$compile_args_c += $f_optimize_none
+# $compile_args_c += $f_optimize_size
 
-$compile_args += $f_wno_attributes
-$compile_args += $f_omit_frame_ptr
-$compile_args += $f_no_builtin
-$compile_args += $f_no_strict_alias
+$compile_args_c += $f_code_sections
+$compile_args_c += $f_data_sections
 
-# $compile_args += $f_optimize_size
-$compile_args += $f_optimize_none
-
-$compile_args += $f_arch_mips1,   $f_arch_abi32,     $f_arch_little_endian, $f_arch_fp32
-$compile_args += $f_arch_no_pic,  $f_arch_no_shared, $f_arch_no_abicalls
-$compile_args += $f_arch_no_llsc, $f_arch_no_gpopt,  $f_arch_no_stack_prot
-
-$compile_args += $f_no_stdlib,     $f_freestanding
-$compile_args += $f_code_sections, $f_data_sections
+$compile_args_c += $f_wno_attributes
+$compile_args_c += $f_freestanding
+$compile_args_c += $f_omit_frame_ptr
+$compile_args_c += $f_no_builtin
+$compile_args_c += $f_no_stdlib
+$compile_args_c += $f_no_strict_alias
+$compile_args_c += @(
+	$f_arch_mips1,
+	$f_arch_abi32, 
+	$f_arch_fp32,
+	$f_arch_little_endian,
+	$f_arch_no_abicalls, 
+	$f_arch_no_gpopt,  
+	$f_arch_no_pic, 
+	$f_arch_no_llsc,  
+	$f_arch_no_shared, 
+	$f_arch_no_stack_prot
+)
 
 $path_psyq_imyu_inc = join-path $path_psyq_imyu 'include'
+$compile_args_c    += ($f_include + $path_psyq_imyu_inc)
+$compile_args_c    += ($f_include + $path_nugget)
 
-$compile_args += ($f_include + $path_nugget)
-$compile_args += ($f_include + $path_psyq_imyu_inc)
+$compile_args_asm = @()
+$compile_args_asm += $f_debug
+$compile_args_asm += @(
+	$f_arch_mips1, 
+	$f_arch_abi32, 
+	$f_arch_fp32,
+	$f_arch_little_endian, 
+	$f_arch_no_abicalls,
+	$f_arch_no_pic, 
+	$f_arch_no_llsc, 
+	$f_arch_no_shared, 
+	$f_arch_no_stack_prot
+)
+$compile_args_asm += $f_no_stdlib
+$compile_args_asm += $f_freestanding
+$compile_args_asm += ($f_include + $path_nugget)
 
 $link_modules = @()
 foreach ($unit in $units) {
     $base_name     = [System.IO.Path]::GetFileNameWithoutExtension($unit)
+	$extension     = [System.IO.Path]::GetExtension($unit)
     $link_module   = join-path $path_build "$($base_name).o"
     $link_modules += $link_module
 
-    $module_compile_args = @($compile_args) + $f_compile, $unit, ($f_output + $link_module)
+	$module_compile_args = @()
+    if     ($extension -eq ".c") { $module_compile_args = $compile_args_c   }
+    elseif ($extension -eq ".s") { $module_compile_args = $compile_args_asm }
+	else                         { write-error "Unsupported file type: $unit"; exit 1 }
+
+	$module_compile_args = @($module_compile_args) + $f_compile, $unit, ($f_output + $link_module)
     
     write-host "Compiling '$($unit)' -> '$($base_name).o'"
     $module_compile_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
@@ -139,7 +169,9 @@ $link_args += $f_arch_little_endian
 $link_args += ($f_link_pass_through_prefix + $f_link_gc_sections)
 $link_args += ($f_link_pass_through_prefix + $f_link_format + "elf32-littlemips")
 
+$linkscript_nugget = join-path $path_nugget 'nooverlay.ld'
 $linkscript_ps_exe = join-path $path_nugget "ps-exe.ld"
+$link_args        += ($f_link_script + $linkscript_nugget)
 $link_args        += ($f_link_script + $linkscript_ps_exe)
 
 $path_psyq_lib = join-path $path_psyq 'lib'
@@ -190,9 +222,9 @@ if ($LASTEXITCODE -ne 0) { write-error "Linking failed. Aborting."; exit 1 }
 
 
 Write-Host "`n--- Creating Final Binary ---" -ForegroundColor Cyan
-$exe = join-path $ProjectRoot "$($TargetName).ps-exe"
+$exe = join-path $path_build "SpinningCube.ps-exe"
 
-write-host "Converting ELF to PS-EXE -> '$($TargetName).ps-exe'"
+write-host "Converting ELF to PS-EXE -> 'SpinningCube.ps-exe'"
 $objcopy_args = ($f_objcopy_format + "binary"), $elf, $exe
 	& $Objcopy $objcopy_args
 if ($LASTEXITCODE -ne 0) { Write-Error "Objcopy failed. Aborting."; exit 1 }

@@ -10,7 +10,7 @@
 			"request": "attach",
 			"target": "localhost:3333",
 			"remote": true,
-			"cwd": "${workspaceRoot}/psxdev_sample/SpinningCube",
+			"cwd": "${workspaceRoot}/psxdev_sample/SpinningCube/build",
 			"valuesFormatting": "parseText",
 			"stopAtConnect": true,
 			"gdbpath": "gdb-multiarch",
@@ -20,7 +20,7 @@
 			"osx": {
 				"gdbpath": "gdb"
 			},
-			"executable": "${workspaceRoot}/psxdev_sample/SpinningCube/SpinningCube.elf",
+			"executable": "${workspaceRoot}/psxdev_sample/SpinningCube/build/SpinningCube.elf",
 			"autorun": [
 				"monitor reset shellhalt",
 				"load SpinningCube.elf",
