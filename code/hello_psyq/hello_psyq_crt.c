@@ -20,7 +20,7 @@ int main(void)
     DB *cdb;
 
 	ResetGraph(0);
-    InitGeom();
+    // InitGeom();
 
     SetGraphDebug(0);
 
@@ -35,16 +35,28 @@ int main(void)
     SetDefDispEnv(&db[0].disp, 0, 0, 640, 480);
     SetDefDispEnv(&db[1].disp, 0, 0, 640, 480);
 
+    SetDispMask(1);
+
+    PutDrawEnv(&db[0].draw);
+    PutDispEnv(&db[0].disp);
+
 	while (1) {
+        cdb = (cdb == &db[0]) ? &db[1] : &db[0];
+
+        ClearOTagR(cdb->ot, OTSIZE);
+
 		FntPrint("Code compiled using Psy-Q libraries\n\n");
 		FntPrint("converted by psyq-obj-parser\n\n");
 		FntPrint("PCSX-Redux project\n\n");
 		FntPrint("https://bit.ly/pcsx-redux");
 
-		ClearImage(&cdb->draw.clip, 60, 120, 120);
-
 		DrawSync(0);
 		VSync(0);
+
+		ClearImage(&cdb->draw.clip, 60, 120, 120);
+
+        DrawOTag(&cdb->ot[OTSIZE - 1]);
+        FntFlush(-1);
 	}
 
 	return 0;

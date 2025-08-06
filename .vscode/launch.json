@@ -27,6 +27,30 @@
 				"tbreak main",
 				"continue"
 			]
+		},
+		{
+			"name": "Debug: Hello Psy-Q!",
+			"type": "gdb",
+			"request": "attach",
+			"target": "localhost:3333",
+			"remote": true,
+			"cwd": "${workspaceRoot}/build",
+			"valuesFormatting": "parseText",
+			"stopAtConnect": true,
+			"gdbpath": "gdb-multiarch",
+			"windows": {
+				"gdbpath": "gdb-multiarch.exe"
+			},
+			"osx": {
+				"gdbpath": "gdb"
+			},
+			"executable": "${workspaceRoot}/build/hello_psyq.elf",
+			"autorun": [
+				"monitor reset shellhalt",
+				"load hello_psyq.elf",
+				"tbreak main",
+				"continue"
+			]
 		}
 	]
 }

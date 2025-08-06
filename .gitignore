@@ -12,3 +12,4 @@ toolchain/psyq_iwyu
 *.dep
 *.o
 *.a
+.sentry-native
