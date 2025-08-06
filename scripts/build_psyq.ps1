@@ -9,7 +9,6 @@ if ((test-path $path_build) -eq $false) {
 }
 
 # TODO(Ed): General way to build C runtime sandboxed projects.
-
 # The goal here is to lift w/e is going on in SpinningCube to just utilize the toolchain dir's content
 # We also want to strip down the C to just calling the ASM's entry point, from there we'll try to use
 # the PS1 SDK from asm and just setup macros for the ABI calling convention
@@ -79,13 +78,14 @@ $f_objcopy_format   = "-O"
 
 $path_pcsx_redux    = join-path $path_toolchain  'pcsx-redux'
 $path_nugget        = join-path $path_pcsx_redux 'src/mips'
-$path_nugget_common = join-path $path_nugget     'common'
+# $path_nugget_common = join-path $path_nugget     'common'
+$path_psyq          = join-path $path_toolchain  'psyq-4_7'
 $path_psyq_iwyu     = join-path $path_toolchain  'psyq_iwyu'
-$path_psyq_imyu_inc = join-path $path_psyq_imyu  'include'
+$path_psyq_imyu_inc = join-path $path_psyq_iwyu  'include'
 
 function assemble-unit { param( 
 	[string]  $unit,
-	[stirng]  $link_module,
+	[string]  $link_module,
 	[string[]]$include_paths,
 	[string[]]$user_assemble_args
 )
@@ -108,7 +108,7 @@ function assemble-unit { param(
 
 	$assemble_args += $f_compile, $unit, ($f_output + $link_module)
 
-    write-host "Assembling '$unit' -> '$link_module'"
+    write-host "Assembling '$unit' -> '$link_module'" -ForegroundColor Cyan
     $assemble_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
 		& $Assembler $assemble_args
     if ($LASTEXITCODE -ne 0) { write-error "Compilation failed for $unit. Aborting."; exit 1 }
@@ -119,8 +119,6 @@ function compile-unit { param(
 	[string[]]$include_paths,
 	[string[]]$user_compile_args
 )
-	write-host "--- Compiling Source Files ---" -ForegroundColor Cyan
-
 	$compile_args = @()
 	$compile_args += $f_code_sections
 	$compile_args += $f_data_sections
@@ -150,18 +148,16 @@ function compile-unit { param(
 
 	$compile_args += $f_compile, $unit, ($f_output + $link_module)
 
-    write-host "Compiling '$unit' -> '$link_module'"
+    write-host "Compiling '$unit' -> '$link_module'" -ForegroundColor Cyan
     $compile_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
 		& $Compiler $compile_args
     if ($LASTEXITCODE -ne 0) { write-error "Compilation failed for $unit. Aborting."; exit 1 }
 }
 function link-modules { param(
-	[string]  $elf,
 	[string[]]$link_modules,
+	[string]  $elf,
 	[string[]]$user_link_args
 )
-	write-host "`n--- Linking Modules ---" -ForegroundColor Cyan
-
 	$link_args = @()
 
 	$link_args += $f_no_stdlib
@@ -182,7 +178,8 @@ function link-modules { param(
 	$path_psyq_lib = join-path $path_psyq 'lib'
 	$link_args    += ($f_link_lib_path + $path_psyq_lib)
 
-	$map        = join-path $path_build 'SpinningCube.map'
+	$base_name  = [System.IO.Path]::GetFileNameWithoutExtension($elf)
+	$map        = join-path $path_build "$base_name.map"
 	$link_args += ($f_link_pass_through_prefix + $f_link_mapfile + $map)
 
 	$link_args += ($f_link_pass_through_prefix + $f_link_start_group)
@@ -216,10 +213,9 @@ function link-modules { param(
 
 	$link_args += $link_modules
 
-	$elf = Join-Path $path_build "SpinningCube.elf"
 	$final_link_args = @($link_args) + ($f_output + $elf)
 
-	write-host "Linking modules into 'SpinningCube.elf'"
+	write-host "Linking modules into '$elf'"  -ForegroundColor Cyan
 	$final_link_args += ($f_link_pass_through_prefix + $f_link_end_group)
 	$final_link_args | foreach-object { write-host $_ }
 		& $Compiler $final_link_args
@@ -229,31 +225,41 @@ function make-binary { param(
 	[string]$elf,
 	[string]$exe
 )
-	Write-Host "`n--- Creating Final Binary ---" -ForegroundColor Cyan
-	$exe = join-path $path_build "SpinningCube.ps-exe"
-
-	write-host "Converting ELF to PS-EXE -> 'SpinningCube.ps-exe'"
+	Write-Host "--- Creating Binary ---" -ForegroundColor Cyan
+	write-host "Converting $elf to PS-EXE -> '$exe'"
 	$objcopy_args = ($f_objcopy_format + "binary"), $elf, $exe
 		& $Objcopy $objcopy_args
 	if ($LASTEXITCODE -ne 0) { Write-Error "Objcopy failed. Aborting."; exit 1 }
 }
 
 function build-hello_psyqo {
-	$path_hello_psyq
+	$includes += @()
 
-	$assemble_arsg = @()
-	$assemble_arsg += $f_debug
-	$assemble_arsg += $f_optimize_none
-	assemble-unit 
+	$path_hello_psyq = join-path $path_code 'hello_psyq'
+
+	$asm_hello_psyq    = join-path $path_hello_psyq 'hello_psyq.s'
+	$module_hello_psyq = join-path $path_build      'hello_psyq.o'
+
+	$assemble_args = @()
+	$assemble_args += $f_debug
+	$assemble_args += $f_optimize_none
+	assemble-unit $asm_hello_psyq $module_hello_psyq $includes $assemble_args
+
+	$hello_psyq_crt        = join-path $path_hello_psyq 'hello_psyq_crt.c'
+	$module_hello_psyq_crt = join-path $path_build      'hello_psyq_crt.o'
 
 	$compile_args = @()
 	$compile_args += $f_debug
 	$compile_args += $f_optimize_none
 	# $compile_args += $f_optimize_size
+	compile-unit $hello_psyq_crt $module_hello_psyq_crt $includes $compile_args
+
+	$elf_hello_psyq = join-path $path_build 'hello_psyq.elf'
+	$exe_hello_psyq = join-path $path_build 'hello_psyq.ps-exe'
 
 	$link_args += $f_debug
 	# $link_args += $f_optimize_size
-
-
+	link-modules @($module_hello_psyq, $module_hello_psyq_crt) $elf_hello_psyq $link_args
+	make-binary $elf_hello_psyq $exe_hello_psyq
 }
 build-hello_psyqo
