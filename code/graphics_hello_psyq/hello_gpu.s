@@ -1,11 +1,9 @@
-.include "./toolchain/pcsx-redux/src/mips/common/crt0/crt0.s"
+// .include "./toolchain/pcsx-redux/src/mips/common/crt0/crt0.s"
 
-.include "./asmdd/dsl.asm"
-.include "./asmdd/io.asm"
-.include "./asmdd/gp.asm"
+.include "./asmdd/dsl.s"
+.include "./asmdd/io.s"
+.include "./asmdd/gp.s"
 
-#.section .text.gp, "ax, @progbits"
-#.align 2
 .global gp_screen_init
 .type gp_screen_init, @function
 gp_screen_init:
@@ -15,7 +13,6 @@ gp_screen_init:
 	#define gp1 gpio_port1(rio_offset)
 
 	gcmd_push gp1, rtmp_1, gp_Reset
-	nop; nop;
 	gcmd_push gp1, rtmp_1, gp_DisplayEnabled
 	jump_reg  rret_addr; nop
 

@@ -85,4 +85,4 @@ typedef def_struct(gp_Vec2) {
 	U16 y;
 };
 
-extern void gp_screen_init();
+void gp_screen_init();
