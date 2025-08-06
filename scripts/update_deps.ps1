@@ -30,7 +30,7 @@ push-location $path_armips_build
 &	cmake --build . --config Debug
 pop-location
 
-$path_pcsx_redux_vsprojects = join-path $path_pcsx_redux            'vscprojects'
-$path_pcsx_redux_binaries   = join-path $path_pcsx_redux_vsprojects 'x64/Release'
+# $path_pcsx_redux_vsprojects = join-path $path_pcsx_redux            'vscprojects'
+# $path_pcsx_redux_binaries   = join-path $path_pcsx_redux_vsprojects 'x64/Release'
 
-$psyq_obj_parser = join-path $path_pcsx_redux_binaries 'psyq-obj-parser.exe'
+# $psyq_obj_parser = join-path $path_pcsx_redux_binaries 'psyq-obj-parser.exe'

@@ -17,14 +17,14 @@ scoop install lua
 [armips](https://github.com/Kingcom/armips)
 
 * Supports doing bare-metal assembly for the ps1
-* `scoop install armips`
+* `scoop install armips` or just clone and build..
 
 [pscx-redux](https://github.com/grumpycoders/pcsx-redux/): A collection of tools, research, hardware design, and libraries aiming at development and reverse engineering on the PlayStation 1.
 
 * Used as the runtime sandbox emulated the ps1
 * Has hookups to behaving as a gdb server which can be utilized with the gdb client in vscode.
 * Supports symbolic info emitted by armips
-* pysq library has been sucessfully adjusted for modern compiler usage (see: src/)
+* pysq library has been sucessfully adjusted for modern compiler usage (see: `src/`)
 
 [MIPS Toolchain (from pscx-redux)](https://static.grumpycoder.net/pixel/mips/)
 
@@ -39,9 +39,9 @@ scoop install lua
 
 * Original official SDK
 * Modernized using obj parser to extract info for GNU toolchain usage.
-* Can be utilized effectively with the includes below
 * Can either grab from arthus [psyq-4.7-converted-full.7z](https://psx.arthus.net/sdk/Psy-Q/psyq-4.7-converted-full.7z) or [psyq-4_7-converted-light.zip](psyq-4_7-converted-light.zip)
   * The light version omits the link modules (object files), just keeps the static archives.
+* Can be utilized effectively with the includes below
 
 [psyq_include_what_you_use](https://github.com/johnbaumann/psyq_include_what_you_use/)
 

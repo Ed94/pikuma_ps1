@@ -85,11 +85,13 @@ $path_psyq_imyu   = join-path $path_third_party 'psyq-iwyu'
 $path_nugget_common = join-path $path_nugget 'common'
 
 
-function assemble-unit { param(
-		[string]$
-	)
-	$compile_args_asm += $f_debug
-	$compile_args_asm += @(
+function assemble-unit { param( 
+	[string]  $unit,
+	[stirng]  $link_module,
+	[string[]]$include_paths,
+	[string[]]$user_compile_args
+)
+	$compile_args = @(
 		$f_arch_mips1, 
 		$f_arch_abi32, 
 		$f_arch_fp32,
@@ -100,34 +102,33 @@ function assemble-unit { param(
 		$f_arch_no_shared, 
 		$f_arch_no_stack_prot
 	)
-	$compile_args_asm += $f_no_stdlib
-	$compile_args_asm += $f_freestanding
-	$compile_args_asm += ($f_include + $path_nugget)
+	$compile_args += $f_no_stdlib
+	$compile_args += $f_freestanding
+	$compile_args += ($f_include + $path_nugget)
+
+	$compile_args += $user_compile_args
 
 
 }
-
 function compile-unit { param(
-	[string]$module,
-	[string]$unit
+	[string]$unit,
+	[string]$link_module,
+	[string[]]$include_paths,
+	[string[]]$user_compile_args
 )
 	write-host "--- Compiling Source Files ---" -ForegroundColor Cyan
 
-	$compile_args_c = @()
-	$compile_args_c += $f_debug
-	$compile_args_c += $f_optimize_none
-	# $compile_args_c += $f_optimize_size
+	$compile_args = @()
+	$compile_args += $f_code_sections
+	$compile_args += $f_data_sections
 
-	$compile_args_c += $f_code_sections
-	$compile_args_c += $f_data_sections
-
-	$compile_args_c += $f_wno_attributes
-	$compile_args_c += $f_freestanding
-	$compile_args_c += $f_omit_frame_ptr
-	$compile_args_c += $f_no_builtin
-	$compile_args_c += $f_no_stdlib
-	$compile_args_c += $f_no_strict_alias
-	$compile_args_c += @(
+	$compile_args += $f_wno_attributes
+	$compile_args += $f_freestanding
+	$compile_args += $f_omit_frame_ptr
+	$compile_args += $f_no_builtin
+	$compile_args += $f_no_stdlib
+	$compile_args += $f_no_strict_alias
+	$compile_args += @(
 		$f_arch_mips1,
 		$f_arch_abi32, 
 		$f_arch_fp32,
@@ -140,19 +141,21 @@ function compile-unit { param(
 		$f_arch_no_stack_prot
 	)
 	$path_psyq_imyu_inc = join-path $path_psyq_imyu 'include'
-	$compile_args_c    += ($f_include + $path_psyq_imyu_inc)
-	$compile_args_c    += ($f_include + $path_nugget)
+	$compile_args    += ($f_include + $path_psyq_imyu_inc)
+	$compile_args    += ($f_include + $path_nugget)
+
+	$compile_args += $user_compile_args
+
+
 }
-
 function link-modules { param(
-
-
-	)
+	[string]  $elf,
+	[string[]]$link_modules,
+	[string[]]$user_link_args
+)
 	write-host "`n--- Linking Modules ---" -ForegroundColor Cyan
 
 	$link_args = @()
-	$link_args += $f_debug
-	# $link_args += $f_optimize_size
 
 	$link_args += $f_no_stdlib
 	$link_args += $f_link_static
@@ -171,8 +174,6 @@ function link-modules { param(
 
 	$path_psyq_lib = join-path $path_psyq 'lib'
 	$link_args    += ($f_link_lib_path + $path_psyq_lib)
-
-	$link_args += $link_modules
 
 	$map        = join-path $path_build 'SpinningCube.map'
 	$link_args += ($f_link_pass_through_prefix + $f_link_mapfile + $map)
@@ -206,6 +207,8 @@ function link-modules { param(
 		$link_args += ($f_link_lib + $lib)
 	}
 
+	$link_args += $link_modules
+
 	$elf = Join-Path $path_build "SpinningCube.elf"
 	$final_link_args = @($link_args) + ($f_output + $elf)
 
@@ -215,9 +218,9 @@ function link-modules { param(
 		& $Compiler $final_link_args
 	if ($LASTEXITCODE -ne 0) { write-error "Linking failed. Aborting."; exit 1 }
 }
-
 function make-binary { param(
-
+	[string]$elf,
+	[string]$exe
 )
 	Write-Host "`n--- Creating Final Binary ---" -ForegroundColor Cyan
 	$exe = join-path $path_build "SpinningCube.ps-exe"
@@ -229,6 +232,14 @@ function make-binary { param(
 }
 
 function build-hello_psyqo {
+	$compile_args = @()
+	$compile_args += $f_debug
+	$compile_args += $f_optimize_none
+	# $compile_args += $f_optimize_size
+
+	$link_args += $f_debug
+	# $link_args += $f_optimize_size
+
 
 }
 build-hello_psyqo
