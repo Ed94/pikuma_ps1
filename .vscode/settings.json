@@ -1,9 +1,21 @@
 {
 	"files.associations": {
 		"*.rmd": "markdown",
-		"*.s": "armips",
+		"*.s": "gas",
+		"*.asm": "gas",
 		"stdlib.h": "c",
 		"libetc.h": "c",
-		"libgpu.h": "c"
+		"libgpu.h": "c",
+		"stddef.h": "c",
+		"abs.h": "c",
+		"qsort.h": "c",
+		"malloc.h": "c",
+		"convert.h": "c",
+		"type_traits": "c",
+		"xlocmon": "c",
+		"iterator": "c",
+		"regex": "c",
+		"dsl.h": "c",
+		"xlocale": "c"
 	}
 }

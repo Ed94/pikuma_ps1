@@ -27,6 +27,30 @@
 				"tbreak main",
 				"continue"
 			]
+		},
+		{
+			"name": "Debug: Hello GPU Psy-Q!",
+			"type": "gdb",
+			"request": "attach",
+			"target": "localhost:3333",
+			"remote": true,
+			"cwd": "${workspaceRoot}/build",
+			"valuesFormatting": "parseText",
+			"stopAtConnect": true,
+			"gdbpath": "gdb-multiarch",
+			"windows": {
+				"gdbpath": "gdb-multiarch.exe"
+			},
+			"osx": {
+				"gdbpath": "gdb"
+			},
+			"executable": "${workspaceRoot}/build/hello_gpu.elf",
+			"autorun": [
+				"monitor reset shellhalt",
+				"load hello_gpu.elf",
+				"tbreak main",
+				"continue"
+			]
 		}
 	]
 }

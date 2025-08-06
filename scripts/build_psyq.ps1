@@ -106,6 +106,7 @@ function assemble-unit { param(
 
 	$assemble_args += $user_assemble_args
 
+	$assemble_args += '-x', 'assembler-with-cpp'
 	$assemble_args += $f_compile, $unit, ($f_output + $link_module)
 
     write-host "Assembling '$unit' -> '$link_module'" -ForegroundColor Cyan
@@ -264,17 +265,18 @@ function build-hello_psyqo {
 }
 # build-hello_psyqo
 
-function build-double_buffer {
+function build-graphis_hello {
 	$includes += @()
 
 	$path_module = join-path $path_code 'graphics_hello_psyq'
 
-	$src_asm    = join-path $path_module 'hello_gpu.s'
+	$src_asm    = join-path $path_module 'hello_gpu.asm'
 	$module_asm = join-path $path_build  'hello_gpu.o'
 
 	$assemble_args = @()
 	$assemble_args += $f_debug
 	$assemble_args += $f_optimize_none
+	$assemble_args += ($f_include + $path_code)
 	assemble-unit $src_asm $module_asm $includes $assemble_args
 
 	$src_c    = join-path $path_module 'hello_gpu.c'
@@ -284,14 +286,16 @@ function build-double_buffer {
 	$compile_args += $f_debug
 	$compile_args += $f_optimize_none
 	# $compile_args += $f_optimize_size
+	$compile_args += ($f_include + $path_code)
 	compile-unit $src_c $module_c $includes $compile_args
 
 	$elf = join-path $path_build 'hello_gpu.elf'
 	$exe = join-path $path_build 'hello_gpu.ps-exe'
 
+	$link_args = @()
 	$link_args += $f_debug
 	# $link_args += $f_optimize_size
 	link-modules @($module_asm, $module_c) $elf $link_args
 	make-binary $elf $exe
 }
-build-double_buffer
+build-graphis_hello
