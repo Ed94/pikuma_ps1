@@ -18,7 +18,7 @@ $url_armips     = 'https://github.com/Kingcom/armips.git'
 $url_pcsx_redux = 'https://github.com/grumpycoders/pcsx-redux.git'
 
 $path_armips     = join-path $path_toolchain 'armips'
-$path_pcsx_redux = join-path $path_toolchain 'pcsx_redux'
+$path_pcsx_redux = join-path $path_toolchain 'pcsx-redux'
 
 clone-gitrepo $path_armips     $url_armips
 clone-gitrepo $path_pcsx_redux $url_pcsx_redux
@@ -29,3 +29,8 @@ push-location $path_armips_build
 &	cmake ..
 &	cmake --build . --config Debug
 pop-location
+
+$path_pcsx_redux_vsprojects = join-path $path_pcsx_redux            'vscprojects'
+$path_pcsx_redux_binaries   = join-path $path_pcsx_redux_vsprojects 'x64/Release'
+
+$psyq_obj_parser = join-path $path_pcsx_redux_binaries 'psyq-obj-parser.exe'

@@ -76,7 +76,7 @@ if (-not (test-path $path_build)) {
 $path_nugget_common = join-path $path_nugget 'common'
 
 $unit_nugget_crt0 = join-path $path_nugget_common 'crt0/crt0.s'
-$unit_main        = join-path $path_root 'main.c'
+$unit_main        = join-path $path_root          'main.c'
 $units = @(
 	$unit_nugget_crt0,
 	$unit_main
