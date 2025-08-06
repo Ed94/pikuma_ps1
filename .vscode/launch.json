@@ -5,30 +5,6 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
-			"name": "Debug: Spinning Cube",
-			"type": "gdb",
-			"request": "attach",
-			"target": "localhost:3333",
-			"remote": true,
-			"cwd": "${workspaceRoot}/psxdev_sample/SpinningCube/build",
-			"valuesFormatting": "parseText",
-			"stopAtConnect": true,
-			"gdbpath": "gdb-multiarch",
-			"windows": {
-				"gdbpath": "gdb-multiarch.exe"
-			},
-			"osx": {
-				"gdbpath": "gdb"
-			},
-			"executable": "${workspaceRoot}/psxdev_sample/SpinningCube/build/SpinningCube.elf",
-			"autorun": [
-				"monitor reset shellhalt",
-				"load SpinningCube.elf",
-				"tbreak main",
-				"continue"
-			]
-		},
-		{
 			"name": "Debug: Hello Psy-Q!",
 			"type": "gdb",
 			"request": "attach",

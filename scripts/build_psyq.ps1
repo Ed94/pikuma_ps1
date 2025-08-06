@@ -20,7 +20,7 @@ $Compiler  = "$($Prefix)-gcc"
 $Assembler = $Compiler
 $Objcopy   = "$($Prefix)-objcopy"
 
-# --- Abstracted GCC/MIPS Flags ---
+# --- GCC/MIPS Flags ---
 
 # General Compiler Flags
 $f_compile          = "-c"
@@ -262,4 +262,36 @@ function build-hello_psyqo {
 	link-modules @($module_hello_psyq, $module_hello_psyq_crt) $elf_hello_psyq $link_args
 	make-binary $elf_hello_psyq $exe_hello_psyq
 }
-build-hello_psyqo
+# build-hello_psyqo
+
+function build-double_buffer {
+	$includes += @()
+
+	$path_module = join-path $path_code 'graphics_hello_psyq'
+
+	$src_asm    = join-path $path_module 'hello_gpu.s'
+	$module_asm = join-path $path_build  'hello_gpu.o'
+
+	$assemble_args = @()
+	$assemble_args += $f_debug
+	$assemble_args += $f_optimize_none
+	assemble-unit $src_asm $module_asm $includes $assemble_args
+
+	$src_c    = join-path $path_module 'hello_gpu.c'
+	$module_c = join-path $path_build  'hello_gpu_c.o'
+
+	$compile_args = @()
+	$compile_args += $f_debug
+	$compile_args += $f_optimize_none
+	# $compile_args += $f_optimize_size
+	compile-unit $src_c $module_c $includes $compile_args
+
+	$elf = join-path $path_build 'hello_gpu.elf'
+	$exe = join-path $path_build 'hello_gpu.ps-exe'
+
+	$link_args += $f_debug
+	# $link_args += $f_optimize_size
+	link-modules @($module_asm, $module_c) $elf $link_args
+	make-binary $elf $exe
+}
+build-double_buffer
