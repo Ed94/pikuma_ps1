@@ -1,10 +1,10 @@
 ﻿build
-# psxdev_sample
-toolchain/pcsx_redux
+psxdev_sample
 toolchain/armips
+toolchain/pcsx-redux
+toolchain/psyq_iwyu
 
 *.exe
-
 *.elf
 *.map
 *.cpe
@@ -12,5 +12,3 @@ toolchain/armips
 *.dep
 *.o
 *.a
-
-psxdev_sample/SpinningCube/third_party

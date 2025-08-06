@@ -48,6 +48,8 @@ scoop install lua
 * Fixes psyq headers to include what they use, so changing the include order in your project doesn't break compiling.
 * Needed if you want to link and utilize the psyq C SDK
 
+[Other toolchains (not used here)](https://www.psx.dev/getting-started)
+
 ## Gallery
 
 ![clear!](./docs/assets/pcsx-redux.main_2025-08-03_18-02-08.png)  

@@ -16,12 +16,15 @@ $misc = join-path $PSScriptRoot 'helpers/misc.ps1'
 
 $url_armips     = 'https://github.com/Kingcom/armips.git'
 $url_pcsx_redux = 'https://github.com/grumpycoders/pcsx-redux.git'
+$url_psyq_iwyu  = 'https://github.com/johnbaumann/psyq_include_what_you_use.git'
 
 $path_armips     = join-path $path_toolchain 'armips'
 $path_pcsx_redux = join-path $path_toolchain 'pcsx-redux'
+$path_psyq_iwyu  = join-path $path_toolchain 'psyq_iwyu'
 
 clone-gitrepo $path_armips     $url_armips
 clone-gitrepo $path_pcsx_redux $url_pcsx_redux
+clone-gitrepo $path_psyq_iwyu  $url_psyq_iwyu
 
 $path_armips_build = join-path $path_armips 'build'
 verify-path $path_armips_build

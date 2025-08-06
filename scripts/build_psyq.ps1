@@ -16,9 +16,10 @@ if ((test-path $path_build) -eq $false) {
 
 # --- Toolchain Definition ---
 # Assumes 'mipsel-none-elf' toolchain is in your system's PATH.
-$Prefix   = "mipsel-none-elf"
-$Compiler = "$($Prefix)-gcc"
-$Objcopy  = "$($Prefix)-objcopy"
+$Prefix    = "mipsel-none-elf"
+$Compiler  = "$($Prefix)-gcc"
+$Assembler = $Compiler
+$Objcopy   = "$($Prefix)-objcopy"
 
 # --- Abstracted GCC/MIPS Flags ---
 
@@ -76,22 +77,19 @@ $f_link_lib                 = "-l"
 # Objcopy Flags
 $f_objcopy_format   = "-O"
 
-
-
-$path_nugget      = join-path $path_third_party 'nugget'
-$path_psyq        = join-path $path_third_party 'psyq'
-$path_psyq_imyu   = join-path $path_third_party 'psyq-iwyu'
-
-$path_nugget_common = join-path $path_nugget 'common'
-
+$path_pcsx_redux    = join-path $path_toolchain  'pcsx-redux'
+$path_nugget        = join-path $path_pcsx_redux 'src/mips'
+$path_nugget_common = join-path $path_nugget     'common'
+$path_psyq_iwyu     = join-path $path_toolchain  'psyq_iwyu'
+$path_psyq_imyu_inc = join-path $path_psyq_imyu  'include'
 
 function assemble-unit { param( 
 	[string]  $unit,
 	[stirng]  $link_module,
 	[string[]]$include_paths,
-	[string[]]$user_compile_args
+	[string[]]$user_assemble_args
 )
-	$compile_args = @(
+	$assemble_args = @(
 		$f_arch_mips1, 
 		$f_arch_abi32, 
 		$f_arch_fp32,
@@ -102,17 +100,22 @@ function assemble-unit { param(
 		$f_arch_no_shared, 
 		$f_arch_no_stack_prot
 	)
-	$compile_args += $f_no_stdlib
-	$compile_args += $f_freestanding
-	$compile_args += ($f_include + $path_nugget)
+	$assemble_args += $f_no_stdlib
+	$assemble_args += $f_freestanding
+	$assemble_args += ($f_include + $path_nugget)
 
-	$compile_args += $user_compile_args
+	$assemble_args += $user_assemble_args
 
+	$assemble_args += $f_compile, $unit, ($f_output + $link_module)
 
+    write-host "Assembling '$unit' -> '$link_module'"
+    $assemble_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
+		& $Assembler $assemble_args
+    if ($LASTEXITCODE -ne 0) { write-error "Compilation failed for $unit. Aborting."; exit 1 }
 }
 function compile-unit { param(
-	[string]$unit,
-	[string]$link_module,
+	[string]  $unit,
+	[string]  $link_module,
 	[string[]]$include_paths,
 	[string[]]$user_compile_args
 )
@@ -140,13 +143,17 @@ function compile-unit { param(
 		$f_arch_no_shared, 
 		$f_arch_no_stack_prot
 	)
-	$path_psyq_imyu_inc = join-path $path_psyq_imyu 'include'
 	$compile_args    += ($f_include + $path_psyq_imyu_inc)
 	$compile_args    += ($f_include + $path_nugget)
 
 	$compile_args += $user_compile_args
 
+	$compile_args += $f_compile, $unit, ($f_output + $link_module)
 
+    write-host "Compiling '$unit' -> '$link_module'"
+    $compile_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
+		& $Compiler $compile_args
+    if ($LASTEXITCODE -ne 0) { write-error "Compilation failed for $unit. Aborting."; exit 1 }
 }
 function link-modules { param(
 	[string]  $elf,
@@ -232,6 +239,13 @@ function make-binary { param(
 }
 
 function build-hello_psyqo {
+	$path_hello_psyq
+
+	$assemble_arsg = @()
+	$assemble_arsg += $f_debug
+	$assemble_arsg += $f_optimize_none
+	assemble-unit 
+
 	$compile_args = @()
 	$compile_args += $f_debug
 	$compile_args += $f_optimize_none
