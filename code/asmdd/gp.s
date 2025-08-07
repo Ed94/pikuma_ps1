@@ -97,8 +97,8 @@
 #  13      Textured Rectangle Y-Flip (BIOS does set it equal to GPUSTAT.13...?)
 #  14 - 23 Not used (should be 0)
 #  24 - 31 Command  (E1h)
-.equiv gp_SetDisplayMode_DrawAllowed, 10
-.equiv gp_SetDisplayMode_DipArea,     gcmd_SetDrawMode << gcmd_offset | 0x1 << gp_SetDisplayMode_DrawAllowed
+.equiv gp_DrawMode_DrawAllowed, 10
+.equiv gp_SetDrawMode_DrawAllowed, (gcmd_SetDrawMode << gcmd_offset | 0x1 << gp_DrawMode_DrawAllowed)
 
 # GP0(E3h) - Set Drawing Area top left (X1,Y1)
 # GP0(E4h) - Set Drawing Area bottom right (X2,Y2)

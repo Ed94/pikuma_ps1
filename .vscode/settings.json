@@ -23,6 +23,7 @@
 		"initializer_list": "c",
 		"string_view": "c",
 		"functional": "c",
-		"tuple": "c"
+		"tuple": "c",
+		"hello_gpu.h": "c"
 	}
 }

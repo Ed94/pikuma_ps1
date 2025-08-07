@@ -8,8 +8,9 @@
 typedef def_struct(DrawEnv_Packed) { U32 tag; U32 code[15]; };
 typedef def_struct(DrawEnv) {
 	Rect_S16 clip_area;
-	A2_S16   drawwing_offset;
-	Rect_S16 texture_page;
+	A2_S16   drawing_offset;
+	Rect_S16 texture_window;
+	S16      texture_page;
 	BYTE     flag_dither;
 	BYTE     flag_draw_on_display;
 	BYTE     enable_auto_clear;
