@@ -176,6 +176,11 @@
 .equiv gp_b10_Y, 10
 .equiv gp_b16_X, 0
 .equiv gp_b16_Y, 16
+     
+.equiv RGB8_r,      0
+.equiv RGB8_g,      1
+.equiv RGB8_b,      2
+.equiv sizeof_RGB8, 3
 
 .equiv gp_pixel16, (2 * byte)
 .equiv gp_pixel24, (3 * byte)

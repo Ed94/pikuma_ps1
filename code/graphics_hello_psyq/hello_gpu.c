@@ -1,11 +1,12 @@
 // #include <stdlib.h>
 #include "duffle/dsl.h"
+#include "duffle/math.h"
 #include "duffle/gp.h"
+#include "hello_gpu.h"
 
-#define ScreenRes_X 320
-#define ScreenRes_Y 240
-#define ScreenRes_CenterX (ScreenRes_X >> 1)
-#define ScreenRes_CenterY (ScreenRes_Y >> 1)
+DoubleBuffer screen_buffer;
+S16          active_screen_buffer;
+
 
 int main(void)
 {

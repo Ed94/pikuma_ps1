@@ -8,12 +8,13 @@
                 "${workspaceFolder}/toolchain/pcsx-redux/src/mips",
                 "${workspaceFolder}/toolchain/psyq-4_7/include"
             ],
-            "cStandard": "c17",
+            "cStandard": "c11",
             "defines": [
                 "__STDC_HOSTED__ = 0",
-                "INTELLISENSE_DIRECTIVES=1"
+                "INTELLISENSE_DIRECTIVES"
             ],
-            "intelliSenseMode": "gcc-x86"
+            "intelliSenseMode": "gcc-x86",
+            "compilerPath": "C:\\Users\\Ed\\AppData\\Roaming\\mips\\versions\\v14.2.0\\bin\\mipsel-none-elf-gcc.exe",
         }
     ],
     "version": 4

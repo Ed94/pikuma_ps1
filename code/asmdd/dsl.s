@@ -3,94 +3,94 @@
 # Instructions
 # Load
 .macro load_addr p1, p2
-    la \p1, \p2
+	la \p1, \p2
 .endm
 .macro load_imm p1, p2
-    li \p1, \p2
+	li \p1, \p2
 .endm
 .macro load_uimm p1, p2
-    lui \p1, \p2
+	lui \p1, \p2
 .endm
 .macro load_word p1, p2
-    lw \p1, \p2
+	lw \p1, \p2
 .endm
 # Store
 .macro store_word p1, p2
-    sw \p1, \p2
+	sw \p1, \p2
 .endm
 # Shift
 .macro shift_ll p1, p2, p3
-    sll \p1, \p2, \p3
+	sll \p1, \p2, \p3
 .endm
 .macro shift_rl p1, p2, p3
-    srl \p1, \p2, \p3
+	srl \p1, \p2, \p3
 .endm
 .macro shift_ra p1, p2, p3
-    sra \p1, \p2, \p3
+	sra \p1, \p2, \p3
 .endm
 # Addition
 .macro add_s p1, p2, p3
-    add \p1, \p2, \p3
+	add \p1, \p2, \p3
 .endm
 .macro add_u p1, p2, p3
-    add \p1, \p2, \p3
+	add \p1, \p2, \p3
 .endm
 .macro add_si p1, p2, p3
-    addi \p1, \p2, \p3
+	addi \p1, \p2, \p3
 .endm
 .macro add_ui p1, p2, p3
-    addiu \p1, \p2, \p3
+	addiu \p1, \p2, \p3
 .endm
 # Subtraction
 .macro sub_s p1, p2, p3
-    sub \p1, \p2, \p3
+	sub \p1, \p2, \p3
 .endm
 .macro sub_u p1, p2, p3
-    subu \p1, \p2, \p3
+	subu \p1, \p2, \p3
 .endm
 # Multiplication
 
 # Division
 .macro div_s p1, p2
-    div \p1, \p2
+	div \p1, \p2
 .endm
 .macro div_u p1, p2
-    divu \p1, \p2
+	divu \p1, \p2
 .endm
 .macro mov_from_high p1
-    mfhi \p1
+	mfhi \p1
 .endm
 .macro mov_from_low p1
-    mflo \p1
+	mflo \p1
 .endm
 # Branch
 .macro branch_ne_zero p1, p2
-    bnez \p1, \p2
+	bnez \p1, \p2
 .endm
 .macro branch_equal p1, p2, p3
-    beq \p1, \p2, \p3
+	beq \p1, \p2, \p3
 .endm
 .macro branch_gt_equal p1, p2, p3
-    bge \p1, \p2, \p3
+	bge \p1, \p2, \p3
 .endm
 .macro branch_gt p1, p2, p3
-    bgt \p1, \p2, \p3
+	bgt \p1, \p2, \p3
 .endm
 .macro branch_lt p1, p2, p3
-    blt \p1, \p2, \p3
+	blt \p1, \p2, \p3
 .endm
 # Jump
 .macro jump p1
-    j \p1
+	j \p1
 .endm
 .macro jump_nlink p1
-    jal \p1
+	jal \p1
 .endm
 .macro jump_reg p1
-    jr \p1
+	jr \p1
 .endm
 .macro jump_nreg p1
-    jalr \p1
+	jalr \p1
 .endm
 
 # Registers

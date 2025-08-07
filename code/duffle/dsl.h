@@ -34,7 +34,7 @@ enum {
 #define def_enum(underlying_type, symbol)   underlying_type symbol; enum   symbol
 #define def_struct(symbol)                  struct symbol symbol;   struct symbol
 #define def_union(symbol)                   union  symbol symbol;   union  symbol
-#define fn(symbol)                          symbol
+#define def_proc(symbol)                    symbol
 #define opt_args(symbol, ...)               &(symbol){__VA_ARGS__}
 #define ret_type(type)                      type
 #define local_persist                       static
@@ -54,19 +54,19 @@ enum {
 #define giga(n)                             (cast(SSIZE, n) << 30)
 #define tera(n)                             (cast(SSIZE, n) << 40)
 
-#define range_iter(type, iter, m_begin, op, m_end)  \
-	tmpl(Iter_Range,type) iter = { \
-		.r = {(m_begin), (m_end)},   \
-		.cursor = (m_begin) };       \
-	iter.cursor op iter.r.end;     \
+#define span_iter(type, iter, m_begin, op, m_end)  \
+	tmpl(Iter_Span,type) iter = { \
+		.r = {(m_begin), (m_end)},  \
+		.cursor = (m_begin) };      \
+	iter.cursor op iter.r.end;    \
 	++ iter.cursor
 
-#define def_range(type)                                                \
-	        def_struct(tmpl(     Range,type)) { type begin; type end; }; \
-	typedef def_struct(tmpl(Iter_Range,type)) { tmpl(Range,type) r; type cursor; }
+#define def_span(type)                                                \
+	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
+	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
 
-typedef def_range(S32);
-typedef def_range(U32);
-typedef def_range(SSIZE);
+typedef def_span(S32);
+typedef def_span(U32);
+typedef def_span(SSIZE);
 
-typedef void fn(VoidFn) (void);
+typedef void def_proc(VoidFn) (void);

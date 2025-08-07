@@ -40,5 +40,5 @@ function build-program { param(
 # build-program 'graphics_hello' 'hellogpu'
 # build-program 'graphics_hello' 'hello_gouraud'
 # build-program 'graphics_hello' 'hello_gp_routines'
-# build-program 'graphics_hello' 'hello_image'
-build-program 'graphics_hello' 'hello_logo'
+build-program 'graphics_hello' 'hello_image'
+# build-program 'graphics_hello' 'hello_logo'

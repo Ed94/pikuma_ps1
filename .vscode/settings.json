@@ -2,6 +2,7 @@
 	"files.associations": {
 		"*.rmd": "markdown",
 		"*.s": "gas",
+		"*.dasm": "lldb.disassembly",
 		"*.asm": "gas",
 		"stdlib.h": "c",
 		"libetc.h": "c",
@@ -16,6 +17,12 @@
 		"iterator": "c",
 		"regex": "c",
 		"dsl.h": "c",
-		"xlocale": "c"
+		"xlocale": "c",
+		"gp.h": "c",
+		"array": "c",
+		"initializer_list": "c",
+		"string_view": "c",
+		"functional": "c",
+		"tuple": "c"
 	}
 }

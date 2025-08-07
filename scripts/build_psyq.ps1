@@ -109,8 +109,8 @@ function assemble-unit { param(
 	$assemble_args += '-x', 'assembler-with-cpp'
 	$assemble_args += $f_compile, $unit, ($f_output + $link_module)
 
-    write-host "Assembling '$unit' -> '$link_module'" -ForegroundColor Cyan
-    $assemble_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
+    write-host "Assembling '$unit' -> '$link_module'" -ForegroundColor DarkCyan
+    # $assemble_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
 		& $Compiler $assemble_args
     if ($LASTEXITCODE -ne 0) { write-error "Compilation failed for $unit. Aborting."; exit 1 }
 }
@@ -150,8 +150,8 @@ function compile-unit { param(
 	$compile_args += $f_compile
 	$compile_args += $unit, ($f_output + $link_module)
 
-    write-host "Compiling '$unit' -> '$link_module'" -ForegroundColor Cyan
-    $compile_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
+    write-host "Compiling '$unit' -> '$link_module'" -ForegroundColor DarkCyan
+    # $compile_args | ForEach-Object { Write-Host "`t$_" -ForegroundColor Green }
 		& $Compiler $compile_args
     if ($LASTEXITCODE -ne 0) { write-error "Compilation failed for $unit. Aborting."; exit 1 }
 }
@@ -220,9 +220,9 @@ function link-modules { param(
 	$base_name = [System.IO.Path]::GetFileNameWithoutExtension($elf)
 	$dasm      = "$(join-path $path_build $base_name).dasm"
 
-	write-host "Linking modules into '$elf'"  -ForegroundColor Cyan
+	write-host "Linking modules into '$elf'"  -ForegroundColor DarkCyan
 	$final_link_args += ($f_link_pass_through_prefix + $f_link_end_group)
-	$final_link_args | foreach-object { write-host $_ }
+	# $final_link_args | foreach-object { write-host $_ }
 		& $Compiler $final_link_args
 		& mipsel-none-elf-objdump.exe -W $elf >> $dasm
 	if ($LASTEXITCODE -ne 0) { write-error "Linking failed. Aborting."; exit 1 }
@@ -275,18 +275,19 @@ function build-graphis_hello {
 
 	$path_module = join-path $path_code 'graphics_hello_psyq'
 
-	$src_asm_crt    = join-path $path_nugget_common 'crt0/crt0.s'
-	$module_asm_crt = join-path $path_build         'crt0.o'
-
-	$src_asm    = join-path $path_module 'hello_gpu.s'
-	$module_asm = join-path $path_build  'hello_gpu.o'
-
 	$assemble_args = @()
 	$assemble_args += $f_debug
 	$assemble_args += $f_optimize_none
 	$assemble_args += ($f_include + $path_code)
-	assemble-unit $src_asm_crt $module_asm_crt     $includes $assemble_args
-	assemble-unit $src_asm     $module_asm $includes $assemble_args
+
+	$src_asm_crt    = join-path $path_nugget_common 'crt0/crt0.s'
+	$module_asm_crt = join-path $path_build         'crt0.o'
+	# assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
+
+	$src_asm    = join-path $path_module 'hello_gpu.s'
+	$module_asm = join-path $path_build  'hello_gpu.o'
+
+	assemble-unit $src_asm $module_asm $includes $assemble_args
 
 	$src_c    = join-path $path_module 'hello_gpu.c'
 	$module_c = join-path $path_build  'hello_gpu_c.o'

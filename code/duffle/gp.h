@@ -1,6 +1,7 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	pragma once
 #	include "dsl.h"
+#	include "math.h"
 #endif
 
 typedef def_enum(U32, gp_Commands) {
@@ -72,6 +73,8 @@ typedef def_enum(U32, gp_Commands) {
 #define gp_SetArea_TopLeft     (gcmd_SetDrawArea_TopLeft  << gcmd_offset)
 #define gp_SetArea_BottomRight (gcmd_SetDrawArea_BotRight << gcmd_offset)
 
+typedef def_struct(RGB8) { BYTE r; BYTE g; BYTE b; };
+
 typedef BYTE gp_Pixel16[1];
 typedef BYTE gp_Pixel24[3];
 
@@ -80,9 +83,6 @@ typedef BYTE gp_Pixel24[3];
 #define gp_b16_X 0
 #define gp_b16_Y 16 
 
-typedef def_struct(gp_Vec2) {
-	U16 x;
-	U16 y;
-};
+typedef def_struct(gp_Vec2) { U16 y; U16 x; };
 
-void gp_screen_init();
+void gp_screen_init(void) __asm__("gp_screen_init");
