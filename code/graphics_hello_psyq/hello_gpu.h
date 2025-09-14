@@ -11,7 +11,7 @@ typedef def_struct(DrawEnv) {
 	A2_S16   drawing_offset;
 	Rect_S16 texture_window;
 	S16      texture_page;
-	BYTE     flag_dither;
+	BYTE     flag_dither;	
 	BYTE     flag_draw_on_display;
 	BYTE     enable_auto_clear;
 	RGB8     initial_bg_color;

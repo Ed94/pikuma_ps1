@@ -11,10 +11,19 @@
 .macro load_uimm p1, p2
 	lui \p1, \p2
 .endm
+.macro load_half p1, p2
+	lh \p1, \p2
+.endm
 .macro load_word p1, p2
 	lw \p1, \p2
 .endm
 # Store
+.macro store_byte p1, p2
+	sb \p1, \p2
+.endm
+.macro store_half p1, p2
+	sh \p1, \p2
+.endm
 .macro store_word p1, p2
 	sw \p1, \p2
 .endm
@@ -33,14 +42,14 @@
 	add \p1, \p2, \p3
 .endm
 .macro add_u p1, p2, p3
-	add \p1, \p2, \p3
+	addu \p1, \p2, \p3
 .endm
 .macro add_si p1, p2, p3
 	addi \p1, \p2, \p3
 .endm
-.macro add_ui p1, p2, p3
-	addiu \p1, \p2, \p3
-.endm
+ .macro add_ui p1, p2, p3
+ 	addiu \p1, \p2, \p3
+ .endm
 # Subtraction
 .macro sub_s p1, p2, p3
 	sub \p1, \p2, \p3
@@ -49,7 +58,18 @@
 	subu \p1, \p2, \p3
 .endm
 # Multiplication
-
+.macro mult_s p1, p2
+	mult \p1, \p2
+.endm
+.macro mult_u p1, p2
+	multu \p1, \p2
+.endm
+.macro mult_si p1, p2
+	multi \p1, \p2
+.endm
+.macro mult_ui p1, p2
+	multui \p1, \p2
+.endm
 # Division
 .macro div_s p1, p2
 	div \p1, \p2
@@ -122,14 +142,38 @@
 # Subroutine return address when doing a sub
 .set rret_addr, $ra
 
+.macro align8 size
+	(\size + 7) & ~7
+.endm
+
+.macro def_cf_sp_size size
+.set cf_ssize, (\size + 7) & ~7
+.endm
+
+.macro stack_alloc amount
+	add_ui $sp, $sp, - \amount
+.endm
+
+.macro stack_release amount
+	add_ui $sp, $sp, \amount
+.endm
+
 # Data Widths
 .set byte, 1
 .set word, 4
 
-.macro stack_alloc amount
-	add_ui $sp, - \amount
-.endm
+.equ U8,    1
+.equ S8,    1
+.equ U16,   2
+.equ S16,   2
+.equ U32,   4
+.equ S32,   4
+.equ SSIZE, 4
+.equ USIZE, 4
+.equ B8,    S8
+.equ B16,   S16
+.equ B32,   S32
 
-.macro stack_release amount
-	add_ui $sp, \amount
-.endm
+.equ false,         0
+.equ true,          1
+.equ true_overflow, 3

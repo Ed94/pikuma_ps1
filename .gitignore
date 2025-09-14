@@ -1,8 +1,8 @@
 ﻿build
-psxdev_sample
 toolchain/armips
 toolchain/pcsx-redux
 toolchain/psyq_iwyu
+toolchain/PSn00bSDK
 
 *.exe
 *.elf

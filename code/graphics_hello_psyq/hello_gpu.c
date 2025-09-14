@@ -13,10 +13,13 @@ S16          active_screen_buffer;
 void gp_screen_init_c11(void)
 {
 	ResetGraph(0);
+	SetDispMask(1); // gp_DisplayEnabled
+
+	// Just setting env data, not interacting with console hw.
 	// First buffer area
 	SetDefDispEnv((DISPENV*)& screen_buffer.display[0], 0, 0,           ScreenRes_X, ScreenRes_Y);
 	SetDefDrawEnv((DRAWENV*)& screen_buffer.draw   [0], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
-	// Second buffer rea
+	// Second buffer area
 	SetDefDispEnv((DISPENV*)& screen_buffer.display[1], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
 	SetDefDrawEnv((DRAWENV*)& screen_buffer.draw   [1], 0, 0,           ScreenRes_X, ScreenRes_Y);
 	// Set the back/drawing buffer
@@ -27,17 +30,20 @@ void gp_screen_init_c11(void)
 	screen_buffer.draw[1].initial_bg_color = (RGB8){ .r = 127, .g = 63, .b = 0 };
 	// Set the current initial buffer
 	active_screen_buffer = 0;
+
 	PutDispEnv((DISPENV*)& screen_buffer.display[active_screen_buffer]);
-	PutDrawEnv((DRAWENV*)& screen_buffer.draw   [active_screen_buffer]);
+
+	DRAWENV* wtf = (DRAWENV*)& screen_buffer.draw   [active_screen_buffer];
+	PutDrawEnv(wtf);
+
 	// Initialize and setup the GTE geometry offsets
 	InitGeom();
+
 	SetGeomOffset(ScreenRes_CenterX, ScreenRes_CenterY);
 	SetGeomScreen(ScreenRes_CenterX);
-	// Enable display
-	SetDispMask(1);
 }
 
-void gp_display_frame_c11(void) {
+void gp_display_frame(void) {
 	DrawSync(0);
 	VSync(0);
 	PutDispEnv((DISPENV*)& screen_buffer.display[active_screen_buffer]);
@@ -48,19 +54,16 @@ void gp_display_frame_c11(void) {
 	active_screen_buffer = !active_screen_buffer; // Swap current buffer
 }
 
-void render_c11(void) {
+void render(void) {
 }
 
 int main(void)
 {
-	// gp_screen_init();
-	gp_screen_init_c11();
-	
+	gp_screen_init();
 	while (1) 
 	{
-		render_c11();
-		gp_display_frame_c11();
+		render();
+		gp_display_frame();
 	};
-
 	return 0;
 }

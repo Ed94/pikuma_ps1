@@ -85,4 +85,8 @@ typedef BYTE gp_Pixel24[3];
 
 typedef def_struct(gp_Vec2) { U16 y; U16 x; };
 
-void gp_screen_init(void) __asm__("gp_screen_init");
+#if 1
+void gp_screen_init(void) __asm__("gp_screen_init_asm");
+#else
+#define gp_screen_init() gp_screen_init_c11()
+#endif

@@ -24,6 +24,12 @@
 		"string_view": "c",
 		"functional": "c",
 		"tuple": "c",
-		"hello_gpu.h": "c"
+		"hello_gpu.h": "c",
+		"compare": "c",
+		"ratio": "c",
+		"scoped_allocator": "c",
+		"variant": "c",
+		"math.h": "c",
+		"cstdint": "c"
 	}
 }
