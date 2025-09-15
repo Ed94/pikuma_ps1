@@ -8,11 +8,6 @@ if ((test-path $path_build) -eq $false) {
 	new-item -itemtype directory -path $path_build
 }
 
-# TODO(Ed): General way to build C runtime sandboxed projects.
-# The goal here is to lift w/e is going on in SpinningCube to just utilize the toolchain dir's content
-# We also want to strip down the C to just calling the ASM's entry point, from there we'll try to use
-# the PS1 SDK from asm and just setup macros for the ABI calling convention
-
 # --- Toolchain Definition ---
 # Assumes 'mipsel-none-elf' toolchain is in your system's PATH.
 $Prefix    = "mipsel-none-elf"

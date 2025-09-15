@@ -36,6 +36,3 @@ typedef def_struct(DoubleBuffer) {
 #define ScreenRes_Y 240
 #define ScreenRes_CenterX (ScreenRes_X >> 1)
 #define ScreenRes_CenterY (ScreenRes_Y >> 1)
-
-extern DoubleBuffer screen_buffer;
-extern S16          active_screen_buffer;

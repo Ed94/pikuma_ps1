@@ -30,6 +30,30 @@
 		"scoped_allocator": "c",
 		"variant": "c",
 		"math.h": "c",
-		"cstdint": "c"
-	}
+		"cstdint": "c",
+		"*.ch": "c",
+		"ranges": "c",
+		"span": "c",
+		"bitset": "c"
+	},
+	"workbench.colorCustomizations": {
+		"activityBar.activeBackground": "#ffd427",
+		"activityBar.background": "#ffd427",
+		"activityBar.foreground": "#15202b",
+		"activityBar.inactiveForeground": "#15202b99",
+		"activityBarBadge.background": "#009f80",
+		"activityBarBadge.foreground": "#e7e7e7",
+		"commandCenter.border": "#15202b99",
+		"sash.hoverBorder": "#ffd427",
+		"statusBar.background": "#f3c300",
+		"statusBar.foreground": "#15202b",
+		"statusBarItem.hoverBackground": "#c09a00",
+		"statusBarItem.remoteBackground": "#f3c300",
+		"statusBarItem.remoteForeground": "#15202b",
+		"titleBar.activeBackground": "#f3c300",
+		"titleBar.activeForeground": "#15202b",
+		"titleBar.inactiveBackground": "#f3c30099",
+		"titleBar.inactiveForeground": "#15202b99"
+	},
+	"peacock.color": "#F3C300"
 }

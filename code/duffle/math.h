@@ -3,6 +3,10 @@
 #	include "dsl.h"
 #endif
 
+#define min(A, B)       (((A) < (B)) ? (A) : (B))
+#define max(A, B)       (((A) > (B)) ? (A) : (B))
+#define clamp_bot(X, B) max(X, B)
+
 typedef def_farray(S16, 2);
 typedef def_farray(S32, 2);
 // typedef def_farray(F32, 2);

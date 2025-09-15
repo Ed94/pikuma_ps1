@@ -42,6 +42,9 @@
 .equ ScreenRes_CenterX, (ScreenRes_X >> 1)
 .equ ScreenRes_CenterY, (ScreenRes_Y >> 1)
 
+.equ SMemory_screen_buf,        DoubleBuffer * 0
+.equ SMemory_active_screen_buf, S16          * 0 + DoubleBuffer
+
 .equ CF_Shadow, 16
 
 .extern ResetGraph
@@ -86,7 +89,7 @@ gp_screen_init_asm:
 	#define gp0 gpio_port0(rio_offset)
 	#define gp1 gpio_port1(rio_offset)
 
-	def_cf_sp_size 0x80; 
+	def_cf_sp_size 0x18; // Should be enough for all calls within this proc, for some reason SetDefDispEnv needs the offset to be CF_Shadow..
 	stack_alloc cf_ssize
 	store_word rret_addr, 0($sp)
 
@@ -97,26 +100,26 @@ gp_screen_init_asm:
 	load_imm SetDispMask_mask, 1;        jump_nlink SetDispMask
 
 		// First buffer area
-			load_addr rtmp_0, screen_buffer; add_ui SetDefDispEnv_env, rtmp_0, DoubleBuffer_display_0
+			load_addr rtmp_0, static_mem; add_ui SetDefDispEnv_env, rtmp_0, SMemory_screen_buf + DoubleBuffer_display_0
 			move      SetDefDispEnv_x, $zero
 			move      SetDefDispEnv_y, $zero 
 			load_imm  SetDefDispEnv_w, ScreenRes_X
 			load_imm  rtmp_0, ScreenRes_Y; store_word rtmp_0, SetDefDispEnv_h($sp)
 		jump_nlink SetDefDispEnv
-			load_addr rtmp_0, screen_buffer; add_ui SetDefDrawEnv_env, rtmp_0, DoubleBuffer_draw_0
+			load_addr rtmp_0, static_mem; add_ui SetDefDrawEnv_env, rtmp_0, SMemory_screen_buf + DoubleBuffer_draw_0
 			move      SetDefDrawEnv_x, $zero
 			load_imm  SetDefDrawEnv_y, ScreenRes_Y
 			load_imm  SetDefDrawEnv_w, ScreenRes_X
 			load_imm  rtmp_0, ScreenRes_Y; store_word rtmp_0, SetDefDrawEnv_h($sp)
 		jump_nlink SetDefDrawEnv
 		// Second buffer area
-			load_addr rtmp_0, screen_buffer; add_ui SetDefDispEnv_env, rtmp_0, DoubleBuffer_display_1
+			load_addr rtmp_0, static_mem; add_ui SetDefDispEnv_env, rtmp_0, SMemory_screen_buf + DoubleBuffer_display_1
 			move      SetDefDispEnv_x, $zero
 			load_imm  SetDefDispEnv_y, ScreenRes_Y
 			load_imm  SetDefDispEnv_w, ScreenRes_X
 			load_imm  rtmp_0, ScreenRes_Y; store_word rtmp_0, SetDefDispEnv_h($sp)
 		jump_nlink SetDefDispEnv
-			load_addr rtmp_0, screen_buffer; add_ui SetDefDrawEnv_env, rtmp_0, DoubleBuffer_draw_1
+			load_addr rtmp_0, static_mem; add_ui SetDefDrawEnv_env, rtmp_0, SMemory_screen_buf + DoubleBuffer_draw_1
 			move      SetDefDrawEnv_x, $zero
 			move      SetDefDrawEnv_y, $zero 
 			load_imm  SetDefDrawEnv_w, ScreenRes_X
@@ -125,7 +128,7 @@ gp_screen_init_asm:
 
 	// Set the back/drawing buffer
 	load_imm   rtmp_1, true
-	load_addr  rtmp_0, screen_buffer;
+	load_addr  rtmp_0, static_mem; // At SMemory_screen_buf
 	store_word rtmp_1, DoubleBuffer_draw_0 + DrawEnv_enable_auto_clear(rtmp_0)
 	store_word rtmp_1, DoubleBuffer_draw_1 + DrawEnv_enable_auto_clear(rtmp_0)
 
@@ -139,17 +142,17 @@ gp_screen_init_asm:
 	store_byte rtmp_3, DoubleBuffer_draw_1 + DrawEnv_initial_bg_color + RGB8_r(rtmp_0)
 	store_byte rtmp_2, DoubleBuffer_draw_1 + DrawEnv_initial_bg_color + RGB8_g(rtmp_0)
 	store_byte rtmp_1, DoubleBuffer_draw_1 + DrawEnv_initial_bg_color + RGB8_b(rtmp_0)
-	load_addr  rtmp_0, active_screen_buffer; store_word rtmp_1, 0(rtmp_0)
+	load_addr  rtmp_0, static_mem; store_word rtmp_1, SMemory_active_screen_buf(rtmp_0)
 
-		load_addr rtmp_1, active_screen_buffer; load_half rtmp_1, 0(rtmp_1);     // rtmp_1  = active_screen_buffer
-		load_imm  rtmp_2, DisplayEnv; mult_u rtmp_1, rtmp_2; mov_from_low rtmp_2 // rtmp_2  = DisplayEnv.type_size * active_screen_Buffer (rtmp_1)
-		add_ui    rtmp_2, rtmp_2, DoubleBuffer_display                           // rtmp_2 += DoubleBuffer.display
-		load_addr rtmp_0, screen_buffer; add_u PutDispEnv_env, rtmp_0, rtmp_2    // rarg_0  = rtmp_0 (screen_buffer) + rtmp_2 (.display[active_screen-buffer])
+		load_addr rtmp_1, static_mem; load_half rtmp_1, SMemory_active_screen_buf(rtmp_1); // rtmp_1  = active_screen_buffer
+		load_imm  rtmp_2, DisplayEnv; mult_u rtmp_1, rtmp_2; mov_from_low rtmp_2           // rtmp_2  = DisplayEnv.type_size * active_screen_Buffer (rtmp_1)
+		add_ui    rtmp_2, rtmp_2, DoubleBuffer_display                                     // rtmp_2 += DoubleBuffer.display
+		load_addr rtmp_0, static_mem; add_u PutDispEnv_env, rtmp_0, rtmp_2                 // rarg_0  = rtmp_0 (screen_buffer) + rtmp_2 (.display[active_screen-buffer])
 	jump_nlink PutDispEnv
-		load_addr rtmp_1, active_screen_buffer; load_half rtmp_1, 0(rtmp_1);
+		load_addr rtmp_1, static_mem; load_half rtmp_1, SMemory_active_screen_buf(rtmp_1);
 		load_imm  rtmp_2, DrawEnv; mult_u rtmp_1, rtmp_2; mov_from_low rtmp_2;
 		add_ui rtmp_2, rtmp_2, DoubleBuffer_draw
-		load_addr rtmp_0, screen_buffer; add_u PutDrawEnv_env, rtmp_0, rtmp_2
+		load_addr rtmp_0, static_mem; add_u PutDrawEnv_env, rtmp_0, rtmp_2
 	jump_nlink PutDrawEnv
 
 	// Initialize and setup the GTE geometry offsets
