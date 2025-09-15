@@ -42,7 +42,6 @@ enum {
 #define internal                            static
 #define global
 #define gknown
-#define ct_lit
 #define offset_of(type, member)             cast(SSIZE, & (((type*) 0)->member))
 #define static_assert                       _Static_assert
 #define typeof                              __typeof__
@@ -57,6 +56,12 @@ enum {
 #define mega(n)                             (cast(SSIZE, n) << 20)
 #define giga(n)                             (cast(SSIZE, n) << 30)
 #define tera(n)                             (cast(SSIZE, n) << 40)
+
+#if 1
+#	define dbg_args(...)                      __VA_ARGS__
+#else
+#	define dbg_args(...)
+#endif
 
 #define span_iter(type, iter, m_begin, op, m_end)  \
 	tmpl(Iter_Span,type) iter = { \

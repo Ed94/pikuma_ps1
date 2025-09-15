@@ -40,10 +40,10 @@ typedef def_struct(QuadFlat) {
 	};
 };
 typedef def_struct(Tile) {
-	U32         tag;
-	RGB8        color;
-	BYTE        code;
-	Rect_S16    rect;
+	U32      tag;
+	RGB8     color;
+	BYTE     code;
+	Rect_S16 rect;
 };
 
 #define PrimitiveBuff_Len 2048
@@ -63,22 +63,22 @@ typedef def_struct(SMemory) {
 	DoubleBuffer            screen_buf;
 	A2_OrderingTable_Buffer ordering_tbl;
 	PrimitiveArena          primitives;
-	S16                     active_screen_buf;
+	S16                     active_buf_id;
 };
 global SMemory static_mem;
 extern SMemory static_mem;
 
-BYTE* prim__alloc(SSIZE type_width, ct_lit Str8 type_name) {
+BYTE* prim__alloc(SSIZE type_width, dbg_args(Str8 type_name)) {
 	gknown PrimitiveArena*  pa  = & static_mem.primitives;
-	gknown BYTE*            buf = (BYTE*) static_mem.primitives.buf[static_mem.active_screen_buf];
+	gknown BYTE*            buf = (BYTE*) static_mem.primitives.buf[static_mem.active_buf_id];
 	assert(pa->used + type_width < PrimitiveBuff_Len);
 	BYTE* next = buf + pa->used;
 	pa->used  += type_width;
 	return next;
 }
-#define prim_alloc(type) (type*)prim__alloc(size_of(type), txt( stringify(type) ))
+#define prim_alloc(type) (type*)prim__alloc(size_of(type), txt( stringify(type)))
 
-void gp_screen_init_c11(DoubleBuffer* screen_buf, S16* active_screen_buf)
+void gp_screen_init_c11(DoubleBuffer* screen_buf, S16* active_buf_id)
 {
 	ResetGraph(0);
 	SetDispMask(1); // gp_DisplayEnabled
@@ -97,11 +97,11 @@ void gp_screen_init_c11(DoubleBuffer* screen_buf, S16* active_screen_buf)
 	screen_buf->draw[0].initial_bg_color = (RGB8){ .r = 63,  .g = 0,  .b = 127 };
 	screen_buf->draw[1].initial_bg_color = (RGB8){ .r = 127, .g = 63, .b = 0 };
 	// Set the current initial buffer
-	* active_screen_buf = 0;
+	* active_buf_id = 0;
 
-	PutDispEnv((DISPENV*)& screen_buf->display[* active_screen_buf]);
+	PutDispEnv((DISPENV*)& screen_buf->display[* active_buf_id]);
 
-	DRAWENV* env = (DRAWENV*)& screen_buf->draw[* active_screen_buf];
+	DRAWENV* env = (DRAWENV*)& screen_buf->draw[* active_buf_id];
 	PutDrawEnv(env);
 
 	// Initialize and setup the GTE geometry offsets
@@ -111,23 +111,22 @@ void gp_screen_init_c11(DoubleBuffer* screen_buf, S16* active_screen_buf)
 	SetGeomScreen(ScreenRes_CenterX);
 }
 
-void gp_display_frame(DoubleBuffer* screen_buf, S16* active_screen_buf, U32* ordering_buf) {
+void gp_display_frame(DoubleBuffer* screen_buf, S16* active_buf_id, U32* ordering_buf, PrimitiveArena* pa) {
 	DrawSync(0);
 	VSync(0);
-	PutDispEnv((DISPENV*)& screen_buf->display[* active_screen_buf]);
-	PutDrawEnv((DRAWENV*)& screen_buf->draw   [* active_screen_buf]);
+	PutDispEnv((DISPENV*)& screen_buf->display[* active_buf_id]);
+	PutDrawEnv((DRAWENV*)& screen_buf->draw   [* active_buf_id]);
 	{
 		DrawOTag((u_long*) (ordering_buf + OrderingTbl_Len - 1));
 	}
-	* active_screen_buf = ! (* active_screen_buf); // Swap current buffer
-
-	gknown static_mem.primitives.used = 0;
+	* active_buf_id = ! (* active_buf_id); // Swap current buffer
+	pa->used = 0;
 }
 
 void render(void) {
 }
 
-void update(PrimitiveArena* pa, S16 active_screen_buff, U32* ordering_buf) {
+void update(PrimitiveArena* pa, U32* ordering_buf) {
 	
 	ClearOTagR((u_long*) ordering_buf, OrderingTbl_Len);
 
@@ -147,15 +146,16 @@ void update(PrimitiveArena* pa, S16 active_screen_buff, U32* ordering_buf) {
 int main(void)
 {
 	static_mem.primitives.used = 0;
-	gp_screen_init();
+	gknown gp_screen_init();
 	// gp_screen_init_c11(& static_mem.screen_buf, & static_mem.active_screen_buf);
 	while (1) 
 	{
-		gknown S16* active_screen = & static_mem.active_screen_buf;
-		gknown U32* ordering_buf  = static_mem.ordering_tbl[* active_screen];
-		update(& static_mem.primitives, * active_screen, ordering_buf);
+		gknown S16* active_buf_id = & static_mem.active_buf_id;
+		gknown U32* ordering_buf  = static_mem.ordering_tbl[* active_buf_id];
+		gknown PrimitiveArena* pa = & static_mem.primitives;
+		update(pa, ordering_buf);
 		render();
-		gp_display_frame(& static_mem.screen_buf, active_screen, ordering_buf);
+		gp_display_frame(& static_mem.screen_buf, active_buf_id, ordering_buf, pa);
 	};
 	return 0;
 }
