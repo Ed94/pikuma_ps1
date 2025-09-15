@@ -23,3 +23,5 @@ typedef def_struct(Range_2S32) { Vec_2S32 p0; Vec_2S32 p1; };
 
 typedef def_struct(Rect_S16) { S16 x; S16 y; S16 width; S16 height; };
 typedef def_struct(Rect_S32) { S32 x; S32 y; S32 width; S32 height; };
+
+#define vec_2s16(x, y) (Vec_2S16){ x, y }
