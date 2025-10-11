@@ -3,25 +3,25 @@
 #	include "dsl.h"
 #endif
 
-inline SSIZE align_pow2(SSIZE x, SSIZE b) {
+inline U4 align_pow2(U4 x, U4 b) {
     assert(b != 0);
     assert((b & (b - 1)) == 0);  // Check power of 2
     return ((x + b - 1) & (~(b - 1)));
 }
 
-#define align_struct(type_width) ((SSIZE)(((type_width) + 3) & ~3))
+#define align_struct(type_width) ((U4)(((type_width) + 3) & ~3))
 
 #define assert_bounds(point, start, end) do { \
-	SSIZE pos_point = cast(SSIZE, point); \
-	SSIZE pos_start = cast(SSIZE, start); \
-	SSIZE pos_end   = cast(SSIZE, end);   \
-	assert(pos_start <= pos_point);       \
-	assert(pos_point <= pos_end);         \
+	U4 pos_point = cast(U4, point); \
+	U4 pos_start = cast(U4, start); \
+	U4 pos_end   = cast(U4, end);   \
+	assert(pos_start <= pos_point); \
+	assert(pos_point <= pos_end);   \
 } while(0)
 
-// void* memory_copy            (void* restrict dest, void const* restrict src, USIZE length);
-// void* memory_copy_overlapping(void* restrict dest, void const* restrict src, USIZE length);
-// B32   memory_zero            (void* dest, USIZE length);
+void* memory_copy            (void* restrict dest, void const* restrict src, U4 length) __asm__("memcpy");
+void* memory_copy_overlapping(void* restrict dest, void const* restrict src, U4 length);
+B4    memory_zero            (void* dest, U4 length);
 
 #define check_nil(nil, p) ((p) == 0 || (p) == nil)
 #define set_nil(nil, p)   ((p) = nil)
@@ -43,7 +43,7 @@ inline SSIZE align_pow2(SSIZE x, SSIZE b) {
 #define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
 
 #pragma region Allocator Interface
-typedef def_enum(U32, AllocatorOp) {
+typedef def_enum(U4, AllocatorOp) {
 	AllocatorOp_Alloc_NoZero = 0, // If Alloc exist, so must No_Zero
 	AllocatorOp_Alloc,
 	AllocatorOp_Free,
@@ -55,7 +55,7 @@ typedef def_enum(U32, AllocatorOp) {
 	AllocatorOp_SavePoint,
 	AllocatorOp_Query, // Must always be implemented
 };
-typedef def_enum(U32, AllocatorQueryFlags) {
+typedef def_enum(U4, AllocatorQueryFlags) {
 	AllocatorQuery_Alloc        = (1 << 0),
 	AllocatorQuery_Free         = (1 << 1),
 	// Wipe the allocator's state
@@ -72,14 +72,14 @@ typedef struct AllocatorProc_Out AllocatorProc_Out;
 typedef void def_proc(AllocatorProc) (AllocatorProc_In In, AllocatorProc_Out* Out);
 typedef def_struct(AllocatorSP) {
 	AllocatorProc* type_sig;
-	SSIZE          slot;
+	U4             slot;
 };
 struct AllocatorProc_In {
 	void*          data;
-	SSIZE          requested_size;
-	SSIZE          alignment;
+	U4             requested_size;
+	U4             alignment;
 	union {
-		Slice_BYTE   old_allocation;
+		Slice_B1     old_allocation;
 		AllocatorSP  save_point;
 	};
 	AllocatorOp    op;
@@ -87,28 +87,28 @@ struct AllocatorProc_In {
 };
 struct AllocatorProc_Out {
 	union {
-		Slice_BYTE  allocation;
+		Slice_B1    allocation;
 		AllocatorSP save_point;
 	};
 	AllocatorQueryFlags features;
-	SSIZE               left; // Contiguous memory left
-	SSIZE               max_alloc;
-	SSIZE               min_alloc;
-	B32                 continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
+	U4                  left; // Contiguous memory left
+	U4                  max_alloc;
+	U4                  min_alloc;
+	B4                  continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
 	byte_pad(4);
 };
 typedef def_struct(AllocatorInfo) {
 	AllocatorProc* proc;
 	void*          data;
 };
-static_assert(size_of(AllocatorSP) <= size_of(Slice_BYTE));
+static_assert(size_of(AllocatorSP) <= size_of(Slice_B1));
 typedef def_struct(AllocatorQueryInfo) {
 	AllocatorSP         save_point;
 	AllocatorQueryFlags features;
-	SSIZE               left; // Contiguous memory left
-	SSIZE               max_alloc;
-	SSIZE               min_alloc;
-	B32                 continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
+	U4                  left; // Contiguous memory left
+	U4                  max_alloc;
+	U4                  min_alloc;
+	B4                  continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
 	byte_pad(4);
 };
 static_assert(size_of(AllocatorProc_Out) == size_of(AllocatorQueryInfo));
@@ -117,20 +117,20 @@ static_assert(size_of(AllocatorProc_Out) == size_of(AllocatorQueryInfo));
 
 AllocatorQueryInfo allocator_query(AllocatorInfo ainfo);
 
-void        mem_free      (AllocatorInfo ainfo, Slice_BYTE mem);
+void        mem_free      (AllocatorInfo ainfo, Slice_B1 mem);
 void        mem_reset     (AllocatorInfo ainfo);
 void        mem_rewind    (AllocatorInfo ainfo, AllocatorSP save_point);
 AllocatorSP mem_save_point(AllocatorInfo ainfo);
 
-typedef def_struct(Opts_mem_alloc)  { SSIZE alignment; B32 no_zero; byte_pad(4); };
-typedef def_struct(Opts_mem_grow)   { SSIZE alignment; B32 no_zero; byte_pad(4); };
-typedef def_struct(Opts_mem_shrink) { SSIZE alignment; };
-typedef def_struct(Opts_mem_resize) { SSIZE alignment; B32 no_zero; byte_pad(4); };
+typedef def_struct(Opts_mem_alloc)  { U4 alignment; B4 no_zero; byte_pad(4); };
+typedef def_struct(Opts_mem_grow)   { U4 alignment; B4 no_zero; byte_pad(4); };
+typedef def_struct(Opts_mem_shrink) { U4 alignment; };
+typedef def_struct(Opts_mem_resize) { U4 alignment; B4 no_zero; byte_pad(4); };
 
-Slice_BYTE mem__alloc (AllocatorInfo ainfo,                 SSIZE size, Opts_mem_alloc*  opts);
-Slice_BYTE mem__grow  (AllocatorInfo ainfo, Slice_BYTE mem, SSIZE size, Opts_mem_grow*   opts);
-Slice_BYTE mem__resize(AllocatorInfo ainfo, Slice_BYTE mem, SSIZE size, Opts_mem_resize* opts);
-Slice_BYTE mem__shrink(AllocatorInfo ainfo, Slice_BYTE mem, SSIZE size, Opts_mem_shrink* opts);
+Slice_B1 mem__alloc (AllocatorInfo ainfo,               U4 size, Opts_mem_alloc*  opts);
+Slice_B1 mem__grow  (AllocatorInfo ainfo, Slice_B1 mem, U4 size, Opts_mem_grow*   opts);
+Slice_B1 mem__resize(AllocatorInfo ainfo, Slice_B1 mem, U4 size, Opts_mem_resize* opts);
+Slice_B1 mem__shrink(AllocatorInfo ainfo, Slice_B1 mem, U4 size, Opts_mem_shrink* opts);
 
 #define mem_alloc(ainfo, size, ...)       mem__alloc (ainfo,      size, opt_args(Opts_mem_alloc,  __VA_ARGS__))
 #define mem_grow(ainfo,   mem, size, ...) mem__grow  (ainfo, mem, size, opt_args(Opts_mem_grow,   __VA_ARGS__))

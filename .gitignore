@@ -13,3 +13,4 @@ toolchain/PSn00bSDK
 *.o
 *.a
 .sentry-native
+.vscode/settings.json

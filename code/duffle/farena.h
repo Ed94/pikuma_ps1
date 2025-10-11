@@ -6,17 +6,17 @@
 #endif
 
 typedef def_struct(Opts_farena) {
-	Str8  type_name;
-	SSIZE alignment;
+	Str8 type_name;
+	U4   alignment;
 };
 typedef def_struct(FArena) {
 	void* start;
-	SSIZE capacity;
-	SSIZE used;
+	U4    capacity;
+	U4    used;
 };
-FArena      farena_make  (Slice_BYTE mem);
-void        farena_init  (FArena* arena, Slice_BYTE byte);
-Slice_BYTE  farena__push (FArena* arena, SSIZE amount, SSIZE type_width, Opts_farena* opts);
+FArena      farena_make  (Slice_B1 mem);
+void        farena_init  (FArena* arena, Slice_B1 byte);
+Slice_B1    farena__push (FArena* arena, U4 amount, U4 type_width, Opts_farena* opts);
 void        farena_reset (FArena* arena);
 void        farena_rewind(FArena* arena, AllocatorSP save_point);
 AllocatorSP farena_save  (FArena  arena);

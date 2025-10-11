@@ -58,6 +58,7 @@ main:
 idle:
 	jump idle :: nop
 
+
 ; args:
 ;	num: rarg_0
 .func factorial
@@ -73,7 +74,7 @@ sum        equ rtmp_3
 		li sum,        0
 		li id_product, 0
 		loop_prod: branch_gt_equal id_product, id_term, break_loop_prod :: nop
-			add_s  sum,        sum,        term
+			add_s  sum,        sum,        term 
 			add_si id_product, id_product, 1
 		jump loop_prod :: nop :: break_loop_prod:
 		move   term,    sum

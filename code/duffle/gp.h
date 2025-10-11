@@ -4,7 +4,7 @@
 #	include "math.h"
 #endif
 
-typedef def_enum(U32, gp_Commands) {
+typedef def_enum(U4, gp_Commands) {
 	gcmd_Reset       = 0b000,
 	gcmd_Polygon     = 0b001,
 	gcmd_Line        = 0b010,
@@ -73,19 +73,18 @@ typedef def_enum(U32, gp_Commands) {
 #define gp_SetArea_TopLeft     (gcmd_SetDrawArea_TopLeft  << gcmd_offset)
 #define gp_SetArea_BottomRight (gcmd_SetDrawArea_BotRight << gcmd_offset)
 
-typedef def_struct(RGB8) { BYTE r; BYTE g; BYTE b; };
+typedef def_struct(RGB8) { B1 r; B1 g; B1 b; };
 #define rgba8(r, g, b) (RGB8){ r, g, b }
 
-typedef BYTE gp_Pixel16[1];
-typedef BYTE gp_Pixel24[3];
+typedef B1 gp_Pixel16[1];
+typedef B1 gp_Pixel24[3];
 
 #define gp_b10_X 0
 #define gp_b10_Y 10
 #define gp_b16_X 0
 #define gp_b16_Y 16 
 
-typedef def_struct(gp_Vec2) { U16 y; U16 x; };
-
+typedef def_struct(gp_Vec2) { U2 y; U2 x; };
 
 #if 1
 void gp_screen_init(void) __asm__("gp_screen_init_asm");
