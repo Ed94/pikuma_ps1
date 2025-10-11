@@ -170,7 +170,7 @@ void gp_display_frame(DoubleBuffer* screen_buf, S2* active_buf_id, U4* ordering_
 		draw_orderingtbl(ordering_buf + OrderingTbl_Len - 1);
 		pa->used = 0;
 	}
-	* active_buf_id = ! (* active_buf_id); // Swap current buffer
+	active_buf_id[0] = ! active_buf_id[0]; // Swap current buffer
 }
 
 void render(void) {
@@ -187,40 +187,40 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	gte_matrix_set_rotation   (& static_mem.tform_world);
 	gte_matrix_set_translation(& static_mem.tform_world);
 
-	TriFlat* tri = prim_alloc(TriFlat); set_tri_flat(tri);
-	tri->color = rgba8(255, 0, 0);
+	// TriFlat* tri = prim_alloc(TriFlat); set_tri_flat(tri);
+	// tri->color = rgba8(255, 0, 0);
 
 	S4 otz = 0;
 	// otz += vec_3s16_rtp(& )
 
 #if 0
 	Tile* tile  = prim_alloc(Tile); set_tile(tile);
-	tile->rect  = (Rect_S16){ 82, 32, 64, 64 };
+	tile->rect  = (Rect_S2){ 82, 32, 64, 64 };
 	tile->color = (RGB8){ 0, 255, 0};
 	orderingtbl_add_primitive(ordering_buf, tile);
 
 	TriFlat* tri = prim_alloc(TriFlat); set_tri_flat(tri);
-	tri->p0    = vec_2s16(64,  100);
-	tri->p1    = vec_2s16(200, 150);
-	tri->p2    = vec_2s16(50,  220);
+	tri->p0    = v2s2(64,  100);
+	tri->p1    = v2s2(200, 150);
+	tri->p2    = v2s2(50,  220);
 	tri->color = rgba8(255, 0, 255);
 	orderingtbl_add_primitive(ordering_buf, tri);
 
 	QuadGouraud* quad = prim_alloc(QuadGouraud); set_quad_gouraud(quad);
-	quad->p0 = vec_2s16(140, 50);
-	quad->p1 = vec_2s16(200, 40);
-	quad->p2 = vec_2s16(170, 120);
-	quad->p3 = vec_2s16(220, 80);
+	quad->p0 = v2s2(140, 50);
+	quad->p1 = v2s2(200, 40);
+	quad->p2 = v2s2(170, 120);
+	quad->p3 = v2s2(220, 80);
 	quad->c0 = rgba8(255, 0, 0);
 	quad->c1 = rgba8(0, 255, 0);
 	quad->c3 = rgba8(0, 0, 255);
 	orderingtbl_add_primitive(ordering_buf, quad);
 	
 	QuadFlat* quadf = prim_alloc(QuadFlat); set_quad_flat(quadf);
-	quadf->p0 = vec_2s16(140 + 15, 50  + 9);
-	quadf->p1 = vec_2s16(200 + 15, 40  + 9);
-	quadf->p2 = vec_2s16(170 + 15, 120 + 9);
-	quadf->p3 = vec_2s16(220 + 15, 80  + 9);
+	quadf->p0    = v2s2(140 + 15, 50  + 9);
+	quadf->p1    = v2s2(200 + 15, 40  + 9);
+	quadf->p2    = v2s2(170 + 15, 120 + 9);
+	quadf->p3    = v2s2(220 + 15, 80  + 9);
 	quadf->color = rgba8(22, 22, 22);
 	orderingtbl_add_primitive(ordering_buf, quadf);
 #endif

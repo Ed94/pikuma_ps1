@@ -27,4 +27,4 @@ typedef def_struct(Rect_S4) { S4 x; S4 y; S4 width; S4 height; };
 
 typedef def_struct(M3_S2) { A3A3_S2 m; A3_S4 t; };
 
-#define v2_s2(x, y) (V2_S2){ x, y }
+#define v2s2(x, y) (V2_S2){ x, y }
