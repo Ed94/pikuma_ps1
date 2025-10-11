@@ -56,3 +56,4 @@ scoop install lua
 ![traingles!](./docs/assets/pcsx-redux.main_2025-08-03_19-28-22.png)  
 ![polys!](./docs/assets/pcsx-redux.main_2025-08-03_20-45-35.png)  
 ![hello_psyq!](./docs/assets/pcsx-redux_2025-08-05_23-01-19.png)
+![cube!](./docs/assets/pcsx-redux_2025-10-11_03-04-01.png)
