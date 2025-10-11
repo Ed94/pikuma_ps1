@@ -277,7 +277,7 @@ int main(void)
 	cube128_init(& static_mem.cube_verts, & static_mem.cube_faces);
 	static_mem.rotation    = v3s2(0, 0, 0);
 	static_mem.translation = v3s4(0, 0, 900);
-	static_mem.scale       = v3s4(m3s2_one, m3s2_one, m3s2_one);
+	static_mem.scale       = v3s4(fp_one, fp_one, fp_one);
 	gknown gp_screen_init();
 	// gp_screen_init_c11(& static_mem.screen_buf, & static_mem.active_screen_buf);
 	while (1) 

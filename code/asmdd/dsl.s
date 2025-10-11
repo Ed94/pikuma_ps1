@@ -162,18 +162,20 @@
 .set byte, 1
 .set word, 4
 
-.equ U8,    1
-.equ S8,    1
-.equ U16,   2
-.equ S16,   2
-.equ U32,   4
-.equ S32,   4
-.equ SSIZE, 4
-.equ USIZE, 4
-.equ B8,    S8
-.equ B16,   S16
-.equ B32,   S32
+.equ U1, 1
+.equ U2, 2
+.equ U4, 4
+.equ S1, 1
+.equ S2, 2
+.equ S4, 4
+.equ B1, 1
+.equ B2, 2
+.equ B3, 3
 
 .equ false,         0
 .equ true,          1
 .equ true_overflow, 3
+
+.macro struct_field name type_width, prev_offset
+\name \prev_offset
+.endm

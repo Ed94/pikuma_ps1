@@ -5,29 +5,29 @@
 .include "./asmdd/io.s"
 .include "./asmdd/gp.s"
 
-# DrawEnv_Packed { U32 tag; U32 code[15]; }
+# DrawEnv_Packed { U4 tag; U4 code[15]; }
 .equ DrawEnv_Packed_tag,  0
-.equ DrawEnv_Packed_code, DrawEnv_Packed_tag + U32
+.equ DrawEnv_Packed_code, DrawEnv_Packed_tag + U4
 .equ DrawEnv_Packed,      64
 # DrawEnv { Rect_S16 clip; Vec_2S16 ofs; Rect_S16 tw; U16 tpage; U8 dtd; U8 dfe; U8 tme; U8 r0,g0,b0; DR_ENV dr_env; }
-.equ DrawEnv_clip_area,             /* 0  */ Rect_S16       * 0
-.equ DrawEnv_drawing_offset,        /* 8  */ A2_S16         * 0 + Rect_S16
-.equ DrawEnv_texture_window,        /* 12 */ Rect_S16       * 0 + A2_S16   + DrawEnv_drawing_offset
-.equ DrawEnv_texture_page,          /* 20 */ S16            * 0 + Rect_S16 + DrawEnv_texture_window
-.equ DrawEnv_flag_dither,           /* 22 */ byte           * 0 + S16      + DrawEnv_texture_page
-.equ DrawEnv_flag_draw_on_display,  /* 23 */ byte           * 0 + byte     + DrawEnv_flag_dither
-.equ DrawEnv_enable_auto_clear,     /* 24 */ byte           * 0 + byte     + DrawEnv_flag_draw_on_display
-.equ DrawEnv_initial_bg_color,      /* 25 */ RGB8           * 0 + byte     + DrawEnv_enable_auto_clear
+.equ DrawEnv_clip_area,             /* 0  */ Rect_S2        * 0
+.equ DrawEnv_drawing_offset,        /* 8  */ A2_S2          * 0 + Rect_S2
+.equ DrawEnv_texture_window,        /* 12 */ Rect_S2        * 0 + A2_S2    + DrawEnv_drawing_offset
+.equ DrawEnv_texture_page,          /* 20 */ S1             * 0 + Rect_S2  + DrawEnv_texture_window
+.equ DrawEnv_flag_dither,           /* 22 */ B1             * 0 + S2       + DrawEnv_texture_page
+.equ DrawEnv_flag_draw_on_display,  /* 23 */ B1             * 0 + B1       + DrawEnv_flag_dither
+.equ DrawEnv_enable_auto_clear,     /* 24 */ B1             * 0 + B1       + DrawEnv_flag_draw_on_display
+.equ DrawEnv_initial_bg_color,      /* 25 */ RGB8           * 0 + B1       + DrawEnv_enable_auto_clear
 .equ DrawEnv_dr_env,                /* 28 */ DrawEnv_Packed * 0 + RGB8     + DrawEnv_initial_bg_color
 .equ DrawEnv,                       /* 92 */ DrawEnv_dr_env + DrawEnv_Packed
 # DisplayEnv { Rect_S16 disp; Rect_S16 screen; U8 isinter; U8 isrgb24; U8 pad[2]; }
-.equ DisplayEnv_display_area, Rect_S16 * 0
-.equ DisplayEnv_screen,       Rect_S16 * 0 + Rect_S16 + DisplayEnv_display_area
-.equ DisplayEnv_vinterlace,   byte     * 0 + Rect_S16 + DisplayEnv_screen
-.equ DisplayEnv_color24,      byte     * 0 + byte     + DisplayEnv_vinterlace
-.equ DisplayEnv_pad0,         byte     * 0 + byte     + DisplayEnv_color24
-.equ DisplayEnv_pad1,         byte     * 0 + byte     + DisplayEnv_pad0
-.equ DisplayEnv,              DisplayEnv_pad1 + byte
+.equ DisplayEnv_display_area, Rect_S2  * 0
+.equ DisplayEnv_screen,       Rect_S2  * 0 + Rect_S2 + DisplayEnv_display_area
+.equ DisplayEnv_vinterlace,   B1       * 0 + Rect_S2 + DisplayEnv_screen
+.equ DisplayEnv_color24,      B1       * 0 + B1      + DisplayEnv_vinterlace
+.equ DisplayEnv_pad0,         B1       * 0 + B1      + DisplayEnv_color24
+.equ DisplayEnv_pad1,         B1       * 0 + B1      + DisplayEnv_pad0
+.equ DisplayEnv,              DisplayEnv_pad1 + B1
 # DoubleBuffer { DrawEnv draw[2]; DisplayEnv display[2]; }
 .equ DoubleBuffer_draw,      0
 .equ DoubleBuffer_draw_0,    (DrawEnv    * 0)
@@ -43,7 +43,7 @@
 .equ ScreenRes_CenterY, (ScreenRes_Y >> 1)
 
 .equ SMemory_screen_buf,        DoubleBuffer * 0
-.equ SMemory_active_screen_buf, S16          * 0 + DoubleBuffer
+.equ SMemory_active_screen_buf, S2           * 0 + DoubleBuffer
 
 .equ CF_Shadow, 16
 
@@ -64,7 +64,7 @@
 .equ SetDefDispEnv_y,   rarg_2
 .equ SetDefDispEnv_w,   rarg_3
 .equ SetDefDispEnv_h,   CF_Shadow
-.set SetDefDispEnv_sp_size, CF_Shadow + S32
+.set SetDefDispEnv_sp_size, CF_Shadow + S4
 
 .extern SetDefDrawEnv
 .equ SetDefDrawEnv_env, rarg_0
@@ -72,7 +72,7 @@
 .equ SetDefDrawEnv_y,   rarg_2
 .equ SetDefDrawEnv_w,   rarg_3
 .equ SetDefDrawEnv_h,   CF_Shadow
-.set SetDefDrawEnv_sp_size, CF_Shadow + S32
+.set SetDefDrawEnv_sp_size, CF_Shadow + S4
 
 .extern SetGeomOffset
 .equ SetGeomOffset_x, rarg_0
