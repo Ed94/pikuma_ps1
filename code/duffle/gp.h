@@ -74,7 +74,7 @@ typedef def_enum(U4, gp_Commands) {
 #define gp_SetArea_BottomRight (gcmd_SetDrawArea_BotRight << gcmd_offset)
 
 typedef def_struct(RGB8) { B1 r; B1 g; B1 b; };
-#define rgba8(r, g, b) (RGB8){ r, g, b }
+#define rgb8(r, g, b)    (RGB8){ r, g, b }
 
 typedef B1 gp_Pixel16[1];
 typedef B1 gp_Pixel24[3];

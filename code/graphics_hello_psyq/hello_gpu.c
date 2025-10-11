@@ -3,6 +3,7 @@
 #include "assert.h"
 // #include "libgpu.h"
 // #include "libetc.h"
+// #include "libgte.h"
 
 #include "duffle/dsl.h"
 #include "duffle/memory.h"
@@ -11,7 +12,7 @@
 #include "hello_gpu.h"
 
 typedef def_farray(V2_S2, 3);
-typedef def_struct(TriFlat) {
+typedef def_struct(Poly_F3) {
 	U4   tag;
 	RGB8 color;
 	B1   code;
@@ -24,8 +25,14 @@ typedef def_struct(TriFlat) {
 		A3_V2_S2 points;
 	};
 };
+typedef def_struct(Poly_G3) {
+	U4    tag; RGB8 c0; B1 code;
+	V2_S2 p0;  RGB8 c1; B1 pad1;
+	V2_S2 p1;  RGB8 c2; B1 pad2;
+	V2_S2 p2;
+};
 typedef def_farray(V2_S2, 4);
-typedef def_struct(QuadFlat) {
+typedef def_struct(Poly_F4) {
 	U4   tag;
 	RGB8 color;
 	B1   code;
@@ -39,7 +46,7 @@ typedef def_struct(QuadFlat) {
 		A4_V2_S2 points;
 	};
 };
-typedef def_struct(QuadGouraud) {
+typedef def_struct(Poly_G4) {
 	U4    tag; RGB8 c0; B1 code;
 	V2_S2 p0;  RGB8 c1; B1 pad1;
 	V2_S2 p1;  RGB8 c2; B1 pad2;
@@ -54,7 +61,7 @@ typedef def_struct(Tile) {
 };
 
 #define PrimitiveBuff_Len 2048
-#define OrderingTbl_Len   256
+#define OrderingTbl_Len   1024
 
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
 typedef def_farray(OrderingTable_Buffer, 2);
@@ -134,7 +141,6 @@ B1* prim__alloc(U4 type_width, Str8 type_name) {
 void gp_screen_init_c11(DoubleBuffer* screen_buf, S2* active_buf_id)
 {
 	reset_graph(0);
-	set_display_enabled(1); // gp_DisplayEnabled
 
 	// Set the current initial buffer
 	active_buf_id[0] = 0;
@@ -150,8 +156,8 @@ void gp_screen_init_c11(DoubleBuffer* screen_buf, S2* active_buf_id)
 	screen_buf->draw[0].enable_auto_clear = true;
 	screen_buf->draw[1].enable_auto_clear = true;
 	// Set the background clear color
-	screen_buf->draw[0].initial_bg_color = rgba8( .r = 63,  .g = 0,  .b = 127 );
-	screen_buf->draw[1].initial_bg_color = rgba8( .r = 127, .g = 63, .b = 0 );
+	screen_buf->draw[0].initial_bg_color = rgb8( .r = 13, .g = 0,  .b = 47 );
+	screen_buf->draw[1].initial_bg_color = rgb8( .r = 47, .g = 13, .b = 0 );
 	displayenv_put(& r_(screen_buf->display)[ active_buf_id[0] ]);
 	drawenv_put   (& r_(screen_buf->draw   )[ active_buf_id[0] ]);
 
@@ -159,6 +165,8 @@ void gp_screen_init_c11(DoubleBuffer* screen_buf, S2* active_buf_id)
 	geom_init();
 	geom_set_offset(ScreenRes_CenterX, ScreenRes_CenterY);
 	geom_set_screen(ScreenZ);
+
+	set_display_enabled(1); // gp_DisplayEnabled
 }
 
 void gp_display_frame(DoubleBuffer* screen_buf, S2* active_buf_id, U4* ordering_buf, PrimitiveArena* pa) {
@@ -187,11 +195,48 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	gte_matrix_set_rotation   (& static_mem.tform_world);
 	gte_matrix_set_translation(& static_mem.tform_world);
 
-	// TriFlat* tri = prim_alloc(TriFlat); set_tri_flat(tri);
-	// tri->color = rgba8(255, 0, 0);
+#if 1
+	S4 nclip = 0;
+	S4 orderingtbl_z = 0;
+	A2_S2 p;    //???
+	S4 flag; //????
 
-	S4 otz = 0;
-	// otz += vec_3s16_rtp(& )
+	for (U4 face_id = 0; face_id < Cube_num_faces; face_id += 1)
+	{
+		Poly_G3* tri = prim_alloc(Poly_G3); set_poly_g3(tri);
+		tri->c0 = rgb8(255,   0, 255);
+		tri->c1 = rgb8(255, 255,   0);
+		tri->c2 = rgb8(  0, 255, 255);
+
+		V3_S2* face = & static_mem.cube_faces[face_id];
+		V3_S2* p0   = & static_mem.cube_verts[face->x];
+		V3_S2* p1   = & static_mem.cube_verts[face->y];
+		V3_S2* p2   = & static_mem.cube_verts[face->z];
+
+		// orderingtbl_z = 0;
+		// orderingtbl_z += rtp_v3s2(p0, & tri->p0, & p, & flag);
+		// orderingtbl_z += rtp_v3s2(p1, & tri->p1, & p, & flag);
+		// orderingtbl_z += rtp_v3s2(p2, & tri->p2, & p, & flag);
+		// orderingtbl_z /= 3;
+
+		nclip = rtp_avg_nclip_a3_v3s2(
+			p0, p1, p2, 
+			& tri->p0, & tri->p1, & tri->p2, 
+			& p, & orderingtbl_z, & flag
+		);
+		if (nclip <= 0) {
+			continue;
+		}
+
+		if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
+			orderingtbl_add_primitive(ordering_buf[orderingtbl_z], tri);
+		}
+	}
+
+	static_mem.rotation.x +=  6;
+	static_mem.rotation.y +=  8;
+	static_mem.rotation.z += 12;
+#endif
 
 #if 0
 	Tile* tile  = prim_alloc(Tile); set_tile(tile);
@@ -199,29 +244,29 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	tile->color = (RGB8){ 0, 255, 0};
 	orderingtbl_add_primitive(ordering_buf, tile);
 
-	TriFlat* tri = prim_alloc(TriFlat); set_tri_flat(tri);
+	Poly_F3* tri = prim_alloc(Poly_F3); set_poly_f3(tri);
 	tri->p0    = v2s2(64,  100);
 	tri->p1    = v2s2(200, 150);
 	tri->p2    = v2s2(50,  220);
-	tri->color = rgba8(255, 0, 255);
+	tri->color = rgb8(255, 0, 255);
 	orderingtbl_add_primitive(ordering_buf, tri);
 
-	QuadGouraud* quad = prim_alloc(QuadGouraud); set_quad_gouraud(quad);
+	Poly_G4* quad = prim_alloc(Poly_G4); set_poly_g4(quad);
 	quad->p0 = v2s2(140, 50);
 	quad->p1 = v2s2(200, 40);
 	quad->p2 = v2s2(170, 120);
 	quad->p3 = v2s2(220, 80);
-	quad->c0 = rgba8(255, 0, 0);
-	quad->c1 = rgba8(0, 255, 0);
-	quad->c3 = rgba8(0, 0, 255);
+	quad->c0 = rgb8(255, 0, 0);
+	quad->c1 = rgb8(0, 255, 0);
+	quad->c3 = rgb8(0, 0, 255);
 	orderingtbl_add_primitive(ordering_buf, quad);
 	
-	QuadFlat* quadf = prim_alloc(QuadFlat); set_quad_flat(quadf);
+	Poly_F4* quadf = prim_alloc(Poly_F4); set_poly_f4(quadf);
 	quadf->p0    = v2s2(140 + 15, 50  + 9);
 	quadf->p1    = v2s2(200 + 15, 40  + 9);
 	quadf->p2    = v2s2(170 + 15, 120 + 9);
 	quadf->p3    = v2s2(220 + 15, 80  + 9);
-	quadf->color = rgba8(22, 22, 22);
+	quadf->color = rgb8(22, 22, 22);
 	orderingtbl_add_primitive(ordering_buf, quadf);
 #endif
 }
@@ -230,6 +275,9 @@ int main(void)
 {
 	static_mem.primitives.used = 0;
 	cube128_init(& static_mem.cube_verts, & static_mem.cube_faces);
+	static_mem.rotation    = v3s2(0, 0, 0);
+	static_mem.translation = v3s4(0, 0, 900);
+	static_mem.scale       = v3s4(m3s2_one, m3s2_one, m3s2_one);
 	gknown gp_screen_init();
 	// gp_screen_init_c11(& static_mem.screen_buf, & static_mem.active_screen_buf);
 	while (1) 

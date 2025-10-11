@@ -16,7 +16,7 @@ indent_size  = 4
 indent_style = space
 indent_size  = 4
 
-[*.{h, c, hpp, cpp}]
+[*{.h, .c, .hpp, .cpp}]
 indent_style = tab
 indent_size  = 2
 

@@ -53,11 +53,12 @@ enum { false = 0, true  = 1, true_overflow, };
 
 #define farray_len(array)                   (SSIZE)sizeof(array) / size_of( typeof((array)[0]))
 #define farray_init(type, ...)              (type[]){__VA_ARGS__}
-#define def_farray_impl(_type, _len)        _type A ## _len ## _ ## _type[_len]
+#define def_farray_sym(_type, _len)         A ## _len ## _ ## _type
+#define def_farray_impl(_type, _len)        _type def_farray_sym(_type, _len)[_len]; typedef def_ptr_set(def_farray_sym(_type, _len))
 #define def_farray(type, len)               def_farray_impl(type, len)
-#define def_enum(underlying_type, symbol)   underlying_type symbol; enum   symbol
-#define def_struct(symbol)                  struct symbol symbol;   struct symbol
-#define def_union(symbol)                   union  symbol symbol;   union  symbol
+#define def_enum(underlying_type, symbol)   underlying_type def_tset(symbol); enum   symbol
+#define def_struct(symbol)                  struct symbol   def_tset(symbol); struct symbol
+#define def_union(symbol)                   union  symbol   def_tset(symbol); union  symbol
 #define def_proc(symbol)                    symbol
 #define opt_args(symbol, ...)               &(symbol){__VA_ARGS__}
 #define ret_type(type)                      type

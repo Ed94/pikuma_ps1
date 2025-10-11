@@ -133,7 +133,7 @@ gp_screen_init_asm:
 	store_word rtmp_1, DoubleBuffer_draw_1 + DrawEnv_enable_auto_clear(rtmp_0)
 
 	// Set background clear color
-	move rtmp_1, $zero; load_imm rtmp_2, 63; load_imm rtmp_3, 127
+	load_imm rtmp_1, 28; load_imm rtmp_2, 22; load_imm rtmp_3, 25
 	// 63, 0, 127
 	store_byte rtmp_2, DoubleBuffer_draw_0 + DrawEnv_initial_bg_color + RGB8_r(rtmp_0)
 	store_byte rtmp_1, DoubleBuffer_draw_0 + DrawEnv_initial_bg_color + RGB8_g(rtmp_0)

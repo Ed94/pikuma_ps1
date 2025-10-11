@@ -81,13 +81,13 @@ typedef def_struct(PolyTag) {
 #define orderingtbl_add_primitives(ot, p0, p1)	set_addr(p1, get_addr(ot)), set_addr(ot, p0)
 
 /* Primitive 	Length		Code */
-#define set_tri_flat(p)	    set_len(p, 4),  set_code(p, 0x20)
+#define set_poly_f3(p)	    set_len(p, 4),  set_code(p, 0x20)
 // #define setPolyFT3(p)	      set_len(p, 7),  set_code(p, 0x24)
-// #define setPolyG3(p)	      set_len(p, 6),  set_code(p, 0x30)
+#define set_poly_g3(p)      set_len(p, 6),  set_code(p, 0x30)
 // #define setPolyGT3(p)	      set_len(p, 9),  set_code(p, 0x34)
-#define set_quad_flat(p)	  set_len(p, 5),  set_code(p, 0x28)
+#define set_poly_f4(p)	    set_len(p, 5),  set_code(p, 0x28)
 // #define setPolyFT4(p)	      set_len(p, 9),  set_code(p, 0x2c)
-#define set_quad_gouraud(p)	set_len(p, 8),  set_code(p, 0x38)
+#define set_poly_g4(p)      set_len(p, 8),  set_code(p, 0x38)
 // #define setPolyGT4(p)	      set_len(p, 12), set_code(p, 0x3c)
 
 // #define setSprt8(p)	setlen(p, 3),  setcode(p, 0x74)
@@ -113,7 +113,22 @@ M3_S2* m3s2_rotation   (V3_S2* vec, M3_S2* mat) __asm__("RotMatrix");
 M3_S2* m3s2_translation(M3_S2* mat, V3_S4* vec) __asm__("TransMatrix");
 M3_S2* m3s2_scale      (M3_S2* mat, V3_S4* vec) __asm__("ScaleMatrix");
 
-S4 v3s2_rtp(V3_S2* vec, A2_S2 xy, A2_S2* pp, S4* flag) __asm__("RotTransPers"); // Rotation, Translate, Perspective
+S4 rtp_v3s2_raw(V3_S2* vec, S4* xy, S4* pp, S4* flag) __asm__("RotTransPers"); // Rotation, Translate, Perspective
+finline S4 rtp_v3s2(V3_S2* vec, V2_S2* xy, A2_S2* pp, S4* flag) { return rtp_v3s2_raw(vec, cast(S4*R_, & xy->x), cast(S4*R_, pp), r_(flag)); }
+
+S4 rtp_avg_nclip_a3_v3s2_raw(V3_S2* v0, V3_S2* v1, V3_S2* v2, S4* xy1, S4* xy2, S4* xy3, S4* pp, S4* otz, S4* flag) __asm__("RotAverageNclip3");
+finline  S4 rtp_avg_nclip_a3_v3s2(
+	V3_S2* v0,  V3_S2* v1,  V3_S2* v2, 
+	V2_S2* xy0, V2_S2* xy1, V2_S2* xy2, 
+	A2_S2* pp, S4* otz, S4* flag) {
+	return rtp_avg_nclip_a3_v3s2_raw(
+		v0, v1, v2, 
+		cast(S4*R_, xy0), cast(S4*R_, xy1), cast(S4*R_, xy2),
+		cast(S4*R_, pp),  cast(S4*R_, otz), cast(S4*R_, flag)
+	);
+}
 
 void gte_matrix_set_rotation   (M3_S2* mat) __asm__("SetRotMatrix");
 void gte_matrix_set_translation(M3_S2* mat) __asm__("SetTransMatrix");
+
+#define m3s2_one (1 << 12)
