@@ -9,9 +9,9 @@
 .equ DrawEnv_Packed_tag,  0
 .equ DrawEnv_Packed_code, DrawEnv_Packed_tag + U4
 .equ DrawEnv_Packed,      64
-# DrawEnv { Rect_S16 clip; Vec_2S16 ofs; Rect_S16 tw; U16 tpage; U8 dtd; U8 dfe; U8 tme; U8 r0,g0,b0; DR_ENV dr_env; }
+# DrawEnv { Rect_S2 clip; V2_S2 ofs; Rect_S2 tw; U2 tpage; U8 dtd; U8 dfe; U8 tme; U8 r0,g0,b0; DR_ENV dr_env; }
 .equ DrawEnv_clip_area,             /* 0  */ Rect_S2        * 0
-.equ DrawEnv_drawing_offset,        /* 8  */ A2_S2          * 0 + Rect_S2
+.equ DrawEnv_drawing_offset,        /* 8  */ V2_S2          * 0 + Rect_S2
 .equ DrawEnv_texture_window,        /* 12 */ Rect_S2        * 0 + A2_S2    + DrawEnv_drawing_offset
 .equ DrawEnv_texture_page,          /* 20 */ S1             * 0 + Rect_S2  + DrawEnv_texture_window
 .equ DrawEnv_flag_dither,           /* 22 */ B1             * 0 + S2       + DrawEnv_texture_page

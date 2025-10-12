@@ -69,13 +69,13 @@ typedef def_struct(PolyTag) {
  * Primitive Handling Macros
  */
 
-#define set_len( p, _len) 	(((PolyTag*)(p))->len  = (B1)(_len))
-#define set_addr(p, _addr)	(((PolyTag*)(p))->addr = (U4)(_addr))
-#define set_code(p, _code)	(((PolyTag*)(p))->code = (B1)(_code))
+#define set_len( p, _len) 	(((PolyTag*R_)(p))->len  = (B1)(_len))
+#define set_addr(p, _addr)	(((PolyTag*R_)(p))->addr = (U4)(_addr))
+#define set_code(p, _code)	(((PolyTag*R_)(p))->code = (B1)(_code))
 
-#define get_len(p)    	    (B1)(((PolyTag*)(p))->len)
-#define get_code(p)   	    (B1)(((PolyTag*)(p))->code)
-#define get_addr(p)   	    (U4)(((PolyTag*)(p))->addr)
+#define get_len(p)    	    (B1)(((PolyTag*R_)(p))->len)
+#define get_code(p)   	    (B1)(((PolyTag*R_)(p))->code)
+#define get_addr(p)   	    (U4)(((PolyTag*R_)(p))->addr)
 
 #define orderingtbl_add_primitive(ot, p)		    set_addr(p,  get_addr(ot)), set_addr(ot, p)
 #define orderingtbl_add_primitives(ot, p0, p1)	set_addr(p1, get_addr(ot)), set_addr(ot, p0)
