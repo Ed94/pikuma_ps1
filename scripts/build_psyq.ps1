@@ -30,9 +30,11 @@ $f_wall             = "-Wall"
 $f_wno_attributes   = "-Wno-attributes"
 
 # Optimization Flags
-$f_optimize_none    = "-O0" # For Debug builds
-$f_optimize_size    = "-Os" # For Release builds
-$f_omit_frame_ptr   = "-fomit-frame-pointer"
+$f_optimize_none       = "-O0"
+$f_optimize_size       = "-Os"
+$f_optimize_intrinsics = "-Oi"
+$f_optimize_debug      = "-Og"
+$f_omit_frame_ptr      = "-fomit-frame-pointer"
 
 # Environment & Standard Library Flags
 $f_no_stdlib        = "-nostdlib"
@@ -289,8 +291,10 @@ function build-graphis_hello {
 
 	$compile_args = @()
 	$compile_args += $f_debug
-	$compile_args += $f_optimize_none
+	# $compile_args += $f_optimize_none
+	# $compile_args += $f_optimize_intrinsics
 	# $compile_args += $f_optimize_size
+	$compile_args += $f_optimize_debug
 	$compile_args += ($f_include + $path_code)
 	compile-unit $src_c $module_c $includes $compile_args
 

@@ -11,6 +11,8 @@
 #include "duffle/gp.h"
 #include "hello_gpu.h"
 
+#define GTE_Coprocessor_Chapter 1
+
 typedef def_farray(V2_S2, 3);
 typedef def_struct(Poly_F3) {
 	U4   tag;
@@ -73,12 +75,22 @@ typedef def_struct(PrimitiveArena) {
 	U4                 used;
 };
 
-#define Cube_num_verts 8
-#define Cube_num_faces 12
-typedef def_farray(V3_S2, Cube_num_verts);
-typedef def_farray(V3_S2, Cube_num_faces);
+#define GTE_Coprocessor_UseQuads 1
+#define GTE_Coprocessor_UseTris  0
 
-void cube128_init(A8_V3_S2* verts, A12_V3_S2* faces) {
+#define Cube_num_verts 8
+typedef def_farray(V3_S2, Cube_num_verts);
+#if GTE_Coprocessor_UseTris
+#define Cube_num_faces 12
+typedef def_farray(V3_S2, Cube_num_faces)
+typedef A12_V3_S2 ACubeFaces;
+#endif
+#if GTE_Coprocessor_UseQuads
+#define Cube_num_faces 6
+typedef def_farray(V4_S2, Cube_num_faces);
+typedef A6_V4_S2 ACubeFaces;
+#endif
+void cube128_init(A8_V3_S2* verts, ACubeFaces* faces) {
 	memory_copy(verts, & (A8_V3_S2) {
 			{ -128, -128, -128 },
 			{  128, -128, -128 },
@@ -91,6 +103,7 @@ void cube128_init(A8_V3_S2* verts, A12_V3_S2* faces) {
 		},
 		size_of(A8_V3_S2)
 	);
+	#if GTE_Coprocessor_UseTris
 	memory_copy(faces, & (A12_V3_S2) {
 			{ 0, 3, 2 }, // top
 			{ 0, 2, 1 }, // top
@@ -107,6 +120,19 @@ void cube128_init(A8_V3_S2* verts, A12_V3_S2* faces) {
 		},
 		size_of(A12_V3_S2)
 	);
+	#endif
+	#if GTE_Coprocessor_UseQuads
+	memory_copy(faces, & (A6_V4_S2) {
+			{ 3, 2, 0, 1 },
+			{ 0, 1, 4, 5 },
+			{ 4, 5, 7, 6 },
+			{ 1, 2, 5, 6 },
+			{ 2, 3, 6, 7 },
+			{ 3, 0, 7, 4 },
+		},
+		sizeof(A6_V4_S2)
+	);
+	#endif
 	return;
 }
 
@@ -122,8 +148,8 @@ typedef def_struct(SMemory) {
 
 	M3_S2 tform_world;
 
-	A8_V3_S2  cube_verts;
-	A12_V3_S2 cube_faces;
+	A8_V3_S2   cube_verts;
+	ACubeFaces cube_faces;
 };
 global SMemory static_mem;
 extern SMemory static_mem;
@@ -195,7 +221,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	gte_matrix_set_rotation   (& static_mem.tform_world);
 	gte_matrix_set_translation(& static_mem.tform_world);
 
-#if 1
+#if GTE_Coprocessor_Chapter
 	S4 nclip = 0;
 	S4 orderingtbl_z = 0;
 	A2_S2 p;    //???
@@ -203,6 +229,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 	for (U4 face_id = 0; face_id < Cube_num_faces; face_id += 1)
 	{
+		#if GTE_Coprocessor_UseTris
 		Poly_G3* tri = prim_alloc(Poly_G3); set_poly_g3(tri);
 		tri->c0 = rgb8(255,   0, 255);
 		tri->c1 = rgb8(255, 255,   0);
@@ -231,8 +258,34 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
 			orderingtbl_add_primitive(ordering_buf[orderingtbl_z], tri);
 		}
-	}
+		#endif
+		#if GTE_Coprocessor_UseQuads
+		Poly_G4* quad = prim_alloc(Poly_G4); set_poly_g4(quad);
+		quad->c0 = rgb8(255,   0, 255);
+		quad->c1 = rgb8(255, 255,   0);
+		quad->c2 = rgb8(  0, 255, 255);
+		quad->c3 = rgb8(  0, 255,   0);
 
+		V4_S2* face = & static_mem.cube_faces[face_id];
+		V3_S2* p0   = & static_mem.cube_verts[face->x];
+		V3_S2* p1   = & static_mem.cube_verts[face->y];
+		V3_S2* p2   = & static_mem.cube_verts[face->z];
+		V3_S2* p3   = & static_mem.cube_verts[face->w];
+
+		nclip = rtp_avg_nclip_a4_v3s2(
+			p0, p1, p2, p3,
+			& quad->p0, & quad->p1, & quad->p2, & quad->p3,
+			& p, & orderingtbl_z, & flag
+		);
+		if (nclip <= 0) {
+			continue;
+		}
+
+		if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
+			orderingtbl_add_primitive(ordering_buf[orderingtbl_z], quad);
+		}
+		#endif
+	}
 	static_mem.rotation.x +=  6;
 	static_mem.rotation.y +=  8;
 	static_mem.rotation.z += 12;

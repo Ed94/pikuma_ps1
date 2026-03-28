@@ -14,7 +14,7 @@
                 "INTELLISENSE_DIRECTIVES"
             ],
             "intelliSenseMode": "gcc-x86",
-            "compilerPath": "C:\\Users\\Ed\\AppData\\Roaming\\mips\\versions\\v14.2.0\\bin\\mipsel-none-elf-gcc.exe",
+            "compilerPath": "C:/Users/Ed/scoop/apps/gcc/current/bin/gcc.exe"
         }
     ],
     "version": 4

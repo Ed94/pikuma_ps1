@@ -3,12 +3,17 @@
 #	include "assert.h"
 #endif
 
-#define align_(value)     __attribute__((aligned (value)))             // for easy alignment
-#define expect_(x, y)     __builtin_expect(x, y)                       // so compiler knows the common path
-#define finline           static inline __attribute__((always_inline)) // force inline
-#define no_inline         static        __attribute__((noinline))      // force no inline [used in thread api]
-#define R_                __restrict                                   // pointers are either restricted or volatile and nothing else 
-#define V_                volatile                                     // pointers are either restricted or volatile and nothing else
+#define LP_      static // local_persist
+#define internal static // internal
+#define global
+#define gknown
+
+#define align_(value) __attribute__((aligned (value)))             // for easy alignment
+#define expect_(x, y) __builtin_expect(x, y)                       // so compiler knows the common path
+#define FI_           static inline __attribute__((always_inline)) // force inline
+#define NI_           static        __attribute__((noinline))      // force no inline [used in thread api]
+#define R_            __restrict                                   // pointers are either restricted or volatile and nothing else 
+#define V_            volatile                                     // pointers are either restricted or volatile and nothing else
 
 #define glue_impl(A, B)          A ## B
 #define glue(A, B)               glue_impl(A, B)
@@ -16,12 +21,7 @@
 #define stringify(S)             stringify_impl(S)
 #define tmpl(prefix, type)       prefix ## _ ## type
 
-#define local_persist            static
-#define internal                 static
-#define global
-#define gknown
-
-#define offset_of(type, member)  cast(SSIZE, & (((type*) 0)->member))
+#define offset_of(type, member)  cast(U8,__builtin_offsetof(type,member))
 #define static_assert            _Static_assert
 #define typeof                   __typeof__
 #define typeof_ptr(ptr)          typeof((ptr)[0])
@@ -32,9 +32,16 @@
 #define def_ptr_set(type)        def_R_(type); typedef def_V_(type)
 #define def_tset(type)           type; typedef def_ptr_set(type)
 
-typedef __UINT8_TYPE__  def_tset(U1); typedef __UINT16_TYPE__ def_tset(U2); typedef __UINT32_TYPE__ def_tset(U4);
-typedef __INT8_TYPE__   def_tset(S1); typedef __INT16_TYPE__  def_tset(S2); typedef __INT32_TYPE__  def_tset(S4);
-typedef unsigned char   def_tset(B1); typedef __UINT16_TYPE__ def_tset(B2); typedef __UINT32_TYPE__ def_tset(B4);
+typedef __UINT8_TYPE__  def_tset(U1); 
+typedef __UINT16_TYPE__ def_tset(U2);
+typedef __UINT32_TYPE__ def_tset(U4);
+typedef __INT8_TYPE__   def_tset(S1); 
+typedef __INT16_TYPE__  def_tset(S2); 
+typedef __INT32_TYPE__  def_tset(S4);
+typedef unsigned char   def_tset(B1); 
+typedef __UINT16_TYPE__ def_tset(B2); 
+typedef __UINT32_TYPE__ def_tset(B4);
+typedef __UINT64_TYPE__ def_tset(B8);
 enum { false = 0, true  = 1, true_overflow, };
 
 #define u1_r(value) cast(U1_R, value)
@@ -75,6 +82,8 @@ enum { false = 0, true  = 1, true_overflow, };
 
 #define r_(ptr)                             cast(typeof_ptr(ptr)*R_, ptr)
 #define v_(ptr)                             cast(typeof_ptr(ptr)*V_, ptr)
+#define tr_(type, ptr)                      cast(type*R_, ptr)
+#define tv_(type, ptr)                      cast(type*V_, ptr)
 
 #define kilo(n)                             (cast(U4, n) << 10)
 #define mega(n)                             (cast(U4, n) << 20)
@@ -87,7 +96,7 @@ enum { false = 0, true  = 1, true_overflow, };
 #define sop_2(op, a, b) cast(U2, s2_(a) op s2_(b))
 #define sop_4(op, a, b) cast(U4, s4_(a) op s4_(b))
 
-#define def_signed_op(id, op, width) finline U ## width id ## _s ## width(U ## width a, U ## width b) {return sop_ ## width(op, a, b); }
+#define def_signed_op(id, op, width) FI_ U ## width id ## _s ## width(U ## width a, U ## width b) {return sop_ ## width(op, a, b); }
 #define def_signed_ops(id, op)       def_signed_op(id, op, 1) def_signed_op(id, op, 2) def_signed_op(id, op, 4)
 def_signed_ops(add, +) def_signed_ops(sub, -)
 def_signed_ops(mut, *) def_signed_ops(div, /)
@@ -103,13 +112,13 @@ def_signed_ops(ge, >=) def_signed_ops(le, <=)
 #define ge_s(a,b)  def_generic_sop(ge, a,b)
 #define le_s(a,b)  def_generic_sop(le, a,b)
 
-#define span_iter(type, iter, m_begin, op, m_end)  \
-	tmpl(Iter_Span,type) iter = { \
-		.r = {(m_begin), (m_end)},  \
-		.cursor = (m_begin) };      \
-	iter.cursor op iter.r.end;    \
-	++ iter.cursor
-
+#define span_iter(type, iter, m_begin, op, m_end) ( \
+	tmpl(Iter_Span,type) iter = {     \
+		.r      = {(m_begin), (m_end)}, \
+		.cursor = (m_begin) };          \
+	iter.cursor op iter.r.end;        \
+	++ iter.cursor                    \
+)
 #define def_span(type)                                                \
 	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
 	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
@@ -127,7 +136,7 @@ typedef def_struct(Slice_Str8) { Str8* ptr; U4 len; };
 #define def_Slice(type)           def_struct(tmpl(Slice,type)) { type* ptr; U4 len; }
 #define slice_assert(slice)       do { assert((slice).ptr != nullptr); assert((slice).len > 0); } while(0)
 #define slice_end(slice)          ((slice).ptr + (slice).len)
-#define size_of_slice_type(slice) size_of( * (slice).ptr )
+#define size_of_slice_type(slice) size_of((slice).ptr[0])
 
 typedef def_Slice(void);
 typedef def_Slice(B1);
@@ -142,10 +151,11 @@ void slice__zero(Slice_B1 mem, U4 typewidth);
 } while (0)
 #define slice_zero(slice) slice__zero(slice_byte(slice), size_of_slice_type(slice))
 
-#define slice_iter(container, iter)               \
+#define slice_iter(container, iter) (             \
 	typeof((container).ptr) iter = (container).ptr; \
 	iter != slice_end(container);                   \
-	++ iter
+	++ iter                                         \
+)
 #define slice_from_farray(type, ...) & (tmpl(Slice,type)) { \
 	.ptr = farray_init(type, __VA_ARGS__),             \
 	.len = farray_len( farray_init(type, __VA_ARGS__)) \

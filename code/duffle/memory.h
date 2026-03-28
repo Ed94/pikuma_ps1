@@ -94,8 +94,7 @@ struct AllocatorProc_Out {
 	U4                  left; // Contiguous memory left
 	U4                  max_alloc;
 	U4                  min_alloc;
-	B4                  continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
-	byte_pad(4);
+	// byte_pad(8);
 };
 typedef def_struct(AllocatorInfo) {
 	AllocatorProc* proc;
@@ -108,8 +107,7 @@ typedef def_struct(AllocatorQueryInfo) {
 	U4                  left; // Contiguous memory left
 	U4                  max_alloc;
 	U4                  min_alloc;
-	B4                  continuity_break; // Whether this allocation broke continuity with the previous (address space wise)
-	byte_pad(4);
+	// byte_pad(4);
 };
 static_assert(size_of(AllocatorProc_Out) == size_of(AllocatorQueryInfo));
 

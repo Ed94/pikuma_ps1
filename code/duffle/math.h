@@ -16,10 +16,14 @@ typedef S2 A3A3_S2[3][3];
 
 typedef def_struct(Extent2_S2) { S2 width; S2 height; };
 typedef def_struct(Extent2_S4) { S4 width; S4 height; };
+
 typedef def_struct(V2_S2)      { S2 x; S2 y; };
 typedef def_struct(V2_S4)      { S4 x; S4 y; };
 typedef def_struct(V3_S2)      { S2 x; S2 y; S2 z; S2 pad; };
 typedef def_struct(V3_S4)      { S4 x; S4 y; S4 z; S4 pad; };
+typedef def_struct(V4_S2)      { S2 x; S2 y; S2 z; S2 w; };
+typedef def_struct(V4_S4)      { S4 x; S4 y; S4 z; S4 w; };
+
 typedef def_struct(R2_S2)      { V2_S2 p0; V2_S2 p1; };
 typedef def_struct(R2_S4)      { V2_S4 p0; V2_S4 p1; };
 
@@ -28,6 +32,8 @@ typedef def_struct(Rect_S4) { S4 x; S4 y; S4 width; S4 height; };
 
 typedef def_struct(M3_S2) { A3A3_S2 m; A3_S4 t; };
 
-#define v2s2(x,y)   (V2_S2){x,y}
-#define v3s2(x,y,z) (V3_S2){x,y,z}
-#define v3s4(x,y,z) (V3_S4){x,y,z}
+#define v2s2(x,y)     (V2_S2){x,y}
+#define v3s2(x,y,z)   (V3_S2){x,y,z}
+#define v3s4(x,y,z)   (V3_S4){x,y,z}
+#define v4s2(x,y,z,w) (V4_S2){x,y,z,w}
+#define v4s4(x,y,z,w) (V4_S4){x,y,z,w}

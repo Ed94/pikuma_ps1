@@ -117,10 +117,10 @@ M3_S2* m3s2_scale      (M3_S2* mat, V3_S4* vec) __asm__("ScaleMatrix");
 // Rotation, Translation, Perspective
 
 S4 rtp_v3s2_raw(V3_S2* vec, S4* xy, S4* pp, S4* flag) __asm__("RotTransPers");
-finline S4 rtp_v3s2(V3_S2* vec, V2_S2* xy, A2_S2* pp, S4* flag) { return rtp_v3s2_raw(vec, cast(S4*R_, & xy->x), cast(S4*R_, pp), r_(flag)); }
+FI_ S4 rtp_v3s2(V3_S2* vec, V2_S2* xy, A2_S2* pp, S4* flag) { return rtp_v3s2_raw(vec, cast(S4*R_, & xy->x), cast(S4*R_, pp), r_(flag)); }
 
 S4 rtp_avg_nclip_a3_v3s2_raw(V3_S2* v0, V3_S2* v1, V3_S2* v2, S4* xy1, S4* xy2, S4* xy3, S4* pp, S4* otz, S4* flag) __asm__("RotAverageNclip3");
-finline  S4 rtp_avg_nclip_a3_v3s2(
+FI_  S4 rtp_avg_nclip_a3_v3s2(
 	V3_S2* v0,  V3_S2* v1,  V3_S2* v2, 
 	V2_S2* xy0, V2_S2* xy1, V2_S2* xy2, 
 	A2_S2* pp, S4* otz, S4* flag
@@ -128,6 +128,19 @@ finline  S4 rtp_avg_nclip_a3_v3s2(
 	return rtp_avg_nclip_a3_v3s2_raw(
 		v0, v1, v2, 
 		cast(S4*R_, xy0), cast(S4*R_, xy1), cast(S4*R_, xy2),
+		cast(S4*R_, pp),  cast(S4*R_, otz), cast(S4*R_, flag)
+	);
+}
+
+S4 rtp_avg_nclip_a4_v3s2_raw(V3_S2* v0, V3_S2* v1, V3_S2* v2, V3_S2* v3, S4* xy1, S4* xy2, S4* xy3, S4* xy4, S4* pp, S4* otz, S4* flag) __asm__("RotAverageNclip4");
+FI_ S4 rtp_avg_nclip_a4_v3s2(
+	V3_S2* v0,  V3_S2* v1,  V3_S2* v2,  V3_S2* v3,
+	V2_S2* xy0, V2_S2* xy1, V2_S2* xy2, V2_S2* xy3,
+	A2_S2* pp,  S4* otz,    S4* flag
+){
+	return rtp_avg_nclip_a4_v3s2_raw(
+		v0, v1, v2, v3,
+		cast(S4*R_, xy0), cast(S4*R_, xy1), cast(S4*R_, xy2), cast(S4*R_, xy3),
 		cast(S4*R_, pp),  cast(S4*R_, otz), cast(S4*R_, flag)
 	);
 }
