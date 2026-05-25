@@ -33,12 +33,20 @@ typedef def_enum(U4, gp_Commands) {
 	gcmd_SetVramSize             = 0x09,
 };
 
-#define gpio_port0 0x1810
-#define gpio_port1 0x1814
+enum {
+	gpio_port_0 = 0x1810,
+	gpio_port_1 = 0x1814,
 
-#define gcmd_offset 24
+	gmcd_offset = 24,
 
-#define gp_Reset (gcmd_Reset << gcmd_offset)
+	gp_Reset = (gcmd_Reset << gmcd_offset),
+};
+// #define gpio_port0 0x1810
+// #define gpio_port1 0x1814
+
+// #define gcmd_offset 24
+
+// #define gp_Reset (gcmd_Reset << gcmd_offset)
 
 #define gp_DisplayEnabled  (gcmd_DisplayEnable << gcmd_offset | 0x0)
 #define gp_DisplayDisabled (gcmd_DisplayEnable << gcmd_offset | 0x1)

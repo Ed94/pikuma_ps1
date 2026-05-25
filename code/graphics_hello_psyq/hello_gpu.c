@@ -11,8 +11,6 @@
 #include "duffle/gp.h"
 #include "hello_gpu.h"
 
-#define GTE_Coprocessor_Chapter 1
-
 typedef def_farray(V2_S2, 3);
 typedef def_struct(Poly_F3) {
 	U4   tag;
@@ -62,8 +60,10 @@ typedef def_struct(Tile) {
 	Rect_S2 rect;
 };
 
-#define PrimitiveBuff_Len 2048
-#define OrderingTbl_Len   1024
+enum {
+	PrimitiveBuff_Len = 4096,
+	OrderingTbl_Len   = 2048
+};
 
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
 typedef def_farray(OrderingTable_Buffer, 2);
@@ -75,21 +75,11 @@ typedef def_struct(PrimitiveArena) {
 	U4                 used;
 };
 
-#define GTE_Coprocessor_UseQuads 1
-#define GTE_Coprocessor_UseTris  0
-
 #define Cube_num_verts 8
 typedef def_farray(V3_S2, Cube_num_verts);
-#if GTE_Coprocessor_UseTris
-#define Cube_num_faces 12
-typedef def_farray(V3_S2, Cube_num_faces)
-typedef A12_V3_S2 ACubeFaces;
-#endif
-#if GTE_Coprocessor_UseQuads
 #define Cube_num_faces 6
 typedef def_farray(V4_S2, Cube_num_faces);
 typedef A6_V4_S2 ACubeFaces;
-#endif
 void cube128_init(A8_V3_S2* verts, ACubeFaces* faces) {
 	memory_copy(verts, & (A8_V3_S2) {
 			{ -128, -128, -128 },
@@ -103,25 +93,6 @@ void cube128_init(A8_V3_S2* verts, ACubeFaces* faces) {
 		},
 		size_of(A8_V3_S2)
 	);
-	#if GTE_Coprocessor_UseTris
-	memory_copy(faces, & (A12_V3_S2) {
-			{ 0, 3, 2 }, // top
-			{ 0, 2, 1 }, // top
-			{ 4, 0, 1 }, // front
-			{ 4, 1, 5 }, // front
-			{ 7, 4, 5 }, // bottom
-			{ 7, 5, 6 }, // bottom
-			{ 5, 1, 2 }, // right
-			{ 5, 2, 6 }, // right
-			{ 2, 3, 7 }, // back
-			{ 2, 7, 6 }, // back
-			{ 0, 4, 7 }, // left
-			{ 0, 7, 3 }  // left
-		},
-		size_of(A12_V3_S2)
-	);
-	#endif
-	#if GTE_Coprocessor_UseQuads
 	memory_copy(faces, & (A6_V4_S2) {
 			{ 3, 2, 0, 1 },
 			{ 0, 1, 4, 5 },
@@ -132,7 +103,6 @@ void cube128_init(A8_V3_S2* verts, ACubeFaces* faces) {
 		},
 		sizeof(A6_V4_S2)
 	);
-	#endif
 	return;
 }
 
@@ -150,6 +120,10 @@ typedef def_struct(SMemory) {
 
 	A8_V3_S2   cube_verts;
 	ACubeFaces cube_faces;
+
+	V3_S4 vel;
+	V3_S4 acc;
+	V3_S4 pos;
 };
 global SMemory static_mem;
 extern SMemory static_mem;
@@ -214,14 +188,28 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 {
 	orderingtbl_clear_reverse(ordering_buf, OrderingTbl_Len);
 
+	// Update the position based on acceleration and velocity
+	gknown V3_S4_R pos = & static_mem.pos;
+	gknown V3_S4_R vel = & static_mem.vel;
+	gknown V3_S4_R acc = & static_mem.acc;
+	add_v3s4(vel, acc[0]);
+	add_v3s4(pos, vel[0]);
+	// vel->x += acc->x;
+	// vel->y += acc->y;
+	// vel->z += acc->z;
+	// pos->x += vel->x;
+	// pos->y += vel->y;
+	// pos->z += vel->z;
+
+	if (pos->y > 400) vel->y *= -1;
+
 	m3s2_rotation   (& static_mem.rotation,    & static_mem.tform_world);
-	m3s2_translation(& static_mem.tform_world, & static_mem.translation);
+	m3s2_translation(& static_mem.tform_world, & static_mem.pos);
 	m3s2_scale      (& static_mem.tform_world, & static_mem.scale);
 
 	gte_matrix_set_rotation   (& static_mem.tform_world);
 	gte_matrix_set_translation(& static_mem.tform_world);
 
-#if GTE_Coprocessor_Chapter
 	S4 nclip = 0;
 	S4 orderingtbl_z = 0;
 	A2_S2 p;    //???
@@ -229,37 +217,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 	for (U4 face_id = 0; face_id < Cube_num_faces; face_id += 1)
 	{
-		#if GTE_Coprocessor_UseTris
-		Poly_G3* tri = prim_alloc(Poly_G3); set_poly_g3(tri);
-		tri->c0 = rgb8(255,   0, 255);
-		tri->c1 = rgb8(255, 255,   0);
-		tri->c2 = rgb8(  0, 255, 255);
-
-		V3_S2* face = & static_mem.cube_faces[face_id];
-		V3_S2* p0   = & static_mem.cube_verts[face->x];
-		V3_S2* p1   = & static_mem.cube_verts[face->y];
-		V3_S2* p2   = & static_mem.cube_verts[face->z];
-
-		// orderingtbl_z = 0;
-		// orderingtbl_z += rtp_v3s2(p0, & tri->p0, & p, & flag);
-		// orderingtbl_z += rtp_v3s2(p1, & tri->p1, & p, & flag);
-		// orderingtbl_z += rtp_v3s2(p2, & tri->p2, & p, & flag);
-		// orderingtbl_z /= 3;
-
-		nclip = rtp_avg_nclip_a3_v3s2(
-			p0, p1, p2, 
-			& tri->p0, & tri->p1, & tri->p2, 
-			& p, & orderingtbl_z, & flag
-		);
-		if (nclip <= 0) {
-			continue;
-		}
-
-		if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
-			orderingtbl_add_primitive(ordering_buf[orderingtbl_z], tri);
-		}
-		#endif
-		#if GTE_Coprocessor_UseQuads
 		Poly_G4* quad = prim_alloc(Poly_G4); set_poly_g4(quad);
 		quad->c0 = rgb8(255,   0, 255);
 		quad->c1 = rgb8(255, 255,   0);
@@ -284,53 +241,23 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
 			orderingtbl_add_primitive(ordering_buf[orderingtbl_z], quad);
 		}
-		#endif
 	}
-	static_mem.rotation.x +=  6;
-	static_mem.rotation.y +=  8;
-	static_mem.rotation.z += 12;
-#endif
-
-#if 0
-	Tile* tile  = prim_alloc(Tile); set_tile(tile);
-	tile->rect  = (Rect_S2){ 82, 32, 64, 64 };
-	tile->color = (RGB8){ 0, 255, 0};
-	orderingtbl_add_primitive(ordering_buf, tile);
-
-	Poly_F3* tri = prim_alloc(Poly_F3); set_poly_f3(tri);
-	tri->p0    = v2s2(64,  100);
-	tri->p1    = v2s2(200, 150);
-	tri->p2    = v2s2(50,  220);
-	tri->color = rgb8(255, 0, 255);
-	orderingtbl_add_primitive(ordering_buf, tri);
-
-	Poly_G4* quad = prim_alloc(Poly_G4); set_poly_g4(quad);
-	quad->p0 = v2s2(140, 50);
-	quad->p1 = v2s2(200, 40);
-	quad->p2 = v2s2(170, 120);
-	quad->p3 = v2s2(220, 80);
-	quad->c0 = rgb8(255, 0, 0);
-	quad->c1 = rgb8(0, 255, 0);
-	quad->c3 = rgb8(0, 0, 255);
-	orderingtbl_add_primitive(ordering_buf, quad);
-	
-	Poly_F4* quadf = prim_alloc(Poly_F4); set_poly_f4(quadf);
-	quadf->p0    = v2s2(140 + 15, 50  + 9);
-	quadf->p1    = v2s2(200 + 15, 40  + 9);
-	quadf->p2    = v2s2(170 + 15, 120 + 9);
-	quadf->p3    = v2s2(220 + 15, 80  + 9);
-	quadf->color = rgb8(22, 22, 22);
-	orderingtbl_add_primitive(ordering_buf, quadf);
-#endif
+	// static_mem.rotation.x +=  6;
+	// static_mem.rotation.y +=  8;
+	// static_mem.rotation.z += 12;
+	static_mem.rotation.x += 20;
 }
 
 int main(void)
 {
+	static_mem = (SMemory){0};
 	static_mem.primitives.used = 0;
 	cube128_init(& static_mem.cube_verts, & static_mem.cube_faces);
 	static_mem.rotation    = v3s2(0, 0, 0);
 	static_mem.translation = v3s4(0, 0, 900);
 	static_mem.scale       = v3s4(fp_one, fp_one, fp_one);
+	static_mem.acc = v3s4(0, 1, 0);
+	static_mem.pos = v3s4(0, -400, 1800);
 	gknown gp_screen_init();
 	// gp_screen_init_c11(& static_mem.screen_buf, & static_mem.active_screen_buf);
 	while (1) 

@@ -50,7 +50,7 @@ void geom_set_screen(U4 h)       __asm__("SetGeomScreen");
 
 U4* orderingtbl_clear_reverse(U4* ot, U4 len) __asm__("ClearOTagR");
 
-U4 reset_graph(U4 mode)          __asm__("ResetGraph");
+U4 reset_graph(U4 mode)           __asm__("ResetGraph");
 void set_display_enabled(U4 mask) __asm__("SetDispMask");
 
 U4 draw_sync(U4 mode) __asm__("DrawSync");
@@ -148,4 +148,6 @@ FI_ S4 rtp_avg_nclip_a4_v3s2(
 void gte_matrix_set_rotation   (M3_S2* mat) __asm__("SetRotMatrix");
 void gte_matrix_set_translation(M3_S2* mat) __asm__("SetTransMatrix");
 
-#define fp_one (1 << 12)
+enum {
+	fp_one = (1 << 12),
+};

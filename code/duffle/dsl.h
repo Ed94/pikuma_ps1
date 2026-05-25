@@ -76,7 +76,7 @@ enum { false = 0, true  = 1, true_overflow, };
 #define alignof                             _Alignof
 #define byte_pad(amount, ...)               B1 glue(_PAD_, __VA_ARGS__) [amount]
 #define cast(type, data)                    ((type)(data))
-#define pcast(type, data)                   * cast(type*, & (data))
+#define pcast(type, data)                   (cast(type*, & (data)) [0])
 #define nullptr                             cast(void*, 0)
 #define size_of(data)                       cast(U4, sizeof(data))
 

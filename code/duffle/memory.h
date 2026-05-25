@@ -43,6 +43,7 @@ B4    memory_zero            (void* dest, U4 length);
 #define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
 
 #pragma region Allocator Interface
+#if 0
 typedef def_enum(U4, AllocatorOp) {
 	AllocatorOp_Alloc_NoZero = 0, // If Alloc exist, so must No_Zero
 	AllocatorOp_Alloc,
@@ -137,4 +138,5 @@ Slice_B1 mem__shrink(AllocatorInfo ainfo, Slice_B1 mem, U4 size, Opts_mem_shrink
 
 #define alloc_type(ainfo, type, ...)       (type*)             mem__alloc(ainfo, size_of(type),        opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr
 #define alloc_slice(ainfo, type, num, ...) (tmpl(Slice,type)){ mem__alloc(ainfo, size_of(type) * num,  opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr, num }
+#endif
 #pragma endregion Allocator Interface

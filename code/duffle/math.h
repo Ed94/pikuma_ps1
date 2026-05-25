@@ -12,6 +12,7 @@ typedef def_farray(S2, 2);
 typedef def_farray(S2, 3);
 typedef def_farray(S4, 2);
 typedef def_farray(S4, 3);
+typedef def_farray(S4, 4);
 typedef S2 A3A3_S2[3][3];
 
 typedef def_struct(Extent2_S2) { S2 width; S2 height; };
@@ -33,7 +34,17 @@ typedef def_struct(Rect_S4) { S4 x; S4 y; S4 width; S4 height; };
 typedef def_struct(M3_S2) { A3A3_S2 m; A3_S4 t; };
 
 #define v2s2(x,y)     (V2_S2){x,y}
-#define v3s2(x,y,z)   (V3_S2){x,y,z}
-#define v3s4(x,y,z)   (V3_S4){x,y,z}
+#define v3s2(x,y,z)   (V3_S2){x,y,z,0}
+#define v3s4(x,y,z)   (V3_S4){x,y,z,0}
 #define v4s2(x,y,z,w) (V4_S2){x,y,z,w}
 #define v4s4(x,y,z,w) (V4_S4){x,y,z,w}
+
+FI_ void add_a3s4(A3_S4_R out_a, A3_S4 b) {
+	(out_a[0])[0] += b[0];
+	(out_a[0])[1] += b[1];
+	(out_a[0])[2] += b[2];
+}
+
+FI_ void add_v3s4(V3_S4_R out_a, V3_S4 b) { 
+	add_a3s4(pcast(A3_S4_R, out_a), pcast(A3_S4, b)); 
+}
