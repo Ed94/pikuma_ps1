@@ -138,9 +138,9 @@ enum { _BitOffsets = 0
 #define enc_imm(imm)     (((imm)   & IMM_MASK))
 
 /* MIPS R-Type Instruction Format (Register-to-Register) */
-#define enc_r(op, rs, rt, rd, shamt, fc) enc_op(op) | enc_rs(rs) | enc_rt(rt) | enc_rd(rd) | enc_shamt(shamt) | enc_fc(fc)
+#define enc_r(op, rs, rt, rd, shamt, fc) (enc_op(op) | enc_rs(rs) | enc_rt(rt) | enc_rd(rd) | enc_shamt(shamt) | enc_fc(fc))
 /* MIPS I-Type Instruction Format (Immediate/Constant) */
-#define enc_i(op, rs, rt, imm)           enc_op(op) | enc_rs(rs) | enc_rt(rt) | enc_imm(imm)
+#define enc_i(op, rs, rt, imm)           (enc_op(op) | enc_rs(rs) | enc_rt(rt) | enc_imm(imm))
 
 /* COP0 (System) Transfer Format */
 #define ENC_COP0_TX(sub, rt, rd) \
@@ -163,6 +163,8 @@ enum { _BitOffsets = 0
 
 #define nop() shift_ll(rdiscard, rdiscard, rdiscard)
 
+// FI_ void emit_load_imm(U4 rs, U4 rt, U4 imm) { emit(load_imm()); }
+
 // Binary Metaprogramming
 
 typedef U4 const Code;
@@ -181,37 +183,35 @@ enum {
 	bios_table_addr = 0xA0,
 };
 
-internal 
+/* Flushes the Instruction Cache */
+I_
 Code CodeBlob_(mips_flush_icache) {
 	add_ui(rstack_ptr, rstack_ptr, -8),
 	store_word(rstack_ptr, rret_addr, 4),
-	add_ui(rdiscard, rret_0, bios_flushcache),
-	add_ui(rdiscard, rtmp_0, bios_table_addr),
-	jump_nreg(rtmp_0, rdiscard, rret_addr),
-	nop(),
-	load_imm(rstack_ptr, rret_addr, 4),
-	jump_reg(rret_addr),
+	add_ui(rdiscard, rret_0, bios_flushcache), add_ui(rdiscard, rtmp_0, bios_table_addr),
+	jump_nreg(rtmp_0, rdiscard, rret_addr), 
+	nop(), load_imm(rstack_ptr, rret_addr, 4), jump_reg(rret_addr),
 	add_ui(rstack_ptr, rstack_ptr, 8)
 };
 FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
-/* Flushes the Instruction Cache so the CPU sees our newly written tape */
-// FI_ void mips_flush_icache(void) {
-//     /* Uses standard PS1 BIOS A0 table call 0x44 */
-//     __asm__ volatile (
-//         "li $v0, 0x44\n\t"
-//         "li $t1, 0xA0\n\t"
-//         "jalr $t1\n\t"
-//         "nop"
-//         : : : "v0", "t1", "ra", "memory"
-//     );
-// }
+#define clb_system "$2", "$8", "$9", "$31", "memory"
 
+#define asm_mips_flush_icache() asm volatile( \
+	asm_inline( \
+			add_ui(rstack_ptr, rstack_ptr, -8) \
+		, store_word(rstack_ptr, rret_addr, 4) \
+		, add_ui(rdiscard, rret_0, bios_flushcache), add_ui(rdiscard, rtmp_0, bios_table_addr) \
+		, jump_nreg(rtmp_0, rdiscard, rret_addr)  \
+		, nop(), load_imm(rstack_ptr, rret_addr, 4), jump_reg(rret_addr) \
+		, add_ui(rstack_ptr, rstack_ptr, 8) \
+	) \
+	asm_clobber( clb_system ) \
+)
 
-
-
+void test()
+{
+	asm_mips_flush_icache();
+}
 
 // TAPE & EMITTERS
-
-
-

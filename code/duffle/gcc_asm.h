@@ -133,226 +133,130 @@
 #define _STR98 _STR97 ", %c97"
 #define _STR99 _STR98 ", %c98"
 
-/* --- 3. The Blob Generators (1 to 99) --- */
-#define _B1(c, p0) \
-    __asm__ volatile (".word " _STR1 : : "i"(p0) : c)
-#define _B2(c, p0, p1) \
-    __asm__ volatile (".word " _STR2 : : "i"(p0), "i"(p1) : c)
-#define _B3(c, p0, p1, p2) \
-    __asm__ volatile (".word " _STR3 : : "i"(p0), "i"(p1), "i"(p2) : c)
-#define _B4(c, p0, p1, p2, p3) \
-    __asm__ volatile (".word " _STR4 : : "i"(p0), "i"(p1), "i"(p2), "i"(p3) : c)
-#define _B5(c, p0, p1, p2, p3, p4) \
-    __asm__ volatile (".word " _STR5 : : "i"(p0), "i"(p1), "i"(p2), "i"(p3), "i"(p4) : c)
-#define _B6(c, p0, p1, p2, p3, p4, p5) \
-    __asm__ volatile (".word " _STR6 : : "i"(p0), "i"(p1), "i"(p2), "i"(p3), "i"(p4), "i"(p5) : c)
-#define _B7(c, p0, p1, p2, p3, p4, p5, p6) \
-    __asm__ volatile (".word " _STR7 : : "i"(p0), "i"(p1), "i"(p2), "i"(p3), "i"(p4), "i"(p5), "i"(p6) : c)
-#define _B8(c, p0, p1, p2, p3, p4, p5, p6, p7) \
-    __asm__ volatile (".word " _STR8 : : "i"(p0), "i"(p1), "i"(p2), "i"(p3), "i"(p4), "i"(p5), "i"(p6), "i"(p7) : c)
-#define _B9(c, p0, p1, p2, p3, p4, p5, p6, p7, p8) \
-    __asm__ volatile (".word " _STR9 : : "i"(p0), "i"(p1), "i"(p2), "i"(p3), "i"(p4), "i"(p5), "i"(p6), "i"(p7), "i"(p8) : c)
-#define _B10(c, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9) \
-    __asm__ volatile (".word " _STR10 : : "i"(p0), "i"(p1), "i"(p2), "i"(p3), "i"(p4), "i"(p5), "i"(p6), "i"(p7), "i"(p8), "i"(p9) : c)
+/* Utilizing cascading operand strings to compress the payload */
+#define _OP10 "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7),"i"(p8),"i"(p9)
+#define _OP20 _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17),"i"(p18),"i"(p19)
+#define _OP30 _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27),"i"(p28),"i"(p29)
+#define _OP40 _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37),"i"(p38),"i"(p39)
+#define _OP50 _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47),"i"(p48),"i"(p49)
+#define _OP60 _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57),"i"(p58),"i"(p59)
+#define _OP70 _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67),"i"(p68),"i"(p69)
+#define _OP80 _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77),"i"(p78),"i"(p79)
+#define _OP90 _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87),"i"(p88),"i"(p89)
 
-/* Utilizing cascading operand strings to compress the rest of the lines */
-#define _I10 "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7),"i"(p8),"i"(p9)
-#define _I20 _I10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17),"i"(p18),"i"(p19)
-#define _I30 _I20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27),"i"(p28),"i"(p29)
-#define _I40 _I30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37),"i"(p38),"i"(p39)
-#define _I50 _I40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47),"i"(p48),"i"(p49)
-#define _I60 _I50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57),"i"(p58),"i"(p59)
-#define _I70 _I60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67),"i"(p68),"i"(p69)
-#define _I80 _I70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77),"i"(p78),"i"(p79)
-#define _I90 _I80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87),"i"(p88),"i"(p89)
+/* --- The AST Generators (1 to 99) --- */
+#define _INL_1(p0)                               ".word " _STR1 : : "i"(p0)
+#define _INL_2(p0,p1)                            ".word " _STR2 : : "i"(p0),"i"(p1)
+#define _INL_3(p0,p1,p2)                         ".word " _STR3 : : "i"(p0),"i"(p1),"i"(p2)
+#define _INL_4(p0,p1,p2,p3)                      ".word " _STR4 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3)
+#define _INL_5(p0,p1,p2,p3,p4)                   ".word " _STR5 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4)
+#define _INL_6(p0,p1,p2,p3,p4,p5)                ".word " _STR6 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5)
+#define _INL_7(p0,p1,p2,p3,p4,p5,p6)             ".word " _STR7 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6)
+#define _INL_8(p0,p1,p2,p3,p4,p5,p6,p7)          ".word " _STR8 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7)
+#define _INL_9(p0,p1,p2,p3,p4,p5,p6,p7,p8)       ".word " _STR9 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7),"i"(p8)
+#define _INL_10(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9)   ".word " _STR10 : : _OP10
 
-#define _B11(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10) \
-    __asm__ volatile (".word " _STR11 : : _I10,"i"(p10) : c)
-#define _B12(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11) \
-    __asm__ volatile (".word " _STR12 : : _I10,"i"(p10),"i"(p11) : c)
-#define _B13(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12) \
-    __asm__ volatile (".word " _STR13 : : _I10,"i"(p10),"i"(p11),"i"(p12) : c)
-#define _B14(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13) \
-    __asm__ volatile (".word " _STR14 : : _I10,"i"(p10),"i"(p11),"i"(p12),"i"(p13) : c)
-#define _B15(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14) \
-    __asm__ volatile (".word " _STR15 : : _I10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14) : c)
-#define _B16(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15) \
-    __asm__ volatile (".word " _STR16 : : _I10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15) : c)
-#define _B17(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16) \
-    __asm__ volatile (".word " _STR17 : : _I10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16) : c)
-#define _B18(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17) \
-    __asm__ volatile (".word " _STR18 : : _I10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17) : c)
-#define _B19(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18) \
-    __asm__ volatile (".word " _STR19 : : _I10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17),"i"(p18) : c)
-#define _B20(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19) \
-    __asm__ volatile (".word " _STR20 : : _I20 : c)
+#define _INL_11(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10) ".word " _STR11 : : _OP10,"i"(p10)
+#define _INL_12(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11) ".word " _STR12 : : _OP10,"i"(p10),"i"(p11)
+#define _INL_13(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12) ".word " _STR13 : : _OP10,"i"(p10),"i"(p11),"i"(p12)
+#define _INL_14(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13) ".word " _STR14 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13)
+#define _INL_15(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14) ".word " _STR15 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14)
+#define _INL_16(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15) ".word " _STR16 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15)
+#define _INL_17(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16) ".word " _STR17 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16)
+#define _INL_18(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17) ".word " _STR18 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17)
+#define _INL_19(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18) ".word " _STR19 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17),"i"(p18)
+#define _INL_20(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19) ".word " _STR20 : : _OP20
 
-#define _B21(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20) \
-    __asm__ volatile (".word " _STR21 : : _I20,"i"(p20) : c)
-#define _B22(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21) \
-    __asm__ volatile (".word " _STR22 : : _I20,"i"(p20),"i"(p21) : c)
-#define _B23(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22) \
-    __asm__ volatile (".word " _STR23 : : _I20,"i"(p20),"i"(p21),"i"(p22) : c)
-#define _B24(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23) \
-    __asm__ volatile (".word " _STR24 : : _I20,"i"(p20),"i"(p21),"i"(p22),"i"(p23) : c)
-#define _B25(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24) \
-    __asm__ volatile (".word " _STR25 : : _I20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24) : c)
-#define _B26(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25) \
-    __asm__ volatile (".word " _STR26 : : _I20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25) : c)
-#define _B27(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26) \
-    __asm__ volatile (".word " _STR27 : : _I20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26) : c)
-#define _B28(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27) \
-    __asm__ volatile (".word " _STR28 : : _I20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27) : c)
-#define _B29(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28) \
-    __asm__ volatile (".word " _STR29 : : _I20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27),"i"(p28) : c)
-#define _B30(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29) \
-    __asm__ volatile (".word " _STR30 : : _I30 : c)
+#define _INL_21(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20) ".word " _STR21 : : _OP20,"i"(p20)
+#define _INL_22(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21) ".word " _STR22 : : _OP20,"i"(p20),"i"(p21)
+#define _INL_23(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22) ".word " _STR23 : : _OP20,"i"(p20),"i"(p21),"i"(p22)
+#define _INL_24(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23) ".word " _STR24 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23)
+#define _INL_25(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24) ".word " _STR25 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24)
+#define _INL_26(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25) ".word " _STR26 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25)
+#define _INL_27(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26) ".word " _STR27 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26)
+#define _INL_28(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27) ".word " _STR28 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27)
+#define _INL_29(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28) ".word " _STR29 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27),"i"(p28)
+#define _INL_30(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29) ".word " _STR30 : : _OP30
 
-#define _B31(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30) \
-    __asm__ volatile (".word " _STR31 : : _I30,"i"(p30) : c)
-#define _B32(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31) \
-    __asm__ volatile (".word " _STR32 : : _I30,"i"(p30),"i"(p31) : c)
-#define _B33(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32) \
-    __asm__ volatile (".word " _STR33 : : _I30,"i"(p30),"i"(p31),"i"(p32) : c)
-#define _B34(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33) \
-    __asm__ volatile (".word " _STR34 : : _I30,"i"(p30),"i"(p31),"i"(p32),"i"(p33) : c)
-#define _B35(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34) \
-    __asm__ volatile (".word " _STR35 : : _I30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34) : c)
-#define _B36(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35) \
-    __asm__ volatile (".word " _STR36 : : _I30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35) : c)
-#define _B37(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36) \
-    __asm__ volatile (".word " _STR37 : : _I30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36) : c)
-#define _B38(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37) \
-    __asm__ volatile (".word " _STR38 : : _I30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37) : c)
-#define _B39(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38) \
-    __asm__ volatile (".word " _STR39 : : _I30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37),"i"(p38) : c)
-#define _B40(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39) \
-    __asm__ volatile (".word " _STR40 : : _I40 : c)
+#define _INL_31(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30) ".word " _STR31 : : _OP30,"i"(p30)
+#define _INL_32(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31) ".word " _STR32 : : _OP30,"i"(p30),"i"(p31)
+#define _INL_33(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32) ".word " _STR33 : : _OP30,"i"(p30),"i"(p31),"i"(p32)
+#define _INL_34(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33) ".word " _STR34 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33)
+#define _INL_35(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34) ".word " _STR35 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34)
+#define _INL_36(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35) ".word " _STR36 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35)
+#define _INL_37(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36) ".word " _STR37 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36)
+#define _INL_38(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37) ".word " _STR38 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37)
+#define _INL_39(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38) ".word " _STR39 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37),"i"(p38)
+#define _INL_40(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39) ".word " _STR40 : : _OP40
 
-#define _B41(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40) \
-    __asm__ volatile (".word " _STR41 : : _I40,"i"(p40) : c)
-#define _B42(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41) \
-    __asm__ volatile (".word " _STR42 : : _I40,"i"(p40),"i"(p41) : c)
-#define _B43(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42) \
-    __asm__ volatile (".word " _STR43 : : _I40,"i"(p40),"i"(p41),"i"(p42) : c)
-#define _B44(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43) \
-    __asm__ volatile (".word " _STR44 : : _I40,"i"(p40),"i"(p41),"i"(p42),"i"(p43) : c)
-#define _B45(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44) \
-    __asm__ volatile (".word " _STR45 : : _I40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44) : c)
-#define _B46(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45) \
-    __asm__ volatile (".word " _STR46 : : _I40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45) : c)
-#define _B47(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46) \
-    __asm__ volatile (".word " _STR47 : : _I40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46) : c)
-#define _B48(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47) \
-    __asm__ volatile (".word " _STR48 : : _I40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47) : c)
-#define _B49(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48) \
-    __asm__ volatile (".word " _STR49 : : _I40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47),"i"(p48) : c)
-#define _B50(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49) \
-    __asm__ volatile (".word " _STR50 : : _I50 : c)
+#define _INL_41(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40) ".word " _STR41 : : _OP40,"i"(p40)
+#define _INL_42(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41) ".word " _STR42 : : _OP40,"i"(p40),"i"(p41)
+#define _INL_43(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42) ".word " _STR43 : : _OP40,"i"(p40),"i"(p41),"i"(p42)
+#define _INL_44(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43) ".word " _STR44 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43)
+#define _INL_45(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44) ".word " _STR45 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44)
+#define _INL_46(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45) ".word " _STR46 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45)
+#define _INL_47(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46) ".word " _STR47 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46)
+#define _INL_48(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47) ".word " _STR48 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47)
+#define _INL_49(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48) ".word " _STR49 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47),"i"(p48)
+#define _INL_50(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49) ".word " _STR50 : : _OP50
 
-#define _B51(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50) \
-    __asm__ volatile (".word " _STR51 : : _I50,"i"(p50) : c)
-#define _B52(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51) \
-    __asm__ volatile (".word " _STR52 : : _I50,"i"(p50),"i"(p51) : c)
-#define _B53(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52) \
-    __asm__ volatile (".word " _STR53 : : _I50,"i"(p50),"i"(p51),"i"(p52) : c)
-#define _B54(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53) \
-    __asm__ volatile (".word " _STR54 : : _I50,"i"(p50),"i"(p51),"i"(p52),"i"(p53) : c)
-#define _B55(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54) \
-    __asm__ volatile (".word " _STR55 : : _I50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54) : c)
-#define _B56(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55) \
-    __asm__ volatile (".word " _STR56 : : _I50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55) : c)
-#define _B57(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56) \
-    __asm__ volatile (".word " _STR57 : : _I50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56) : c)
-#define _B58(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57) \
-    __asm__ volatile (".word " _STR58 : : _I50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57) : c)
-#define _B59(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58) \
-    __asm__ volatile (".word " _STR59 : : _I50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57),"i"(p58) : c)
-#define _B60(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59) \
-    __asm__ volatile (".word " _STR60 : : _I60 : c)
+#define _INL_51(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50) ".word " _STR51 : : _OP50,"i"(p50)
+#define _INL_52(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51) ".word " _STR52 : : _OP50,"i"(p50),"i"(p51)
+#define _INL_53(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52) ".word " _STR53 : : _OP50,"i"(p50),"i"(p51),"i"(p52)
+#define _INL_54(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53) ".word " _STR54 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53)
+#define _INL_55(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54) ".word " _STR55 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54)
+#define _INL_56(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55) ".word " _STR56 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55)
+#define _INL_57(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56) ".word " _STR57 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56)
+#define _INL_58(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57) ".word " _STR58 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57)
+#define _INL_59(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58) ".word " _STR59 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57),"i"(p58)
+#define _INL_60(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59) ".word " _STR60 : : _OP60
 
-#define _B61(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60) \
-    __asm__ volatile (".word " _STR61 : : _I60,"i"(p60) : c)
-#define _B62(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61) \
-    __asm__ volatile (".word " _STR62 : : _I60,"i"(p60),"i"(p61) : c)
-#define _B63(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62) \
-    __asm__ volatile (".word " _STR63 : : _I60,"i"(p60),"i"(p61),"i"(p62) : c)
-#define _B64(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63) \
-    __asm__ volatile (".word " _STR64 : : _I60,"i"(p60),"i"(p61),"i"(p62),"i"(p63) : c)
-#define _B65(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64) \
-    __asm__ volatile (".word " _STR65 : : _I60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64) : c)
-#define _B66(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65) \
-    __asm__ volatile (".word " _STR66 : : _I60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65) : c)
-#define _B67(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66) \
-    __asm__ volatile (".word " _STR67 : : _I60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66) : c)
-#define _B68(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67) \
-    __asm__ volatile (".word " _STR68 : : _I60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67) : c)
-#define _B69(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68) \
-    __asm__ volatile (".word " _STR69 : : _I60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67),"i"(p68) : c)
-#define _B70(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69) \
-    __asm__ volatile (".word " _STR70 : : _I70 : c)
+#define _INL_61(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60) ".word " _STR61 : : _OP60,"i"(p60)
+#define _INL_62(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61) ".word " _STR62 : : _OP60,"i"(p60),"i"(p61)
+#define _INL_63(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62) ".word " _STR63 : : _OP60,"i"(p60),"i"(p61),"i"(p62)
+#define _INL_64(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63) ".word " _STR64 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63)
+#define _INL_65(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64) ".word " _STR65 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64)
+#define _INL_66(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65) ".word " _STR66 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65)
+#define _INL_67(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66) ".word " _STR67 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66)
+#define _INL_68(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67) ".word " _STR68 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67)
+#define _INL_69(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68) ".word " _STR69 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67),"i"(p68)
+#define _INL_70(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69) ".word " _STR70 : : _OP70
 
-#define _B71(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70) \
-    __asm__ volatile (".word " _STR71 : : _I70,"i"(p70) : c)
-#define _B72(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71) \
-    __asm__ volatile (".word " _STR72 : : _I70,"i"(p70),"i"(p71) : c)
-#define _B73(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72) \
-    __asm__ volatile (".word " _STR73 : : _I70,"i"(p70),"i"(p71),"i"(p72) : c)
-#define _B74(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73) \
-    __asm__ volatile (".word " _STR74 : : _I70,"i"(p70),"i"(p71),"i"(p72),"i"(p73) : c)
-#define _B75(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74) \
-    __asm__ volatile (".word " _STR75 : : _I70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74) : c)
-#define _B76(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75) \
-    __asm__ volatile (".word " _STR76 : : _I70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75) : c)
-#define _B77(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76) \
-    __asm__ volatile (".word " _STR77 : : _I70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76) : c)
-#define _B78(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77) \
-    __asm__ volatile (".word " _STR78 : : _I70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77) : c)
-#define _B79(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78) \
-    __asm__ volatile (".word " _STR79 : : _I70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77),"i"(p78) : c)
-#define _B80(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79) \
-    __asm__ volatile (".word " _STR80 : : _I80 : c)
+#define _INL_71(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70) ".word " _STR71 : : _OP70,"i"(p70)
+#define _INL_72(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71) ".word " _STR72 : : _OP70,"i"(p70),"i"(p71)
+#define _INL_73(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72) ".word " _STR73 : : _OP70,"i"(p70),"i"(p71),"i"(p72)
+#define _INL_74(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73) ".word " _STR74 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73)
+#define _INL_75(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74) ".word " _STR75 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74)
+#define _INL_76(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75) ".word " _STR76 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75)
+#define _INL_77(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76) ".word " _STR77 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76)
+#define _INL_78(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77) ".word " _STR78 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77)
+#define _INL_79(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78) ".word " _STR79 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77),"i"(p78)
+#define _INL_80(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79) ".word " _STR80 : : _OP80
 
-#define _B81(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80) \
-    __asm__ volatile (".word " _STR81 : : _I80,"i"(p80) : c)
-#define _B82(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81) \
-    __asm__ volatile (".word " _STR82 : : _I80,"i"(p80),"i"(p81) : c)
-#define _B83(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82) \
-    __asm__ volatile (".word " _STR83 : : _I80,"i"(p80),"i"(p81),"i"(p82) : c)
-#define _B84(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83) \
-    __asm__ volatile (".word " _STR84 : : _I80,"i"(p80),"i"(p81),"i"(p82),"i"(p83) : c)
-#define _B85(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84) \
-    __asm__ volatile (".word " _STR85 : : _I80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84) : c)
-#define _B86(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85) \
-    __asm__ volatile (".word " _STR86 : : _I80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85) : c)
-#define _B87(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86) \
-    __asm__ volatile (".word " _STR87 : : _I80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86) : c)
-#define _B88(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87) \
-    __asm__ volatile (".word " _STR88 : : _I80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87) : c)
-#define _B89(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88) \
-    __asm__ volatile (".word " _STR89 : : _I80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87),"i"(p88) : c)
-#define _B90(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89) \
-    __asm__ volatile (".word " _STR90 : : _I90 : c)
+#define _INL_81(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80) ".word " _STR81 : : _OP80,"i"(p80)
+#define _INL_82(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81) ".word " _STR82 : : _OP80,"i"(p80),"i"(p81)
+#define _INL_83(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82) ".word " _STR83 : : _OP80,"i"(p80),"i"(p81),"i"(p82)
+#define _INL_84(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83) ".word " _STR84 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83)
+#define _INL_85(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84) ".word " _STR85 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84)
+#define _INL_86(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85) ".word " _STR86 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85)
+#define _INL_87(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86) ".word " _STR87 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86)
+#define _INL_88(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87) ".word " _STR88 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87)
+#define _INL_89(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88) ".word " _STR89 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87),"i"(p88)
+#define _INL_90(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89) ".word " _STR90 : : _OP90
 
-#define _B91(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90) \
-    __asm__ volatile (".word " _STR91 : : _I90,"i"(p90) : c)
-#define _B92(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91) \
-    __asm__ volatile (".word " _STR92 : : _I90,"i"(p90),"i"(p91) : c)
-#define _B93(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92) \
-    __asm__ volatile (".word " _STR93 : : _I90,"i"(p90),"i"(p91),"i"(p92) : c)
-#define _B94(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93) \
-    __asm__ volatile (".word " _STR94 : : _I90,"i"(p90),"i"(p91),"i"(p92),"i"(p93) : c)
-#define _B95(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94) \
-    __asm__ volatile (".word " _STR95 : : _I90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94) : c)
-#define _B96(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95) \
-    __asm__ volatile (".word " _STR96 : : _I90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95) : c)
-#define _B97(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96) \
-    __asm__ volatile (".word " _STR97 : : _I90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96) : c)
-#define _B98(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97) \
-    __asm__ volatile (".word " _STR98 : : _I90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97) : c)
-#define _B99(c,p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97,p98) \
-    __asm__ volatile (".word " _STR99 : : _I90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97),"i"(p98) : c)
+#define _INL_91(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90) ".word " _STR91 : : _OP90,"i"(p90)
+#define _INL_92(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91) ".word " _STR92 : : _OP90,"i"(p90),"i"(p91)
+#define _INL_93(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92) ".word " _STR93 : : _OP90,"i"(p90),"i"(p91),"i"(p92)
+#define _INL_94(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93) ".word " _STR94 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93)
+#define _INL_95(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94) ".word " _STR95 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94)
+#define _INL_96(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95) ".word " _STR96 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95)
+#define _INL_97(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96) ".word " _STR97 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96)
+#define _INL_98(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97) ".word " _STR98 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97)
+#define _INL_99(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97,p98) ".word " _STR99 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97),"i"(p98)
 
-/* --- 4. The Final Exposed Macro --- */
-#define _ASM_BLOB_DISPATCH(count) glue(_B, count)
-#define asm_blob(clobbers, ...) m_expand(_ASM_BLOB_DISPATCH(_ASM_COUNT_ARGS(__VA_ARGS__))(clobbers, __VA_ARGS__))
+/* The AST Builders */
+#define asm_clobber(...) : __VA_ARGS__
+#define asm_inline(...)  m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
+
+/* The Shell */
+#define asm_blob(inlines, clobbers) asm volatile ( inlines clobbers )

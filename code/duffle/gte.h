@@ -91,3 +91,12 @@ typedef enum {
     (GTE_CMD_BASE | \
      (((sf) & 1) << 19) | (((mx) & 3) << 17) | (((v)  & 3) << 15) | \
      (((cv) & 3) << 13) | (((lm) & 1) << 10) | ((cmd) & 0x3F))
+
+
+#define asm_gte_matrix_set_rotation asm volatile( \
+ asm_inline( \
+	\
+ ) \
+ asm_clobber() \
+)
+
