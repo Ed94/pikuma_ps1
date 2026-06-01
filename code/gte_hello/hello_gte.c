@@ -157,6 +157,26 @@ void gp_display_frame(DoubleBuffer* screen_buf, S2* active_buf_id, U4* ordering_
 void render(void) {
 }
 
+// #define gte_ldv0(r0)          \
+//     __asm__ volatile(         \
+//         "lwc2   $0, 0( %0 );" \
+//         "lwc2   $1, 4( %0 )"  \
+//         :                     \
+//         : "r"(r0))
+
+/**
+ * @brief Loads a single V3_S2 to GTE vector register V0
+ *
+ * @details Loads values from an V3_S2 struct to GTE data registers C2_VXY0
+ * and C2_VZ0.
+ */
+// #define gte_ldv0( r0 ) __asm__ volatile ( \
+// 	"lwc2	$0, 0( %0 );"	\
+// 	"lwc2	$1, 4( %0 );"	\
+// 	:						\
+// 	: "r"( r0 )				\
+// 	: "$t0" )
+
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
 	orderingtbl_clear_reverse(ordering_buf, OrderingTbl_Len);
@@ -219,7 +239,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// static_mem.cube.rot.x +=  6;
 		// static_mem.cube.rot.y +=  8;
 		// static_mem.cube.rot.z += 12;
-		static_mem.cube.rot.y += 20;
+		static_mem.cube.rot.y += 0;
 	}
 	// Draw Floor
 	{

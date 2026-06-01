@@ -2,6 +2,6 @@
   "configureme": true,
   "grey": false,
   "mask": 0.5,
-  "masktype": 2,
+  "masktype": 1,
   "warp": 0
 }
