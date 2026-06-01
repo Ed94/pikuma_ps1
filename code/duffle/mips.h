@@ -143,12 +143,7 @@ enum { _BitOffsets = 0
 #define enc_i(op, rs, rt, imm)           (enc_op(op) | enc_rs(rs) | enc_rt(rt) | enc_imm(imm))
 
 /* COP0 (System) Transfer Format */
-#define ENC_COP0_TX(sub, rt, rd) \
-	((MIPS_OP_COP0 << MIPS_OPCODE_SHIFT) | \
-		(((sub) & MIPS_REG_MASK) << MIPS_RS_SHIFT) | \
-		(((rt) & MIPS_REG_MASK)  << MIPS_RT_SHIFT) | \
-		(((rd) & MIPS_REG_MASK)  << MIPS_RD_SHIFT))
-
+#define enc_cop0_tx(sub, rt, rd) enc_op(op_cop0) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd)
 
 /* COP0 Return From Exception (rfe) */
 #define enc_rfe() 0x42000010
@@ -209,8 +204,7 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 	asm_clobber( clb_system ) \
 )
 
-void test()
-{
+void test_mips_asm() {
 	asm_mips_flush_icache();
 }
 
