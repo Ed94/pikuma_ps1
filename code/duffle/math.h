@@ -7,34 +7,34 @@
 #define max(A, B)       (((A) > (B)) ? (A) : (B))
 #define clamp_bot(X, B) max(X, B)
 
-typedef def_farray(U4, 2);
-typedef def_farray(S2, 2);
-typedef def_farray(S2, 3);
-typedef def_farray(S4, 2);
-typedef def_farray(S4, 3);
-typedef def_farray(S4, 4);
-typedef S2 A3A3_S2[3][3];
+typedef Array_(U4, 2);
+typedef Array_(S2, 2);
+typedef Array_(S2, 3);
+typedef Array_(S4, 2);
+typedef Array_(S4, 3);
+typedef Array_(S4, 4);
+typedef S2 A3x3_S2[3][3];
 
-typedef def_struct(Extent2_S2) { S2 width; S2 height; };
-typedef def_struct(Extent2_S4) { S4 width; S4 height; };
+typedef Struct_(Extent2_S2) { S2 width; S2 height; };
+typedef Struct_(Extent2_S4) { S4 width; S4 height; };
 
-typedef def_struct(V2_S2)      { S2 x; S2 y; };
-typedef def_struct(V2_S4)      { S4 x; S4 y; };
-typedef def_struct(V3_S2)      { S2 x; S2 y; S2 z; S2 pad; };
-typedef def_struct(V3_S4)      { S4 x; S4 y; S4 z; S4 pad; };
-typedef def_struct(V4_S2)      { S2 x; S2 y; S2 z; S2 w; };
-typedef def_struct(V4_S4)      { S4 x; S4 y; S4 z; S4 w; };
+typedef Struct_(V2_S2)      { S2 x; S2 y; };
+typedef Struct_(V2_S4)      { S4 x; S4 y; };
+typedef Struct_(V3_S2)      { S2 x; S2 y; S2 z; S2 pad; };
+typedef Struct_(V3_S4)      { S4 x; S4 y; S4 z; S4 pad; };
+typedef Struct_(V4_S2)      { S2 x; S2 y; S2 z; S2 w; };
+typedef Struct_(V4_S4)      { S4 x; S4 y; S4 z; S4 w; };
 
-typedef def_struct(R2_S2)      { V2_S2 p0; V2_S2 p1; };
-typedef def_struct(R2_S4)      { V2_S4 p0; V2_S4 p1; };
+typedef Struct_(R2_S2)      { V2_S2 p0; V2_S2 p1; };
+typedef Struct_(R2_S4)      { V2_S4 p0; V2_S4 p1; };
 
-typedef def_struct(Rect_S2) { S2 x; S2 y; S2 width; S2 height; };
-typedef def_struct(Rect_S4) { S4 x; S4 y; S4 width; S4 height; };
+typedef Struct_(Rect_S2) { S2 x; S2 y; S2 width; S2 height; };
+typedef Struct_(Rect_S4) { S4 x; S4 y; S4 width; S4 height; };
 
-typedef def_struct(M3_S2) { A3A3_S2 m; A3_S4 t; };
+typedef Struct_(M3_S2) { A3x3_S2 m; A3_S4 t; };
 
-typedef def_farray(V2_S2, 3);
-typedef def_farray(V2_S2, 4);
+typedef Array_(V2_S2, 3);
+typedef Array_(V2_S2, 4);
 
 #define v2s2(x,y)     (V2_S2){x,y}
 #define v3s2(x,y,z)   (V3_S2){x,y,z,0}

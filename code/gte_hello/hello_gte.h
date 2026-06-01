@@ -5,8 +5,8 @@
 #	include "duffle/gp.h"
 #endif
 
-typedef def_struct(DrawEnv_Packed) { U4 tag; U4 code[15]; };
-typedef def_struct(DrawEnv) {
+typedef Struct_(DrawEnv_Packed) { U4 tag; U4 code[15]; };
+typedef Struct_(DrawEnv) {
 	Rect_S2 clip_area;
 	A2_S2   drawing_offset;
 	Rect_S2 texture_window;
@@ -17,7 +17,7 @@ typedef def_struct(DrawEnv) {
 	RGB8    initial_bg_color;
 	DrawEnv_Packed dr_env; // reserved
 };
-typedef def_struct(DisplayEnv) {
+typedef Struct_(DisplayEnv) {
 	Rect_S2 display_area;
 	Rect_S2 screen;
 	B1      vinterlace;
@@ -25,9 +25,9 @@ typedef def_struct(DisplayEnv) {
 	B1      pad0;
 	B1      pad1;
 };
-typedef def_farray(DrawEnv,    2);
-typedef def_farray(DisplayEnv, 2);
-typedef def_struct(DoubleBuffer) {
+typedef Array_(DrawEnv,    2);
+typedef Array_(DisplayEnv, 2);
+typedef Struct_(DoubleBuffer) {
 	A2_DrawEnv    draw;
 	A2_DisplayEnv display;
 };
@@ -58,7 +58,7 @@ U4 vsync(U4 mode)     __asm__("VSync");
 
 void draw_orderingtbl(U4* buf) __asm__("DrawOTag");
 
-typedef def_struct(PolyTag) {
+typedef Struct_(PolyTag) {
 	U4   addr: 24;
 	U4   len:  8;
 	RGB8 color;
@@ -106,7 +106,7 @@ typedef def_struct(PolyTag) {
 // #define setLineF4(p)	set_len(p, 6),  set_code(p, 0x4c),(p)->pad = 0x55555555
 // #define setLineG4(p)	set_len(p, 9),  set_code(p, 0x5c),(p)->pad = 0x55555555, (p)->p2 = 0, (p)->p3 = 0
 
-typedef def_struct(Poly_F3) {
+typedef Struct_(Poly_F3) {
 	U4   tag;
 	RGB8 color;
 	B1   code;
@@ -120,14 +120,14 @@ typedef def_struct(Poly_F3) {
 	};
 };
 
-typedef def_struct(Poly_G3) {
+typedef Struct_(Poly_G3) {
 	U4    tag; RGB8 c0; B1 code;
 	V2_S2 p0;  RGB8 c1; B1 pad1;
 	V2_S2 p1;  RGB8 c2; B1 pad2;
 	V2_S2 p2;
 };
 
-typedef def_struct(Poly_F4) {
+typedef Struct_(Poly_F4) {
 	U4   tag;
 	RGB8 color;
 	B1   code;
@@ -142,7 +142,7 @@ typedef def_struct(Poly_F4) {
 	};
 };
 
-typedef def_struct(Poly_G4) {
+typedef Struct_(Poly_G4) {
 	U4    tag; RGB8 c0; B1 code;
 	V2_S2 p0;  RGB8 c1; B1 pad1;
 	V2_S2 p1;  RGB8 c2; B1 pad2;
@@ -150,7 +150,7 @@ typedef def_struct(Poly_G4) {
 	V2_S2 p3;
 };
 
-typedef def_struct(Tile) {
+typedef Struct_(Tile) {
 	U4      tag;
 	RGB8    color;
 	B1      code;
@@ -169,7 +169,7 @@ M3_S2* m3s2_scale      (M3_S2* mat, V3_S4* vec) __asm__("ScaleMatrix");
 // Rotation, Translation, Perspective
 
 S4 rtp_v3s2_raw(V3_S2* vec, S4* xy, S4* pp, S4* flag) __asm__("RotTransPers");
-FI_ S4 rtp_v3s2(V3_S2* vec, V2_S2* xy, A2_S2* pp, S4* flag) { return rtp_v3s2_raw(vec, cast(S4*R_, & xy->x), cast(S4*R_, pp), r_(flag)); }
+FI_ S4 rtp_v3s2(V3_S2* vec, V2_S2* xy, A2_S2* pp, S4* flag) { return rtp_v3s2_raw(vec, C_(S4*R_, & xy->x), C_(S4*R_, pp), r_(flag)); }
 
 S4 rtp_avg_nclip_a3_v3s2_raw(V3_S2* v0, V3_S2* v1, V3_S2* v2, S4* xy1, S4* xy2, S4* xy3, S4* pp, S4* otz, S4* flag) __asm__("RotAverageNclip3");
 FI_  S4 rtp_avg_nclip_a3_v3s2(
@@ -179,8 +179,8 @@ FI_  S4 rtp_avg_nclip_a3_v3s2(
 ){
 	return rtp_avg_nclip_a3_v3s2_raw(
 		v0, v1, v2, 
-		cast(S4*R_, xy0), cast(S4*R_, xy1), cast(S4*R_, xy2),
-		cast(S4*R_, pp),  cast(S4*R_, otz), cast(S4*R_, flag)
+		C_(S4*R_, xy0), C_(S4*R_, xy1), C_(S4*R_, xy2),
+		C_(S4*R_, pp),  C_(S4*R_, otz), C_(S4*R_, flag)
 	);
 }
 
@@ -192,8 +192,8 @@ FI_ S4 rtp_avg_nclip_a4_v3s2(
 ){
 	return rtp_avg_nclip_a4_v3s2_raw(
 		v0, v1, v2, v3,
-		cast(S4*R_, xy0), cast(S4*R_, xy1), cast(S4*R_, xy2), cast(S4*R_, xy3),
-		cast(S4*R_, pp),  cast(S4*R_, otz), cast(S4*R_, flag)
+		C_(S4*R_, xy0), C_(S4*R_, xy1), C_(S4*R_, xy2), C_(S4*R_, xy3),
+		C_(S4*R_, pp),  C_(S4*R_, otz), C_(S4*R_, flag)
 	);
 }
 

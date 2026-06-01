@@ -24,6 +24,7 @@ $f_define           = "-D"
 $f_include          = "-I"
 $f_output           = "-o"
 $f_std_c11          = "-std=c11"
+$f_std_c23          = "-std=c23"
 
 # Warning Flags
 $f_wall             = "-Wall"
@@ -139,6 +140,7 @@ function compile-unit { param(
 		$f_arch_no_shared, 
 		$f_arch_no_stack_prot
 	)
+	# $compile_args    += $f_std_c23
 	$compile_args    += ($f_include + $path_psyq_imyu_inc)
 	$compile_args    += ($f_include + $path_nugget)
 
@@ -350,3 +352,48 @@ function build-gte_hello {
 	make-binary $elf $exe
 }
 build-gte_hello
+
+function Send-ToEmulator { param(
+    [string]$exePath
+)
+    $uri = "http://localhost:8080/api/v1/load-exec"
+    
+    # Absolute path is safest for the emulator web server
+    $absolutePath = [System.IO.Path]::GetFullPath($exePath)
+    
+    # Create JSON payload pointing to your compiled .ps-exe
+    $body = @{
+        filename = $absolutePath
+    } | ConvertTo-Json
+
+    Write-Host "Pushing hot-reload to PCSX-Redux..." -ForegroundColor Magenta
+    try {
+        $response = Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType "application/json"
+        Write-Host "Hot-reload successful!" -ForegroundColor Green
+    } catch {
+        Write-Warning "Could not connect to PCSX-Redux web server. Ensure the emulator is running and Web Server is enabled."
+    }
+}
+
+# # Automatically hot-reloads it into the running emulator
+# Send-ToEmulator (join-path $path_build 'hello_gte.ps-exe')
+
+# --- Hot Reload via PCSX-Redux Web Server ---
+$exe_path = join-path $path_build 'hello_gte.ps-exe'
+$absolute_path = [System.IO.Path]::GetFullPath($exe_path)
+
+# PCSX-Redux expects the file location in the URL query string!
+# We URL-encode the path to ensure backslashes and spaces don't break the HTTP request.
+$encoded_path = [uri]::EscapeDataString($absolute_path)
+$uri = "http://localhost:8080/api/v1/load-exec?path=$encoded_path"
+
+# Write-Host "Pushing hot-reload to PCSX-Redux..." -ForegroundColor Magenta
+# try {
+#     # Send the request with the query string included
+#     Invoke-RestMethod -Uri $uri -Method Post 
+#     Write-Host "Hot-reload successful!" -ForegroundColor Green
+# } catch {
+#     Write-Host "Failed to hot-reload." -ForegroundColor Red
+#     # This will print the *actual* HTTP error instead of our generic warning
+#     Write-Host $_.Exception.Message -ForegroundColor Yellow
+# }

@@ -3,105 +3,123 @@
 #	include "assert.h"
 #endif
 
-#define LP_      static // local_persist
-#define internal static // internal
-#define global
-#define gknown
-
-#define align_(value) __attribute__((aligned (value)))             // for easy alignment
-#define expect_(x, y) __builtin_expect(x, y)                       // so compiler knows the common path
-#define FI_           static inline __attribute__((always_inline)) // force inline
-#define NI_           static        __attribute__((noinline))      // force no inline [used in thread api]
-#define R_            __restrict                                   // pointers are either restricted or volatile and nothing else 
-#define V_            volatile                                     // pointers are either restricted or volatile and nothing else
-
-#define glue_impl(A, B)          A ## B
-#define glue(A, B)               glue_impl(A, B)
-#define stringify_impl(S)        #S
-#define stringify(S)             stringify_impl(S)
-#define tmpl(prefix, type)       prefix ## _ ## type
-
 #define offset_of(type, member)  cast(U8,__builtin_offsetof(type,member))
 #define static_assert            _Static_assert
 #define typeof                   __typeof__
 #define typeof_ptr(ptr)          typeof((ptr)[0])
 #define typeof_same(a, b)        _Generic((a), typeof((b)): 1, default: 0)
 
-#define def_R_(type)             type*restrict type ## _R
-#define def_V_(type)             type*volatile type ## _V
-#define def_ptr_set(type)        def_R_(type); typedef def_V_(type)
-#define def_tset(type)           type; typedef def_ptr_set(type)
+#define m_expand(...)      __VA_ARGS__
+#define glue_impl(A, B)    A ## B
+#define glue(A, B)         glue_impl(A, B)
+#define tmpl(prefix, type) prefix ## _ ## type
 
-typedef __UINT8_TYPE__  def_tset(U1); 
-typedef __UINT16_TYPE__ def_tset(U2);
-typedef __UINT32_TYPE__ def_tset(U4);
-typedef __INT8_TYPE__   def_tset(S1); 
-typedef __INT16_TYPE__  def_tset(S2); 
-typedef __INT32_TYPE__  def_tset(S4);
-typedef unsigned char   def_tset(B1); 
-typedef __UINT16_TYPE__ def_tset(B2); 
-typedef __UINT32_TYPE__ def_tset(B4);
-typedef __UINT64_TYPE__ def_tset(B8);
+#define stringify_impl(S)        #S
+#define stringify(S)             stringify_impl(S)
+
+#define VA_Sel_1( _1, ... ) _1 // <-- Of all th args passed pick _1.
+#define VA_Sel_2( _1, _2, ... ) _2 // <-- Of all the args passed pick _2.
+#define VA_Sel_3( _1, _2, _3, ... ) _3 // etc..
+
+#define global static // Mark global data
+#define gknown        // Mark global data used in procedure
+
+#define LP_      static // static data within procedure scope
+#define internal static // internal
+
+#define asm           __asm__
+#define align_(value) __attribute__((aligned (value)))             // for easy alignment
+#define C_(type,data) ((type)(data))                               // for enforced precedence
+#define expect_(x, y) __builtin_expect(x, y)                       // so compiler knows the common path
+#define I_            internal inline
+#define FI_           inline   __attribute__((always_inline))      // inline always
+#define NI_           internal __attribute__((noinline))           // inline never
+#define RO_           __attribute__((section(".rodata")))          // Read only data allocation
+#define R_            restrict                                     // pointers are either restricted or volatile and nothing else 
+#define V_            volatile                                     // pointers are either restricted or volatile and nothing else
+#define T_            typeof
+#define T_same(a,b)   _Generic((a), typeof((b)): 1, default: 0)
+
+#define r_(ptr)        C_(T_(ptr[0])*R_, ptr)
+#define v_(ptr)        C_(T_(ptr[0])*V_, ptr)
+#define tr_(type, ptr) C_(type*R_, ptr)
+#define tv_(type, ptr) C_(type*V_, ptr)
+
+#define TypeR_(type)          type*restrict type ## _R
+#define TypeV_(type)          type*volatile type ## _V
+#define PtrSet_(type)         TypeR_(type); typedef TypeV_(type)
+#define TSet_(type)           type; typedef PtrSet_(type)
+
+#define array_len(a)                   (U8)(sizeof(a) / sizeof(typeof((a)[0])))
+#define array_decl(type, ...)          (type[]){__VA_ARGS__}
+#define Array_sym(type,len)            A ## len ## _ ## type
+#define Array_expand(type,len)         type Array_sym(type, len)[len]; typedef PtrSet_(Array_sym(type, len))
+#define Array_(type,len)               Array_expand(type,len)
+#define Bit_(id,b)                     id = (1 << b), tmpl(id,pos) = b
+#define Enum_(underlying_type, symbol) underlying_type TSet_(symbol); enum   symbol
+#define Proc_(symbol)                  symbol
+#define Struct_(symbol)                struct symbol   TSet_(symbol); struct symbol
+#define Union_(symbol)                 union  symbol   TSet_(symbol); union  symbol
+
+#define Opt_(proc)                    Struct_(tmpl(Opt,proc))
+#define opt_(symbol, ...)             (tmpl(Opt,symbol)){__VA_ARGS__}
+#define Ret_(proc)                    Struct_(tmpl(Ret,proc))
+#define ret_(proc)                    tmpl(Ret,proc) proc
+
+// Using Byte-Width convention for the fundamental types.
+typedef __UINT8_TYPE__  TSet_(U1); 
+typedef __UINT16_TYPE__ TSet_(U2);
+typedef __UINT32_TYPE__ TSet_(U4);
+typedef __INT8_TYPE__   TSet_(S1); 
+typedef __INT16_TYPE__  TSet_(S2); 
+typedef __INT32_TYPE__  TSet_(S4);
+typedef unsigned char   TSet_(B1); 
+typedef __UINT16_TYPE__ TSet_(B2); 
+typedef __UINT32_TYPE__ TSet_(B4);
+
+#define u1_(value)  C_(U1, value)
+#define u2_(value)  C_(U2, value)
+#define u4_(value)  C_(U4, value)
+#define s1_(value)  C_(S1, value)
+#define s2_(value)  C_(S2, value)
+#define s4_(value)  C_(S4, value)
+
+#define u1_r(value) C_(U1*R_, value)
+#define u2_r(value) C_(U2*R_, value)
+#define u4_r(value) C_(U4*R_, value)
+#define u1_v(value) C_(U1*V_, value)
+#define u2_v(value) C_(U2*V_, value)
+#define u4_v(value) C_(U4*V_, value)
 enum { false = 0, true  = 1, true_overflow, };
 
-#define u1_r(value) cast(U1_R, value)
-#define u2_r(value) cast(U2_R, value)
-#define u4_r(value) cast(U4_R, value)
-#define u1_v(value) cast(U1_V, value)
-#define u2_v(value) cast(U2_V, value)
-#define u4_v(value) cast(U4_V, value)
+typedef void Proc_(VoidFn) (void);
 
-#define u1_(value)  cast(U1, value)
-#define u2_(value)  cast(U2, value)
-#define u4_(value)  cast(U4, value)
-#define s1_(value)  cast(S1, value)
-#define s2_(value)  cast(S2, value)
-#define s4_(value)  cast(S4, value)
+#define kilo(n)         (C_(U4, n) << 10)
+#define mega(n)         (C_(U4, n) << 20)
+#define giga(n)         (C_(U4, n) << 30)
+#define tera(n)         (C_(U4, n) << 40)
+#define null             C_(U4,    0)
+#define nullptr          C_(void*, 0)
+#define O_(type,member)  C_(U4,__builtin_offsetof(type,member))
+#define S_(data)         C_(U4, sizeof(data))
 
-#define farray_len(array)                   (SSIZE)sizeof(array) / size_of( typeof((array)[0]))
-#define farray_init(type, ...)              (type[]){__VA_ARGS__}
-#define def_farray_sym(_type, _len)         A ## _len ## _ ## _type
-#define def_farray_impl(_type, _len)        _type def_farray_sym(_type, _len)[_len]; typedef def_ptr_set(def_farray_sym(_type, _len))
-#define def_farray(type, len)               def_farray_impl(type, len)
-#define def_enum(underlying_type, symbol)   underlying_type def_tset(symbol); enum   symbol
-#define def_struct(symbol)                  struct symbol   def_tset(symbol); struct symbol
-#define def_union(symbol)                   union  symbol   def_tset(symbol); union  symbol
-#define def_proc(symbol)                    symbol
-#define opt_args(symbol, ...)               &(symbol){__VA_ARGS__}
-#define ret_type(type)                      type
+#define sop_1(op,a,b) C_(U1, s1_(a) op s1_(b))
+#define sop_2(op,a,b) C_(U2, s2_(a) op s2_(b))
+#define sop_4(op,a,b) C_(U4, s4_(a) op s4_(b))
 
-#define o_(field)                           offset_of(typeof_ptr(& field), filed))
-
-#define alignas                             _Alignas
-#define alignof                             _Alignof
-#define byte_pad(amount, ...)               B1 glue(_PAD_, __VA_ARGS__) [amount]
-#define cast(type, data)                    ((type)(data))
-#define pcast(type, data)                   (cast(type*, & (data)) [0])
-#define nullptr                             cast(void*, 0)
-#define size_of(data)                       cast(U4, sizeof(data))
-
-#define r_(ptr)                             cast(typeof_ptr(ptr)*R_, ptr)
-#define v_(ptr)                             cast(typeof_ptr(ptr)*V_, ptr)
-#define tr_(type, ptr)                      cast(type*R_, ptr)
-#define tv_(type, ptr)                      cast(type*V_, ptr)
-
-#define kilo(n)                             (cast(U4, n) << 10)
-#define mega(n)                             (cast(U4, n) << 20)
-#define giga(n)                             (cast(U4, n) << 30)
-#define tera(n)                             (cast(U4, n) << 40)
-
-#define dbg_args(...)                      __VA_ARGS__
-
-#define sop_1(op, a, b) cast(U1, s1_(a) op s1_(b))
-#define sop_2(op, a, b) cast(U2, s2_(a) op s2_(b))
-#define sop_4(op, a, b) cast(U4, s4_(a) op s4_(b))
-
-#define def_signed_op(id, op, width) FI_ U ## width id ## _s ## width(U ## width a, U ## width b) {return sop_ ## width(op, a, b); }
-#define def_signed_ops(id, op)       def_signed_op(id, op, 1) def_signed_op(id, op, 2) def_signed_op(id, op, 4)
-def_signed_ops(add, +) def_signed_ops(sub, -)
-def_signed_ops(mut, *) def_signed_ops(div, /)
-def_signed_ops(gt,  >) def_signed_ops(lt,  <) 
-def_signed_ops(ge, >=) def_signed_ops(le, <=)
+#undef def_signed_op
+#define def_signed_op(id,op,width) FI_ U ## width id ## _s ## width(U ## width a, U ## width b) {return sop_ ## width(op, a, b); }
+#define def_signed_ops(id,op)      def_signed_op(id, op, 1) def_signed_op(id, op, 2) def_signed_op(id, op, 4)
+def_signed_ops(add, +)
+def_signed_ops(sub, -)
+def_signed_ops(mut, *)
+def_signed_ops(div, /)
+def_signed_ops(gt,  >)
+def_signed_ops(lt,  <) 
+def_signed_ops(ge, >=)
+def_signed_ops(le, <=)
+#undef def_signed_ops
+#undef def_signed_op
 
 #define def_generic_sop(op, a, ...) _Generic((a), U1:  op ## _s1, U2: op ## _s2, U4: op ## _s4) (a, __VA_ARGS__)
 #define add_s(a,b) def_generic_sop(add,a,b)
@@ -111,6 +129,29 @@ def_signed_ops(ge, >=) def_signed_ops(le, <=)
 #define lt_s(a,b)  def_generic_sop(lt, a,b)
 #define ge_s(a,b)  def_generic_sop(ge, a,b)
 #define le_s(a,b)  def_generic_sop(le, a,b)
+#undef def_generic_sop
+
+#define o_(field)                           offset_of(typeof_ptr(& field), filed))
+
+#define alignas                             _Alignas
+#define alignof                             _Alignof
+#define byte_pad(amount, ...)               B1 glue(_PAD_, __VA_ARGS__) [amount]
+#define pcast(type, data)                   (C_(type*, & (data)) [0])
+
+#define dbg_args(...)                      __VA_ARGS__
+
+#pragma region Control Flow & Iteration
+#define each_iter(type, iter, end)             (type iter = 0; iter < end; ++ iter)
+#define index_iter(type, iter, begin, op, end) (type iter = begin; iter op end; (begin < end ? ++ iter : -- iter))
+#define range_iter(iter,op,range)              (T_((range).p0) iter = (range).p0; iter op (range).p1; ((range).p0 < (range).p1 ? ++ iter : -- iter))
+
+#define defer(expr)                for(U4         once= 1;                  once!=1;++     once,(expr))    // Basic do something after body
+#define scope(begin,end)           for(U4         once=(1,(begin));         once!=1;++     once,(end ))    // Do things before or after a scope
+#define defer_rewind(cursor)       for(T_(cursor) sp=cursor,once=0;         once!=1;++     once,cursor=sp) // Used with arenas/stacks
+#define defer_info(type,expr, ...) for(type       info= {__VA_ARGS__}; info.once!=1;++info.once,(expr))    // Defer with tracked state
+
+#define do_while(cond) for (U8 once=0; once!=1 || (cond); ++once)
+#pragma endregion Control Flow & Iteration
 
 #define span_iter(type, iter, m_begin, op, m_end) ( \
 	tmpl(Iter_Span,type) iter = {     \
@@ -119,44 +160,20 @@ def_signed_ops(ge, >=) def_signed_ops(le, <=)
 	iter.cursor op iter.r.end;        \
 	++ iter.cursor                    \
 )
-#define def_span(type)                                                \
-	        def_struct(tmpl(     Span,type)) { type begin; type end; }; \
-	typedef def_struct(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
+#define Span_(type)                                                \
+	        Struct_(tmpl(     Span,type)) { type begin; type end; }; \
+	typedef Struct_(tmpl(Iter_Span,type)) { tmpl(Span,type) r; type cursor; }
 
-typedef def_span(S4);
-typedef def_span(U4);
+typedef Span_(S4);
+typedef Span_(U4);
 
-typedef void def_proc(VoidFn) (void);
-
-typedef unsigned char def_tset(UTF8);
-typedef def_struct(Str8)       { UTF8* ptr; U4 len; }; typedef Str8 def_tset(Slice_UTF8);
-typedef def_struct(Slice_Str8) { Str8* ptr; U4 len; };
-#define txt(string_literal)    (Str8){ (UTF8*) string_literal, size_of(string_literal) - 1 }
-
-#define def_Slice(type)           def_struct(tmpl(Slice,type)) { type* ptr; U4 len; }
-#define slice_assert(slice)       do { assert((slice).ptr != nullptr); assert((slice).len > 0); } while(0)
-#define slice_end(slice)          ((slice).ptr + (slice).len)
-#define size_of_slice_type(slice) size_of((slice).ptr[0])
-
-typedef def_Slice(void);
-typedef def_Slice(B1);
-#define slice_byte(slice) ((Slice_B1){cast(B1*, (slice).ptr), (slice).len * size_of_slice_type(slice)})
-#define slice_fmem(mem)   ((Slice_B1){ mem, size_of(mem) })
-
-void slice__copy(Slice_B1 dest, U4 dest_typewidth, Slice_B1 src, U4 src_typewidth);
-void slice__zero(Slice_B1 mem, U4 typewidth);
-#define slice_copy(dest, src) do {       \
-	static_assert(typeof_same(dest, src)); \
-	slice__copy(slice_byte(dest),  size_of_slice_type(dest), slice_byte(src), size_of_slice_type(src)); \
-} while (0)
-#define slice_zero(slice) slice__zero(slice_byte(slice), size_of_slice_type(slice))
-
-#define slice_iter(container, iter) (             \
-	typeof((container).ptr) iter = (container).ptr; \
-	iter != slice_end(container);                   \
-	++ iter                                         \
-)
-#define slice_from_farray(type, ...) & (tmpl(Slice,type)) { \
-	.ptr = farray_init(type, __VA_ARGS__),             \
-	.len = farray_len( farray_init(type, __VA_ARGS__)) \
-}
+#if 0
+#pragma region Debug
+#define debug_trap() __builtin_debugtrap()
+#if BUILD_DEBUG
+IA_ void assert(U8 cond) { if(cond){return;} else{debug_trap(); ms_exit_process(1);} }
+#else
+#define assert(cond)
+#endif
+#pragma endregion Debug
+#endif

@@ -17,21 +17,21 @@ enum {
 };
 
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
-typedef def_farray(OrderingTable_Buffer, 2);
+typedef Array_(OrderingTable_Buffer, 2);
 
 typedef B1 PrimitiveBuffer[PrimitiveBuff_Len];
-typedef def_farray(PrimitiveBuffer, 2);
-typedef def_struct(PrimitiveArena) {
+typedef Array_(PrimitiveBuffer, 2);
+typedef Struct_(PrimitiveArena) {
 	A2_PrimitiveBuffer buf;
 	U4                 used;
 };
 
 #define Cube_num_verts 8
-typedef def_farray(V3_S2, Cube_num_verts);
+typedef Array_(V3_S2, Cube_num_verts);
 #define Cube_num_faces 6
-typedef def_farray(V4_S2, Cube_num_faces);
-void ent_cube128_init(A8_V3_S2* verts, A6_V4_S2* faces) {
-	memory_copy(verts, & (A8_V3_S2) {
+typedef Array_(V4_S2, Cube_num_faces);
+I_ void ent_cube128_init(A8_V3_S2* verts, A6_V4_S2* faces) {
+	LP_ A8_V3_S2 baked_verts = (A8_V3_S2) {
 		{ -128, -128, -128 },
 		{  128, -128, -128 },
 		{  128, -128,  128 },
@@ -40,18 +40,20 @@ void ent_cube128_init(A8_V3_S2* verts, A6_V4_S2* faces) {
 		{  128,  128, -128 },
 		{  128,  128,  128 },
 		{ -128,  128,  128 }
-	}, size_of(A8_V3_S2) );
-	memory_copy(faces, & (A6_V4_S2) {
+	};
+	LP_ A6_V4_S2 baked_faces = (A6_V4_S2) {
 		{ 3, 2, 0, 1 },
 		{ 0, 1, 4, 5 },
 		{ 4, 5, 7, 6 },
 		{ 1, 2, 5, 6 },
 		{ 2, 3, 6, 7 },
 		{ 3, 0, 7, 4 },
-	}, size_of(A6_V4_S2) );
+	};
+	mem_copy(u4_(verts), u4_(& baked_verts), S_(A8_V3_S2) );
+	mem_copy(u4_(faces), u4_(& baked_faces), S_(A6_V4_S2) );
 	return;
 }
-typedef def_struct(Ent_Cube) {
+typedef Struct_(Ent_Cube) {
 	V3_S4 accel;
 	V3_S4 vel;
 	V3_S4 pos;
@@ -62,22 +64,24 @@ typedef def_struct(Ent_Cube) {
 };
 
 #define Floor_num_verts 4
-typedef def_farray(V3_S2, Floor_num_verts);
+typedef Array_(V3_S2, Floor_num_verts);
 #define Floor_num_faces 2
-typedef def_farray(V3_S2, Floor_num_faces);
-void ent_floor_init(A4_V3_S2* verts, A2_V3_S2* faces) {
-	memory_copy(verts, &(A4_V3_S2) {
+typedef Array_(V3_S2, Floor_num_faces);
+I_ void ent_floor_init(A4_V3_S2* verts, A2_V3_S2* faces) {
+	LP_ A4_V3_S2 baked_verts = (A4_V3_S2) {
 		{ -900, 0, -900 },
 		{ -900, 0,  900 },
 		{  900, 0, -900 },
 		{  900, 0,  900 },
-	}, size_of(A8_V3_S2));
-	memory_copy(faces, & (A2_V3_S2) {
+	};
+	LP_ A2_V3_S2 baked_faces = (A2_V3_S2) {
 		{ 0, 1, 2 },
 		{ 1, 3, 2 },
-	}, size_of(A2_V3_S2));
+	};
+	mem_copy(u4_(verts), u4_(& baked_verts), S_(A4_V3_S2));
+	mem_copy(u4_(faces), u4_(& baked_faces), S_(A2_V3_S2));
 };
-typedef def_struct(Ent_Floor) {
+typedef Struct_(Ent_Floor) {
 	V3_S4 accel;
 	V3_S4 pos;
 	V3_S4 scale;
@@ -86,7 +90,7 @@ typedef def_struct(Ent_Floor) {
 	A2_V3_S2 faces;
 };
 
-typedef def_struct(SMemory) {
+typedef Struct_(SMemory) {
 	DoubleBuffer            screen_buf;
 	A2_OrderingTable_Buffer ordering_tbl;
 	PrimitiveArena          primitives;
@@ -100,7 +104,7 @@ typedef def_struct(SMemory) {
 global SMemory static_mem;
 extern SMemory static_mem;
 
-B1* prim__alloc(U4 type_width, Str8 type_name) {
+I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 	gknown PrimitiveArena* pa  = & static_mem.primitives;
 	gknown B1*             buf = (B1*) r_(static_mem.primitives.buf)[static_mem.active_buf_id];
 	assert(pa->used + type_width < PrimitiveBuff_Len);
@@ -108,7 +112,7 @@ B1* prim__alloc(U4 type_width, Str8 type_name) {
 	pa->used += type_width;
 	return next;
 }
-#define prim_alloc(type) (type*)prim__alloc(size_of(type), txt( stringify(type)))
+#define prim_alloc(type) (type*)prim__alloc(S_(type), txt( stringify(type)))
 
 void gp_screen_init_c11(DoubleBuffer* screen_buf, S2* active_buf_id)
 {

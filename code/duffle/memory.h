@@ -3,6 +3,13 @@
 #	include "dsl.h"
 #endif
 
+#define MEM_ALIGNMENT_DEFAULT  (2 * S_(void*))
+
+#define assert_bounds(point, start, end) for(;0;){ \
+	assert((start) <= (point)); \
+	assert((point) <= (end));   \
+} while(0)
+
 inline U4 align_pow2(U4 x, U4 b) {
     assert(b != 0);
     assert((b & (b - 1)) == 0);  // Check power of 2
@@ -11,17 +18,17 @@ inline U4 align_pow2(U4 x, U4 b) {
 
 #define align_struct(type_width) ((U4)(((type_width) + 3) & ~3))
 
-#define assert_bounds(point, start, end) do { \
-	U4 pos_point = cast(U4, point); \
-	U4 pos_start = cast(U4, start); \
-	U4 pos_end   = cast(U4, end);   \
-	assert(pos_start <= pos_point); \
-	assert(pos_point <= pos_end);   \
-} while(0)
+FI_ void mem_bump(U4 start, U4 cap, U4*R_ used, U4 amount) {
+	assert(amount <= (cap - used[0])); 
+	used[0] += amount; 
+}
 
-void* memory_copy            (void* restrict dest, void const* restrict src, U4 length) __asm__("memcpy");
-void* memory_copy_overlapping(void* restrict dest, void const* restrict src, U4 length);
-B4    memory_zero            (void* dest, U4 length);
+FI_ U4 mem_copy            (U4 dest, U4 src,   U4 len) { return (U4)(__builtin_memcpy ((void*)dest, (void const*)src,   len)); }
+FI_ U4 mem_copy_overlapping(U4 dest, U4 src,   U4 len) { return (U4)(__builtin_memmove((void*)dest, (void const*)src,   len)); }
+FI_ U4 mem_fill            (U4 dest, U4 value, U4 len) { return (U4)(__builtin_memset ((void*)dest, (int)        value, len)); }
+FI_ B4 mem_zero            (U4 dest,           U4 len) { if(dest == 0){return false;} mem_fill(dest, 0, len); return true; }
+
+#pragma region DAG
 
 #define check_nil(nil, p) ((p) == 0 || (p) == nil)
 #define set_nil(nil, p)   ((p) = nil)
@@ -42,101 +49,70 @@ B4    memory_zero            (void* dest, U4 length);
 )
 #define sll_queue_push_n(f, l, n, next) sll_queue_push_nz(0, f, l, n, next)
 
-#pragma region Allocator Interface
-#if 0
-typedef def_enum(U4, AllocatorOp) {
-	AllocatorOp_Alloc_NoZero = 0, // If Alloc exist, so must No_Zero
-	AllocatorOp_Alloc,
-	AllocatorOp_Free,
-	AllocatorOp_Reset,
-	AllocatorOp_Grow_NoZero,
-	AllocatorOp_Grow,
-	AllocatorOp_Shrink,
-	AllocatorOp_Rewind,
-	AllocatorOp_SavePoint,
-	AllocatorOp_Query, // Must always be implemented
-};
-typedef def_enum(U4, AllocatorQueryFlags) {
-	AllocatorQuery_Alloc        = (1 << 0),
-	AllocatorQuery_Free         = (1 << 1),
-	// Wipe the allocator's state
-	AllocatorQuery_Reset        = (1 << 2),
-	// Supports both grow and shrink
-	AllocatorQuery_Shrink       = (1 << 4),
-	AllocatorQuery_Grow         = (1 << 5),
-	AllocatorQuery_Resize       = AllocatorQuery_Grow | AllocatorQuery_Shrink,
-	// Ability to rewind to a save point (ex: arenas, stack), must also be able to save such a point
-	AllocatorQuery_Rewind       = (1 << 6),
-};
-typedef struct AllocatorProc_In  AllocatorProc_In;
-typedef struct AllocatorProc_Out AllocatorProc_Out;
-typedef void def_proc(AllocatorProc) (AllocatorProc_In In, AllocatorProc_Out* Out);
-typedef def_struct(AllocatorSP) {
-	AllocatorProc* type_sig;
-	U4             slot;
-};
-struct AllocatorProc_In {
-	void*          data;
-	U4             requested_size;
-	U4             alignment;
-	union {
-		Slice_B1     old_allocation;
-		AllocatorSP  save_point;
-	};
-	AllocatorOp    op;
-	byte_pad(4);
-};
-struct AllocatorProc_Out {
-	union {
-		Slice_B1    allocation;
-		AllocatorSP save_point;
-	};
-	AllocatorQueryFlags features;
-	U4                  left; // Contiguous memory left
-	U4                  max_alloc;
-	U4                  min_alloc;
-	// byte_pad(8);
-};
-typedef def_struct(AllocatorInfo) {
-	AllocatorProc* proc;
-	void*          data;
-};
-static_assert(size_of(AllocatorSP) <= size_of(Slice_B1));
-typedef def_struct(AllocatorQueryInfo) {
-	AllocatorSP         save_point;
-	AllocatorQueryFlags features;
-	U4                  left; // Contiguous memory left
-	U4                  max_alloc;
-	U4                  min_alloc;
-	// byte_pad(4);
-};
-static_assert(size_of(AllocatorProc_Out) == size_of(AllocatorQueryInfo));
+#pragma endregion DAG
 
-#define MEMORY_ALIGNMENT_DEFAULT (2 * size_of(void*))
+#pragma region Slice
 
-AllocatorQueryInfo allocator_query(AllocatorInfo ainfo);
+typedef unsigned char UTF8;
+typedef Struct_(Str8)       { UTF8* ptr; U4 len; };
+typedef Struct_(Slice_Str8) { Str8* ptr; U4 len; };
+#define txt(string_literal) (Str8){ (UTF8*) string_literal, S_(string_literal) - 1 }
 
-void        mem_free      (AllocatorInfo ainfo, Slice_B1 mem);
-void        mem_reset     (AllocatorInfo ainfo);
-void        mem_rewind    (AllocatorInfo ainfo, AllocatorSP save_point);
-AllocatorSP mem_save_point(AllocatorInfo ainfo);
+typedef Struct_(Slice) { U4 ptr, len; }; // Untyped Slice
+FI_ Slice slice_ut_(U4 ptr, U4 len) { return (Slice){ptr, len}; }
 
-typedef def_struct(Opts_mem_alloc)  { U4 alignment; B4 no_zero; byte_pad(4); };
-typedef def_struct(Opts_mem_grow)   { U4 alignment; B4 no_zero; byte_pad(4); };
-typedef def_struct(Opts_mem_shrink) { U4 alignment; };
-typedef def_struct(Opts_mem_resize) { U4 alignment; B4 no_zero; byte_pad(4); };
+#define Slice_(type)        Struct_(tmpl(Slice,type)) { type* ptr; U4 len; }
+typedef Slice_(B1);
+#define slice_assert(s)    do { assert((s).ptr != 0); assert((s).len > 0); } while(0)
+#define slice_end(slice)   ((slice).ptr + (slice).len)
+#define S_slice(s)         ((s).len * S_((s).ptr[0]))
 
-Slice_B1 mem__alloc (AllocatorInfo ainfo,               U4 size, Opts_mem_alloc*  opts);
-Slice_B1 mem__grow  (AllocatorInfo ainfo, Slice_B1 mem, U4 size, Opts_mem_grow*   opts);
-Slice_B1 mem__resize(AllocatorInfo ainfo, Slice_B1 mem, U4 size, Opts_mem_resize* opts);
-Slice_B1 mem__shrink(AllocatorInfo ainfo, Slice_B1 mem, U4 size, Opts_mem_shrink* opts);
+#define slice_ut(ptr,len)  slice_ut_(u4_(ptr), u4_(len))
+#define slice_ut_arr(a)    slice_ut_(u4_(a),   S_(a))
+#define slice_to_ut(s)     slice_ut_(u4_((s).ptr), S_slice(s))
 
-#define mem_alloc(ainfo, size, ...)       mem__alloc (ainfo,      size, opt_args(Opts_mem_alloc,  __VA_ARGS__))
-#define mem_grow(ainfo,   mem, size, ...) mem__grow  (ainfo, mem, size, opt_args(Opts_mem_grow,   __VA_ARGS__))
-#define mem_resize(ainfo, mem, size, ...) mem__resize(ainfo, mem, size, opt_args(Opts_mem_resize, __VA_ARGS__))
-#define mem_shrink(ainfo, mem, size, ...) mem__shrink(ainfo, mem, size, opt_args(Opts_mem_shrink, __VA_ARGS__))
+#define slice_iter(container, iter)     (T_((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter)
+#define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = array_decl(type,__VA_ARGS__), .len = array_len( array_decl(type,__VA_ARGS__)) }
 
-#define alloc_type(ainfo, type, ...)       (type*)             mem__alloc(ainfo, size_of(type),        opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr
-#define alloc_slice(ainfo, type, num, ...) (tmpl(Slice,type)){ mem__alloc(ainfo, size_of(type) * num,  opt_args(Opts_mem_alloc, __VA_ARGS__)).ptr, num }
-#endif
-#pragma endregion Allocator Interface
+FI_ void slice_zero_(Slice s) { slice_assert(s); mem_zero(s.ptr, s.len); }
+#define  slice_zero(s)        slice_zero_(slice_to_ut(s))
+
+FI_ void slice_copy_(Slice dest, Slice src) {
+	assert(dest.len >= src.len);
+	slice_assert(dest);
+	slice_assert(src);
+	mem_copy(dest.ptr, src.ptr, src.len);
+}
+#define slice_copy(dest, src) do {  \
+	static_assert(T_same(dest, src)); \
+	slice_copy_(slice_to_ut(dest), slice_to_ut(src)); \
+} while(0)
+
+#pragma endregion Slice
+
+#pragma region FArena
+typedef Opt_(farena)    { U4 alignment, type_width; };
+typedef Struct_(FArena) { U4 start, capacity, used; };
+FI_ void farena_init(FArena_R arena, Slice mem) {  assert(arena != nullptr);
+	arena->start    = mem.ptr;
+	arena->capacity = mem.len;
+	arena->used     = 0;
+}
+FI_ FArena farena_make(Slice mem) { FArena a; farena_init(& a, mem); return a; }
+I_ Slice farena_push(FArena_R arena, U4 amount, Opt_farena o) {
+	if (amount == 0) { return (Slice){}; }
+	U4 desired   = amount * (o.type_width == 0 ? 1 : o.type_width);
+	U4 to_commit = align_pow2(desired, o.alignment ?  o.alignment : MEM_ALIGNMENT_DEFAULT);
+	mem_bump(arena->start, arena->capacity, & arena->used, to_commit);
+	return (Slice){ arena->start + arena->used, to_commit };
+}
+FI_ void farena_reset(FArena_R arena) { arena->used = 0; }
+FI_ void farena_rewind(FArena_R arena, U4 save_point) {
+	U4 end       = arena->start + arena->used; assert_bounds(save_point, arena->start, end);
+	arena->used -= save_point - arena->start;
+}
+FI_ U4 farena_save(FArena arena) { return arena.used; }
+#define farena_push_(arena, amount, ...)                                          farena_push((arena), (amount), opt_(farena, __VA_ARGS__))
+#define farena_push_type(arena, type, ...)                              C_(type*, farena_push((arena), 1,        opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr)
+#define farena_push_array(arena, type, amount, ...) (tmpl(Slice,type)){ C_(type*, farena_push((arena), (amount), opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr), (amount) }
+#pragma endregion FArena

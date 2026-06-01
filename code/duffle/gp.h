@@ -4,7 +4,7 @@
 #	include "math.h"
 #endif
 
-typedef def_enum(U4, gp_Commands) {
+typedef Enum_(U4, gp_Commands) {
 	gcmd_Reset       = 0b000,
 	gcmd_Polygon     = 0b001,
 	gcmd_Line        = 0b010,
@@ -75,8 +75,8 @@ enum {
 	gp_SetArea_BottomRight = (gcmd_SetDrawArea_BotRight << gcmd_offset),
 };
 
-typedef def_struct(RGB8) { B1 r; B1 g; B1 b; };
-#define rgb8(r, g, b)    (RGB8){ r, g, b }
+typedef Struct_(RGB8) { B1 r; B1 g; B1 b; };
+#define rgb8(r, g, b) (RGB8){ r, g, b }
 
 typedef B1 gp_Pixel16[1];
 typedef B1 gp_Pixel24[3];
@@ -88,10 +88,35 @@ enum {
 	gp_b16_Y = 16,
 };
 
-typedef def_struct(gp_Vec2) { U2 y; U2 x; };
+typedef Struct_(gp_Vec2) { U2 y; U2 x; };
 
 #if 1
 void gp_screen_init(void) __asm__("gp_screen_init_asm");
 #else
 #define gp_screen_init() gp_screen_init_c11()
 #endif
+
+
+
+// TODO REVIEW:
+
+/* --- GPU Command Semantics (GP0) --- */
+
+#define GPU_CMD_CLEAR_CACHE 0x01
+#define GPU_CMD_VRAM_FILL   0x02
+#define GPU_CMD_VRAM_COPY   0x80
+#define GPU_CMD_VRAM_READ   0xC0
+#define GPU_CMD_POLY_F3     0x20 /* Flat Triangle */
+#define GPU_CMD_POLY_FT3    0x24 /* Flat Textured Triangle */
+#define GPU_CMD_POLY_G3     0x30 /* Gouraud Triangle */
+#define GPU_CMD_POLY_GT3    0x34 /* Gouraud Textured Triangle */
+#define GPU_CMD_POLY_F4     0x28 /* Flat Quad */
+#define GPU_CMD_POLY_FT4    0x2C /* Flat Textured Quad */
+#define GPU_CMD_POLY_G4     0x38 /* Gouraud Quad */
+#define GPU_CMD_POLY_GT4    0x3C /* Gouraud Textured Quad */
+
+/* --- Hardware MMIO Addresses --- */
+
+#define HW_GP0_ADDR       0x1F801810 /* GPU Data Port */
+#define HW_GP1_ADDR       0x1F801814 /* GPU Status/Control Port */
+
