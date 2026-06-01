@@ -293,8 +293,8 @@ function build-graphis_hello {
 	$compile_args += $f_debug
 	# $compile_args += $f_optimize_none
 	# $compile_args += $f_optimize_intrinsics
-	# $compile_args += $f_optimize_size
-	$compile_args += $f_optimize_debug
+	$compile_args += $f_optimize_size
+	# $compile_args += $f_optimize_debug
 	$compile_args += ($f_include + $path_code)
 	compile-unit $src_c $module_c $includes $compile_args
 

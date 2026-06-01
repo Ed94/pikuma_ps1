@@ -37,49 +37,43 @@ enum {
 	gpio_port_0 = 0x1810,
 	gpio_port_1 = 0x1814,
 
-	gmcd_offset = 24,
+	gcmd_offset = 24,
 
-	gp_Reset = (gcmd_Reset << gmcd_offset),
+	gp_Reset = (gcmd_Reset << gcmd_offset),
+
+	gp_DisplayEnabled  = (gcmd_DisplayEnable << gcmd_offset | 0x0),
+	gp_DisplayDisabled = (gcmd_DisplayEnable << gcmd_offset | 0x1),
+
+	gp_DMA_FIFO       = 1,
+	gp_DMA_CPU_to_GPU = 2,
+	gp_DMA_GPU_to_CPU = 3,
+	gp_DMA_Request    = (gcmd_DMA_Request << gcmd_offset),
+
+	gp_HorizontalDisplayRange_3168_608 = (gcmd_HorizontalDisplayRange << gcmd_offset | 0xC60 << 12 | 0x260),
+
+	gp_VerticalDiplayRange         = (gcmd_VerticalDisplayRange << gcmd_offset),
+	gp_VerticalDisplayRange_264_24 = (gp_VerticalDiplayRange | 264 << 10 | 24),
+	gp_VerticalDisplayRange_504_24 = (gp_VerticalDiplayRange | 504 << 10 | 24),
+
+	gp_DisplayMode                    = (gcmd_DisplayMode << gcmd_offset),
+	gp_Disp_HRes_256                  = (0x0),
+	gp_Disp_HRes_320                  = (0x1),
+	gp_Disp_HRes_512                  = (0x2),
+	gp_Disp_HRes_640                  = (0x3),
+	gp_Disp_VRes_240                  = (0x0 << 2),
+	gp_Disp_VRes_480                  = (0x1 << 2),
+	gp_Disp_Color15                   = (0x0 << 4),
+	gp_Disp_Color24                   = (0x1 << 4),
+	gp_Disp_VInterlace                = (0x1 << 5),
+	gp_DisplayMode_320x240_15bit_NTSC = (gp_DisplayMode | gp_Disp_HRes_320 | gp_Disp_VRes_240 | gp_Disp_Color15),
+	gp_DisplayMOde_640x480_24bbp_NTSC = (gp_DisplayMode | gp_Disp_HRes_640 | gp_Disp_VRes_480 | gp_Disp_Color24 | gp_Disp_VInterlace),
+	
+	gp_DrawMode_DrawAllowed    = 10,
+	gp_SetDrawMode_DrawAllowed = (gcmd_SetDrawMode << gcmd_offset | 0x1 << gp_DrawMode_DrawAllowed),
+
+	gp_SetArea_TopLeft     = (gcmd_SetDrawArea_TopLeft  << gcmd_offset),
+	gp_SetArea_BottomRight = (gcmd_SetDrawArea_BotRight << gcmd_offset),
 };
-// #define gpio_port0 0x1810
-// #define gpio_port1 0x1814
-
-// #define gcmd_offset 24
-
-// #define gp_Reset (gcmd_Reset << gcmd_offset)
-
-#define gp_DisplayEnabled  (gcmd_DisplayEnable << gcmd_offset | 0x0)
-#define gp_DisplayDisabled (gcmd_DisplayEnable << gcmd_offset | 0x1)
-
-#define gp_DMA_FIFO       1
-#define gp_DMA_CPU_to_GPU 2
-#define gp_DMA_GPU_to_CPU 3
-#define gp_DMA_Request    (gcmd_DMA_Request << gcmd_offset)
-
-#define gp_HorizontalDisplayRange_3168_608 (gcmd_HorizontalDisplayRange << gcmd_offset | 0xC60 << 12 | 0x260)
-
-#define gp_VerticalDiplayRange         (gcmd_VerticalDisplayRange << gcmd_offset)
-#define gp_VerticalDisplayRange_264_24 (gp_VerticalDiplayRange | 264 << 10 | 24)
-#define gp_VerticalDisplayRange_504_24 (gp_VerticalDiplayRange | 504 << 10 | 24)
-
-#define gp_DisplayMode     (gcmd_DisplayMode << gcmd_offset)
-#define gp_Disp_HRes_256   (0x0)
-#define gp_Disp_HRes_320   (0x1)
-#define gp_Disp_HRes_512   (0x2)
-#define gp_Disp_HRes_640   (0x3)
-#define gp_Disp_VRes_240   (0x0 << 2)
-#define gp_Disp_VRes_480   (0x1 << 2)
-#define gp_Disp_Color15    (0x0 << 4)
-#define gp_Disp_Color24    (0x1 << 4)
-#define gp_Disp_VInterlace (0x1 << 5)
-#define gp_DisplayMode_320x240_15bit_NTSC (gp_DisplayMode | gp_Disp_HRes_320 | gp_Disp_VRes_240 | gp_Disp_Color15)
-#define gp_DisplayMOde_640x480_24bbp_NTSC (gp_DisplayMode | gp_Disp_HRes_640 | gp_Disp_VRes_480 | gp_Disp_Color24 | gp_Disp_VInterlace)
-
-#define gp_DrawMode_DrawAllowed 10
-#define gp_SetDrawMode_DrawAllowed (gcmd_SetDrawMode << gcmd_offset | 0x1 << gp_DrawMode_DrawAllowed)
-
-#define gp_SetArea_TopLeft     (gcmd_SetDrawArea_TopLeft  << gcmd_offset)
-#define gp_SetArea_BottomRight (gcmd_SetDrawArea_BotRight << gcmd_offset)
 
 typedef def_struct(RGB8) { B1 r; B1 g; B1 b; };
 #define rgb8(r, g, b)    (RGB8){ r, g, b }
@@ -87,10 +81,12 @@ typedef def_struct(RGB8) { B1 r; B1 g; B1 b; };
 typedef B1 gp_Pixel16[1];
 typedef B1 gp_Pixel24[3];
 
-#define gp_b10_X 0
-#define gp_b10_Y 10
-#define gp_b16_X 0
-#define gp_b16_Y 16 
+enum {
+	gp_b10_X = 0,
+	gp_b10_Y = 10,
+	gp_b16_X = 0,
+	gp_b16_Y = 16,
+};
 
 typedef def_struct(gp_Vec2) { U2 y; U2 x; };
 

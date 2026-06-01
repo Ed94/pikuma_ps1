@@ -1,0 +1,8 @@
+{
+  "configureme": false,
+  "enabled": true,
+  "hardPix": 1.5,
+  "hardScan": 4.5,
+  "scanlines": true,
+  "useSrgb": false
+}

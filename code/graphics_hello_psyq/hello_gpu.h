@@ -34,7 +34,7 @@ typedef def_struct(DoubleBuffer) {
 
 #define ScreenRes_X 320
 #define ScreenRes_Y 240
-#define ScreenZ     400
+#define ScreenZ     320
 #define ScreenRes_CenterX (ScreenRes_X >> 1)
 #define ScreenRes_CenterY (ScreenRes_Y >> 1)
 
@@ -106,6 +106,58 @@ typedef def_struct(PolyTag) {
 // #define setLineF4(p)	set_len(p, 6),  set_code(p, 0x4c),(p)->pad = 0x55555555
 // #define setLineG4(p)	set_len(p, 9),  set_code(p, 0x5c),(p)->pad = 0x55555555, (p)->p2 = 0, (p)->p3 = 0
 
+typedef def_struct(Poly_F3) {
+	U4   tag;
+	RGB8 color;
+	B1   code;
+	union {
+		struct {
+			V2_S2 p0;
+			V2_S2 p1;
+			V2_S2 p2;
+		};
+		A3_V2_S2 points;
+	};
+};
+
+typedef def_struct(Poly_G3) {
+	U4    tag; RGB8 c0; B1 code;
+	V2_S2 p0;  RGB8 c1; B1 pad1;
+	V2_S2 p1;  RGB8 c2; B1 pad2;
+	V2_S2 p2;
+};
+
+typedef def_struct(Poly_F4) {
+	U4   tag;
+	RGB8 color;
+	B1   code;
+	union {
+		struct {
+			V2_S2 p0;
+			V2_S2 p1;
+			V2_S2 p2;
+			V2_S2 p3;
+		};
+		A4_V2_S2 points;
+	};
+};
+
+typedef def_struct(Poly_G4) {
+	U4    tag; RGB8 c0; B1 code;
+	V2_S2 p0;  RGB8 c1; B1 pad1;
+	V2_S2 p1;  RGB8 c2; B1 pad2;
+	V2_S2 p2;  RGB8 c3; B1 pad3;
+	V2_S2 p3;
+};
+
+typedef def_struct(Tile) {
+	U4      tag;
+	RGB8    color;
+	B1      code;
+	Rect_S2 rect;
+};
+
+
 /*
 	Linear Algebra
 */
@@ -151,3 +203,5 @@ void gte_matrix_set_translation(M3_S2* mat) __asm__("SetTransMatrix");
 enum {
 	fp_one = (1 << 12),
 };
+
+#define v3s4_fp_one() v3s4(fp_one, fp_one, fp_one)
