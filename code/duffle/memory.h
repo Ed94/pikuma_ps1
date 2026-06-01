@@ -91,6 +91,7 @@ FI_ void slice_copy_(Slice dest, Slice src) {
 #pragma endregion Slice
 
 #pragma region FArena
+
 typedef Opt_(farena)    { U4 alignment, type_width; };
 typedef Struct_(FArena) { U4 start, capacity, used; };
 FI_ void farena_init(FArena_R arena, Slice mem) {  assert(arena != nullptr);
@@ -115,4 +116,5 @@ FI_ U4 farena_save(FArena arena) { return arena.used; }
 #define farena_push_(arena, amount, ...)                                          farena_push((arena), (amount), opt_(farena, __VA_ARGS__))
 #define farena_push_type(arena, type, ...)                              C_(type*, farena_push((arena), 1,        opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr)
 #define farena_push_array(arena, type, amount, ...) (tmpl(Slice,type)){ C_(type*, farena_push((arena), (amount), opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr), (amount) }
+
 #pragma endregion FArena
