@@ -17,8 +17,6 @@ enum {
 	C2_RGB0 = 20, C2_RGB1 = 21, C2_RGB2 = 22, C2_RES1 = 23,
 	C2_MAC0 = 24, C2_MAC1 = 25, C2_MAC2 = 26, C2_MAC3 = 27,
 	C2_IRGB = 28, C2_ORGB = 29, C2_LZCS = 30, C2_LZCR = 31
-
-
 };
 
 /* Semantic Aliases for GTE Data Registers */
@@ -83,24 +81,124 @@ enum {
 	gte_cmd_nclip     = 0x06, /* Normal Clipping (Backface culling) */
 	gte_cmd_op        = 0x0C, /* Outer Product */
 	gte_cmd_mvmva     = 0x12, /* Matrix Vector Multiply & Add (Custom math) */
+
+/* --- GTE Command Bit-Field Layout ---
+ * A GTE command word (sent to COP2 with RS=1) is laid out as:
+ *
+ *   31........25 24 23..19 18..17 16..15 14..13 12..11 10  9.......6  5.......0
+ *   +------------+--+-----+------+------+------+------+---+--------+----------+
+ *   |  0x3E (COP2)| 1|  -- |  sf  |  mx  |  v   |  cv  | --|  lm  |  -- |  cmd  |
+ *   +------------+--+-----+------+------+------+------+---+--------+----------+
+ *                                    \_____ GTE_PAYLOAD _____/       \__ GTE_CMD __/
+ *
+ * Shifts/masks below are the *bit positions* and *bit widths* of each
+ * configurable field, used by the ENC_GTE_CMD encoder. Mirrors the
+ * OPCODE_SHIFT / RS_SHIFT convention used in mips.h.
+ */
+
+	gte_shift_sf  = 19,  gte_width_sf  = 1,  gte_mask_sf  = 0x1,
+	gte_shift_mx  = 17,  gte_width_mx  = 2,  gte_mask_mx  = 0x3,
+	gte_shift_v   = 15,  gte_width_v   = 2,  gte_mask_v   = 0x3,
+	gte_shift_cv  = 13,  gte_width_cv  = 2,  gte_mask_cv  = 0x3,
+	gte_shift_lm  = 10,  gte_width_lm  = 1,  gte_mask_lm  = 0x1,
+	gte_shift_cmd =  0,  gte_width_cmd = 6,  gte_mask_cmd = 0x3F,
 };
 
-/* COP2 (GTE) Transfer Format 
+/* --- GTE Control Register Indices (for ctc2/cfc2) --- */
+
+enum {
+    gte_cr_RT11 = 0,  gte_cr_RT12 = 1,  gte_cr_RT13 = 2,
+    gte_cr_RT21 = 3,  gte_cr_RT22 = 4,  gte_cr_RT23 = 5,
+    gte_cr_RT31 = 6,  gte_cr_RT32 = 7,  gte_cr_RT33 = 8,
+    gte_cr_TRX  = 9,  gte_cr_TRY  = 10, gte_cr_TRZ  = 11,
+    gte_cr_L11  = 12, gte_cr_L12  = 13, gte_cr_L13  = 14,
+    gte_cr_L21  = 15, gte_cr_L22  = 16, gte_cr_L23  = 17,
+    gte_cr_LR1  = 18, gte_cr_LR2  = 19, gte_cr_LR3  = 20,
+    gte_cr_RBK  = 24, gte_cr_GBK  = 25, gte_cr_BBK  = 26,
+    gte_cr_RFC  = 27, gte_cr_GFC  = 28, gte_cr_BFC  = 29,
+    gte_cr_OFX  = 30, gte_cr_OFY  = 31,
+};
+
+/* COP2 (GTE) Transfer Format
  * Opcode is always op_cop2. The 'sub' field determines direction (MT/MF). */
 #define enc_cop2_tx(sub, rt, rd) enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd)
 
-/* GTE Command Format (The math engine trigger) 
+/* GTE Command Format (The math engine trigger)
  * Opcode is always MIPS_OP_COP2, RS is always 1 (CO).
- * The lower 25 bits are the GTE-specific command payload. */
+ * The lower 25 bits are the GTE-specific command payload.
+ *
+ * The granular `enc_gte_<field>(x)` macros below mirror the `enc_op`/`enc_rs`
+ * pattern in mips.h: each one self-masks and shifts its own field, so a
+ * caller can build up a GTE command piece by piece (handy for state-driven
+ * MVMVA emitters that vary one field at a time).
+ *
+ * `ENC_GTE_CMD` is the all-in-one convenience for emitting a full command
+ * word in one go. It just ORs the per-field encoders together. */
 #define gte_cmd_base (enc_op(op_cop2) | (1 << 25))
-#define ENC_GTE_CMD(sf, mx, v, cv, lm, cmd) (gte_cmd_base | \
-     (((sf) & 1) << 19) | (((mx) & 3) << 17) | (((v)  & 3) << 15) | \
-     (((cv) & 3) << 13) | (((lm) & 1) << 10) | ((cmd) & 0x3F))
 
-// #define asm_gte_matrix_set_rotation asm volatile( \
-//  asm_inline( \
-// 	\
-//  ) \
-//  asm_clobber() \
-// )
+/* Per-field encoders. Each one does (value & mask) << shift on its own. */
+#define enc_gte_sf(sf)       (((sf)  & gte_mask_sf ) << gte_shift_sf )
+#define enc_gte_mx(mx)       (((mx)  & gte_mask_mx ) << gte_shift_mx )
+#define enc_gte_v(v)         (((v)   & gte_mask_v  ) << gte_shift_v  )
+#define enc_gte_cv(cv)       (((cv)  & gte_mask_cv ) << gte_shift_cv )
+#define enc_gte_lm(lm)       (((lm)  & gte_mask_lm ) << gte_shift_lm )
+#define enc_gte_cmd(cmd)     (((cmd) & gte_mask_cmd) << gte_shift_cmd)
 
+/* Composite: all six GTE fields + the COP2/CO base. */
+#define enc_gte_cmd(sf, mx, v, cv, lm, cmd) ( \
+     gte_cmd_base     \
+   | enc_gte_sf(sf)   \
+   | enc_gte_mx(mx)   \
+   | enc_gte_v(v)     \
+   | enc_gte_cv(cv)   \
+   | enc_gte_lm(lm)   \
+   | enc_gte_cmd(cmd) \
+)
+
+/* asm_gte_matrix_set_rotation(r0)
+ *
+ * Loads the 3x3 rotation matrix at `r0` into the GTE's rotation-matrix
+ * control registers (RT11..RT22, indices 0..4) via ctc2.
+ *
+ * Memory layout at r0: five contiguous 32-bit words (offsets 0..16),
+ * each holding two packed 16-bit matrix elements. The first 1.5 rows
+ * of a standard PSX SDK MATRIX struct (where each row is laid out as
+ * [RT_xx, RT_xy] | [RT_xz, pad] | ...).
+ *
+ * Generated MIPS (mirrors the source macro):
+ *
+ *   lw   $12,  0( %0 )    ; word 0
+ *   lw   $13,  4( %0 )    ; word 1
+ *   ctc2 $12,  $0         ; → C2_RT11
+ *   ctc2 $13,  $1         ; → C2_RT12
+ *   lw   $12,  8( %0 )    ; word 2
+ *   lw   $13, 12( %0 )    ; word 3
+ *   lw   $14, 16( %0 )    ; word 4
+ *   ctc2 $12,  $2         ; → C2_RT13
+ *   ctc2 $13,  $3         ; → C2_RT21
+ *   ctc2 $14,  $4         ; → C2_RT22
+ *
+ * WARNING: Incomplete by design. The source macro only writes RT11..RT22
+ * (5 of 9 rotation elements); RT23 and the entire RT3x row are left
+ * untouched. Real libpsn00b SetRotMatrix writes all 9. Use only when the
+ * GTE's remaining rotation entries are already correct, or you will
+ * get stale-RT2x/RT3x artifacts in RTPS/RTPT/MVMVA output.
+ */
+#define asm_gte_matrix_set_rotation(r0) \
+	asm volatile(                         \
+		asm_inline(                         \
+			 load_imm(R_T4, r0,  0),          \
+			 load_imm(R_T5, r0,  4),          \
+			 enc_cop2_tx(cop_mt, R_T4,  0),   \
+			 enc_cop2_tx(cop_mt, R_T5,  1),   \
+			 load_imm(R_T4, r0,  8),          \
+			 load_imm(R_T5, r0, 12),          \
+			 load_imm(R_T6, r0, 16),          \
+			 enc_cop2_tx(cop_mt, R_T4,  2),   \
+			 enc_cop2_tx(cop_mt, R_T5,  3),   \
+			 enc_cop2_tx(cop_mt, R_T6,  4)    \
+		)                                   \
+		asm_clobber( clb_system, "$12", "$13", "$14") \
+		:                                             \
+		: "r"(r0)                                     \
+	)
