@@ -307,4 +307,46 @@ function build-graphis_hello {
 	link-modules @($module_asm_crt, $module_asm, $module_c) $elf $link_args
 	make-binary $elf $exe
 }
-build-graphis_hello
+# build-graphis_hello
+
+function build-gte_hello {
+	$includes += @()
+
+	$path_module = join-path $path_code 'gte_hello'
+
+	$assemble_args = @()
+	$assemble_args += $f_debug
+	$assemble_args += $f_optimize_none
+	$assemble_args += ($f_include + $path_code)
+
+	$src_asm_crt    = join-path $path_nugget_common 'crt0/crt0.s'
+	$module_asm_crt = join-path $path_build         'crt0.o'
+	# assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
+
+	$src_asm    = join-path $path_module 'hello_gte.s'
+	$module_asm = join-path $path_build  'hello_gte.o'
+
+	assemble-unit $src_asm $module_asm $includes $assemble_args
+
+	$src_c    = join-path $path_module 'hello_gte.c'
+	$module_c = join-path $path_build  'hello_gte_c.o'
+
+	$compile_args = @()
+	$compile_args += $f_debug
+	# $compile_args += $f_optimize_none
+	# $compile_args += $f_optimize_intrinsics
+	$compile_args += $f_optimize_size
+	# $compile_args += $f_optimize_debug
+	$compile_args += ($f_include + $path_code)
+	compile-unit $src_c $module_c $includes $compile_args
+
+	$elf = join-path $path_build 'hello_gte.elf'
+	$exe = join-path $path_build 'hello_gte.ps-exe'
+
+	$link_args = @()
+	$link_args += $f_debug
+	# $link_args += $f_optimize_size
+	link-modules @($module_asm_crt, $module_asm, $module_c) $elf $link_args
+	make-binary $elf $exe
+}
+build-gte_hello
