@@ -281,6 +281,15 @@ enum { _C2_OPS_ = 0
 #define enc_cop2_lwc2(rt, base, off)  enc_i(op_lwc2, (base), (rt), (off))
 #define enc_cop2_swc2(rt, base, off)  enc_i(op_swc2, (base), (rt), (off))
 
+/* Semantic aliases for the COP2 data load/store. The `c2` in `lwc2`/
+ * `swc2` is redundant when we're already inside the `gte_` namespace.
+ *   gte_lw rt, base, off  →  lwc2 rt, off(base)
+ *   gte_sw rt, base, off  →  swc2 rt, off(base)
+ * For the typical user-facing vector-level load (xy + z as two
+ * instructions), use the higher-level `gte_load_vN` macros below. */
+#define gte_lw(rt, base, off)          enc_cop2_lwc2(rt, base, off)
+#define gte_sw(rt, base, off)          enc_cop2_swc2(rt, base, off)
+
 /* GTE Command Format (The math engine trigger)
  * Opcode is always MIPS_OP_COP2, RS is always 1 (CO).
  * The lower 25 bits are the GTE-specific command payload.

@@ -78,7 +78,17 @@ enum {
 	, rtmp_0        = R_T0 /* Temporary (Caller saved) */
 	, rtmp_1        = R_T1 /* Temporary (Caller saved) */
 	, rtmp_2        = R_T2 /* Temporary (Caller saved) */
-	, rsaved_0      = R_S0 /* Saved register (Callee saved) */
+	, rtmp_3        = R_T3 /* Temporary (Caller saved) */
+	, rtmp_4        = R_T4 /* Temporary (Caller saved) — common GTE base pointer */
+	, rstatic_0     = R_S0 /* Static (Callee saved, preserved across calls) */
+	, rstatic_1     = R_S1
+	, rstatic_2     = R_S2
+	, rstatic_3     = R_S3
+	, rstatic_4     = R_S4
+	, rstatic_5     = R_S5
+	, rstatic_6     = R_S6
+	, rstatic_7     = R_S7
+	, rsaved_0      = R_S0 /* Alias for rstatic_0 (alternate vocabulary) */
 	, rstack_ptr    = R_SP /* Stack Pointer */
 	, rret_addr     = R_RA /* Return Address (populated by JAL) */
 
@@ -199,6 +209,15 @@ enum { _BitOffsets = 0
  * `rd` is the COP0 register index (in rd slot at bits 15..11). */
 #define enc_cop0_tx(sub, rt, rd) enc_i(op_cop0, (sub), (rt), ((rd) << 11))
 
+/* Semantic aliases for COP0 transfer. `sys_` is the namespace marker
+ * for system-control instructions (analogous to `gte_` for COP2).
+ *   sys_mov_to_cop0   rt, rd  →  mtc0 rt, rd
+ *   sys_mov_from_cop0 rt, rd  →  mfc0 rt, rd
+ *   sys_rfe                  →  rfe (return from exception) */
+#define sys_mov_to_cop0(rt, rd)   enc_cop0_tx(cop_mt, (rt), (rd))
+#define sys_mov_from_cop0(rt, rd) enc_cop0_tx(cop_mf, (rt), (rd))
+#define sys_rfe()                 enc_rfe()
+
 /* COP0 Return From Exception (rfe) */
 #define enc_rfe() 0x42000010
 
@@ -238,25 +257,139 @@ enum { _BitOffsets = 0
  * Layout: [op_special][rs:5][rt=0:5][rd:5][shamt=0:5][fc_jalr=0x09] */
 #define jump_link(rs, rd)          enc_r(op_special, (rs), R_0, (rd), 0, fc_jalr)
 
-/* Back-compat alias: the old `load_imm` was a misnomer for `lw`. */
-#define load_imm(rt, base, off)    load_word(rt, base, off)
+/* jalr rs — link in $ra and jump to address in rs (most common form). */
+#define jump_nreg(rs)              jump_link((rs), R_RA)
 
+/* j target — absolute jump within the current 256MB region. */
+#define jump(off)                   enc_i(op_j,     R_0, R_0, (off))
+
+/* jal target — absolute call within the current 256MB region. */
+#define jump_nlink(off)             enc_i(op_jal,   R_0, R_0, (off))
+
+/* --- Store family (mirrors the load family) --- */
+#define store_byte(rt, base, off)  enc_i(op_sb,    (base), (rt), (off))
+#define store_half(rt, base, off)  enc_i(op_sh,    (base), (rt), (off))
+/* store_word already exists above */
+
+/* --- Arithmetic R-type (signed/unsigned split: _s traps, _u doesn't) ---
+ * add_s rd, rs, rt  → add   rd, rs, rt   (overflow traps)
+ * add_u rd, rs, rt  → addu  rd, rs, rt   (overflow silent)
+ * sub_s / sub_u  → sub / subu
+ * mult_s / mult_u → mult / multu   (writes HI/LO; result in LO)
+ * div_s / div_u   → div / divu     (LO = quot, HI = rem)
+ *
+ * NOTE: dsl.h defines `add_s`/`sub_s`/`mut_s`/`gt_s`/etc. as
+ * _Generic-based signed integer-arithmetic helpers for U1/U2/U4. Those
+ * live in a different conceptual layer (generic arithmetic on DSL
+ * types) and would collide with the instruction encoders here. The
+ * `#undef` below lets the gas-style names below win; if a file needs
+ * both, the dsl.h versions can be reached via their long forms
+ * (e.g. `def_signed_op`-style or the underlying `add_s1/s2/s4`). */
+#undef add_s
+#undef sub_s
+#define add_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_add)
+#define add_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_addu)
+#define sub_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_sub)
+#define sub_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_subu)
+#define mult_s(rd, rs, rt)         enc_r(op_special, (rs), (rt), (rd), 0, fc_mult)
+#define mult_u(rd, rs, rt)         enc_r(op_special, (rs), (rt), (rd), 0, fc_multu)
+#define div_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_div)
+#define div_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_divu)
+
+/* --- Arithmetic I-type (immediate) --- */
+#define add_si(rt, rs, imm)         enc_i(op_addi,  (rs), (rt), (imm))
+/* add_ui already exists above as add_ui */
+
+/* --- Set on less than (R-type and I-type) --- */
+#define slt_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_slt)
+#define slt_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_sltu)
+#define slt_si(rt, rs, imm)         enc_i(op_slti,  (rs), (rt), (imm))
+#define slt_ui(rt, rs, imm)         enc_i(op_sltiu, (rs), (rt), (imm))
+
+/* --- Move from/to HI/LO (mult/div results) --- */
+#define mov_from_high(rd)          enc_r(op_special, R_0, R_0, (rd), 0, fc_mfhi)
+#define mov_from_low(rd)           enc_r(op_special, R_0, R_0, (rd), 0, fc_mflo)
+#define mov_to_high(rs)             enc_r(op_special, (rs), R_0, R_0, 0, fc_mthi)
+#define mov_to_low(rs)              enc_r(op_special, (rs), R_0, R_0, 0, fc_mtlo)
+
+/* --- Atomic branches (no pseudos like bgt/bge; compose with slt_* + branch_ne) ---
+ * branch_equal  rs, rt, off → beq   rs, rt, off
+ * branch_ne      rs, rt, off → bne   rs, rt, off
+ * branch_lt_zero rs, off     → bltz  rs, off
+ * branch_gt_zero rs, off     → bgtz  rs, off
+ * branch_le_zero rs, off     → blez  rs, off
+ * branch_ge_zero rs, off     → bgez  rs, off
+ * (For `bgez`, the opcode is `op_bcond` with rt=1 to invert the bltz condition.) */
+#define branch_equal(rs, rt, off)   enc_i(op_beq,   (rs), (rt), (off))
+#define branch_ne(rs, rt, off)       enc_i(op_bne,   (rs), (rt), (off))
+#define branch_lt_zero(rs, off)      enc_i(op_bltz,  R_0, (rs), (off))
+#define branch_gt_zero(rs, off)      enc_i(op_bgtz,  R_0, (rs), (off))
+#define branch_le_zero(rs, off)      enc_i(op_blez,  R_0, (rs), (off))
+#define branch_ge_zero(rs, off)      enc_i(op_bcond, R_0, (rs), (1u << 16) | ((off) & 0xFFFF))
+
+/* --- System (kernel) instructions --- */
+#define syscall()                   enc_r(op_special, R_0, R_0, R_0, 0, fc_syscall)
+#define breakpoint()                enc_r(op_special, R_0, R_0, R_0, 0, fc_break)
+
+/* --- Shift-amount alias (matches the gas convention `\p3 = shamt`) --- */
+#define shamt(rd, rt, n)           shift_ll(rd, rt, n)
+
+/* nop — canonical sll $0, $0, 0 */
 #define nop() shift_ll(rdiscard, rdiscard, 0)
 
-// FI_ void emit_load_imm(U4 rs, U4 rt, U4 imm) { emit(load_imm()); }
+/* load_imm rt, imm — true `li` semantics (assembler `li` pseudo)
+ *
+ * Dispatches at compile time on the immediate's range, picking the
+ * smallest single-instruction form when possible:
+ *
+ *   imm in   0 ..  0x7FFF  →  addi  rt, $0, imm   (1 word)
+ *   imm in 0x8000 .. 0xFFFF →  ori   rt, $0, imm   (1 word; sign-bit must be zeroed)
+ *   imm in  0x10000 ..  0xFFFFFFFF  →  lui + (ori | addi)  (2 words)
+ *
+ * Statement-level (not expression-level): the macro emits its own
+ * `asm volatile(...)` block with 1 or 2 .word constants. Callers can
+ * group multiple `load_imm` calls in a single volatile by using the
+ * lower-level encoders directly:
+ *
+ *      load_imm(R_T4, 0x12345678);          // emits 2 .words
+ *
+ * Falls back to a 2-word form if `imm` is not a compile-time constant,
+ * but that path is unusual (load_imm is most useful with literal
+ * addresses and magic numbers). */
+#define load_imm(rt, imm) do {                                              \
+    if (__builtin_constant_p(imm) && ((U4)(imm) <= 0x7FFFU)) {              \
+        /* Small positive: addi rt, $0, imm */                             \
+        asm volatile(asm_inline(add_si((rt), R_0, (imm)))                   \
+                       asm_clobber(reg_str(R_AT_Code), "memory"));           \
+    } else if (__builtin_constant_p(imm) && ((U4)(imm) <= 0xFFFFU)) {       \
+        /* 0x8000..0xFFFF: ori rt, $0, imm (zero-extends) */                \
+        asm volatile(asm_inline(ori_op((rt), R_0, (imm)))                   \
+                       asm_clobber(reg_str(R_AT_Code), "memory"));           \
+    } else {                                                                \
+        /* > 16 bits: lui + (ori | addi).                                  \
+         * If lo16 is in [0, 0x7FFF] use addi (sign-ext is harmless        \
+         * since the high half cleared bits 15..0). Otherwise ori. */       \
+        U4 _li_imm_ = (U4)(imm);                                            \
+        U4 _li_lo_  = _li_imm_ & 0xFFFFU;                                  \
+        U4 _li_hi_  = _li_imm_ >> 16;                                       \
+        if (_li_lo_ <= 0x7FFFU) {                                          \
+            asm volatile(                                                   \
+                asm_inline(lui_op((rt), _li_hi_),                          \
+                            add_si((rt), (rt), (S2)(U2)_li_lo_))          \
+                asm_clobber(reg_str(R_AT_Code), "memory"));                  \
+        } else {                                                            \
+            asm volatile(                                                   \
+                asm_inline(lui_op((rt), _li_hi_),                          \
+                            ori_op((rt), (rt), (U2)_li_lo_))              \
+                asm_clobber(reg_str(R_AT_Code), "memory"));                  \
+        }                                                                   \
+    }                                                                       \
+} while (0)
 
 // Binary Metaprogramming
 
 typedef U4 const Code;
 #define CodeBlob_(sym) tmpl(codeblob,sym) [] align_(4) =
-
-// #define def_code_blob(func_name, func_signature, ...) \
-// internal U4 const \
-// tmpl(func_name,blob) [] align(4) \
-// = { \
-// 		__VA_ARGS__ \
-// }; \
-// internal func_signature func_name = (func_signature)func_name##_blob;
 
 enum {
 	bios_flushcache = 0x44,
