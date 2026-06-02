@@ -243,18 +243,30 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			V3_S2* p1   = & static_mem.floor.verts[face->y];
 			V3_S2* p2   = & static_mem.floor.verts[face->z];
 
-			asm_gte_load_v0(p0);
+			gte_ldv0(p0);
+			gte_ldv1(p1);
+			gte_ldv2(p2);
 
-			nclip = rtp_avg_nclip_a3_v3s2(p0, p1, p2
-				, & tri->p0, & tri->p1, & tri->p2
-				, & p, & orderingtbl_z, & flag
-			);
-			if (nclip <= 0) {
-				continue;
-			}
+			gte_rtpt();
+			gte_nclip();
+			gte_stotz(& nclip);
 
-			if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
-				orderingtbl_add_primitive(ordering_buf[orderingtbl_z], tri);
+			// nclip = rtp_avg_nclip_a3_v3s2(p0, p1, p2
+			// 	, & tri->p0, & tri->p1, & tri->p2
+			// 	, & p, & orderingtbl_z, & flag
+			// );
+			// if (nclip <= 0) {
+			// 	continue;
+			// }
+
+			if (nclip > 0 ) {
+				gte_stsxy3(& tri->p0, & tri->p1, & tri->p2);
+				gte_avsz3();
+				gte_stotz(& orderingtbl_z);
+
+				if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
+					orderingtbl_add_primitive(ordering_buf[orderingtbl_z], tri);
+				}
 			}
 		}
 		static_mem.floor.rot.y += 5;

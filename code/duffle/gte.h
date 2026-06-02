@@ -181,12 +181,96 @@ enum {
  * Usage:
  *   asm_gte_load_v0(svector_ptr);
  */
-#define asm_gte_load_v0(r0) asm volatile( \
-	"lwc2 $0, 0(%0);"  \
-	"lwc2 $1, 4(%0);"  \
-	:                   \
-	: "r"(r0)           \
-)
+
+/* Pre-baked constant: lwc2 $0, 0($12) — a plain integer the C compiler
+ * constant-folds into a .word directive */
+#define gte_lwc2_v0_RT4  enc_cop2_lwc2(gte_in_v0_xy, R_T4, 0)
+#define gte_lwc2_v0z_RT4 enc_cop2_lwc2(gte_in_v0_z,  R_T4, 4)
+
+/* The actual call-site macro — zero string syntax */
+#define gte_load_v0(r_ptr) \
+    asm V_(                                        \
+        asm_inline( gte_lwc2_v0_RT4 , gte_lwc2_v0z_RT4 ) \
+        asm_clobber( clb_system , "$12" )      \
+        :                                      \
+        : "r"(r_ptr)                           \
+    )
+
+/**
+ * @brief Loads a single SVECTOR to GTE vector register V1
+ *
+ * @details Loads values from an SVECTOR struct to GTE data registers C2_VXY1
+ * and C2_VZ1.
+ */
+#define gte_load_v1( r0 ) __asm__ volatile ( \
+	"lwc2	$2, 0( %0 );"	\
+	"lwc2	$3, 4( %0 );"	\
+	:						\
+	: "r"( r0 )				\
+	: "$t0" )
+
+/**
+ * @brief Loads a single SVECTOR to GTE vector register V2
+ *
+ * @details Loads values from an SVECTOR struct to GTE data registers C2_VXY2
+ * and C2_VZ2.
+ */
+#define gte_load_v2( r0 ) __asm__ volatile ( \
+	"lwc2	$4, 0( %0 );"	\
+	"lwc2	$5, 4( %0 );"	\
+	:						\
+	: "r"( r0 )				\
+	: "$t0" )
+
+#define gte_ldv0(r0)          \
+    __asm__ volatile(         \
+        "lwc2   $0, 0( %0 );" \
+        "lwc2   $1, 4( %0 )"  \
+        :                     \
+        : "r"(r0))
+
+#define gte_ldv1(r0)          \
+    __asm__ volatile(         \
+        "lwc2   $2, 0( %0 );" \
+        "lwc2   $3, 4( %0 )"  \
+        :                     \
+        : "r"(r0))
+
+#define gte_ldv2(r0)          \
+    __asm__ volatile(         \
+        "lwc2   $4, 0( %0 );" \
+        "lwc2   $5, 4( %0 )"  \
+        :                     \
+        : "r"(r0))
+
+#define gte_rtpt()    \
+    __asm__ volatile( \
+        "nop;"        \
+        "nop;"        \
+        "cop2 0x0280030;")
+
+#define gte_nclip()   \
+    __asm__ volatile( \
+        "nop;"        \
+        "nop;"        \
+        "cop2 0x01400006;")
+
+#define gte_stotz(r0) __asm__ volatile("swc2   $7, 0( %0 )" : : "r"(r0) : "memory")
+
+#define gte_stsxy3(r0, r1, r2)      \
+    __asm__ volatile(               \
+        "swc2   $12, 0( %0 );"      \
+        "swc2   $13, 0( %1 );"      \
+        "swc2   $14, 0( %2 )"       \
+        :                           \
+        : "r"(r0), "r"(r1), "r"(r2) \
+        : "memory")
+
+#define gte_avsz3()   \
+    __asm__ volatile( \
+        "nop;"        \
+        "nop;"        \
+        "cop2 0x0158002D;")
 
 /* asm_gte_matrix_set_rotation(r0)
  *
