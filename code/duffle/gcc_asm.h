@@ -298,20 +298,58 @@
 #define asm_clobber(...)      : __VA_ARGS__
 
 /* `asm_inline(...)` dispatches into `_INL_<count>` to emit up to 99 encoded
- * instruction words. This is the "compiled-instruction" form of `asm_code`. */
+ * instruction words. This is the "compiled-instruction" form of `asm_code`.
+ *
+ * Result is a 3-colon statement body WITHOUT the final clobber section:
+ *   ".word %c0, %c1, ..." : : "i"(p0), "i"(p1)
+ *   |----- code -----|   |--- empty ---|  |------- inputs -------|
+ *
+ * Append `: clobbers` after it and wrap in `asm volatile (...)`. */
 #define asm_inline(...)       m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
 
-/* `asm_blob(inlines, clobbers)` — the original 2-section shell. Emits
- *   `asm volatile ( inlines clobbers )`
- * which is the `.word`-only shape (no inputs/outputs): the inlines expand
- * to `".word %c0, ..." : : "i"(...)` already including the empty output
- * and input sections via their trailing `:`, so clobbers just tacks on the
- * end. */
-// #define asm_blob(inlines, clobbers) asm volatile ( inlines clobbers )
-// Not a fan rather just do asm volatile ( ... )
+/* ============================================================================
+ * SECTION-STRIP HELPER — let users wrap multi-token sections in `(...)` so
+ * the preprocessor treats them as a single argument.
+ * ============================================================================
+ *
+ * Without paren-stripping, calling
+ *   asm_block_4(asm_inline(w0, w1), , "r"(p), "$2", "$8")
+ * would tokenize the last `clb` as TWO args (`"$2"` and `"$8"`) because
+ * the preprocessor counts top-level commas. The parens `("$2", "$8")`
+ * shield the comma, so the preprocessor sees ONE arg — but those parens
+ * would then survive into the C source as a syntax error.
+ *
+ * The trick:
+ *   _strip((a, b, c))  ->  _strip_IMPL (a, b, c)  ->  _strip_IMPL a, b, c
+ *                                                  (function-call syntax!)
+ *                              ->  a, b, c
+ *
+ * The outer call is on `a, b, c` (which is fine as macro args), and the
+ * variadic capture `__VA_ARGS__` then re-emits the comma-separated list. */
+#define _strip(x)             _strip_IMPL x
+#define _strip_IMPL(...)      __VA_ARGS__
 
-/* `asm_block(code, outs, ins, clb)` — the full 4-section shell. Each
- * argument is expected to already include its own leading `:` (via the
- * `asm_out` / `asm_in` / `asm_clb` builders) or be empty. The `code`
- * argument should NOT have a leading `:`. */
-#define asm_block(code, outs, ins, clb) asm volatile ( code outs ins clb )
+/* ============================================================================
+ *  asm_block_4(code, outs, ins, clb) — the assembler for the 4-section form
+ * ============================================================================
+ *
+ * You pass 4 section BODIES (no colons). To allow multi-token sections, wrap
+ * them in `(...)` — the parens shield internal commas from the preprocessor
+ * and are stripped by the `_strip` helper.
+ *
+ *   asm_block_4(
+ *       (asm_inline(w0, w1)),     // code body — parens protect inner commas
+ *       (),                       // empty outputs
+ *       ("r"(p)),                 // inputs body
+ *       ("$2", "$8", "memory")    // clobbers body
+ *   )
+ *
+ * Expands to:
+ *   asm volatile( asm_inline(w0, w1) : : "r"(p) : "$2", "$8", "memory" )
+ *                      |-- 3 colons inserted here --|
+ *
+ * If a section is a single token (no internal commas), you can omit the
+ * parens: `asm_block_4("...", , "r"(p), "$2")`.
+ */
+#define asm_block_4(code, outs, ins, clb) \
+    asm volatile( _strip(code) : _strip(outs) : _strip(ins) : _strip(clb) )

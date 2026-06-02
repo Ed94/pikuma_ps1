@@ -207,45 +207,50 @@ enum { _C2_OPS_ = 0
  * hardwired form the "placeholder-pun" — GCC is forced to bind r_ptr to
  * $12, which is exactly the register the .word constants expect.
  *
- * Uses asm_volatile_4(code, outs, ins, clb) from gcc_asm.h.
+ * Uses asm_block_4(code, outs, ins, clb) from gcc_asm.h.
  *   asm_inline(...)    produces the 2-colon code:outputs:inputs body
  *   "r"(r_ptr)         is the runtime-input section body
  *   "$2", ..., "$12"   is the clobber section body
- *   asm_volatile_4()   joins them with 3 colons and wraps in asm volatile
+ *   asm_block_4()      joins them with 3 colons and wraps in asm volatile
+ *
+ * The parens `(...)` around each section let the preprocessor treat the
+ * section's contents as a single arg (shielding internal commas), and
+ * the `_strip` helper inside asm_block_4 removes those parens so the
+ * final C code is clean.
  */
 #define gte_load_v0(r_ptr) \
-    asm_volatile_4(                                              \
-        (asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4 )),        \
-        (),                                                        \
-        ("r"(r_ptr)),                                              \
-        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    asm_block_4(                                                \
+        (asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4 )),       \
+        (),                                                       \
+        ("r"(r_ptr)),                                             \
+        ("$2", "$8", "$9", "$31", "memory", "$12")               \
     )
 
 #define gte_load_v1(r_ptr) \
-    asm_volatile_4(                                              \
-        (asm_inline( gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4 )),        \
-        (),                                                        \
-        ("r"(r_ptr)),                                              \
-        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    asm_block_4(                                                \
+        (asm_inline( gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4 )),       \
+        (),                                                       \
+        ("r"(r_ptr)),                                             \
+        ("$2", "$8", "$9", "$31", "memory", "$12")               \
     )
 
 #define gte_load_v2(r_ptr) \
-    asm_volatile_4(                                              \
-        (asm_inline( gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )),        \
-        (),                                                        \
-        ("r"(r_ptr)),                                              \
-        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    asm_block_4(                                                \
+        (asm_inline( gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )),       \
+        (),                                                       \
+        ("r"(r_ptr)),                                             \
+        ("$2", "$8", "$9", "$31", "memory", "$12")               \
     )
 
 /* All three at once -- the canonical prelude to gte_cmd_rtpt. */
 #define gte_load_v0v1v2(r_ptr) \
-    asm_volatile_4(                                              \
-        (asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4,            \
-                    gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4,            \
-                    gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )),         \
-        (),                                                        \
-        ("r"(r_ptr)),                                              \
-        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    asm_block_4(                                                \
+        (asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4,           \
+                    gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4,           \
+                    gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )),        \
+        (),                                                       \
+        ("r"(r_ptr)),                                             \
+        ("$2", "$8", "$9", "$31", "memory", "$12")               \
     )
 
 /**
