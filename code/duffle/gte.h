@@ -119,6 +119,12 @@ enum {
     gte_cr_OFX  = 30, gte_cr_OFY  = 31,
 };
 
+enum { _C2_OPS_ = 0
+
+	, op_lwc2    = 0x32 /* Load Word to Coprocessor 2 (GTE) */
+	, op_swc2    = 0x3A /* Store Word from Coprocessor 2 (GTE) */
+};
+
 /* COP2 (GTE) Transfer Format: ctc2 rt, rd or cfc2 rt, rd
  * Layout: [op_cop2:6][sub:5][rt:5][rd:5][0:11]
  *   - sub: cop_mf (0x00) for cfc2, cop_mt (0x04) for ctc2
@@ -182,19 +188,54 @@ enum {
  *   asm_gte_load_v0(svector_ptr);
  */
 
-/* Pre-baked constant: lwc2 $0, 0($12) — a plain integer the C compiler
- * constant-folds into a .word directive */
-#define gte_lwc2_v0_RT4  enc_cop2_lwc2(gte_in_v0_xy, R_T4, 0)
-#define gte_lwc2_v0z_RT4 enc_cop2_lwc2(gte_in_v0_z,  R_T4, 4)
+/* Pre-baked constants: lwc2 $N, off($12) — plain integers the C compiler
+ * constant-folds into .word directives. The R_T4 in the name reminds you
+ * that the `rs` field is baked to R_T4 ($12), forcing the placeholder-pun
+ * pattern below. */
+#define gte_lwc2_v0_RT4   enc_cop2_lwc2(gte_in_v0_xy, R_T4, 0)
+#define gte_lwc2_v0z_RT4  enc_cop2_lwc2(gte_in_v0_z,  R_T4, 4)
+#define gte_lwc2_v1_RT4   enc_cop2_lwc2(gte_in_v1_xy, R_T4, 0)
+#define gte_lwc2_v1z_RT4  enc_cop2_lwc2(gte_in_v1_z,  R_T4, 4)
+#define gte_lwc2_v2_RT4   enc_cop2_lwc2(gte_in_v2_xy, R_T4, 0)
+#define gte_lwc2_v2z_RT4  enc_cop2_lwc2(gte_in_v2_z,  R_T4, 4)
 
-/* The actual call-site macro — zero string syntax */
+/* The actual call-site macros — zero string syntax. The asm_blob wrapper
+ * (defined in gcc_asm.h) handles the asm volatile (...) envelope, and the
+ * colon-prefixed clobber/input sections slot in cleanly:
+ *
+ *   asm_blob( <code section>, <clobber section> )
+ *
+ * The placeholder-pun: the .word constants have rs=R_T4 ($12) hardwired,
+ * and the "$12" clobber + "r"(r_ptr) input forces GCC to bind the pointer
+ * to $12, which is exactly the register the constants expect. */
 #define gte_load_v0(r_ptr) \
-    asm V_(                                        \
-        asm_inline( gte_lwc2_v0_RT4 , gte_lwc2_v0z_RT4 ) \
-        asm_clobber( clb_system , "$12" )      \
-        :                                      \
-        : "r"(r_ptr)                           \
-    )
+    asm volatile(                                  \
+        asm_inline( gte_lwc2_v0_RT4,  gte_lwc2_v0z_RT4 ),  \
+        asm_clobber( clb_system, "$12" )                    \
+        : : "r"(r_ptr) )
+
+#define gte_load_v1(r_ptr) \
+    asm volatile(                                  \
+        asm_inline( gte_lwc2_v1_RT4,  gte_lwc2_v1z_RT4 ),  \
+        asm_clobber( clb_system, "$12" )                    \
+        : : "r"(r_ptr) )
+
+#define gte_load_v2(r_ptr) \
+    asm volatile(                                  \
+        asm_inline( gte_lwc2_v2_RT4,  gte_lwc2_v2z_RT4 ),  \
+        asm_clobber( clb_system, "$12" )                    \
+        : : "r"(r_ptr) )
+
+/* All three at once — the canonical prelude to gte_cmd_rtpt. */
+#define gte_load_v0v1v2(r_ptr) \
+    asm volatile(                                  \
+        asm_inline(                            \
+              gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4, \
+              gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4, \
+              gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4  \
+        ),                                     \
+        asm_clobber( clb_system, "$12" )       \
+        : : "r"(r_ptr) )
 
 /**
  * @brief Loads a single SVECTOR to GTE vector register V1
@@ -202,12 +243,12 @@ enum {
  * @details Loads values from an SVECTOR struct to GTE data registers C2_VXY1
  * and C2_VZ1.
  */
-#define gte_load_v1( r0 ) __asm__ volatile ( \
-	"lwc2	$2, 0( %0 );"	\
-	"lwc2	$3, 4( %0 );"	\
-	:						\
-	: "r"( r0 )				\
-	: "$t0" )
+// #define gte_load_v1( r0 ) __asm__ volatile ( \
+// 	"lwc2	$2, 0( %0 );"	\
+// 	"lwc2	$3, 4( %0 );"	\
+// 	:						\
+// 	: "r"( r0 )				\
+// 	: "$t0" )
 
 /**
  * @brief Loads a single SVECTOR to GTE vector register V2
@@ -215,12 +256,12 @@ enum {
  * @details Loads values from an SVECTOR struct to GTE data registers C2_VXY2
  * and C2_VZ2.
  */
-#define gte_load_v2( r0 ) __asm__ volatile ( \
-	"lwc2	$4, 0( %0 );"	\
-	"lwc2	$5, 4( %0 );"	\
-	:						\
-	: "r"( r0 )				\
-	: "$t0" )
+// #define gte_load_v2( r0 ) __asm__ volatile ( \
+// 	"lwc2	$4, 0( %0 );"	\
+// 	"lwc2	$5, 4( %0 );"	\
+// 	:						\
+// 	: "r"( r0 )				\
+// 	: "$t0" )
 
 #define gte_ldv0(r0)          \
     __asm__ volatile(         \

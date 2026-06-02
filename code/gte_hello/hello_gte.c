@@ -8,6 +8,8 @@
 #include "duffle/dsl.h"
 #include "duffle/memory.h"
 #include "duffle/math.h"
+#include "duffle/gcc_asm.h"
+#include "duffle/mips.h"
 #include "duffle/gp.h"
 #include "duffle/gte.h"
 #include "hello_gte.h"
@@ -243,7 +245,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			V3_S2* p1   = & static_mem.floor.verts[face->y];
 			V3_S2* p2   = & static_mem.floor.verts[face->z];
 
-			gte_ldv0(p0);
+			// gte_ldv0(p0);
+			gte_load_v0(p0);
 			gte_ldv1(p1);
 			gte_ldv2(p2);
 

@@ -307,7 +307,8 @@
  * to `".word %c0, ..." : : "i"(...)` already including the empty output
  * and input sections via their trailing `:`, so clobbers just tacks on the
  * end. */
-#define asm_blob(inlines, clobbers) asm volatile ( inlines clobbers )
+// #define asm_blob(inlines, clobbers) asm volatile ( inlines clobbers )
+// Not a fan rather just do asm volatile ( ... )
 
 /* `asm_block(code, outs, ins, clb)` — the full 4-section shell. Each
  * argument is expected to already include its own leading `:` (via the

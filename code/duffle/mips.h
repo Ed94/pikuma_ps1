@@ -59,11 +59,10 @@ enum {
 	, op_lw      = 0x23 /* Load Word */
 	, op_lbu     = 0x24 /* Load Byte Unsigned */
 	, op_lhu     = 0x25 /* Load Halfword Unsigned */
-	, op_lwc2    = 0x32 /* Load Word to Coprocessor 2 (GTE) */
 	, op_sb      = 0x28 /* Store Byte */
 	, op_sh      = 0x29 /* Store Halfword */
 	, op_sw      = 0x2B /* Store Word */
-	, op_swc2    = 0x3A /* Store Word from Coprocessor 2 (GTE) */
+
 
 	, op_load_addr  = op_la
 	, op_load_imm   = op_li
@@ -225,17 +224,17 @@ enum {
  *   5. lw $ra, 4($sp);  jr $ra          ; restore & return
  *   6. sp += 8
  */
-I_
+internal
 Code CodeBlob_(mips_flush_icache) {
-	add_ui(rstack_ptr, rstack_ptr, -8),                       /* sp -= 8         */
-	store_word(rret_addr, rstack_ptr, 4),                    /* sw  $ra, 4($sp) */
-	add_ui(rret_0, rdiscard, bios_flushcache),               /* addiu $a0, $0, 0x44 */
-	add_ui(rtmp_0, rdiscard, bios_table_addr),               /* addiu $t0, $0, 0xA0 */
-	jump_link(rtmp_0, rret_addr),                            /* jalr $t0, $ra   */
-	nop(),                                                    /* BD slot         */
-	load_word(rret_addr, rstack_ptr, 4),                     /* lw  $ra, 4($sp) */
-	jump_reg(rret_addr),                                     /* jr   $ra        */
-	add_ui(rstack_ptr, rstack_ptr, 8)                        /* sp += 8 (BD)    */
+	add_ui(rstack_ptr, rstack_ptr, -8),        /* sp -= 8         */
+	store_word(rret_addr, rstack_ptr, 4),      /* sw  $ra, 4($sp) */
+	add_ui(rret_0, rdiscard, bios_flushcache), /* addiu $a0, $0, 0x44 */
+	add_ui(rtmp_0, rdiscard, bios_table_addr), /* addiu $t0, $0, 0xA0 */
+	jump_link(rtmp_0, rret_addr),              /* jalr $t0, $ra   */
+	nop(),                                     /* BD slot         */
+	load_word(rret_addr, rstack_ptr, 4),       /* lw  $ra, 4($sp) */
+	jump_reg(rret_addr),                       /* jr   $ra        */
+	add_ui(rstack_ptr, rstack_ptr, 8)          /* sp += 8 (BD)    */
 };
 FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
@@ -243,15 +242,15 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
 #define asm_mips_flush_icache() asm volatile( \
 	asm_inline( \
-			add_ui(rstack_ptr, rstack_ptr, -8)                                  \
-		, store_word(rret_addr, rstack_ptr, 4)                                   \
-		, add_ui(rret_0, rdiscard, bios_flushcache)                              \
-		, add_ui(rtmp_0, rdiscard, bios_table_addr)                              \
-		, jump_link(rtmp_0, rret_addr)                                           \
-		, nop()                                                                  \
-		, load_word(rret_addr, rstack_ptr, 4)                                    \
-		, jump_reg(rret_addr)                                                    \
-		, add_ui(rstack_ptr, rstack_ptr, 8)                                      \
+			add_ui(rstack_ptr, rstack_ptr, -8)        \
+		, store_word(rret_addr, rstack_ptr, 4)      \
+		, add_ui(rret_0, rdiscard, bios_flushcache) \
+		, add_ui(rtmp_0, rdiscard, bios_table_addr) \
+		, jump_link(rtmp_0, rret_addr)              \
+		, nop()                                     \
+		, load_word(rret_addr, rstack_ptr, 4)       \
+		, jump_reg(rret_addr)                       \
+		, add_ui(rstack_ptr, rstack_ptr, 8)         \
 	) \
 	asm_clobber( clb_system ) \
 )
