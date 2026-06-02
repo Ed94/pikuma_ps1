@@ -326,3 +326,58 @@
  *
  * 3 colons total. Always valid. */
 #define asm_inline(...)       m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
+
+/* ------------------------------------------------------------------------ *
+ *  rgcc(n) — GCC-specific bundle for register-variable declarations.
+ *
+ *  Produces `__asm__(reg_str(tmpl(n, Code)))` at expansion time. The
+ *  `tmpl(n, Code)` indirection derives the preprocessor-visible `_Code`
+ *  form from the enum name (which the preprocessor can't expand on
+ *  its own). So a call like
+ *
+ *      register V3_S2* p rgcc(R_T4) = verts[0].ptr;
+ *
+ *  expands (via tmpl) to
+ *
+ *      register V3_S2* p __asm__(reg_str(R_T4_Code))
+ *                                = verts[0].ptr;
+ *
+ *  which (via reg_str) becomes
+ *
+ *      register V3_S2* p __asm__("$12") = verts[0].ptr;
+ *
+ *  Why bundle the `__asm__()` wrapper?
+ *    - The integer R_T4 (= 12, via R_T4_Code) is the canonical truth.
+ *    - The string "$12" is derived from it via reg_str, so they
+ *      cannot drift apart.
+ *    - Spelling `__asm__(reg_str(R_T4_Code))` at every call site is
+ *      noise. `rgcc(R_T4)` says what you mean.
+ *
+ *  The two-level form (rgcc_/rgcc) is the standard preprocessor idiom
+ *  for forcing one level of expansion before the bundle's `__asm__`
+ *  token is written; without it, `rgcc(R_T4)` would expand to
+ *  `__asm__(reg_str(tmpl(R_T4, Code)))` but the inner `tmpl(R_T4, Code)`
+ *  would token-paste prematurely.
+ *
+ *  Layering: reg_str lives in dsl.h (the integer-to-string primitive,
+ *  compiler-agnostic in name). tmpl lives in dsl.h (the token-paste
+ *  glue). rgcc lives here (gcc_asm.h) because the `__asm__` keyword
+ *  is GCC-specific. Anyone porting to a different compiler's asm
+ *  dialect overrides rgcc, and the integer→string derivation in
+ *  reg_str can be retargeted in one place.
+ *
+ *  For clobber lists and asm-template strings, use the bare
+ *  `reg_str(R_T4_Code)` — you don't want __asm__() there, you just
+ *  want the string.
+ * ------------------------------------------------------------------------ */
+#define rgcc_(n)       __asm__(reg_str(tmpl(n, Code)))
+#define rgcc(n)        rgcc_(n)
+
+/* rgcc_ref(n) — GCC operand-reference form "%N". Not currently used
+ * by the placeholder-pun macros (the .word bodies are fully baked
+ * at compile time and have no runtime operand references), but kept
+ * here for completeness in case a future asm template needs to refer
+ * to a runtime input by position. Mirror of rgcc but produces "%N"
+ * instead of "$N". */
+#define rgcc_ref_(n)   "%" #n
+#define rgcc_ref(n)    rgcc_ref_(n)

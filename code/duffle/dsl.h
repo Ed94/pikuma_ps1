@@ -29,6 +29,26 @@
 
 #define asm           __asm__
 #define align_(value) __attribute__((aligned (value)))             // for easy alignment
+
+/* reg_str(n) — Stringify an integer register id into the GCC asm
+ * string form (e.g. 12 → "$12"). Use this anywhere GCC's parser
+ * expects a literal string identifying a register: clobber lists,
+ * asm templates, etc. The two-level macro is the standard preprocessor
+ * idiom for forcing one level of expansion before stringify — without
+ * it, `#n` would stringify the macro name `R_T4` to `"R_T4"` instead
+ * of expanding `R_T4` to its value first.
+ *
+ * For declaring a register variable bound to a specific GPR, use the
+ * `rgcc(n)` bundle from gcc_asm.h instead — it adds the `__asm__()`
+ * qualifier around the string.
+ *
+ *   register V3_S2* p0 __asm__(reg_str(R_T4)) = ...;        // verbose
+ *   register V3_S2* p0 rgcc(R_T4) = ...;                    // bundled
+ *
+ *   asm volatile("nop" : : : reg_str(R_RA), "memory");      // clobber list */
+#define reg_str_(n)  "$" #n
+#define reg_str(n)   reg_str_(n)
+#define align_(value) __attribute__((aligned (value)))             // for easy alignment
 #define C_(type,data) ((type)(data))                               // for enforced precedence
 #define expect_(x, y) __builtin_expect(x, y)                       // so compiler knows the common path
 #define I_            internal inline

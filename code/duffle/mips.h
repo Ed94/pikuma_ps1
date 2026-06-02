@@ -4,17 +4,67 @@
 # include "gcc_asm.h"
 #endif
 
+/* ============================================================================
+ *  REGISTER INTEGER IDS (preprocessor-visible)
+ * ============================================================================
+ *  Every R_* enum below has a parallel R_*_Code `#define` so that the
+ *  preprocessor can stringify the integer (e.g. for asm clobber lists and
+ *  register-variable declarations via `rgcc(R_X)`). The enum value is
+ *  bound to the `#define` so the two forms cannot drift apart.
+ *
+ *  Only registers that get stringified need a `_Code` form; the rest are
+ *  plain enum values. If you need to add a new one, follow the pattern:
+ *      #define R_T7_Code 15
+ *      R_T7 = R_T7_Code,        // in the enum
+ *
+ *  User code should always reference the enum form (`R_T4`) at arithmetic
+ *  sites and let `reg_str(R_T4_Code)` / `rgcc(R_T4)` handle the stringify
+ *  cases — never write the bare number `12`.
+ * ============================================================================ */
+#define R_0_Code    0
+#define R_AT_Code   1
+#define R_V0_Code   2
+#define R_V1_Code   3
+#define R_A0_Code   4
+#define R_A1_Code   5
+#define R_A2_Code   6
+#define R_A3_Code   7
+#define R_T0_Code   8
+#define R_T1_Code   9
+#define R_T2_Code  10
+#define R_T3_Code  11
+#define R_T4_Code  12
+#define R_T5_Code  13
+#define R_T6_Code  14
+#define R_T7_Code  15
+#define R_S0_Code  16
+#define R_S1_Code  17
+#define R_S2_Code  18
+#define R_S3_Code  19
+#define R_S4_Code  20
+#define R_S5_Code  21
+#define R_S6_Code  22
+#define R_S7_Code  23
+#define R_T8_Code  24
+#define R_T9_Code  25
+#define R_K0_Code  26
+#define R_K1_Code  27
+#define R_GP_Code  28
+#define R_SP_Code  29
+#define R_FP_Code  30
+#define R_RA_Code  31
+
 enum {
 /* --- MIPS CPU Registers --- */
 
-	R_0  = 0,  R_AT = 1,   R_V0 = 2,   R_V1 = 3,
-	R_A0 = 4,  R_A1 = 5,   R_A2 = 6,   R_A3 = 7,
-	R_T0 = 8,  R_T1 = 9,   R_T2 = 10,  R_T3 = 11,
-	R_T4 = 12, R_T5 = 13,  R_T6 = 14,  R_T7 = 15,
-	R_S0 = 16, R_S1 = 17,  R_S2 = 18,  R_S3 = 19,
-	R_S4 = 20, R_S5 = 21,  R_S6 = 22,  R_S7 = 23,
-	R_T8 = 24, R_T9 = 25,  R_K0 = 26,  R_K1 = 27,
-	R_GP = 28, R_SP = 29,  R_FP = 30,  R_RA = 31
+	R_0  = R_0_Code,  R_AT = R_AT_Code,   R_V0 = R_V0_Code,   R_V1 = R_V1_Code,
+	R_A0 = R_A0_Code,  R_A1 = R_A1_Code,   R_A2 = R_A2_Code,   R_A3 = R_A3_Code,
+	R_T0 = R_T0_Code,  R_T1 = R_T1_Code,   R_T2 = R_T2_Code,  R_T3 = R_T3_Code,
+	R_T4 = R_T4_Code,  R_T5 = R_T5_Code,   R_T6 = R_T6_Code,  R_T7 = R_T7_Code,
+	R_S0 = R_S0_Code,  R_S1 = R_S1_Code,   R_S2 = R_S2_Code,  R_S3 = R_S3_Code,
+	R_S4 = R_S4_Code,  R_S5 = R_S5_Code,   R_S6 = R_S6_Code,  R_S7 = R_S7_Code,
+	R_T8 = R_T8_Code,  R_T9 = R_T9_Code,   R_K0 = R_K0_Code,  R_K1 = R_K1_Code,
+	R_GP = R_GP_Code,  R_SP = R_SP_Code,   R_FP = R_FP_Code,  R_RA = R_RA_Code
 
 /* Semantic Aliases for MIPS Registers (O32 ABI) */
 
@@ -238,7 +288,12 @@ Code CodeBlob_(mips_flush_icache) {
 };
 FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
-#define clb_system "$2", "$8", "$9", "$31", "memory"
+/* Standard clobber list for pure-MIPS asm volatile blocks: caller-saved
+ * GPRs that the kernel treats as volatile (v0/v1/t0/t1/ra) plus the
+ * "memory" barrier. The register ids are passed through `reg_str` so
+ * the R_*_Code `#define`s are stringified into "$N" at expansion time. */
+#define clb_system \
+	reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory"
 
 #define asm_mips_flush_icache() asm volatile( asm_inline( \
 		add_ui(rstack_ptr, rstack_ptr, -8)        \

@@ -241,14 +241,14 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			tri->color   = rgb8(255, 255, 255);
 
 			V3_S2* face = & static_mem.floor.faces[face_id];
-			register V3_S2* p0 asm("$12") = & static_mem.floor.verts[face->x];
-			V3_S2* p1   = & static_mem.floor.verts[face->y];
-			V3_S2* p2   = & static_mem.floor.verts[face->z];
+			register V3_S2* p0 rgcc(R_T4) = & static_mem.floor.verts[face->x];
+			register V3_S2* p1 rgcc(R_T5) = & static_mem.floor.verts[face->y];
+			register V3_S2* p2 rgcc(R_T6) = & static_mem.floor.verts[face->z];
 
-			// gte_ldv0(p0);
- 			gte_load_v0(p0);
-			gte_ldv1(p1);
-			gte_ldv2(p2);
+			// Three independent bases — full register discretion at the call site
+			gte_load_v0(p0, R_T4);
+			gte_load_v1(p1, R_T5);
+			gte_load_v2(p2, R_T6);
 
 			gte_rtpt();
 			gte_nclip();

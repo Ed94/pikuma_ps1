@@ -42,8 +42,18 @@
  *          asm_clobber( clb_system )
  *      );
  *
- *      // Runtime-base-register load — uses R_T4 ($12) under the hood:
- *      gte_load_v0( my_svector_ptr );
+ *      // Runtime-base-register load — caller picks the base GPR:
+ *      register V3_S2* p_in_12 __asm__("$12") = verts[0].ptr;
+ *      gte_load_v0(p_in_12, R_T4);   // R_T4 = 12 = $t4 = $12
+ *
+ *      // Three independent bases for an RTPT pipeline:
+ *      register V3_S2* p0 __asm__("$12") = verts[0].ptr;
+ *      register V3_S2* p1 __asm__("$13") = verts[1].ptr;
+ *      register V3_S2* p2 __asm__("$14") = verts[2].ptr;
+ *      gte_load_v0(p0, R_T4);
+ *      gte_load_v1(p1, R_T5);
+ *      gte_load_v2(p2, R_T6);
+ *      gte_rtpt();
  *
  *  STYLE NOTES
  *  -----------
@@ -65,16 +75,53 @@
 
 /* C2 data registers */
 
-/* --- GTE Data Registers (Coprocessor 2) --- */
+/* --- GTE Data Registers (Coprocessor 2) ---
+ * Preprocessor-visible integer ids for the COP2 data register file.
+ * Each enum value is bound to a parallel `_Code` `#define` so the
+ * preprocessor can stringify the integer (for `reg_str`/`rgcc` paths).
+ * Same pattern as the GPR `_Code` set in mips.h. */
+#define C2_VXY0_Code  0
+#define C2_VZ0_Code   1
+#define C2_VXY1_Code  2
+#define C2_VZ1_Code   3
+#define C2_VXY2_Code  4
+#define C2_VZ2_Code   5
+#define C2_RGB_Code   6
+#define C2_OTZ_Code   7
+#define C2_IR0_Code   8
+#define C2_IR1_Code   9
+#define C2_IR2_Code  10
+#define C2_IR3_Code  11
+#define C2_SXY0_Code 12
+#define C2_SXY1_Code 13
+#define C2_SXY2_Code 14
+#define C2_SXYP_Code 15
+#define C2_SZ0_Code  16
+#define C2_SZ1_Code  17
+#define C2_SZ2_Code  18
+#define C2_SZ3_Code  19
+#define C2_RGB0_Code 20
+#define C2_RGB1_Code 21
+#define C2_RGB2_Code 22
+#define C2_RES1_Code 23
+#define C2_MAC0_Code 24
+#define C2_MAC1_Code 25
+#define C2_MAC2_Code 26
+#define C2_MAC3_Code 27
+#define C2_IRGB_Code 28
+#define C2_ORGB_Code 29
+#define C2_LZCS_Code 30
+#define C2_LZCR_Code 31
+
 enum {
-	C2_VXY0 = 0,  C2_VZ0  = 1,  C2_VXY1 = 2,  C2_VZ1  = 3,
-	C2_VXY2 = 4,  C2_VZ2  = 5,  C2_RGB  = 6,  C2_OTZ  = 7,
-	C2_IR0  = 8,  C2_IR1  = 9,  C2_IR2  = 10, C2_IR3  = 11,
-	C2_SXY0 = 12, C2_SXY1 = 13, C2_SXY2 = 14, C2_SXYP = 15,
-	C2_SZ0  = 16, C2_SZ1  = 17, C2_SZ2  = 18, C2_SZ3  = 19,
-	C2_RGB0 = 20, C2_RGB1 = 21, C2_RGB2 = 22, C2_RES1 = 23,
-	C2_MAC0 = 24, C2_MAC1 = 25, C2_MAC2 = 26, C2_MAC3 = 27,
-	C2_IRGB = 28, C2_ORGB = 29, C2_LZCS = 30, C2_LZCR = 31
+	C2_VXY0 = C2_VXY0_Code, C2_VZ0  = C2_VZ0_Code,  C2_VXY1 = C2_VXY1_Code, C2_VZ1  = C2_VZ1_Code,
+	C2_VXY2 = C2_VXY2_Code, C2_VZ2  = C2_VZ2_Code,  C2_RGB  = C2_RGB_Code,  C2_OTZ  = C2_OTZ_Code,
+	C2_IR0  = C2_IR0_Code,  C2_IR1  = C2_IR1_Code,  C2_IR2  = C2_IR2_Code,  C2_IR3  = C2_IR3_Code,
+	C2_SXY0 = C2_SXY0_Code, C2_SXY1 = C2_SXY1_Code, C2_SXY2 = C2_SXY2_Code, C2_SXYP = C2_SXYP_Code,
+	C2_SZ0  = C2_SZ0_Code,  C2_SZ1  = C2_SZ1_Code,  C2_SZ2  = C2_SZ2_Code,  C2_SZ3  = C2_SZ3_Code,
+	C2_RGB0 = C2_RGB0_Code, C2_RGB1 = C2_RGB1_Code, C2_RGB2 = C2_RGB2_Code, C2_RES1 = C2_RES1_Code,
+	C2_MAC0 = C2_MAC0_Code, C2_MAC1 = C2_MAC1_Code, C2_MAC2 = C2_MAC2_Code, C2_MAC3 = C2_MAC3_Code,
+	C2_IRGB = C2_IRGB_Code, C2_ORGB = C2_ORGB_Code, C2_LZCS = C2_LZCS_Code, C2_LZCR = C2_LZCR_Code
 };
 
 /* Semantic Aliases for GTE Data Registers */
@@ -162,19 +209,53 @@ enum {
 	gte_shift_cmd =  0,  gte_width_cmd = 6,  gte_mask_cmd = 0x3F,
 };
 
-/* --- GTE Control Register Indices (for ctc2/cfc2) --- */
+/* --- GTE Control Register Indices (for ctc2/cfc2) ---
+ * Preprocessor-visible integer ids for the COP2 control register file.
+ * Each enum value is bound to a parallel `_Code` `#define` so the
+ * preprocessor can stringify the integer (for `reg_str`/`rgcc` paths).
+ * Same pattern as the GPR `_Code` set in mips.h. Note: indices 21-23
+ * are reserved/unused on real hardware, so there's a gap. */
+#define gte_cr_RT11_Code  0
+#define gte_cr_RT12_Code  1
+#define gte_cr_RT13_Code  2
+#define gte_cr_RT21_Code  3
+#define gte_cr_RT22_Code  4
+#define gte_cr_RT23_Code  5
+#define gte_cr_RT31_Code  6
+#define gte_cr_RT32_Code  7
+#define gte_cr_RT33_Code  8
+#define gte_cr_TRX_Code   9
+#define gte_cr_TRY_Code  10
+#define gte_cr_TRZ_Code  11
+#define gte_cr_L11_Code  12
+#define gte_cr_L12_Code  13
+#define gte_cr_L13_Code  14
+#define gte_cr_L21_Code  15
+#define gte_cr_L22_Code  16
+#define gte_cr_L23_Code  17
+#define gte_cr_LR1_Code  18
+#define gte_cr_LR2_Code  19
+#define gte_cr_LR3_Code  20
+#define gte_cr_RBK_Code  24
+#define gte_cr_GBK_Code  25
+#define gte_cr_BBK_Code  26
+#define gte_cr_RFC_Code  27
+#define gte_cr_GFC_Code  28
+#define gte_cr_BFC_Code  29
+#define gte_cr_OFX_Code  30
+#define gte_cr_OFY_Code  31
 
 enum {
-    gte_cr_RT11 = 0,  gte_cr_RT12 = 1,  gte_cr_RT13 = 2,
-    gte_cr_RT21 = 3,  gte_cr_RT22 = 4,  gte_cr_RT23 = 5,
-    gte_cr_RT31 = 6,  gte_cr_RT32 = 7,  gte_cr_RT33 = 8,
-    gte_cr_TRX  = 9,  gte_cr_TRY  = 10, gte_cr_TRZ  = 11,
-    gte_cr_L11  = 12, gte_cr_L12  = 13, gte_cr_L13  = 14,
-    gte_cr_L21  = 15, gte_cr_L22  = 16, gte_cr_L23  = 17,
-    gte_cr_LR1  = 18, gte_cr_LR2  = 19, gte_cr_LR3  = 20,
-    gte_cr_RBK  = 24, gte_cr_GBK  = 25, gte_cr_BBK  = 26,
-    gte_cr_RFC  = 27, gte_cr_GFC  = 28, gte_cr_BFC  = 29,
-    gte_cr_OFX  = 30, gte_cr_OFY  = 31,
+    gte_cr_RT11 = gte_cr_RT11_Code, gte_cr_RT12 = gte_cr_RT12_Code, gte_cr_RT13 = gte_cr_RT13_Code,
+    gte_cr_RT21 = gte_cr_RT21_Code, gte_cr_RT22 = gte_cr_RT22_Code, gte_cr_RT23 = gte_cr_RT23_Code,
+    gte_cr_RT31 = gte_cr_RT31_Code, gte_cr_RT32 = gte_cr_RT32_Code, gte_cr_RT33 = gte_cr_RT33_Code,
+    gte_cr_TRX  = gte_cr_TRX_Code,  gte_cr_TRY  = gte_cr_TRY_Code,  gte_cr_TRZ  = gte_cr_TRZ_Code,
+    gte_cr_L11  = gte_cr_L11_Code,  gte_cr_L12  = gte_cr_L12_Code,  gte_cr_L13  = gte_cr_L13_Code,
+    gte_cr_L21  = gte_cr_L21_Code,  gte_cr_L22  = gte_cr_L22_Code,  gte_cr_L23  = gte_cr_L23_Code,
+    gte_cr_LR1  = gte_cr_LR1_Code,  gte_cr_LR2  = gte_cr_LR2_Code,  gte_cr_LR3  = gte_cr_LR3_Code,
+    gte_cr_RBK  = gte_cr_RBK_Code,  gte_cr_GBK  = gte_cr_GBK_Code,  gte_cr_BBK  = gte_cr_BBK_Code,
+    gte_cr_RFC  = gte_cr_RFC_Code,  gte_cr_GFC  = gte_cr_GFC_Code,  gte_cr_BFC  = gte_cr_BFC_Code,
+    gte_cr_OFX  = gte_cr_OFX_Code,  gte_cr_OFY  = gte_cr_OFY_Code,
 };
 
 enum { _C2_OPS_ = 0
@@ -246,67 +327,102 @@ enum { _C2_OPS_ = 0
  *   asm_gte_load_v0(svector_ptr);
  */
 
-/* Pre-baked constants: lwc2 $N, off($12) — plain integers the C compiler
- * constant-folds into .word directives. The R_T4 in the name reminds you
- * that the `rs` field is baked to R_T4 ($12), forcing the placeholder-pun
- * pattern below. */
-#define gte_lwc2_v0_RT4   enc_cop2_lwc2(gte_in_v0_xy, R_T4, 0)
-#define gte_lwc2_v0z_RT4  enc_cop2_lwc2(gte_in_v0_z,  R_T4, 4)
-#define gte_lwc2_v1_RT4   enc_cop2_lwc2(gte_in_v1_xy, R_T4, 0)
-#define gte_lwc2_v1z_RT4  enc_cop2_lwc2(gte_in_v1_z,  R_T4, 4)
-#define gte_lwc2_v2_RT4   enc_cop2_lwc2(gte_in_v2_xy, R_T4, 0)
-#define gte_lwc2_v2z_RT4  enc_cop2_lwc2(gte_in_v2_z,  R_T4, 4)
-
-/* gte_load_vN(r_ptr) — placeholder-punned lwc2 loaders
+/* Pre-baked lwc2 encoding helpers parameterized on the base GPR.
  *
- * Each emits a small sequence of `.word` constants that encode `lwc2 $N,
- * off($12)` for the chosen GTE vector register. The base register is
- * forced to be R_T4 ($12) at runtime via:
- *   - `"r"(r_ptr)`: GCC picks a GPR for `r_ptr`
- *   - `"$12"` in the clobber list: GCC can't put any other live value in $12
- *   - Net effect: GCC must place `r_ptr` in $12, the register the .word
- *     constants expect.
+ * gte_lwc2_v0(base)  → lwc2 $0,  0(base)   ; C2_VXY0
+ * gte_lwc2_v0z(base) → lwc2 $1,  4(base)   ; C2_VZ0
+ * gte_lwc2_v1(base)  → lwc2 $2,  0(base)   ; C2_VXY1
+ * gte_lwc2_v1z(base) → lwc2 $3,  4(base)   ; C2_VZ1
+ * gte_lwc2_v2(base)  → lwc2 $4,  0(base)   ; C2_VXY2
+ * gte_lwc2_v2z(base) → lwc2 $5,  4(base)   ; C2_VZ2
+ *
+ * `base` is the GPR number to bake into the .word constant's `rs` field.
+ * These are pure compile-time integers; the C compiler constant-folds
+ * them into .word directives. */
+#define gte_lwc2_v0(base)   enc_cop2_lwc2(gte_in_v0_xy, (base), 0)
+#define gte_lwc2_v0z(base)  enc_cop2_lwc2(gte_in_v0_z,  (base), 4)
+#define gte_lwc2_v1(base)   enc_cop2_lwc2(gte_in_v1_xy, (base), 0)
+#define gte_lwc2_v1z(base)  enc_cop2_lwc2(gte_in_v1_z,  (base), 4)
+#define gte_lwc2_v2(base)   enc_cop2_lwc2(gte_in_v2_xy, (base), 0)
+#define gte_lwc2_v2z(base)  enc_cop2_lwc2(gte_in_v2_z,  (base), 4)
+
+/* gte_load_vN(r_ptr, base) — placeholder-punned lwc2 loaders
+ *
+ * Emits `.word` constants encoding `lwc2 $N, off(<base>)` for the chosen
+ * GTE vector register, where `<base>` is the GPR number you pass in
+ * (typically one of R_T4..R_T9 for the standard "3-pointer" pattern).
+ *
+ * The caller MUST bind `r_ptr` to that same GPR via a register variable:
+ *
+ *     register V3_S2* p_in_12 __asm__("$12") = my_ptr;
+ *     gte_load_v0(p_in_12, R_T4);   // R_T4 = 12, base is $12
+ *
+ * Then `"r"(r_ptr)` inside the asm binds to $12 (the only register
+ * `p_in_12` can live in), which is exactly the register the .word
+ * constants expect. A `"$12"` clobber would conflict with the
+ * register-variable binding ("asm specifier for variable conflicts
+ * with asm clobber list"), so we omit it. The other ABI-clobbers
+ * ($2/$8/$9/$31) stay because the GTE instructions don't touch
+ * caller-saved GPRs but the kernel does treat them as volatile.
+ *
+ * WHICH REGISTER TO PICK
+ * ----------------------
+ * Any caller-saved GPR is safe. Recommended default for an RTPT-style
+ * 3-pointer pipeline:
+ *   gte_load_v0(p0, R_T4);  // $12
+ *   gte_load_v1(p1, R_T5);  // $13
+ *   gte_load_v2(p2, R_T6);  // $14
+ * Avoid $0 (zero), $1 (at), $26/$27 (k0/k1), $28-$31 (gp/sp/fp/ra).
  *
  * Shape of the generated `asm volatile (...)`:
  *   code section       : ".word %0, %1"                 (from asm_inline)
  *   outputs section    : (empty, the 2nd colon)
- *   inputs section     : "i"(w0), "i"(w1), "r"(r_ptr)
- *   clobbers section   : "$2", "$8", ..., "$12"        (from asm_clobber)
+ *   inputs section     : "i"(w0), "i"(w1), "r"(r_ptr)   — r_ptr bound to <base>
+ *   clobbers section   : "$2", "$8", ..., "memory"      (from asm_clobber)
  *   3 colons total, GCC-legal. No string-syntax mnemonics in the .word body.
  *
  * The `asm_clobber(...)` helper from gcc_asm.h prepends the colon that
  * starts the clobbers section. */
-#define gte_load_v0(r_ptr) \
+#define gte_load_v0(r_ptr, base) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4 )         \
+        asm_inline( gte_lwc2_v0(base), gte_lwc2_v0z(base) )     \
         , "r"(r_ptr)                                           \
-        asm_clobber( "$2", "$8", "$9", "$31", "memory", "$12" ) \
+        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
-#define gte_load_v1(r_ptr) \
+#define gte_load_v1(r_ptr, base) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4 )         \
+        asm_inline( gte_lwc2_v1(base), gte_lwc2_v1z(base) )     \
         , "r"(r_ptr)                                           \
-        asm_clobber( "$2", "$8", "$9", "$31", "memory", "$12" ) \
+        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
-#define gte_load_v2(r_ptr) \
+#define gte_load_v2(r_ptr, base) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )         \
+        asm_inline( gte_lwc2_v2(base), gte_lwc2_v2z(base) )     \
         , "r"(r_ptr)                                           \
-        asm_clobber( "$2", "$8", "$9", "$31", "memory", "$12" ) \
+        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
-/* gte_load_v0v1v2(r_ptr) — the canonical prelude to gte_cmd_rtpt.
- * Loads all three GTE input vectors (6 words) from a contiguous array
- * of three SVECTORs (24 bytes total). */
-#define gte_load_v0v1v2(r_ptr) \
+/* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — the canonical prelude to gte_cmd_rtpt.
+ *
+ * Loads all three GTE input vectors (6 words) from three separate pointers,
+ * one per GTE vector register, each loaded from its own base GPR. Caller
+ * must bind each `pN` to `bN` via a register variable.
+ *
+ *   register V3_S2* p0 rgcc(R_T4) = verts[0].ptr;  // → __asm__("$12")
+ *   register V3_S2* p1 rgcc(R_T5) = verts[1].ptr;  // → __asm__("$13")
+ *   register V3_S2* p2 rgcc(R_T6) = verts[2].ptr;  // → __asm__("$14")
+ *   gte_load_v0v1v2(p0, p1, p2, R_T4, R_T5, R_T6);
+ *   gte_rtpt();
+ */
+#define gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4,          \
-                    gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4,          \
-                    gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )         \
-        , "r"(r_ptr)                                           \
-        asm_clobber( "$2", "$8", "$9", "$31", "memory", "$12" ) \
+        asm_inline( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),          \
+                    gte_lwc2_v1(b1), gte_lwc2_v1z(b1),          \
+                    gte_lwc2_v2(b2), gte_lwc2_v2z(b2) )         \
+        , "r"(p0), "r"(p1), "r"(p2)                            \
+        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
 #define gte_ldv0(r0)          \
@@ -382,10 +498,21 @@ enum { _C2_OPS_ = 0
  *   ctc2 $13,  $3         ; → C2_RT21
  *   ctc2 $14,  $4         ; → C2_RT22
  *
- * Uses the placeholder-pun: R_T4 ($12) is hard-wired into the `lw` base
- * field of every `.word` constant, and the `"r"(r0)` constraint + `"$12"`
- * clobber force GCC to put `r0` in $12 at runtime. The `lw` offsets are
- * literal values (0, 4, 8, ...) so the only runtime GPR in play is $12.
+ * Same contract as gte_load_v0: caller MUST bind `r0` to $12 via a
+ * register variable (`rgcc(R_T4)`) for the `lw $12, off(...)`
+ * instructions to read from the right base. The `"r"(r0)` constraint
+ * alone doesn't force a specific GPR — it just lets GCC pick one.
+ * The .word constants here bake R_T4/R_T5/R_T6 into the `rs` field
+ * of each lw, so the lw instructions will only do the right thing
+ * if $12/$13/$14 hold the matrix base at runtime.
+ *
+ *   M3_S2* m = ...;
+ *   register M3_S2* m_in_12 rgcc(R_T4) = m;
+ *   asm_gte_matrix_set_rotation(m_in_12);
+ *
+ * We clobber $12/$13/$14 (the ones we use as scratch inside the
+ * inline asm) plus the system clobbers; we don't clobber `r0` because
+ * the `rgcc` binding already says "this variable lives in $12".
  *
  * WARNING: Incomplete by design. The source macro only writes RT11..RT22
  * (5 of 9 rotation elements); RT23 and the entire RT3x row are left
@@ -407,7 +534,7 @@ enum { _C2_OPS_ = 0
 			 enc_cop2_tx(cop_mt, R_T5,  3),   \
 			 enc_cop2_tx(cop_mt, R_T6,  4)    \
 		)                                   \
-		asm_clobber( clb_system, "$12", "$13", "$14") \
+		asm_clobber( clb_system, reg_str(R_T4_Code), reg_str(R_T5_Code), reg_str(R_T6_Code) ) \
 		: \
 		: "r"(r0) \
 	)
