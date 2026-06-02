@@ -240,20 +240,17 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
 #define clb_system "$2", "$8", "$9", "$31", "memory"
 
-#define asm_mips_flush_icache() asm volatile( \
-	asm_inline( \
-			add_ui(rstack_ptr, rstack_ptr, -8)        \
-		, store_word(rret_addr, rstack_ptr, 4)      \
-		, add_ui(rret_0, rdiscard, bios_flushcache) \
-		, add_ui(rtmp_0, rdiscard, bios_table_addr) \
-		, jump_link(rtmp_0, rret_addr)              \
-		, nop()                                     \
-		, load_word(rret_addr, rstack_ptr, 4)       \
-		, jump_reg(rret_addr)                       \
-		, add_ui(rstack_ptr, rstack_ptr, 8)         \
-	) \
-	asm_clobber( clb_system ) \
-)
+#define asm_mips_flush_icache() asm_volatile( asm_inline( \
+		add_ui(rstack_ptr, rstack_ptr, -8)        \
+	, store_word(rret_addr, rstack_ptr, 4)      \
+	, add_ui(rret_0, rdiscard, bios_flushcache) \
+	, add_ui(rtmp_0, rdiscard, bios_table_addr) \
+	, jump_link(rtmp_0, rret_addr)              \
+	, nop()                                     \
+	, load_word(rret_addr, rstack_ptr, 4)       \
+	, jump_reg(rret_addr)                       \
+	, add_ui(rstack_ptr, rstack_ptr, 8)         \
+), clb_system )
 
 void test_mips_asm() {
 	asm_mips_flush_icache();

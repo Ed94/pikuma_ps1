@@ -325,10 +325,10 @@ function build-gte_hello {
 	$module_asm_crt = join-path $path_build         'crt0.o'
 	# assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
 
-	$src_asm    = join-path $path_module 'hello_gte.s'
-	$module_asm = join-path $path_build  'hello_gte.o'
+	# $src_asm    = join-path $path_module 'hello_gte.s'
+	# $module_asm = join-path $path_build  'hello_gte.o'
 
-	assemble-unit $src_asm $module_asm $includes $assemble_args
+	# assemble-unit $src_asm $module_asm $includes $assemble_args
 
 	$src_c    = join-path $path_module 'hello_gte.c'
 	$module_c = join-path $path_build  'hello_gte_c.o'
@@ -348,7 +348,7 @@ function build-gte_hello {
 	$link_args = @()
 	$link_args += $f_debug
 	# $link_args += $f_optimize_size
-	link-modules @($module_asm_crt, $module_asm, $module_c) $elf $link_args
+	link-modules @($module_asm_crt, $module_c) $elf $link_args
 	make-binary $elf $exe
 }
 build-gte_hello

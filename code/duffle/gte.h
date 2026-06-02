@@ -199,43 +199,54 @@ enum { _C2_OPS_ = 0
 #define gte_lwc2_v2_RT4   enc_cop2_lwc2(gte_in_v2_xy, R_T4, 0)
 #define gte_lwc2_v2z_RT4  enc_cop2_lwc2(gte_in_v2_z,  R_T4, 4)
 
-/* The actual call-site macros — zero string syntax. The asm_blob wrapper
- * (defined in gcc_asm.h) handles the asm volatile (...) envelope, and the
- * colon-prefixed clobber/input sections slot in cleanly:
+/* The actual call-site macros — zero string syntax in the .word body.
  *
- *   asm_blob( <code section>, <clobber section> )
+ * The "r"(r_ptr) input constraint is the irreducible GCC-syntax bit: the
+ * base register of lwc2 is a runtime value, so the compiler must allocate
+ * one for us. The "$12" clobber + the .word constants having rs=R_T4 ($12)
+ * hardwired form the "placeholder-pun" — GCC is forced to bind r_ptr to
+ * $12, which is exactly the register the .word constants expect.
  *
- * The placeholder-pun: the .word constants have rs=R_T4 ($12) hardwired,
- * and the "$12" clobber + "r"(r_ptr) input forces GCC to bind the pointer
- * to $12, which is exactly the register the constants expect. */
+ * Uses asm_volatile_4(code, outs, ins, clb) from gcc_asm.h.
+ *   asm_inline(...)    produces the 2-colon code:outputs:inputs body
+ *   "r"(r_ptr)         is the runtime-input section body
+ *   "$2", ..., "$12"   is the clobber section body
+ *   asm_volatile_4()   joins them with 3 colons and wraps in asm volatile
+ */
 #define gte_load_v0(r_ptr) \
-    asm volatile(                                  \
-        asm_inline( gte_lwc2_v0_RT4,  gte_lwc2_v0z_RT4 ),  \
-        asm_clobber( clb_system, "$12" )                    \
-        : : "r"(r_ptr) )
+    asm_volatile_4(                                              \
+        (asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4 )),        \
+        (),                                                        \
+        ("r"(r_ptr)),                                              \
+        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    )
 
 #define gte_load_v1(r_ptr) \
-    asm volatile(                                  \
-        asm_inline( gte_lwc2_v1_RT4,  gte_lwc2_v1z_RT4 ),  \
-        asm_clobber( clb_system, "$12" )                    \
-        : : "r"(r_ptr) )
+    asm_volatile_4(                                              \
+        (asm_inline( gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4 )),        \
+        (),                                                        \
+        ("r"(r_ptr)),                                              \
+        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    )
 
 #define gte_load_v2(r_ptr) \
-    asm volatile(                                  \
-        asm_inline( gte_lwc2_v2_RT4,  gte_lwc2_v2z_RT4 ),  \
-        asm_clobber( clb_system, "$12" )                    \
-        : : "r"(r_ptr) )
+    asm_volatile_4(                                              \
+        (asm_inline( gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )),        \
+        (),                                                        \
+        ("r"(r_ptr)),                                              \
+        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    )
 
-/* All three at once — the canonical prelude to gte_cmd_rtpt. */
+/* All three at once -- the canonical prelude to gte_cmd_rtpt. */
 #define gte_load_v0v1v2(r_ptr) \
-    asm volatile(                                  \
-        asm_inline(                            \
-              gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4, \
-              gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4, \
-              gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4  \
-        ),                                     \
-        asm_clobber( clb_system, "$12" )       \
-        : : "r"(r_ptr) )
+    asm_volatile_4(                                              \
+        (asm_inline( gte_lwc2_v0_RT4, gte_lwc2_v0z_RT4,            \
+                    gte_lwc2_v1_RT4, gte_lwc2_v1z_RT4,            \
+                    gte_lwc2_v2_RT4, gte_lwc2_v2z_RT4 )),         \
+        (),                                                        \
+        ("r"(r_ptr)),                                              \
+        ("$2", "$8", "$9", "$31", "memory", "$12")                 \
+    )
 
 /**
  * @brief Loads a single SVECTOR to GTE vector register V1
