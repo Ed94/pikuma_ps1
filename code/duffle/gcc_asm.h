@@ -254,9 +254,63 @@
 #define _INL_98(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97) ".word " _STR98 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97)
 #define _INL_99(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97,p98) ".word " _STR99 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97),"i"(p98)
 
-/* The AST Builders */
-#define asm_clobber(...) : __VA_ARGS__
-#define asm_inline(...)  m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
+/* ============================================================================
+ * AST BUILDERS — assemble a complete inline-asm block
+ * ============================================================================
+ *
+ * A complete GCC inline-asm statement has up to 4 sections separated by `:`:
+ *
+ *   asm volatile ( "code" : OUTPUTS : INPUTS : CLOBBERS );
+ *
+ * Every section-builder below prepends the `:` separator that GCC requires,
+ * so you can compose them inline without thinking about punctuation. The
+ * master `asm_block(...)` then wraps the four sections in `asm volatile (...)`.
+ *
+ *   asm_block(
+ *       asm_code( "..." ),
+ *       asm_out  ( "=r"(x), "+m"(y) ),   // optional
+ *       asm_in   ( "r"(a),  "m"(b)  ),   // optional
+ *       asm_clb  ( "$8", "memory"  )    // optional
+ *   );
+ *
+ * Common idioms (kept for back-compat / terseness):
+ *
+ *   asm_blob(asm_inline(...), asm_clobber(...))   // 2-section, no I/O
+ *   asm_block(asm_inline(...), , , )              // 4-section, empty
+ */
 
-/* The Shell */
+/* `asm_code` is a passthrough — it does NOT prepend a colon, since the code
+ * section is always the first (no separator needed before it). The format
+ * string + `"i"(...)` operand list are produced by `asm_inline(...)` and
+ * just pass through unchanged. */
+#define asm_code(...)         __VA_ARGS__
+
+/* `asm_out`  prepends `:` — separates code/outputs/inputs/clobbers */
+#define asm_out(...)          : __VA_ARGS__
+/* `asm_in`   prepends `:` */
+#define asm_in(...)           : __VA_ARGS__
+/* `asm_clb`  prepends `:` */
+#define asm_clb(...)          : __VA_ARGS__
+
+/* `asm_clobber` is the legacy single-section name. Kept for existing
+ * call-sites that put inputs *before* clobbers and want both as one colon-
+ * prefixed block (i.e. the user wrote `: "r"(x) ... : "..."` by hand). */
+#define asm_clobber(...)      : __VA_ARGS__
+
+/* `asm_inline(...)` dispatches into `_INL_<count>` to emit up to 99 encoded
+ * instruction words. This is the "compiled-instruction" form of `asm_code`. */
+#define asm_inline(...)       m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
+
+/* `asm_blob(inlines, clobbers)` — the original 2-section shell. Emits
+ *   `asm volatile ( inlines clobbers )`
+ * which is the `.word`-only shape (no inputs/outputs): the inlines expand
+ * to `".word %c0, ..." : : "i"(...)` already including the empty output
+ * and input sections via their trailing `:`, so clobbers just tacks on the
+ * end. */
 #define asm_blob(inlines, clobbers) asm volatile ( inlines clobbers )
+
+/* `asm_block(code, outs, ins, clb)` — the full 4-section shell. Each
+ * argument is expected to already include its own leading `:` (via the
+ * `asm_out` / `asm_in` / `asm_clb` builders) or be empty. The `code`
+ * argument should NOT have a leading `:`. */
+#define asm_block(code, outs, ins, clb) asm volatile ( code outs ins clb )

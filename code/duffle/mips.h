@@ -59,9 +59,11 @@ enum {
 	, op_lw      = 0x23 /* Load Word */
 	, op_lbu     = 0x24 /* Load Byte Unsigned */
 	, op_lhu     = 0x25 /* Load Halfword Unsigned */
+	, op_lwc2    = 0x32 /* Load Word to Coprocessor 2 (GTE) */
 	, op_sb      = 0x28 /* Store Byte */
 	, op_sh      = 0x29 /* Store Halfword */
 	, op_sw      = 0x2B /* Store Word */
+	, op_swc2    = 0x3A /* Store Word from Coprocessor 2 (GTE) */
 
 	, op_load_addr  = op_la
 	, op_load_imm   = op_li
@@ -142,21 +144,55 @@ enum { _BitOffsets = 0
 /* MIPS I-Type Instruction Format (Immediate/Constant) */
 #define enc_i(op, rs, rt, imm)           (enc_op(op) | enc_rs(rs) | enc_rt(rt) | enc_imm(imm))
 
-/* COP0 (System) Transfer Format */
-#define enc_cop0_tx(sub, rt, rd) enc_op(op_cop0) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd)
+/* COP0 (System) Transfer Format: mtc0 rt, rd or mfc0 rt, rd
+ * `sub` is the COP0 sub-opcode (cop_mf=0 or cop_mt=4), placed in rs slot.
+ * `rt` is the GPR operand (in rt slot).
+ * `rd` is the COP0 register index (in rd slot at bits 15..11). */
+#define enc_cop0_tx(sub, rt, rd) enc_i(op_cop0, (sub), (rt), ((rd) << 11))
 
 /* COP0 Return From Exception (rfe) */
 #define enc_rfe() 0x42000010
 
-#define load_imm(rs,rt,imm)   enc_i(op_lw,    rs, rt, imm)
-#define store_word(rs,rt,imm) enc_i(op_sw,    rs, rt, imm)
-#define add_ui(rs,rt,imm)     enc_i(op_addiu, rs, rt, imm)
-#define shift_ll(rs,rt,rd)    enc_r(op_special, rs, rt, rd, 0, fc_sll)
+/* --- Semantic Encoders (MIPS mnemonics) ---
+ * Argument order matches the MIPS assembly syntax:
+ *   dest-first, then source operands, then immediate last.
+ *
+ *   load_word(rt, base, off)   → lw   rt, off(base)
+ *   store_word(rt, base, off)  → sw   rt, off(base)
+ *   add_ui(rt, rs, imm)        → addiu rt, rs, imm
+ *   shift_ll(rd, rt, shamt)    → sll   rd, rt, shamt
+ *   jump_reg(rs)               → jr    rs
+ *   jump_link(rs, rd)          → jalr  rs        (link in rd, default $ra)
+ *   nop()                      → sll   $0, $0, 0
+ */
+#define load_word(rt, base, off)   enc_i(op_lw,    (base), (rt), (off))
+#define load_byte(rt, base, off)   enc_i(op_lb,    (base), (rt), (off))
+#define load_half(rt, base, off)   enc_i(op_lh,    (base), (rt), (off))
+#define load_byte_u(rt, base, off) enc_i(op_lbu,   (base), (rt), (off))
+#define load_half_u(rt, base, off) enc_i(op_lhu,   (base), (rt), (off))
+#define store_word(rt, base, off)  enc_i(op_sw,    (base), (rt), (off))
+#define add_ui(rt, rs, imm)        enc_i(op_addiu, (rs),   (rt), (imm))
+#define andi_op(rt, rs, imm)       enc_i(op_andi,  (rs),   (rt), (imm))
+#define ori_op(rt, rs, imm)        enc_i(op_ori,   (rs),   (rt), (imm))
+#define xori_op(rt, rs, imm)       enc_i(op_xori,  (rs),   (rt), (imm))
+#define lui_op(rt, imm)            enc_i(op_lui,   R_0,    (rt), (imm))
 
-#define jump_reg(rs)          enc_r(op_special, rs, R_0, R_0, 0, fc_jr)
-#define jump_nreg(rs,rt,rd)   enc_r(op_special, rs, rt, rd, 0, fc_jalr)
+/* Shift family (R-type). shift_ll/lr/ra: `sll rd, rt, shamt` */
+#define shift_ll(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sll)
+#define shift_lr(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_srl)
+#define shift_ra(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sra)
 
-#define nop() shift_ll(rdiscard, rdiscard, rdiscard)
+/* jr rs — jump to address in rs. */
+#define jump_reg(rs)               enc_r(op_special, (rs), R_0, R_0, 0, fc_jr)
+
+/* jalr rs, rd — link in rd (default $ra) and jump to address in rs.
+ * Layout: [op_special][rs:5][rt=0:5][rd:5][shamt=0:5][fc_jalr=0x09] */
+#define jump_link(rs, rd)          enc_r(op_special, (rs), R_0, (rd), 0, fc_jalr)
+
+/* Back-compat alias: the old `load_imm` was a misnomer for `lw`. */
+#define load_imm(rt, base, off)    load_word(rt, base, off)
+
+#define nop() shift_ll(rdiscard, rdiscard, 0)
 
 // FI_ void emit_load_imm(U4 rs, U4 rt, U4 imm) { emit(load_imm()); }
 
@@ -178,15 +214,28 @@ enum {
 	bios_table_addr = 0xA0,
 };
 
-/* Flushes the Instruction Cache */
+/* Flushes the Instruction Cache (PSX A-function 0x44 via BIOS stub at 0xA0).
+ *
+ * Sequence (per MIPS ABI; arguments in arg registers, RA pushed to stack):
+ *   1. sp -= 8;  sw $ra, 4($sp)        ; save RA
+ *   2. $a0 = bios_flushcache (arg0)
+ *   3. $t0 = bios_table_addr           ; t0 = &BIOS A-function table
+ *   4. jalr $t0, $ra                    ; call BIOS(flushcache)
+ *      nop                              ; branch delay slot
+ *   5. lw $ra, 4($sp);  jr $ra          ; restore & return
+ *   6. sp += 8
+ */
 I_
 Code CodeBlob_(mips_flush_icache) {
-	add_ui(rstack_ptr, rstack_ptr, -8),
-	store_word(rstack_ptr, rret_addr, 4),
-	add_ui(rdiscard, rret_0, bios_flushcache), add_ui(rdiscard, rtmp_0, bios_table_addr),
-	jump_nreg(rtmp_0, rdiscard, rret_addr), 
-	nop(), load_imm(rstack_ptr, rret_addr, 4), jump_reg(rret_addr),
-	add_ui(rstack_ptr, rstack_ptr, 8)
+	add_ui(rstack_ptr, rstack_ptr, -8),                       /* sp -= 8         */
+	store_word(rret_addr, rstack_ptr, 4),                    /* sw  $ra, 4($sp) */
+	add_ui(rret_0, rdiscard, bios_flushcache),               /* addiu $a0, $0, 0x44 */
+	add_ui(rtmp_0, rdiscard, bios_table_addr),               /* addiu $t0, $0, 0xA0 */
+	jump_link(rtmp_0, rret_addr),                            /* jalr $t0, $ra   */
+	nop(),                                                    /* BD slot         */
+	load_word(rret_addr, rstack_ptr, 4),                     /* lw  $ra, 4($sp) */
+	jump_reg(rret_addr),                                     /* jr   $ra        */
+	add_ui(rstack_ptr, rstack_ptr, 8)                        /* sp += 8 (BD)    */
 };
 FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
@@ -194,12 +243,15 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
 #define asm_mips_flush_icache() asm volatile( \
 	asm_inline( \
-			add_ui(rstack_ptr, rstack_ptr, -8) \
-		, store_word(rstack_ptr, rret_addr, 4) \
-		, add_ui(rdiscard, rret_0, bios_flushcache), add_ui(rdiscard, rtmp_0, bios_table_addr) \
-		, jump_nreg(rtmp_0, rdiscard, rret_addr)  \
-		, nop(), load_imm(rstack_ptr, rret_addr, 4), jump_reg(rret_addr) \
-		, add_ui(rstack_ptr, rstack_ptr, 8) \
+			add_ui(rstack_ptr, rstack_ptr, -8)                                  \
+		, store_word(rret_addr, rstack_ptr, 4)                                   \
+		, add_ui(rret_0, rdiscard, bios_flushcache)                              \
+		, add_ui(rtmp_0, rdiscard, bios_table_addr)                              \
+		, jump_link(rtmp_0, rret_addr)                                           \
+		, nop()                                                                  \
+		, load_word(rret_addr, rstack_ptr, 4)                                    \
+		, jump_reg(rret_addr)                                                    \
+		, add_ui(rstack_ptr, rstack_ptr, 8)                                      \
 	) \
 	asm_clobber( clb_system ) \
 )

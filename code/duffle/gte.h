@@ -119,9 +119,22 @@ enum {
     gte_cr_OFX  = 30, gte_cr_OFY  = 31,
 };
 
-/* COP2 (GTE) Transfer Format
- * Opcode is always op_cop2. The 'sub' field determines direction (MT/MF). */
-#define enc_cop2_tx(sub, rt, rd) enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd)
+/* COP2 (GTE) Transfer Format: ctc2 rt, rd or cfc2 rt, rd
+ * Layout: [op_cop2:6][sub:5][rt:5][rd:5][0:11]
+ *   - sub: cop_mf (0x00) for cfc2, cop_mt (0x04) for ctc2
+ *   - rt:  GPR source/dest
+ *   - rd:  COP2 control register index (0..31) */
+#define enc_cop2_tx(sub, rt, rd) (enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd))
+
+/* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
+ * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]
+ *   - rs: GPR base address
+ *   - rt: COP2 data register index (0..31)
+ *   - imm: signed 16-bit offset
+ * NOTE: When `rs` is a runtime register, the encoding cannot be pre-baked
+ * into a .word — use the string-style `gte_load_v0` macro below instead. */
+#define enc_cop2_lwc2(rt, base, off)  enc_i(op_lwc2, (base), (rt), (off))
+#define enc_cop2_swc2(rt, base, off)  enc_i(op_swc2, (base), (rt), (off))
 
 /* GTE Command Format (The math engine trigger)
  * Opcode is always MIPS_OP_COP2, RS is always 1 (CO).
@@ -145,7 +158,7 @@ enum {
 #define enc_gte_cmd(cmd)     (((cmd) & gte_mask_cmd) << gte_shift_cmd)
 
 /* Composite: all six GTE fields + the COP2/CO base. */
-#define enc_gte_cmd(sf, mx, v, cv, lm, cmd) ( \
+#define enc_gte_cmdw(sf, mx, v, cv, lm, cmd) ( \
      gte_cmd_base     \
    | enc_gte_sf(sf)   \
    | enc_gte_mx(mx)   \
@@ -153,6 +166,26 @@ enum {
    | enc_gte_cv(cv)   \
    | enc_gte_lm(lm)   \
    | enc_gte_cmd(cmd) \
+)
+
+/**
+ * @brief Loads a single SVECTOR to GTE vector register V0
+ *
+ * @details Loads values from an SVECTOR struct to GTE data registers C2_VXY0
+ * (XY at offset 0) and C2_VZ0 (Z at offset 4) using `lwc2`.
+ *
+ * Uses string-style GCC inline asm with `%0` substitution because the
+ * base register `r0` is a runtime GPR chosen by the compiler — it cannot
+ * be encoded into a static `.word` constant.
+ *
+ * Usage:
+ *   asm_gte_load_v0(svector_ptr);
+ */
+#define asm_gte_load_v0(r0) asm volatile( \
+	"lwc2 $0, 0(%0);"  \
+	"lwc2 $1, 4(%0);"  \
+	:                   \
+	: "r"(r0)           \
 )
 
 /* asm_gte_matrix_set_rotation(r0)
@@ -178,6 +211,10 @@ enum {
  *   ctc2 $13,  $3         ; → C2_RT21
  *   ctc2 $14,  $4         ; → C2_RT22
  *
+ * Uses string-style GCC inline asm with `%0` substitution because the
+ * base register `r0` is a runtime GPR — the `lw` offsets use literal
+ * values (0, 4, 8, ...) so only the base register needs substitution.
+ *
  * WARNING: Incomplete by design. The source macro only writes RT11..RT22
  * (5 of 9 rotation elements); RT23 and the entire RT3x row are left
  * untouched. Real libpsn00b SetRotMatrix writes all 9. Use only when the
@@ -185,7 +222,7 @@ enum {
  * get stale-RT2x/RT3x artifacts in RTPS/RTPT/MVMVA output.
  */
 #define asm_gte_matrix_set_rotation(r0) \
-	asm volatile(                         \
+	asm volatile( \
 		asm_inline(                         \
 			 load_imm(R_T4, r0,  0),          \
 			 load_imm(R_T5, r0,  4),          \
@@ -199,6 +236,6 @@ enum {
 			 enc_cop2_tx(cop_mt, R_T6,  4)    \
 		)                                   \
 		asm_clobber( clb_system, "$12", "$13", "$14") \
-		:                                             \
-		: "r"(r0)                                     \
+		: \
+		: "r"(r0) \
 	)

@@ -9,6 +9,7 @@
 #include "duffle/memory.h"
 #include "duffle/math.h"
 #include "duffle/gp.h"
+#include "duffle/gte.h"
 #include "hello_gte.h"
 
 enum {
@@ -161,26 +162,6 @@ void gp_display_frame(DoubleBuffer* screen_buf, S2* active_buf_id, U4* ordering_
 void render(void) {
 }
 
-// #define gte_ldv0(r0)          \
-//     __asm__ volatile(         \
-//         "lwc2   $0, 0( %0 );" \
-//         "lwc2   $1, 4( %0 )"  \
-//         :                     \
-//         : "r"(r0))
-
-/**
- * @brief Loads a single V3_S2 to GTE vector register V0
- *
- * @details Loads values from an V3_S2 struct to GTE data registers C2_VXY0
- * and C2_VZ0.
- */
-// #define gte_ldv0( r0 ) __asm__ volatile ( \
-// 	"lwc2	$0, 0( %0 );"	\
-// 	"lwc2	$1, 4( %0 );"	\
-// 	:						\
-// 	: "r"( r0 )				\
-// 	: "$t0" )
-
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
 	orderingtbl_clear_reverse(ordering_buf, OrderingTbl_Len);
@@ -261,6 +242,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			V3_S2* p0   = & static_mem.floor.verts[face->x];
 			V3_S2* p1   = & static_mem.floor.verts[face->y];
 			V3_S2* p2   = & static_mem.floor.verts[face->z];
+
+			asm_gte_load_v0(p0);
 
 			nclip = rtp_avg_nclip_a3_v3s2(p0, p1, p2
 				, & tri->p0, & tri->p1, & tri->p2
