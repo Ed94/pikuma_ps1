@@ -32,106 +32,112 @@
     19, 18, 17, 16, 15, 14, 13, 12, 11, 10, \
     9,  8,  7,  6,  5,  4,  3,  2,  1,  0))
 
-/* --- 2. String Concatenation Helpers --- */
-#define _STR1  "%c0"
-#define _STR2  _STR1  ", %c1"
-#define _STR3  _STR2  ", %c2"
-#define _STR4  _STR3  ", %c3"
-#define _STR5  _STR4  ", %c4"
-#define _STR6  _STR5  ", %c5"
-#define _STR7  _STR6  ", %c6"
-#define _STR8  _STR7  ", %c7"
-#define _STR9  _STR8  ", %c8"
-#define _STR10 _STR9  ", %c9"
-#define _STR11 _STR10 ", %c10"
-#define _STR12 _STR11 ", %c11"
-#define _STR13 _STR12 ", %c12"
-#define _STR14 _STR13 ", %c13"
-#define _STR15 _STR14 ", %c14"
-#define _STR16 _STR15 ", %c15"
-#define _STR17 _STR16 ", %c16"
-#define _STR18 _STR17 ", %c17"
-#define _STR19 _STR18 ", %c18"
-#define _STR20 _STR19 ", %c19"
-#define _STR21 _STR20 ", %c20"
-#define _STR22 _STR21 ", %c21"
-#define _STR23 _STR22 ", %c22"
-#define _STR24 _STR23 ", %c23"
-#define _STR25 _STR24 ", %c24"
-#define _STR26 _STR25 ", %c25"
-#define _STR27 _STR26 ", %c26"
-#define _STR28 _STR27 ", %c27"
-#define _STR29 _STR28 ", %c28"
-#define _STR30 _STR29 ", %c29"
-#define _STR31 _STR30 ", %c30"
-#define _STR32 _STR31 ", %c31"
-#define _STR33 _STR32 ", %c32"
-#define _STR34 _STR33 ", %c33"
-#define _STR35 _STR34 ", %c34"
-#define _STR36 _STR35 ", %c35"
-#define _STR37 _STR36 ", %c36"
-#define _STR38 _STR37 ", %c37"
-#define _STR39 _STR38 ", %c38"
-#define _STR40 _STR39 ", %c39"
-#define _STR41 _STR40 ", %c40"
-#define _STR42 _STR41 ", %c41"
-#define _STR43 _STR42 ", %c42"
-#define _STR44 _STR43 ", %c43"
-#define _STR45 _STR44 ", %c44"
-#define _STR46 _STR45 ", %c45"
-#define _STR47 _STR46 ", %c46"
-#define _STR48 _STR47 ", %c47"
-#define _STR49 _STR48 ", %c48"
-#define _STR50 _STR49 ", %c49"
-#define _STR51 _STR50 ", %c50"
-#define _STR52 _STR51 ", %c51"
-#define _STR53 _STR52 ", %c52"
-#define _STR54 _STR53 ", %c53"
-#define _STR55 _STR54 ", %c54"
-#define _STR56 _STR55 ", %c55"
-#define _STR57 _STR56 ", %c56"
-#define _STR58 _STR57 ", %c57"
-#define _STR59 _STR58 ", %c58"
-#define _STR60 _STR59 ", %c59"
-#define _STR61 _STR60 ", %c60"
-#define _STR62 _STR61 ", %c61"
-#define _STR63 _STR62 ", %c62"
-#define _STR64 _STR63 ", %c63"
-#define _STR65 _STR64 ", %c64"
-#define _STR66 _STR65 ", %c65"
-#define _STR67 _STR66 ", %c66"
-#define _STR68 _STR67 ", %c67"
-#define _STR69 _STR68 ", %c68"
-#define _STR70 _STR69 ", %c69"
-#define _STR71 _STR70 ", %c70"
-#define _STR72 _STR71 ", %c71"
-#define _STR73 _STR72 ", %c72"
-#define _STR74 _STR73 ", %c73"
-#define _STR75 _STR74 ", %c74"
-#define _STR76 _STR75 ", %c75"
-#define _STR77 _STR76 ", %c76"
-#define _STR78 _STR77 ", %c77"
-#define _STR79 _STR78 ", %c78"
-#define _STR80 _STR79 ", %c79"
-#define _STR81 _STR80 ", %c80"
-#define _STR82 _STR81 ", %c81"
-#define _STR83 _STR82 ", %c82"
-#define _STR84 _STR83 ", %c83"
-#define _STR85 _STR84 ", %c84"
-#define _STR86 _STR85 ", %c85"
-#define _STR87 _STR86 ", %c86"
-#define _STR88 _STR87 ", %c87"
-#define _STR89 _STR88 ", %c88"
-#define _STR90 _STR89 ", %c89"
-#define _STR91 _STR90 ", %c90"
-#define _STR92 _STR91 ", %c91"
-#define _STR93 _STR92 ", %c92"
-#define _STR94 _STR93 ", %c93"
-#define _STR95 _STR94 ", %c94"
-#define _STR96 _STR95 ", %c95"
-#define _STR97 _STR96 ", %c96"
-#define _STR98 _STR97 ", %c97"
-#define _STR99 _STR98 ", %c98"
+/* --- 2. String Concatenation Helpers --- *
+ * NOTE: we use `%0`, `%1`, ... not `%c0`, `%c1`, ... because GCC's
+ * asm-parser rejects `%cN` in this position with "invalid use of '%c'".
+ * The `%cN` form is for printing *character* constants; for arbitrary
+ * integer immediates (the only kind `"i"(...)` produces), the plain
+ * `%N` form is the right one. Both expand to the bare immediate.
+ */
+#define _STR1  "%0"
+#define _STR2  _STR1  ", %1"
+#define _STR3  _STR2  ", %2"
+#define _STR4  _STR3  ", %3"
+#define _STR5  _STR4  ", %4"
+#define _STR6  _STR5  ", %5"
+#define _STR7  _STR6  ", %6"
+#define _STR8  _STR7  ", %7"
+#define _STR9  _STR8  ", %8"
+#define _STR10 _STR9  ", %9"
+#define _STR11 _STR10 ", %10"
+#define _STR12 _STR11 ", %11"
+#define _STR13 _STR12 ", %12"
+#define _STR14 _STR13 ", %13"
+#define _STR15 _STR14 ", %14"
+#define _STR16 _STR15 ", %15"
+#define _STR17 _STR16 ", %16"
+#define _STR18 _STR17 ", %17"
+#define _STR19 _STR18 ", %18"
+#define _STR20 _STR19 ", %19"
+#define _STR21 _STR20 ", %20"
+#define _STR22 _STR21 ", %21"
+#define _STR23 _STR22 ", %22"
+#define _STR24 _STR23 ", %23"
+#define _STR25 _STR24 ", %24"
+#define _STR26 _STR25 ", %25"
+#define _STR27 _STR26 ", %26"
+#define _STR28 _STR27 ", %27"
+#define _STR29 _STR28 ", %28"
+#define _STR30 _STR29 ", %29"
+#define _STR31 _STR30 ", %30"
+#define _STR32 _STR31 ", %31"
+#define _STR33 _STR32 ", %32"
+#define _STR34 _STR33 ", %33"
+#define _STR35 _STR34 ", %34"
+#define _STR36 _STR35 ", %35"
+#define _STR37 _STR36 ", %36"
+#define _STR38 _STR37 ", %37"
+#define _STR39 _STR38 ", %38"
+#define _STR40 _STR39 ", %39"
+#define _STR41 _STR40 ", %40"
+#define _STR42 _STR41 ", %41"
+#define _STR43 _STR42 ", %42"
+#define _STR44 _STR43 ", %43"
+#define _STR45 _STR44 ", %44"
+#define _STR46 _STR45 ", %45"
+#define _STR47 _STR46 ", %46"
+#define _STR48 _STR47 ", %47"
+#define _STR49 _STR48 ", %48"
+#define _STR50 _STR49 ", %49"
+#define _STR51 _STR50 ", %50"
+#define _STR52 _STR51 ", %51"
+#define _STR53 _STR52 ", %52"
+#define _STR54 _STR53 ", %53"
+#define _STR55 _STR54 ", %54"
+#define _STR56 _STR55 ", %55"
+#define _STR57 _STR56 ", %56"
+#define _STR58 _STR57 ", %57"
+#define _STR59 _STR58 ", %58"
+#define _STR60 _STR59 ", %59"
+#define _STR61 _STR60 ", %60"
+#define _STR62 _STR61 ", %61"
+#define _STR63 _STR62 ", %62"
+#define _STR64 _STR63 ", %63"
+#define _STR65 _STR64 ", %64"
+#define _STR66 _STR65 ", %65"
+#define _STR67 _STR66 ", %66"
+#define _STR68 _STR67 ", %67"
+#define _STR69 _STR68 ", %68"
+#define _STR70 _STR69 ", %69"
+#define _STR71 _STR70 ", %70"
+#define _STR72 _STR71 ", %71"
+#define _STR73 _STR72 ", %72"
+#define _STR74 _STR73 ", %73"
+#define _STR75 _STR74 ", %74"
+#define _STR76 _STR75 ", %75"
+#define _STR77 _STR76 ", %76"
+#define _STR78 _STR77 ", %77"
+#define _STR79 _STR78 ", %78"
+#define _STR80 _STR79 ", %79"
+#define _STR81 _STR80 ", %80"
+#define _STR82 _STR81 ", %81"
+#define _STR83 _STR82 ", %82"
+#define _STR84 _STR83 ", %83"
+#define _STR85 _STR84 ", %84"
+#define _STR86 _STR85 ", %85"
+#define _STR87 _STR86 ", %86"
+#define _STR88 _STR87 ", %87"
+#define _STR89 _STR88 ", %88"
+#define _STR90 _STR89 ", %89"
+#define _STR91 _STR90 ", %90"
+#define _STR92 _STR91 ", %91"
+#define _STR93 _STR92 ", %92"
+#define _STR94 _STR93 ", %93"
+#define _STR95 _STR94 ", %94"
+#define _STR96 _STR95 ", %95"
+#define _STR97 _STR96 ", %96"
+#define _STR98 _STR97 ", %97"
+#define _STR99 _STR98 ", %98"
 
 /* Utilizing cascading operand strings to compress the payload */
 #define _OP10 "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7),"i"(p8),"i"(p9)
@@ -300,56 +306,23 @@
 /* `asm_inline(...)` dispatches into `_INL_<count>` to emit up to 99 encoded
  * instruction words. This is the "compiled-instruction" form of `asm_code`.
  *
- * Result is a 3-colon statement body WITHOUT the final clobber section:
+ * Result is a 2-colon body WITHOUT the final clobber section:
  *   ".word %c0, %c1, ..." : : "i"(p0), "i"(p1)
  *   |----- code -----|   |--- empty ---|  |------- inputs -------|
  *
- * Append `: clobbers` after it and wrap in `asm volatile (...)`. */
-#define asm_inline(...)       m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
-
-/* ============================================================================
- * SECTION-STRIP HELPER — let users wrap multi-token sections in `(...)` so
- * the preprocessor treats them as a single argument.
- * ============================================================================
+ * Use it inside `asm volatile( ... )` like so:
  *
- * Without paren-stripping, calling
- *   asm_block_4(asm_inline(w0, w1), , "r"(p), "$2", "$8")
- * would tokenize the last `clb` as TWO args (`"$2"` and `"$8"`) because
- * the preprocessor counts top-level commas. The parens `("$2", "$8")`
- * shield the comma, so the preprocessor sees ONE arg — but those parens
- * would then survive into the C source as a syntax error.
- *
- * The trick:
- *   _strip((a, b, c))  ->  _strip_IMPL (a, b, c)  ->  _strip_IMPL a, b, c
- *                                                  (function-call syntax!)
- *                              ->  a, b, c
- *
- * The outer call is on `a, b, c` (which is fine as macro args), and the
- * variadic capture `__VA_ARGS__` then re-emits the comma-separated list. */
-#define _strip(x)             _strip_IMPL x
-#define _strip_IMPL(...)      __VA_ARGS__
-
-/* ============================================================================
- *  asm_block_4(code, outs, ins, clb) — the assembler for the 4-section form
- * ============================================================================
- *
- * You pass 4 section BODIES (no colons). To allow multi-token sections, wrap
- * them in `(...)` — the parens shield internal commas from the preprocessor
- * and are stripped by the `_strip` helper.
- *
- *   asm_block_4(
- *       (asm_inline(w0, w1)),     // code body — parens protect inner commas
- *       (),                       // empty outputs
- *       ("r"(p)),                 // inputs body
- *       ("$2", "$8", "memory")    // clobbers body
+ *   asm volatile(
+ *       asm_inline(w0, w1, w3)
+ *       : clobbers
  *   )
  *
- * Expands to:
- *   asm volatile( asm_inline(w0, w1) : : "r"(p) : "$2", "$8", "memory" )
- *                      |-- 3 colons inserted here --|
+ * which expands to:
  *
- * If a section is a single token (no internal commas), you can omit the
- * parens: `asm_block_4("...", , "r"(p), "$2")`.
- */
-#define asm_block_4(code, outs, ins, clb) \
-    asm volatile( _strip(code) : _strip(outs) : _strip(ins) : _strip(clb) )
+ *   asm volatile(
+ *       ".word %c0, %c1, %c2" : : "i"(w0), "i"(w1), "i"(w2)
+ *       : "$2", "$8", ...
+ *   )
+ *
+ * 3 colons total. Always valid. */
+#define asm_inline(...)       m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
