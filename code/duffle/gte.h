@@ -425,27 +425,6 @@ enum { _C2_OPS_ = 0
         asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
-#define gte_ldv0(r0)          \
-    __asm__ volatile(         \
-        "lwc2   $0, 0( %0 );" \
-        "lwc2   $1, 4( %0 )"  \
-        :                     \
-        : "r"(r0))
-
-#define gte_ldv1(r0)          \
-    __asm__ volatile(         \
-        "lwc2   $2, 0( %0 );" \
-        "lwc2   $3, 4( %0 )"  \
-        :                     \
-        : "r"(r0))
-
-#define gte_ldv2(r0)          \
-    __asm__ volatile(         \
-        "lwc2   $4, 0( %0 );" \
-        "lwc2   $5, 4( %0 )"  \
-        :                     \
-        : "r"(r0))
-
 #define gte_rtpt()    \
     __asm__ volatile( \
         "nop;"        \

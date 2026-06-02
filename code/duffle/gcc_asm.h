@@ -327,6 +327,25 @@
  * 3 colons total. Always valid. */
 #define asm_inline(...)       m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
 
+/* reg_str(n) — Stringify an integer register id into the GCC asm
+ * string form (e.g. 12 → "$12"). Use this anywhere GCC's parser
+ * expects a literal string identifying a register: clobber lists,
+ * asm templates, etc. The two-level macro is the standard preprocessor
+ * idiom for forcing one level of expansion before stringify — without
+ * it, `#n` would stringify the macro name `R_T4` to `"R_T4"` instead
+ * of expanding `R_T4` to its value first.
+ *
+ * For declaring a register variable bound to a specific GPR, use the
+ * `rgcc(n)` bundle from gcc_asm.h instead — it adds the `__asm__()`
+ * qualifier around the string.
+ *
+ *   register V3_S2* p0 __asm__(reg_str(R_T4)) = ...;        // verbose
+ *   register V3_S2* p0 rgcc(R_T4) = ...;                    // bundled
+ *
+ *   asm volatile("nop" : : : reg_str(R_RA), "memory");      // clobber list */
+#define reg_str_(n)  "$" #n
+#define reg_str(n)   reg_str_(n)
+
 /* ------------------------------------------------------------------------ *
  *  rgcc(n) — GCC-specific bundle for register-variable declarations.
  *
