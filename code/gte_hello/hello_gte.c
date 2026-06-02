@@ -226,7 +226,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// static_mem.cube.rot.x +=  6;
 		// static_mem.cube.rot.y +=  8;
 		// static_mem.cube.rot.z += 12;
-		static_mem.cube.rot.y += 0;
+		static_mem.cube.rot.y += 20;
 	}
 	// Draw Floor
 	{
@@ -241,12 +241,12 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			tri->color   = rgb8(255, 255, 255);
 
 			V3_S2* face = & static_mem.floor.faces[face_id];
-			V3_S2* p0   = & static_mem.floor.verts[face->x];
+			register V3_S2* p0 asm("$12") = & static_mem.floor.verts[face->x];
 			V3_S2* p1   = & static_mem.floor.verts[face->y];
 			V3_S2* p2   = & static_mem.floor.verts[face->z];
 
 			// gte_ldv0(p0);
-			gte_load_v0(p0);
+ 			gte_load_v0(p0);
 			gte_ldv1(p1);
 			gte_ldv2(p2);
 
