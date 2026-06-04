@@ -231,7 +231,7 @@ enum { _BitOffsets = 0
  *   shift_ll(rd, rt, shamt)    → sll   rd, rt, shamt
  *   jump_reg(rs)               → jr    rs
  *   jump_link(rs, rd)          → jalr  rs        (link in rd, default $ra)
- *   nop()                      → sll   $0, $0, 0
+ *   nop                      → sll   $0, $0, 0
  */
 #define load_word(rt, base, off)   enc_i(op_lw,    (base), (rt), (off))
 #define load_byte(rt, base, off)   enc_i(op_lb,    (base), (rt), (off))
@@ -261,10 +261,10 @@ enum { _BitOffsets = 0
 #define jump_nreg(rs)              jump_link((rs), R_RA)
 
 /* j target — absolute jump within the current 256MB region. */
-#define jump(off)                   enc_i(op_j,     R_0, R_0, (off))
+#define jump(off)                  enc_i(op_j,     R_0, R_0, (off))
 
 /* jal target — absolute call within the current 256MB region. */
-#define jump_nlink(off)             enc_i(op_jal,   R_0, R_0, (off))
+#define jump_nlink(off)            enc_i(op_jal,   R_0, R_0, (off))
 
 /* --- Store family (mirrors the load family) --- */
 #define store_byte(rt, base, off)  enc_i(op_sb,    (base), (rt), (off))
@@ -297,20 +297,20 @@ enum { _BitOffsets = 0
 #define div_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_divu)
 
 /* --- Arithmetic I-type (immediate) --- */
-#define add_si(rt, rs, imm)         enc_i(op_addi,  (rs), (rt), (imm))
+#define add_si(rt, rs, imm)        enc_i(op_addi,  (rs), (rt), (imm))
 /* add_ui already exists above as add_ui */
 
 /* --- Set on less than (R-type and I-type) --- */
 #define slt_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_slt)
 #define slt_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_sltu)
-#define slt_si(rt, rs, imm)         enc_i(op_slti,  (rs), (rt), (imm))
-#define slt_ui(rt, rs, imm)         enc_i(op_sltiu, (rs), (rt), (imm))
+#define slt_si(rt, rs, imm)        enc_i(op_slti,  (rs), (rt), (imm))
+#define slt_ui(rt, rs, imm)        enc_i(op_sltiu, (rs), (rt), (imm))
 
 /* --- Move from/to HI/LO (mult/div results) --- */
 #define mov_from_high(rd)          enc_r(op_special, R_0, R_0, (rd), 0, fc_mfhi)
 #define mov_from_low(rd)           enc_r(op_special, R_0, R_0, (rd), 0, fc_mflo)
-#define mov_to_high(rs)             enc_r(op_special, (rs), R_0, R_0, 0, fc_mthi)
-#define mov_to_low(rs)              enc_r(op_special, (rs), R_0, R_0, 0, fc_mtlo)
+#define mov_to_high(rs)            enc_r(op_special, (rs), R_0, R_0, 0, fc_mthi)
+#define mov_to_low(rs)             enc_r(op_special, (rs), R_0, R_0, 0, fc_mtlo)
 
 /* --- Atomic branches (no pseudos like bgt/bge; compose with slt_* + branch_ne) ---
  * branch_equal  rs, rt, off → beq   rs, rt, off
@@ -321,21 +321,21 @@ enum { _BitOffsets = 0
  * branch_ge_zero rs, off     → bgez  rs, off
  * (For `bgez`, the opcode is `op_bcond` with rt=1 to invert the bltz condition.) */
 #define branch_equal(rs, rt, off)   enc_i(op_beq,   (rs), (rt), (off))
-#define branch_ne(rs, rt, off)       enc_i(op_bne,   (rs), (rt), (off))
-#define branch_lt_zero(rs, off)      enc_i(op_bltz,  R_0, (rs), (off))
-#define branch_gt_zero(rs, off)      enc_i(op_bgtz,  R_0, (rs), (off))
-#define branch_le_zero(rs, off)      enc_i(op_blez,  R_0, (rs), (off))
-#define branch_ge_zero(rs, off)      enc_i(op_bcond, R_0, (rs), (1u << 16) | ((off) & 0xFFFF))
+#define branch_ne(rs, rt, off)      enc_i(op_bne,   (rs), (rt), (off))
+#define branch_lt_zero(rs, off)     enc_i(op_bltz,  R_0, (rs), (off))
+#define branch_gt_zero(rs, off)     enc_i(op_bgtz,  R_0, (rs), (off))
+#define branch_le_zero(rs, off)     enc_i(op_blez,  R_0, (rs), (off))
+#define branch_ge_zero(rs, off)     enc_i(op_bcond, R_0, (rs), (1u << 16) | ((off) & 0xFFFF))
 
 /* --- System (kernel) instructions --- */
 #define syscall()                   enc_r(op_special, R_0, R_0, R_0, 0, fc_syscall)
 #define breakpoint()                enc_r(op_special, R_0, R_0, R_0, 0, fc_break)
 
 /* --- Shift-amount alias (matches the gas convention `\p3 = shamt`) --- */
-#define shamt(rd, rt, n)           shift_ll(rd, rt, n)
+#define shamt(rd, rt, n)            shift_ll(rd, rt, n)
 
 /* nop — canonical sll $0, $0, 0 */
-#define nop() shift_ll(rdiscard, rdiscard, 0)
+#define nop shift_ll(rdiscard, rdiscard, 0)
 
 #define load_imm_1w(rt, imm)    add_ui((rt),  R_0, (imm))
 #define load_imm_1w_s0(rt, imm) add_si((rt)), R_0, (imm))
@@ -491,7 +491,7 @@ Code CodeBlob_(mips_flush_icache) {
 	add_ui(rret_0, rdiscard, bios_flushcache), /* addiu $a0, $0, 0x44 */
 	add_ui(rtmp_0, rdiscard, bios_table_addr), /* addiu $t0, $0, 0xA0 */
 	jump_link(rtmp_0, rret_addr),              /* jalr $t0, $ra   */
-	nop(),                                     /* BD slot         */
+	nop,                                       /* BD slot         */
 	load_word(rret_addr, rstack_ptr, 4),       /* lw  $ra, 4($sp) */
 	jump_reg(rret_addr),                       /* jr   $ra        */
 	add_ui(rstack_ptr, rstack_ptr, 8)          /* sp += 8 (BD)    */
@@ -511,7 +511,7 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 	, add_ui(rret_0, rdiscard, bios_flushcache) \
 	, add_ui(rtmp_0, rdiscard, bios_table_addr) \
 	, jump_link(rtmp_0, rret_addr)              \
-	, nop()                                     \
+	, nop                                       \
 	, load_word(rret_addr, rstack_ptr, 4)       \
 	, jump_reg(rret_addr)                       \
 	, add_ui(rstack_ptr, rstack_ptr, 8)         \

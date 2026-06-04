@@ -246,16 +246,16 @@ enum {
 #define gte_cr_OFY_Code  31
 
 enum {
-    gte_cr_RT11 = gte_cr_RT11_Code, gte_cr_RT12 = gte_cr_RT12_Code, gte_cr_RT13 = gte_cr_RT13_Code,
-    gte_cr_RT21 = gte_cr_RT21_Code, gte_cr_RT22 = gte_cr_RT22_Code, gte_cr_RT23 = gte_cr_RT23_Code,
-    gte_cr_RT31 = gte_cr_RT31_Code, gte_cr_RT32 = gte_cr_RT32_Code, gte_cr_RT33 = gte_cr_RT33_Code,
-    gte_cr_TRX  = gte_cr_TRX_Code,  gte_cr_TRY  = gte_cr_TRY_Code,  gte_cr_TRZ  = gte_cr_TRZ_Code,
-    gte_cr_L11  = gte_cr_L11_Code,  gte_cr_L12  = gte_cr_L12_Code,  gte_cr_L13  = gte_cr_L13_Code,
-    gte_cr_L21  = gte_cr_L21_Code,  gte_cr_L22  = gte_cr_L22_Code,  gte_cr_L23  = gte_cr_L23_Code,
-    gte_cr_LR1  = gte_cr_LR1_Code,  gte_cr_LR2  = gte_cr_LR2_Code,  gte_cr_LR3  = gte_cr_LR3_Code,
-    gte_cr_RBK  = gte_cr_RBK_Code,  gte_cr_GBK  = gte_cr_GBK_Code,  gte_cr_BBK  = gte_cr_BBK_Code,
-    gte_cr_RFC  = gte_cr_RFC_Code,  gte_cr_GFC  = gte_cr_GFC_Code,  gte_cr_BFC  = gte_cr_BFC_Code,
-    gte_cr_OFX  = gte_cr_OFX_Code,  gte_cr_OFY  = gte_cr_OFY_Code,
+	gte_cr_RT11 = gte_cr_RT11_Code, gte_cr_RT12 = gte_cr_RT12_Code, gte_cr_RT13 = gte_cr_RT13_Code,
+	gte_cr_RT21 = gte_cr_RT21_Code, gte_cr_RT22 = gte_cr_RT22_Code, gte_cr_RT23 = gte_cr_RT23_Code,
+	gte_cr_RT31 = gte_cr_RT31_Code, gte_cr_RT32 = gte_cr_RT32_Code, gte_cr_RT33 = gte_cr_RT33_Code,
+	gte_cr_TRX  = gte_cr_TRX_Code,  gte_cr_TRY  = gte_cr_TRY_Code,  gte_cr_TRZ  = gte_cr_TRZ_Code,
+	gte_cr_L11  = gte_cr_L11_Code,  gte_cr_L12  = gte_cr_L12_Code,  gte_cr_L13  = gte_cr_L13_Code,
+	gte_cr_L21  = gte_cr_L21_Code,  gte_cr_L22  = gte_cr_L22_Code,  gte_cr_L23  = gte_cr_L23_Code,
+	gte_cr_LR1  = gte_cr_LR1_Code,  gte_cr_LR2  = gte_cr_LR2_Code,  gte_cr_LR3  = gte_cr_LR3_Code,
+	gte_cr_RBK  = gte_cr_RBK_Code,  gte_cr_GBK  = gte_cr_GBK_Code,  gte_cr_BBK  = gte_cr_BBK_Code,
+	gte_cr_RFC  = gte_cr_RFC_Code,  gte_cr_GFC  = gte_cr_GFC_Code,  gte_cr_BFC  = gte_cr_BFC_Code,
+	gte_cr_OFX  = gte_cr_OFX_Code,  gte_cr_OFY  = gte_cr_OFY_Code,
 };
 
 enum { _C2_OPS_ = 0
@@ -440,25 +440,25 @@ enum { _C2_OPS_ = 0
  * The `asm_clobber(...)` helper from gcc_asm.h prepends the colon that
  * starts the clobbers section. */
 #define gte_load_v0(r_ptr, base) \
-    asm volatile(                                              \
-        asm_inline( gte_lwc2_v0(base), gte_lwc2_v0z(base) )    \
-        , "r"(r_ptr)                                           \
-        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
-    )
+	asm volatile(                                            \
+		asm_inline( gte_lwc2_v0(base), gte_lwc2_v0z(base) )    \
+		, "r"(r_ptr)                                           \
+		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+	)
 
 #define gte_load_v1(r_ptr, base) \
-    asm volatile(                                              \
-        asm_inline( gte_lwc2_v1(base), gte_lwc2_v1z(base) )    \
-        , "r"(r_ptr)                                           \
-        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
-    )
+	asm volatile(                                            \
+		asm_inline( gte_lwc2_v1(base), gte_lwc2_v1z(base) )    \
+		, "r"(r_ptr)                                           \
+		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+	)
 
 #define gte_load_v2(r_ptr, base) \
-    asm volatile(                                              \
-        asm_inline( gte_lwc2_v2(base), gte_lwc2_v2z(base) )    \
-        , "r"(r_ptr)                                           \
-        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
-    )
+	asm volatile(                                            \
+		asm_inline( gte_lwc2_v2(base), gte_lwc2_v2z(base) )    \
+		, "r"(r_ptr)                                           \
+		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+	)
 
 /* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — the canonical prelude to gte_cmd_rtpt.
  *
@@ -473,13 +473,13 @@ enum { _C2_OPS_ = 0
  *   gte_rtpt();
  */
 #define gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) \
-    asm volatile(                                              \
-        asm_inline( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),         \
-                    gte_lwc2_v1(b1), gte_lwc2_v1z(b1),         \
-                    gte_lwc2_v2(b2), gte_lwc2_v2z(b2) )        \
-        , "r"(p0), "r"(p1), "r"(p2)                            \
-        asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
-    )
+	asm volatile(                                            \
+		asm_inline( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),         \
+								gte_lwc2_v1(b1), gte_lwc2_v1z(b1),         \
+								gte_lwc2_v2(b2), gte_lwc2_v2z(b2) )        \
+		, "r"(p0), "r"(p1), "r"(p2)                            \
+		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+	)
 
 /**
  * @brief Rotate, Translate and Perspective Triple (23 cycles)
@@ -507,40 +507,69 @@ enum { _C2_OPS_ = 0
  * they need to survive across the call (RTPT writes SXY0..2, SZ0..3,
  * OTZ, MAC0..3, IR0..3, etc.).
  */
-#define gte_rtpt()                                                          \
-    asm volatile(                                                          \
-        asm_inline( nop(), nop(), gte_cmdw_rtpt )                          \
-        asm_clobber( clb_system )                                          \
-    )
+#define gte_rtpt()                        \
+	asm volatile(                           \
+		asm_inline( nop, nop, gte_cmdw_rtpt ) \
+		asm_clobber( clb_system )             \
+	)
 
-#define gte_rtpt_ori()    \
-    __asm__ volatile( \
-        "nop;"        \
-        "nop;"        \
-        "cop2 0x0280030;")
+#define gte_rtpt_ori() \
+	__asm__ volatile( \
+		"nop;"          \
+		"nop;"          \
+		"cop2 0x0280030;")
 
-#define gte_nclip()   \
-    __asm__ volatile( \
-        "nop;"        \
-        "nop;"        \
-        "cop2 0x01400006;")
+/**
+ * @brief Normal clipping (8 cycles)
+ *
+ * @details Computes the sign of three screen coordinates (C2_SXY0-2) used for
+ * backface culling. If the value of C2_MAC0 is negative, the coordinates are
+ * inverted and thus the triangle is back facing.
+ *
+ * The following equation is performed when executing this GTE command:
+ *
+ *     MAC0 = SX0*SY1 + SX1*SY2 + SX2*SY0 - SX0*SY2 - SX1*SY0 - SX2*SY1
+ *
+ * Encoder-style emission (no inline-asm strings in the code body):
+ *   1. Two `nop` words fill the COP2 pipeline latency - the GTE
+ *      pipeline takes a few cycles per op, and the nops let any
+ *      preceding lwc2/swc2/RTPT retire before NCLIP starts reading
+ *      its inputs from SXY0/SXY1/SXY2.
+ *   2. The NCLIP command word itself is `gte_cmdw_nclip` (see the
+ *      pre-baked encoders above) - `0x01400006` decoded as
+ *      `op_cop2` | CO(1) | cmd=NCLIP, with all SF/MX/V/CV/LM fields
+ *      zero. NCLIP is spec-clean in the original PsyQ source
+ *      (unlike RTPS/RTPT which carry the `gte_cmdw_psyq_compat`
+ *      quirk), so `gte_cmdw_nclip` does NOT OR in any reserved bits.
+ *
+ * Clobbers the caller-saved GPRs via `clb_system` (per the kernel
+ * ABI) plus the standard "memory" barrier. Does not clobber any COP2
+ * data/control register - those have to be saved by the caller if
+ * they need to survive across the call (NCLIP writes MAC0 only; it
+ * is purely a sign-of-double-product computation on SXY0..2).
+ */
+#define gte_nclip()                        \
+	asm volatile(                            \
+		asm_inline( nop, nop, gte_cmdw_nclip ) \
+		asm_clobber( clb_system )              \
+	)
 
 #define gte_stotz(r0) __asm__ volatile("swc2   $7, 0( %0 )" : : "r"(r0) : "memory")
 
-#define gte_stsxy3(r0, r1, r2)      \
-    __asm__ volatile(               \
-        "swc2   $12, 0( %0 );"      \
-        "swc2   $13, 0( %1 );"      \
-        "swc2   $14, 0( %2 )"       \
-        :                           \
-        : "r"(r0), "r"(r1), "r"(r2) \
-        : "memory")
+#define gte_stsxy3(r0, r1, r2)  \
+	__asm__ volatile(             \
+		"swc2   $12, 0( %0 );"      \
+		"swc2   $13, 0( %1 );"      \
+		"swc2   $14, 0( %2 )"       \
+		:                           \
+		: "r"(r0), "r"(r1), "r"(r2) \
+		: "memory")
 
-#define gte_avsz3()   \
-    __asm__ volatile( \
-        "nop;"        \
-        "nop;"        \
-        "cop2 0x0158002D;")
+#define gte_avsz3() \
+	__asm__ volatile( \
+		"nop;"          \
+		"nop;"          \
+		"cop2 0x0158002D;")
 
 /* asm_gte_matrix_set_rotation(r0)
  *
