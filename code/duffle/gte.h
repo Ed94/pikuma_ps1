@@ -182,7 +182,7 @@ enum {
 /* Core Command IDs (Bits 5-0) */
 
 	gte_cmd_rtps      = 0x01, /* Rot/Trans Perspective Single (1 vertex) */
-	gte_cmd_rtpt      = 0x02, /* Rot/Trans Perspective Triple (3 vertices) */
+	gte_cmd_rtpt      = 0x30, /* Rot/Trans Perspective Triple (3 vertices) */
 	gte_cmd_nclip     = 0x06, /* Normal Clipping (Backface culling) */
 	gte_cmd_op        = 0x0C, /* Outer Product */
 	gte_cmd_mvmva     = 0x12, /* Matrix Vector Multiply & Add (Custom math) */
@@ -322,6 +322,53 @@ enum { _C2_OPS_ = 0
    | enc_gte_cmd(cmd) \
 )
 
+/* Pre-baked GTE command words for the common cases.
+ *
+ * These are pure compile-time integer constants — the C compiler
+ * constant-folds them into `.word` directives in .rodata. Use them
+ * inside `asm_inline(...)` blocks (see `gte_rtpt` below for the
+ * canonical idiom).
+ *
+ * Decomposition (per the `enc_gte_<field>` definitions above):
+ *   gte_cmdw_<name> = gte_cmd_base | enc_gte_cmd(<cmd>)
+ *
+ * The SF/MX/V/CV/LM fields are all zero in the common cases (standard
+ * rotation-matrix, no scaling factor, V0 vector, translation vector,
+ * no clamp), so the only varying bits are the `cmd` field.
+ *
+ * Naming follows the file's convention: `gte_cmd_*` is the raw
+ * 6-bit `cmd` field id, `gte_cmdw_*` is the fully-encoded 32-bit
+ * instruction word ready to drop into a `.word` directive.
+ *
+ * --------------------------------------------------------------------------
+ *  PsyQ-compatibility note (RTPS/RTPT):
+ *  The original Sony PsyQ `inline_n.h` ships RTPT as `cop2 0x0280030` and
+ *  RTPS as `cop2 0x0180001`. Both have `0x20` set in the upper-reserved
+ *  region (bit 21) AND `sf=1` (bit 19) — i.e. the "no division" flag.
+ *  Per psx-spec these bits are reserved/must-be-zero, but the real GTE
+ *  hardware and PCSX-Redux's GTE model both IGNORE them on these two
+ *  commands (the perspective divide happens regardless of `sf`).
+ *
+ *  If we emit a strictly-spec-compliant word (`sf=0`, reserved bits
+ *  clear), PCSX-Redux's GTE checks those bits more strictly than the
+ *  silicon does and RTPT silently no-ops — the floor's screen
+ *  coordinates come out as raw projection-of-rotation (Z never
+ *  divided), `nclip` ends up wrong, and the triangle is culled.
+ *
+ *  So for RTPS and RTPT we OR-in the `0x28` "PsyQ compat" pattern to
+ *  match the working bit pattern everyone has shipped for 25 years.
+ *  NCLIP/OP/MVMVA stay spec-clean — their reserved bits really are
+ *  zero in the original PsyQ source.
+ * --------------------------------------------------------------------------
+ */
+#define gte_cmdw_psyq_compat  (1u << 21 | enc_gte_sf(gte_sf_integer))
+
+#define gte_cmdw_rtps   (gte_cmd_base | enc_gte_cmd(gte_cmd_rtps ) | gte_cmdw_psyq_compat)
+#define gte_cmdw_rtpt   (gte_cmd_base | enc_gte_cmd(gte_cmd_rtpt ) | gte_cmdw_psyq_compat)
+#define gte_cmdw_nclip  (gte_cmd_base | enc_gte_cmd(gte_cmd_nclip))
+#define gte_cmdw_op     (gte_cmd_base | enc_gte_cmd(gte_cmd_op   ))
+#define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
+
 /**
  * @brief Loads a single SVECTOR to GTE vector register V0
  *
@@ -394,21 +441,21 @@ enum { _C2_OPS_ = 0
  * starts the clobbers section. */
 #define gte_load_v0(r_ptr, base) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v0(base), gte_lwc2_v0z(base) )     \
+        asm_inline( gte_lwc2_v0(base), gte_lwc2_v0z(base) )    \
         , "r"(r_ptr)                                           \
         asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
 #define gte_load_v1(r_ptr, base) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v1(base), gte_lwc2_v1z(base) )     \
+        asm_inline( gte_lwc2_v1(base), gte_lwc2_v1z(base) )    \
         , "r"(r_ptr)                                           \
         asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
 #define gte_load_v2(r_ptr, base) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v2(base), gte_lwc2_v2z(base) )     \
+        asm_inline( gte_lwc2_v2(base), gte_lwc2_v2z(base) )    \
         , "r"(r_ptr)                                           \
         asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
@@ -427,14 +474,46 @@ enum { _C2_OPS_ = 0
  */
 #define gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) \
     asm volatile(                                              \
-        asm_inline( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),          \
-                    gte_lwc2_v1(b1), gte_lwc2_v1z(b1),          \
-                    gte_lwc2_v2(b2), gte_lwc2_v2z(b2) )         \
+        asm_inline( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),         \
+                    gte_lwc2_v1(b1), gte_lwc2_v1z(b1),         \
+                    gte_lwc2_v2(b2), gte_lwc2_v2z(b2) )        \
         , "r"(p0), "r"(p1), "r"(p2)                            \
         asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
     )
 
-#define gte_rtpt()    \
+/**
+ * @brief Rotate, Translate and Perspective Triple (23 cycles)
+ *
+ * @details Performs rotation, translation and perspective calculation of three
+ * vertices at once. The equation performed is the same as gte_rtps() only
+ * repeated three times for each vertex. The result of the first vertex is
+ * stored in GTE data register C2_SXY0, the second vector in C2_SXY1 then
+ * C2_SXY2.
+ *
+ * Encoder-style emission (no inline-asm strings in the code body):
+ *   1. Two `nop` words fill the COP2 pipeline latency — the GTE
+ *      takes ~8 cycles per perspective divide, and the nops let any
+ *      preceding lwc2/swc2 retire before RTPT starts reading its
+ *      inputs from V0/V1/V2.
+ *   2. The RTPT command word itself is `gte_cmdw_rtpt` (see the
+ *      pre-baked encoders above) — `0x0280030` decoded as
+ *      `op_cop2` | CO(1) | cmd=RTPT, with all SF/MX/V/CV/LM fields
+ *      zero (standard rotation, no scaling, V0 vector, translation
+ *      vector, no clamp).
+ *
+ * Clobbers the caller-saved GPRs via `clb_system` (per the kernel
+ * ABI) plus the standard "memory" barrier. Does not clobber any COP2
+ * data/control register — those have to be saved by the caller if
+ * they need to survive across the call (RTPT writes SXY0..2, SZ0..3,
+ * OTZ, MAC0..3, IR0..3, etc.).
+ */
+#define gte_rtpt()                                                          \
+    asm volatile(                                                          \
+        asm_inline( nop(), nop(), gte_cmdw_rtpt )                          \
+        asm_clobber( clb_system )                                          \
+    )
+
+#define gte_rtpt_ori()    \
     __asm__ volatile( \
         "nop;"        \
         "nop;"        \

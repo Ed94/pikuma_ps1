@@ -337,6 +337,73 @@ enum { _BitOffsets = 0
 /* nop — canonical sll $0, $0, 0 */
 #define nop() shift_ll(rdiscard, rdiscard, 0)
 
+#define load_imm_1w(rt, imm)    add_ui((rt),  R_0, (imm))
+#define load_imm_1w_s0(rt, imm) add_si((rt)), R_0, (imm))
+
+/* load_imm_2w — unconditional 2-word `li` form: `lui` + (ori | addi).
+ *
+ * Granular companion to `load_imm`: skips the compile-time range checks
+ * and always emits 2 .words. Use this when:
+ *   - you know `imm` is > 0xFFFF (otherwise you're wasting a word), OR
+ *   - `imm` is not a compile-time constant and you want predictable
+ *     2-word emission without the `__builtin_constant_p` branches.
+ *
+ * The lo16 strategy is still chosen at expansion time on the lo half:
+ *   lo16 in 0x0000..0x7FFF  →  addi (sign-ext is harmless, the lui
+ *                              already cleared bits 15..0)
+ *   lo16 in 0x8000..0xFFFF  →  ori  (zero-extends to preserve the
+ *                              intended bit pattern)
+ *
+ * For situations where you need to bypass even this choice (e.g. to
+ * force a specific encoding for a known discontiguous high/low pair),
+ * see `load_imm_2w_ori` and `load_imm_2w_addi` below.
+ *
+ * Statement-level (not expression-level): emits its own `asm volatile(...)`.
+ */
+#define load_imm_2w(rt, imm) do {                      \
+	U4 _li2_imm_ = (U4)(imm);                            \
+	U4 _li2_lo_  = _li2_imm_ & 0xFFFFU;                  \
+	U4 _li2_hi_  = _li2_imm_ >> 16;                      \
+	if (_li2_lo_ <= 0x7FFFU) {                           \
+		asm volatile(                                      \
+			asm_inline(lui_op((rt), _li2_hi_),               \
+			           add_si((rt), (rt), (S2)(U2)_li2_lo_)) \
+			asm_clobber(reg_str(R_AT_Code), "memory")        \
+		);                                                 \
+	}                                                    \
+	else {                                               \
+		asm volatile(                                      \
+			asm_inline(lui_op((rt), _li2_hi_),               \
+			           ori_op((rt), (rt), (U2)_li2_lo_))     \
+			asm_clobber(reg_str(R_AT_Code), "memory")        \
+		);                                                 \
+	}                                                    \
+} while (0)
+
+/* load_imm_2w_ori — force the `lui` + `ori` form regardless of lo16 sign.
+ * Use when you specifically need zero-extension in the lo half. */
+#define load_imm_2w_ori(rt, imm) do {                          \
+	U4 _li2o_imm_ = (U4)(imm);                                   \
+	asm volatile(                                                \
+		asm_inline(lui_op((rt), _li2o_imm_ >> 16),                 \
+		           ori_op((rt), (rt), (U2)(_li2o_imm_ & 0xFFFFU))) \
+		asm_clobber(reg_str(R_AT_Code), "memory")                  \
+	);                                                           \
+} while (0)
+
+/* load_imm_2w_addi — force the `lui` + `addi` form regardless of lo16 sign.
+ * Use when you know sign-extension is fine (e.g. lo16 is treated as
+ * signed downstream) and you want a smaller effective instruction
+ * (the assembler/MIPS hardware will sign-extend the imm16). */
+#define load_imm_2w_addi(rt, imm) do {                             \
+	U4 _li2a_imm_ = (U4)(imm);                                       \
+	asm volatile(                                                    \
+		asm_inline(lui_op((rt), _li2a_imm_ >> 16),                     \
+		           add_si((rt), (rt), (S2)(U2)(_li2a_imm_ & 0xFFFFU))) \
+		asm_clobber(reg_str(R_AT_Code), "memory")                      \
+	);                                                               \
+} while (0)
+
 /* load_imm rt, imm — true `li` semantics (assembler `li` pseudo)
  *
  * Dispatches at compile time on the immediate's range, picking the
@@ -356,35 +423,45 @@ enum { _BitOffsets = 0
  * Falls back to a 2-word form if `imm` is not a compile-time constant,
  * but that path is unusual (load_imm is most useful with literal
  * addresses and magic numbers). */
-#define load_imm(rt, imm) do {                                              \
-    if (__builtin_constant_p(imm) && ((U4)(imm) <= 0x7FFFU)) {              \
-        /* Small positive: addi rt, $0, imm */                             \
-        asm volatile(asm_inline(add_si((rt), R_0, (imm)))                   \
-                       asm_clobber(reg_str(R_AT_Code), "memory"));           \
-    } else if (__builtin_constant_p(imm) && ((U4)(imm) <= 0xFFFFU)) {       \
-        /* 0x8000..0xFFFF: ori rt, $0, imm (zero-extends) */                \
-        asm volatile(asm_inline(ori_op((rt), R_0, (imm)))                   \
-                       asm_clobber(reg_str(R_AT_Code), "memory"));           \
-    } else {                                                                \
-        /* > 16 bits: lui + (ori | addi).                                  \
-         * If lo16 is in [0, 0x7FFF] use addi (sign-ext is harmless        \
-         * since the high half cleared bits 15..0). Otherwise ori. */       \
-        U4 _li_imm_ = (U4)(imm);                                            \
-        U4 _li_lo_  = _li_imm_ & 0xFFFFU;                                  \
-        U4 _li_hi_  = _li_imm_ >> 16;                                       \
-        if (_li_lo_ <= 0x7FFFU) {                                          \
-            asm volatile(                                                   \
-                asm_inline(lui_op((rt), _li_hi_),                          \
-                            add_si((rt), (rt), (S2)(U2)_li_lo_))          \
-                asm_clobber(reg_str(R_AT_Code), "memory"));                  \
-        } else {                                                            \
-            asm volatile(                                                   \
-                asm_inline(lui_op((rt), _li_hi_),                          \
-                            ori_op((rt), (rt), (U2)_li_lo_))              \
-                asm_clobber(reg_str(R_AT_Code), "memory"));                  \
-        }                                                                   \
-    }                                                                       \
-} while (0)
+#define load_imm(rt, imm) do {                                     \
+	if (__builtin_constant_p(imm) && ((U4)(imm) <= 0x7FFFU)) {       \
+		/* Small positive: addi rt, $0, imm */                         \
+		asm volatile(                                                  \
+			asm_inline(add_si((rt), R_0, (imm)))                         \
+			asm_clobber(reg_str(R_AT_Code), "memory")                    \
+		);                                                             \
+	}                                                                \
+	else if (__builtin_constant_p(imm) && ((U4)(imm) <= 0xFFFFU)) {  \
+			/* 0x8000..0xFFFF: ori rt, $0, imm (zero-extends) */         \
+			asm volatile(                                                \
+				asm_inline(ori_op((rt), R_0, (imm)))                       \
+				asm_clobber(reg_str(R_AT_Code), "memory")                  \
+			);                                                           \
+	}                                                                \
+	else                                                             \
+	{                                                                \
+		/* > 16 bits: lui + (ori | addi).                              \
+			* If lo16 is in [0, 0x7FFF] use addi (sign-ext is harmless   \
+			* since the high half cleared bits 15..0). Otherwise ori. */ \
+		U4 _li_imm_ = (U4)(imm);                                       \
+		U4 _li_lo_  = _li_imm_ & 0xFFFFU;                              \
+		U4 _li_hi_  = _li_imm_ >> 16;                                  \
+		if (_li_lo_ <= 0x7FFFU) {                                      \
+			asm volatile(                                                \
+				asm_inline(lui_op((rt), _li_hi_),                          \
+				add_si((rt), (rt), (S2)(U2)_li_lo_))                       \
+				asm_clobber(reg_str(R_AT_Code), "memory")                  \
+			);                                                           \
+		}                                                              \
+		else {                                                         \
+			asm volatile(                                                \
+				asm_inline(lui_op((rt), _li_hi_),                          \
+				ori_op((rt), (rt), (U2)_li_lo_))                           \
+				asm_clobber(reg_str(R_AT_Code), "memory")                  \
+			);                                                           \
+		}                                                              \
+	}                                                                \
+} while (0                                                         )
 
 // Binary Metaprogramming
 
