@@ -61,7 +61,7 @@ typedef Struct_(Slice_Str8) { Str8* ptr; U4 len; };
 typedef Struct_(Slice) { U4 ptr, len; }; // Untyped Slice
 FI_ Slice slice_ut_(U4 ptr, U4 len) { return (Slice){ptr, len}; }
 
-#define Slice_(type)        Struct_(tmpl(Slice,type)) { type* ptr; U4 len; }
+#define Slice_(type)       Struct_(tmpl(Slice,type)) { type* ptr; U4 len; }
 typedef Slice_(B1);
 #define slice_assert(s)    do { assert((s).ptr != 0); assert((s).len > 0); } while(0)
 #define slice_end(slice)   ((slice).ptr + (slice).len)

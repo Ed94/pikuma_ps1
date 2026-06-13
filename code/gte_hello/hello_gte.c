@@ -226,7 +226,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// static_mem.cube.rot.x +=  6;
 		// static_mem.cube.rot.y +=  8;
 		// static_mem.cube.rot.z += 12;
-		static_mem.cube.rot.y += 20;
+		static_mem.cube.rot.y += 30;
 	}
 	// Draw Floor
 	{

@@ -43,12 +43,12 @@
 #define T_same(a,b)   _Generic((a), typeof((b)): 1, default: 0)
 
 #define r_(ptr)        C_(T_(ptr[0])*R_, ptr)
-#define v_(ptr)        C_(T_(ptr[0])*V_, ptr)
-#define tr_(type, ptr) C_(type*R_, ptr)
-#define tv_(type, ptr) C_(type*V_, ptr)
+#define v_(ptr)        C_(T_(ptr[0])V_*, ptr)
+#define tr_(type, ptr) C_(type *R_, ptr)
+#define tv_(type, ptr) C_(type V_*, ptr)
 
-#define TypeR_(type)          type*restrict type ## _R
-#define TypeV_(type)          type*volatile type ## _V
+#define TypeR_(type)          type *R_ type ## _R
+#define TypeV_(type)          type V_* type ## _V
 #define PtrSet_(type)         TypeR_(type); typedef TypeV_(type)
 #define TSet_(type)           type; typedef PtrSet_(type)
 
@@ -86,12 +86,12 @@ typedef __UINT32_TYPE__ TSet_(B4);
 #define s2_(value)  C_(S2, value)
 #define s4_(value)  C_(S4, value)
 
-#define u1_r(value) C_(U1*R_, value)
-#define u2_r(value) C_(U2*R_, value)
-#define u4_r(value) C_(U4*R_, value)
-#define u1_v(value) C_(U1*V_, value)
-#define u2_v(value) C_(U2*V_, value)
-#define u4_v(value) C_(U4*V_, value)
+#define u1_r(value) C_(U1 *R_, value)
+#define u2_r(value) C_(U2 *R_, value)
+#define u4_r(value) C_(U4 *R_, value)
+#define u1_v(value) C_(U1 V_*, value)
+#define u2_v(value) C_(U2 V_*, value)
+#define u4_v(value) C_(U4 V_*, value)
 enum { false = 0, true  = 1, true_overflow, };
 
 typedef void Proc_(VoidFn) (void);
