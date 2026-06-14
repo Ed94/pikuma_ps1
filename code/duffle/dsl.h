@@ -37,20 +37,54 @@
 #define FI_           inline   __attribute__((always_inline))      // inline always
 #define NI_           internal __attribute__((noinline))           // inline never
 #define RO_           __attribute__((section(".rodata")))          // Read only data allocation
-#define R_            restrict                                     // pointers are either restricted or volatile and nothing else 
-#define V_            volatile                                     // pointers are either restricted or volatile and nothing else
-#define T_            typeof
+#define T_            typeof                                       // 
 #define T_same(a,b)   _Generic((a), typeof((b)): 1, default: 0)
 
-#define r_(ptr)        C_(T_(ptr[0])*R_, ptr)
-#define v_(ptr)        C_(T_(ptr[0])V_*, ptr)
+#define R_    restrict 
+#define V_    volatile 
+// Fictional, used for intiution.
+#define EUB_  restrict // Execute Unit Bound:    Data is siloed in the ALU Register File. The Load/Store Unit is bypassed. (Route to Execution Unit.  Keep in registers)
+#define ISO_  restrict // Sole-access path:      Isolated Provenance. Alternative to Exu_. Guarantees electrical memory isolation, 
+                       //                        unlocking the compiler’s ability to safely pack data across multiple parallel SIMD lanes (vectorization).
+#define LSU_  volatile // Load/Store Unit Bound: The compiler is forbidden from caching in registers. Forces physical L1 Cache matrix sampling.
+#define LIVE_ volatile // Live External Data:    Alternative to Lsu_ emphasizing the memory is tapped by an external electrical actor.
+
+#define latch_store  /* ~: atomic_store*/         // Blasts voltages from the Store Buffer into the L1 SRAM, physically flipping the cross-coupled inverters to lock the state.
+#define pulse_rfo    /* ~: atomic_xchg*/          // Broadcasts an electrical RFO (Request For Ownership) pulse across the CPU mesh network to invalidate other L1 caches.
+#define tact_acquire /* ~: memory_order_acquire*/ // Clamp. Sends a voltage signal to the instruction decoder to halt the Out-of-Order engine until the load resolves.
+#define tact_release /* ~: memory_order_release*/ // Drain. Forces the Store Buffer flip-flops to completely empty into the L1 cache before proceeding.
+
+// -----------------------------------------------------------------------------
+// Out-of-Order (OoO) Pipeline Modifiers
+// -----------------------------------------------------------------------------
+#define ooo_drift_  __ATOMIC_RELAXED // OoO engine allowed to drift
+#define ooo_anchor_ __ATOMIC_ACQUIRE // Anchor the Load Queue (halt spec lookahead)
+#define ooo_drain_  __ATOMIC_RELEASE // Drain the Store Buffer (force writeback)
+#define ooo_weld_   __ATOMIC_SEQ_CST // Weld pipeline (total order bus lock)
+
+// Latch operations with physical queue modifiers
+#define latch_load_anchor(ptr)       //__atomic_load_n(ptr, ooo_anchor_)
+#define latch_store_drain(ptr, val)  //__atomic_store_n(ptr, val, ooo_drain_)
+#define pulse_xchg_weld(ptr, val)    //__atomic_exchange_n(ptr, val, ooo_weld_)
+//end of: Fictional.
+
+
+// R_ (restrict) establishes an "Eigen" or "Proprius" mapping.
+// Unlike volatile (V_), which assumes the memory can be changed by anything, 
+// R_ tells the compiler that this pointer holds the *sole*, private (idios) 
+// ownership of the memory slice. Writes to this memory are exclusively bound 
+// to this single symbolic mapping for the duration of the scope, guaranteeing 
+// zero aliasing.
+
+#define r_(ptr)        C_(T_(ptr[0])*R_, ptr) // Constrain pointer to restrict
+#define v_(ptr)        C_(T_(ptr[0])V_*, ptr) // 
 #define tr_(type, ptr) C_(type *R_, ptr)
 #define tv_(type, ptr) C_(type V_*, ptr)
 
-#define TypeR_(type)          type *R_ type ## _R
-#define TypeV_(type)          type V_* type ## _V
-#define PtrSet_(type)         TypeR_(type); typedef TypeV_(type)
-#define TSet_(type)           type; typedef PtrSet_(type)
+#define TypeR_(type)   type *R_ type ## _R  // type *restrict type_R
+#define TypeV_(type)   type V_* type ## _V  // type volatile* type_V
+#define PtrSet_(type)  TypeR_(type); typedef TypeV_(type)
+#define TSet_(type)    type; typedef PtrSet_(type)
 
 #define array_len(a)                   (U8)(sizeof(a) / sizeof(typeof((a)[0])))
 #define array_decl(type, ...)          (type[]){__VA_ARGS__}

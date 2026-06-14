@@ -379,13 +379,13 @@ function Send-ToEmulator { param(
 # Send-ToEmulator (join-path $path_build 'hello_gte.ps-exe')
 
 # --- Hot Reload via PCSX-Redux Web Server ---
-$exe_path = join-path $path_build 'hello_gte.ps-exe'
-$absolute_path = [System.IO.Path]::GetFullPath($exe_path)
+# $exe_path = join-path $path_build 'hello_gte.ps-exe'
+# $absolute_path = [System.IO.Path]::GetFullPath($exe_path)
 
-# PCSX-Redux expects the file location in the URL query string!
-# We URL-encode the path to ensure backslashes and spaces don't break the HTTP request.
-$encoded_path = [uri]::EscapeDataString($absolute_path)
-$uri = "http://localhost:8080/api/v1/load-exec?path=$encoded_path"
+# PCSX-Redux expects the file location in the URL query string?
+# We URL-encode the path to ensure backslashes and spaces don't break the HTTP request?
+# $encoded_path = [uri]::EscapeDataString($absolute_path)
+# $uri = "http://localhost:8080/api/v1/load-exec?path=$encoded_path"
 
 # Write-Host "Pushing hot-reload to PCSX-Redux..." -ForegroundColor Magenta
 # try {
