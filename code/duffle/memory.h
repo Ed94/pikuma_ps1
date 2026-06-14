@@ -54,9 +54,9 @@ FI_ B4 mem_zero            (U4 dest,           U4 len) { if(dest == 0){return fa
 #pragma region Slice
 
 typedef unsigned char UTF8;
-typedef Struct_(Str8)       { UTF8* ptr; U4 len; };
-typedef Struct_(Slice_Str8) { Str8* ptr; U4 len; };
-#define txt(string_literal) (Str8){ (UTF8*) string_literal, S_(string_literal) - 1 }
+typedef Struct_(Str8)        { UTF8* ptr; U4 len; };
+typedef Struct_(Slice_Str8)  { Str8* ptr; U4 len; };
+#define slit(string_literal) (Str8){ (UTF8*) string_literal, S_(string_literal) - 1 }
 
 typedef Struct_(Slice) { U4 ptr, len; }; // Untyped Slice
 FI_ Slice slice_ut_(U4 ptr, U4 len) { return (Slice){ptr, len}; }

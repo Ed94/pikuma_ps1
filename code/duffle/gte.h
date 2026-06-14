@@ -448,21 +448,21 @@ enum {
 	asm volatile(                                            \
 		asm_inline( gte_lwc2_v0(base), gte_lwc2_v0z(base) )    \
 		, "r"(r_ptr)                                           \
-		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
 	)
 
 #define gte_load_v1(r_ptr, base) \
 	asm volatile(                                            \
 		asm_inline( gte_lwc2_v1(base), gte_lwc2_v1z(base) )    \
 		, "r"(r_ptr)                                           \
-		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
 	)
 
 #define gte_load_v2(r_ptr, base) \
 	asm volatile(                                            \
 		asm_inline( gte_lwc2_v2(base), gte_lwc2_v2z(base) )    \
 		, "r"(r_ptr)                                           \
-		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
 	)
 
 /* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — the canonical prelude to gte_cmd_rtpt.

@@ -503,7 +503,7 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
  * "memory" barrier. The register ids are passed through `reg_str` so
  * the R_*_Code `#define`s are stringified into "$N" at expansion time. */
 #define clb_system \
-	reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory"
+	rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory"
 
 #define asm_mips_flush_icache() asm volatile( asm_inline( \
 		add_ui(rstack_ptr, rstack_ptr, -8)        \

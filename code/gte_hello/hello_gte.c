@@ -115,7 +115,7 @@ I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 	pa->used += type_width;
 	return next;
 }
-#define prim_alloc(type) (type*)prim__alloc(S_(type), txt( stringify(type)))
+#define prim_alloc(type) (type*)prim__alloc(S_(type), slit( stringify(type)))
 
 void gp_screen_init_c11(DoubleBuffer* screen_buf, S2* active_buf_id)
 {

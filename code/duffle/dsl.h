@@ -44,7 +44,7 @@
 #define V_    volatile 
 // Fictional, used for intiution.
 #define EUB_  restrict // Execute Unit Bound:    Data is siloed in the ALU Register File. The Load/Store Unit is bypassed. (Route to Execution Unit.  Keep in registers)
-#define ISO_  restrict // Sole-access path:      Isolated Provenance. Alternative to Exu_. Guarantees electrical memory isolation, 
+#define ISO_  restrict // Isolated Provenance:   Alternative to Exu_. Guarantees electrical memory isolation, 
                        //                        unlocking the compiler’s ability to safely pack data across multiple parallel SIMD lanes (vectorization).
 #define LSU_  volatile // Load/Store Unit Bound: The compiler is forbidden from caching in registers. Forces physical L1 Cache matrix sampling.
 #define LIVE_ volatile // Live External Data:    Alternative to Lsu_ emphasizing the memory is tapped by an external electrical actor.
