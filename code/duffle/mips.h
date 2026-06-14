@@ -57,8 +57,8 @@
 enum {
 /* --- MIPS CPU Registers --- */
 
-	R_0  = R_0_Code,  R_AT = R_AT_Code,   R_V0 = R_V0_Code,   R_V1 = R_V1_Code,
-	R_A0 = R_A0_Code,  R_A1 = R_A1_Code,   R_A2 = R_A2_Code,   R_A3 = R_A3_Code,
+	R_0  = R_0_Code,   R_AT = R_AT_Code,   R_V0 = R_V0_Code,  R_V1 = R_V1_Code,
+	R_A0 = R_A0_Code,  R_A1 = R_A1_Code,   R_A2 = R_A2_Code,  R_A3 = R_A3_Code,
 	R_T0 = R_T0_Code,  R_T1 = R_T1_Code,   R_T2 = R_T2_Code,  R_T3 = R_T3_Code,
 	R_T4 = R_T4_Code,  R_T5 = R_T5_Code,   R_T6 = R_T6_Code,  R_T7 = R_T7_Code,
 	R_S0 = R_S0_Code,  R_S1 = R_S1_Code,   R_S2 = R_S2_Code,  R_S3 = R_S3_Code,

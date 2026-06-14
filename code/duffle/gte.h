@@ -395,12 +395,17 @@ enum { _C2_OPS_ = 0
  * `base` is the GPR number to bake into the .word constant's `rs` field.
  * These are pure compile-time integers; the C compiler constant-folds
  * them into .word directives. */
+
+enum {
+	GTE_Z_Offset = 4
+};
+
 #define gte_lwc2_v0(base)   enc_cop2_lwc2(gte_in_v0_xy, (base), 0)
-#define gte_lwc2_v0z(base)  enc_cop2_lwc2(gte_in_v0_z,  (base), 4)
+#define gte_lwc2_v0z(base)  enc_cop2_lwc2(gte_in_v0_z,  (base), GTE_Z_Offset)
 #define gte_lwc2_v1(base)   enc_cop2_lwc2(gte_in_v1_xy, (base), 0)
-#define gte_lwc2_v1z(base)  enc_cop2_lwc2(gte_in_v1_z,  (base), 4)
+#define gte_lwc2_v1z(base)  enc_cop2_lwc2(gte_in_v1_z,  (base), GTE_Z_Offset)
 #define gte_lwc2_v2(base)   enc_cop2_lwc2(gte_in_v2_xy, (base), 0)
-#define gte_lwc2_v2z(base)  enc_cop2_lwc2(gte_in_v2_z,  (base), 4)
+#define gte_lwc2_v2z(base)  enc_cop2_lwc2(gte_in_v2_z,  (base), GTE_Z_Offset)
 
 /* gte_load_vN(r_ptr, base) — placeholder-punned lwc2 loaders
  *

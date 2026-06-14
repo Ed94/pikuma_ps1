@@ -247,6 +247,14 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 			// Three independent bases — full register discretion at the call site
 			gte_load_v0(p0, R_T4);
+			/*
+			asm volatile( ".word " "%0" ", %1" : : 
+				"i"(((op_lwc2 & OPCODE_MASK) << OPCODE_SHIFT) | ((R_T4 & REG_MASK) << RS_SHIFT) | ((gte_in_v0_xy & REG_MASK) << RT_SHIFT) | (0            & IMM_MASK)),
+				"i"(((op_lwc2 & OPCODE_MASK) << OPCODE_SHIFT) | ((R_T4 & REG_MASK) << RS_SHIFT) | ((gte_in_v0_z  & REG_MASK) << RT_SHIFT) | (GTE_Z_Offset & IMM_MASK)), 
+				"r"(p0) : 
+				"$2", "$8", "$9", "$31", "memory" 
+			);
+			*/
 			gte_load_v1(p1, R_T5);
 			gte_load_v2(p2, R_T6);
 
