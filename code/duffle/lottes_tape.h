@@ -31,29 +31,29 @@ FI_ void tape_run(Slice_U4 tape, B1** r_prim_cursor, void* face_cursor, void* ve
     register void* r_t6 rgcc(R_T6) = ot_base;
 
     asm volatile(
+        "move  $11, $31;"     /* Manually save $ra to $t3 to protect against GCC bugs */
         "lw    $25, 0(%0);"   
         "addiu %0, %0, 4;"    
         "jalr  $25;"          
         "nop;"                
+        "move  $31, $11;"     /* Restore $ra */
         : "+r"(tp), "+r"(pcur), "+r"(r_t4), "+r"(r_t5), "+r"(r_t6)
         : 
-        : "at", "v0", "v1", "t0", "t1", "t2", "t3", "t9", "ra", "memory" 
+        : "at", "v0", "v1", "t0", "t1", "t2", "t3", "t9", "memory" 
     );
     
     *r_prim_cursor = pcur; 
 }
 
-typedef Struct_(TapeBuilder) {FArena* arena;};
-FI_ TapeBuilder tb_begin(FArena* arena) {return (TapeBuilder){ arena };}
+/* Custom TapeBuilder that bypasses FArena to guarantee tightly packed U4s */
+typedef Struct_(TapeBuilder) { U4* ptr; U4 count; };
+FI_ TapeBuilder tb_begin(FArena* arena) { return (TapeBuilder){ (U4*)arena->start, 0 }; }
 
-I_ void tb_emit(TapeBuilder* tb, Code* atom) {
-	U4* slot = farena_push_type(tb->arena, U4); 
-	slot[0] = (U4)atom;
-}
+I_ void tb_emit(TapeBuilder* tb, Code* atom) { r_(tb->ptr)[tb->count] = u4_(atom); ++ tb->count; }
 
 I_ Slice_U4 tb_end(TapeBuilder* tb) {
-	tb_emit(tb, code_tape_exit);
-	return (Slice_U4){ (U4*)tb->arena->start, tb->arena->used / 4 };
+    tb_emit(tb, code_tape_exit);
+    return (Slice_U4){ tb->ptr, tb->count };
 }
 
 internal Code CodeBlob_(atom_set_gte_world) {
@@ -123,7 +123,7 @@ internal Code CodeBlob_(atom_floor_tri) {
     /* 13 */ gte_mf(R_T1, C2_OTZ),      /* T1 = Depth index */
     
     /* Bounds Check: OTZ < 2048 */
-    /* 14 */ load_ui(R_AT, 2048),
+    /* 14 */ add_ui(R_AT, R_0, 2048),   /* <--- FIXED: Use add_ui for small constants! */
     /* 15 */ slt_u(R_AT, R_T1, R_AT),   /* AT = (OTZ < 2048) ? 1 : 0 */
     /* 16 */ branch_equal(R_AT, R_0, 11), /* If AT == 0, skip to end (11 instrs past delay) */
     /* 17 */ nop, /* <--- DELAY SLOT (Index 0 for Bounds branch) */
@@ -136,7 +136,7 @@ internal Code CodeBlob_(atom_floor_tri) {
     /* Create Tag in AT: Len 4 (0x04) in top 8 bits, T7 in bottom 24 */
     /*  22 (5)  */ shift_ll(R_AT, R_T7, 8),
     /*  23 (6)  */ shift_lr(R_AT, R_AT, 8),         /* AT = T7 & 0x00FFFFFF */
-    /*  24 (7)  */ load_ui(R_V0, 0x0400),           /* V0 = 0x04000000 */
+    /*  24 (7)  */ load_ui(R_V0, 0x0400),           /* V0 = 0x04000000 (Here LUI is correct!) */
     /*  25 (8)  */ or_u(R_AT, R_AT, R_V0),          /* AT = Tag */
     
     /*  26 (9)  */ store_word(R_AT, R_T1, 0),       /* OrderingTable[OTZ] = Tag */
@@ -146,3 +146,72 @@ internal Code CodeBlob_(atom_floor_tri) {
     /*  28 (11) */ add_ui(R_T4, R_T4, 8),           /* Advance Face Cursor (4 * S2 = 8 bytes) */
     mips_yield
 };
+
+/* DIAGNOSTIC 1: Pure tape loop test */
+internal Code CodeBlob_(atom_diag_yield) {
+    mips_yield
+};
+
+/* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
+internal Code CodeBlob_(atom_diag_color) {
+    /* 1. Store Primitive Data (Code 0x20, Cyan color) */
+    store_word(R_0, R_T7, 0), 
+    load_ui(R_AT, 0x2000),     
+    or_i(R_AT, R_AT, 0xFFFF),  
+    store_word(R_AT, R_T7, 4),
+    
+    /* 2. Fake coordinates */
+    load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 8),
+    load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0050), store_word(R_AT, R_T7, 12),
+    load_ui(R_AT, 0x0050), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 16),
+
+    /* 3. Link to Ordering Table at fixed depth (10) */
+    add_ui(R_T1, R_0, 10),     /* <--- FIXED: Use add_ui for small constants! */
+    shift_ll(R_T1, R_T1, 2), 
+    add_u(R_T1, R_T1, R_T6),         
+    
+    load_word(R_AT, R_T1, 0),        
+    store_word(R_AT, R_T7, 0),       
+    
+    shift_ll(R_AT, R_T7, 8),
+    shift_lr(R_AT, R_AT, 8),         
+    load_ui(R_V0, 0x0400),           
+    or_u(R_AT, R_AT, R_V0),          
+    
+    store_word(R_AT, R_T1, 0),       
+
+    /* 4. Advance Prim Cursor and Yield */
+    add_ui(R_T7, R_T7, 20),          
+    mips_yield
+};
+
+/* DIAGNOSTIC 3: Pure GTE test (No Memory Writes) */
+internal Code CodeBlob_(atom_diag_gte) {
+    /* Load 3 indices */
+    load_half_u(R_T0, R_T4, 0),
+    load_half_u(R_T1, R_T4, 2),
+    load_half_u(R_T2, R_T4, 4),
+
+    /* Load Vertices into GTE */
+    shift_ll(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_T5),
+    load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
+    gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
+
+    shift_ll(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_T5),
+    load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
+    gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1),
+
+    shift_ll(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_T5),
+    load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
+    gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2),
+
+    /* Run Math */
+    nop, nop, gte_cmdw_rtpt,
+    nop, nop, gte_cmdw_nclip,
+    nop, nop,
+
+    /* Advance Face Cursor and Yield */
+    add_ui(R_T4, R_T4, 8),
+    mips_yield
+};
+

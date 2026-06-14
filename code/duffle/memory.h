@@ -3,7 +3,7 @@
 #	include "dsl.h"
 #endif
 
-#define MEM_ALIGNMENT_DEFAULT  (2 * S_(void*))
+#define MEM_ALIGNMENT_DEFAULT  4
 
 #define assert_bounds(point, start, end) for(;0;){ \
 	assert((start) <= (point)); \
@@ -104,7 +104,7 @@ I_ Slice farena_push(FArena_R arena, U4 amount, Opt_farena o) {
 	if (amount == 0) { return (Slice){}; }
 	U4 desired   = amount * (o.type_width == 0 ? 1 : o.type_width);
 	U4 to_commit = align_pow2(desired, o.alignment ?  o.alignment : MEM_ALIGNMENT_DEFAULT);
-	mem_bump(arena->start, arena->capacity, & arena->used, to_commit);
+	mem_bump(arena->start, arena->capacity - to_commit, & arena->used, to_commit);
 	return (Slice){ arena->start + arena->used, to_commit };
 }
 FI_ void farena_reset(FArena_R arena) { arena->used = 0; }
