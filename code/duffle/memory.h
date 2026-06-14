@@ -10,7 +10,7 @@
 	assert((point) <= (end));   \
 } while(0)
 
-inline U4 align_pow2(U4 x, U4 b) {
+I_ U4 align_pow2(U4 x, U4 b) {
     assert(b != 0);
     assert((b & (b - 1)) == 0);  // Check power of 2
     return ((x + b - 1) & (~(b - 1)));

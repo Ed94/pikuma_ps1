@@ -271,6 +271,9 @@ enum { _C2_OPS_ = 0
  *   - rd:  COP2 control register index (0..31) */
 #define enc_gte_tx(sub, rt, rd) (enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd))
 
+#define gte_mt(rt, rd) enc_gte_tx(cop_mt, (rt), (rd)) /* Move GPR (rt) to GTE Control Register (rd) */
+#define gte_mf(rt, rd) enc_gte_tx(cop_mf, (rt), (rd)) /* Move GTE Control Register (rd) to GPR (rt) */
+
 /* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
  * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]
  *   - rs: GPR base address
@@ -332,7 +335,7 @@ enum { _C2_OPS_ = 0
  *
  * Decomposition (per the `enc_gte_<field>` definitions above):
  *   gte_cmdw_<name> = gte_cmd_base | enc_gte_cmd(<cmd>)
- *
+ 
  * The SF/MX/V/CV/LM fields are all zero in the common cases (standard
  * rotation-matrix, no scaling factor, V0 vector, translation vector,
  * no clamp), so the only varying bits are the `cmd` field.
@@ -401,12 +404,12 @@ enum {
 	GTE_Z_Offset = 4
 };
 
-#define gte_load_word_v0(base)   enc_gte_lw(gte_in_v0_xy, (base), 0)
-#define gte_load_word_v0z(base)  enc_gte_lw(gte_in_v0_z,  (base), GTE_Z_Offset)
-#define gte_load_word_v1(base)   enc_gte_lw(gte_in_v1_xy, (base), 0)
-#define gte_load_word_v1z(base)  enc_gte_lw(gte_in_v1_z,  (base), GTE_Z_Offset)
-#define gte_load_word_v2(base)   enc_gte_lw(gte_in_v2_xy, (base), 0)
-#define gte_load_word_v2z(base)  enc_gte_lw(gte_in_v2_z,  (base), GTE_Z_Offset)
+#define gte_lw_v0(base)   enc_gte_lw(gte_in_v0_xy, (base), 0)
+#define gte_lw_v0z(base)  enc_gte_lw(gte_in_v0_z,  (base), GTE_Z_Offset)
+#define gte_lw_v1(base)   enc_gte_lw(gte_in_v1_xy, (base), 0)
+#define gte_lw_v1z(base)  enc_gte_lw(gte_in_v1_z,  (base), GTE_Z_Offset)
+#define gte_lw_v2(base)   enc_gte_lw(gte_in_v2_xy, (base), 0)
+#define gte_lw_v2z(base)  enc_gte_lw(gte_in_v2_z,  (base), GTE_Z_Offset)
 
 /* gte_load_vN(r_ptr, base) — placeholder-punned lwc2 loaders
  *
@@ -445,26 +448,23 @@ enum {
  *
  * The `asm_clobber(...)` helper from gcc_asm.h prepends the colon that
  * starts the clobbers section. */
-#define gte_load_v0(r_ptr, base) \
-	asm volatile(                                            \
-		asm_words( gte_load_word_v0(base), gte_load_word_v0z(base) )    \
-		, "r"(r_ptr)                                           \
-		asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" \
-	)
+#define gte_load_v0(r_ptr, base) asm volatile( \
+	asm_words( gte_lw_v0(base), gte_lw_v0z(base) ) \
+	asm_rpins,   r_use(r_ptr)                                    \
+	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+)
 
-#define gte_load_v1(r_ptr, base) \
-	asm volatile(                                            \
-		asm_words( gte_load_word_v1(base), gte_load_word_v1z(base) )    \
-		, "r"(r_ptr)                                           \
-		asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" \
-	)
+#define gte_load_v1(r_ptr, base) asm volatile( \
+	asm_words( gte_lw_v1(base), gte_lw_v1z(base) ) \
+	asm_rpins,   r_use(r_ptr)                                    \
+	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+)
 
-#define gte_load_v2(r_ptr, base) \
-	asm volatile(                                            \
-		asm_words( gte_load_word_v2(base), gte_load_word_v2z(base) )    \
-		, "r"(r_ptr)                                           \
-		asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" \
-	)
+#define gte_load_v2(r_ptr, base) asm volatile( \
+	asm_words( gte_lw_v2(base), gte_lw_v2z(base) ) \
+	asm_rpins,   r_use(r_ptr)                                    \
+	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+)
 
 /* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — the canonical prelude to gte_cmd_rtpt.
  *
@@ -478,14 +478,15 @@ enum {
  *   gte_load_v0v1v2(p0, p1, p2, R_T4, R_T5, R_T6);
  *   gte_rtpt();
  */
-#define gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) \
-	asm volatile(                                            \
-		asm_words( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),         \
-								gte_lwc2_v1(b1), gte_lwc2_v1z(b1),         \
-								gte_lwc2_v2(b2), gte_lwc2_v2z(b2) )        \
-		, "r"(p0), "r"(p1), "r"(p2)                            \
-		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
-	)
+#define gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) asm volatile( \
+	asm_words( \
+		gte_lw_v0(b0), gte_lw_v0z(b0),  \
+		gte_lw_v1(b1), gte_lw_v1z(b1),  \
+		gte_lw_v2(b2), gte_lw_v2z(b2) ) \
+	asm_rpins                             \
+		, r_use(p0), r_use(p1), r_use(p2)   \
+	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+)
 
 /**
  * @brief Rotate, Translate and Perspective Triple (23 cycles)
@@ -623,19 +624,20 @@ enum {
  * get stale-RT2x/RT3x artifacts in RTPS/RTPT/MVMVA output.
  */
 #define asm_gte_matrix_set_rotation(r0) \
-	asm volatile(asm_words(               \
-			  load_imm(R_T4, r0,  0)          \
-			, load_imm(R_T5, r0,  4)          \
-			, enc_cop2_tx(cop_mt, R_T4,  0)   \
-			, enc_cop2_tx(cop_mt, R_T5,  1)   \
-			, load_imm(R_T4, r0,  8)          \
-			, load_imm(R_T5, r0, 12)          \
-			, load_imm(R_T6, r0, 16)          \
-			, enc_cop2_tx(cop_mt, R_T4,  2)   \
-			, enc_cop2_tx(cop_mt, R_T5,  3)   \
-			, enc_cop2_tx(cop_mt, R_T6,  4)   \
+	asm volatile(                         \
+		asm_words(                          \
+			  load_word(R_T5, R_T4,  0)       \
+			, load_word(R_T6, R_T4,  4)       \
+			, gte_mt(   R_T5,        0)       \
+			, gte_mt(   R_T6,        1)       \
+			, load_word(R_T5, R_T4,  8)       \
+			, load_word(R_T6, R_T4, 12)       \
+			, load_word(R_T4, R_T4, 16)       \
+			, gte_mt(   R_T5,  2)             \
+			, gte_mt(   R_T6,  3)             \
+			, gte_mt(   R_T4,  4)             \
 		)                                   \
-		asm_clobber: clb_system, reg_str(R_T4_Code), reg_str(R_T5_Code), reg_str(R_T6_Code) \
-		: \
-		: "r"(r0) \
+		, r_use(r0)                         \
+		asm_clobber: clb_system, rlit(R_T4_Code), rlit(R_T5_Code), rlit(R_T6_Code) \
 	)
+

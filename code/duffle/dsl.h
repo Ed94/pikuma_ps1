@@ -33,6 +33,7 @@
 #define align_(value) __attribute__((aligned (value)))             // for easy alignment
 #define C_(type,data) ((type)(data))                               // for enforced precedence
 #define expect_(x, y) __builtin_expect(x, y)                       // so compiler knows the common path
+#define cexpr_        __builtin_constant_p
 #define I_            internal inline
 #define FI_           inline   __attribute__((always_inline))      // inline always
 #define NI_           internal __attribute__((noinline))           // inline never
@@ -127,6 +128,9 @@ typedef __UINT32_TYPE__ TSet_(B4);
 #define u2_v(value) C_(U2 V_*, value)
 #define u4_v(value) C_(U4 V_*, value)
 enum { false = 0, true  = 1, true_overflow, };
+
+#define u4_lo(value) ((value) & 0xFFFFU)
+#define u4_hi(value) ((value) >> 12)
 
 typedef void Proc_(VoidFn) (void);
 

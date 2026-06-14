@@ -4,15 +4,125 @@
 #endif
 
 /* ============================================================================
- * GCC INLINE ASSEMBLY MACRO DSL
- * 
- * 
- * ============================================================================ */
+ * GCC INLINE ASM STATEMENT DSL
+ * ============================================================================
+ * A complete GCC inline-asm statement has up to 5 sections separated by `:`
+ *   asm volatile ( "code template" : OUTPUTS : INPUTS : CLOBBERS : GOTO_LABELS );
+ */
 
- #pragma region Cruft
+// Below are used purely for annotation.
+#define asm_out     // OUTPUTS  section /* cannot be used with asm_words */
+#define asm_in      // INPUTS   section /* can be appended onto after asm_words for pinned registers */
+#define asm_clobber // CLOBBERS section
+
+// Pinned Registers after asm_words list (Semantic marker)
+// We aren't starting a new offical section, its just a continuation of the input section.
+//  asm_words(...)            // ".words " code word ids... : : code_words...
+//  asm_rpins, r_use(r0), ...  // , pinned registers...
+//  asm_clobber: 
+#define asm_rpins
+
+/* --- Logic & Control Flow --- */
+
+/* Annotation for the 'Goto' section of 'asm volatile goto'.
+ * Allows you to jump from assembly directly to a C label. */
+#define asm_goto // Annotate the last `:` in an asm expression.
+
+/* `asm_words(...)` dispatches into `_INL_<count>` to emit up to 99 encoded
+ * instruction words. This is the "compiled-instruction" form of `asm_code`.
+ *
+ * Result is a 2-colon body WITHOUT the final clobber section:
+ *   ".word %c0, %c1, ..." : --- empty   --- : "i"(p0), "i"(p1), ...
+ *   |------ code --------| |--- outputs ---| |------- inputs -------|
+ * 
+ * Use it inside `asm volatile( ... )` like so:
+ *   asm volatile(
+ *       asm_words(w0, w1, w3)
+ *       asm_clobber: clobbers
+ *   )
+ * which expands to:
+ *   asm volatile(".word %c0, %c1, %c2" 
+ *       asm_out:     // empty outputs
+ *       asm_in:      "i"(w0), "i"(w1), "i"(w2)
+ *       asm_clobber: "$2", "$8", ...
+ *   )
+ */
+#define asm_words(...) m_expand(glue(GCC_ASM_INL_, GCC_ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
+// Very nasty macro expansion. See the Cruft pragma region after all the DSL defines
+
+/* reg_str(n) — Stringify an integer register id into the GCC asm
+ * string form (e.g. 12 → "$12"). Use this anywhere GCC's parser
+ * expects a literal string identifying a register: clobber lists,
+ * asm templates, etc. The two-level macro is the standard preprocessor
+ * idiom for forcing one level of expansion before stringify — without
+ * it, `#n` would stringify the macro name `R_T4` to `"R_T4"` instead
+ * of expanding `R_T4` to its value first.
+ *
+ * For declaring a register variable bound to a specific GPR, use the
+ * `rgcc(n)` bundle from gcc_asm.h instead — it adds the `__asm__()`
+ * qualifier around the string.
+ *
+ *   register V3_S2* p0 __asm__(reg_str(R_T4)) = ...;        // verbose
+ *   register V3_S2* p0 rgcc(R_T4) = ...;                    // bundled
+ *
+ *   asm volatile("nop" : : : reg_str(R_RA), "memory");      // clobber list */
+#define rlit_impl(n)  "$" #n
+#define rlit(n)       rlit_impl(n)
+
+/* ------------------------------------------------------------------------ *
+ *  rgcc(n) — GCC-specific bundle for register-variable declarations.
+ *
+ *  Produces `__asm__(reg_str(tmpl(n, Code)))` at expansion time. 
+ *  The `tmpl(n, Code)` indirection derives the preprocessor-visible `_Code`
+ *  form from the enum name (which the preprocessor can't expand on its own). 
+ *  So a call is:                register V3_S2* p rgcc(R_T4)               = verts[0].ptr;
+ *  expands (via tmpl) to:       register V3_S2* p __asm__(rlit(R_T4_Code)) = verts[0].ptr;
+ *  which (via reg_str) becomes: register V3_S2* p __asm__("$12")           = verts[0].ptr;
+ *
+ *  Why bundle the `__asm__()` wrapper?
+ *  - The integer R_T4 (= 12, via R_T4_Code) already indicates the register.
+ *  - The string "$12" is derived from it via reg_str, so they cannot drift apart.
+ *  - Spelling `__asm__(reg_str(R_T4_Code))` at every call site is noise.
+ *
+ *  tmpl defined in dsl.h (the token-paste glue). 
+ *  rgcc define here (gcc_asm.h) because the `__asm__` keyword is GCC-specific. 
+ *  Anyone porting to a different compiler's asm dialect overrides rgcc, 
+ *  and the integer→string derivation in rlit can be retargeted in one place.
+ *
+ *  For clobber lists and asm-template strings, use the bare `rlit(R_T4_Code)`.
+ * ------------------------------------------------------------------------ */
+#define rgcc_(n)       __asm__(rlit(tmpl(n, Code)))
+#define rgcc(n)        rgcc_(n)
+
+/* rgcc_ref(n) — GCC operand-reference form "%N". Not currently used
+ * by the placeholder-pun macros (the .word bodies are fully baked
+ * at compile time and have no runtime operand references), but kept
+ * here for completeness in case a future asm template needs to refer
+ * to a runtime input by position. Mirror of rgcc but produces "%N"
+ * instead of "$N". */
+#define rgcc_ref_(n)   "%" #n
+#define rgcc_ref(n)    rgcc_ref_(n)
+
+/* --- Register Constraint Aliases (for Pinned Variables) --- */
+
+#define r_use(var)  "r"(var)         /* General Purpose Register */
+#define r_set(var)  "=r"(var)        /* Write-only output */
+#define r_mod(var)  "+r"(var)        /* Read-write */
+#define r_imm(val)  "i"(val)         /* Immediate / Constant */
+/* Memory: Forces GCC to sync the variable to RAM before the asm runs.
+ * Essential for DMA buffers or when the hardware reads from memory. */
+#define r_mem(var) "m"(var)
+#define r_imm(val) "i"(val) /* Immediate: Forces a compile-time constant. */
+#define r_fpu(var) "f"(var) /* FPU (PS2/MIPS III/IV): Use for COP1 floating point registers. */
+#define r_acc(var) "a"(var) /* Accumulator: Use for HI/LO register results (multiplication/division). */
+
+#define clb_mem_drain "memory"
+
+// C Preprocessor Iterative Expansion Jank
+#pragma region Cruft
 
 /* --- 1. The Argument Counter --- */
-#define _ASM_COUNT_ARGS_IMPL( \
+#define GCC_ASM_COUNT_ARGS_IMPL( \
     _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, \
     _11,_12,_13,_14,_15,_16,_17,_18,_19,_20, \
     _21,_22,_23,_24,_25,_26,_27,_28,_29,_30, \
@@ -24,7 +134,7 @@
     _81,_82,_83,_84,_85,_86,_87,_88,_89,_90, \
     _91,_92,_93,_94,_95,_96,_97,_98,_99, N, ...) N
 
-#define _ASM_COUNT_ARGS(...) m_expand(_ASM_COUNT_ARGS_IMPL(__VA_ARGS__, \
+#define GCC_ASM_COUNT_ARGS(...) m_expand(GCC_ASM_COUNT_ARGS_IMPL(__VA_ARGS__, \
     99, 98, 97, 96, 95, 94, 93, 92, 91, 90, \
     89, 88, 87, 86, 85, 84, 83, 82, 81, 80, \
     79, 78, 77, 76, 75, 74, 73, 72, 71, 70, \
@@ -344,95 +454,4 @@
 #define GCC_ASM_INL_98(a, ...) ".word " GCC_ASM_W98 : : GCC_ASM_I98(a, __VA_ARGS__)
 #define GCC_ASM_INL_99(a, ...) ".word " GCC_ASM_W99 : : GCC_ASM_I99(a, __VA_ARGS__)
 
- #pragma endregion Cruft
-
-/* ============================================================================
- * AST BUILDERS — assemble a complete inline-asm block
- * ============================================================================
- *
- * A complete GCC inline-asm statement has up to 4 sections separated by `:`:
- *   asm volatile ( "code" : OUTPUTS : INPUTS : CLOBBERS );
- * Below are used purely for annotation.
- */
-#define asm_out
-#define asm_in     
-#define asm_clobber
-
-/* `asm_inline(...)` dispatches into `_INL_<count>` to emit up to 99 encoded
- * instruction words. This is the "compiled-instruction" form of `asm_code`.
- *
- * Result is a 2-colon body WITHOUT the final clobber section:
- *   ".word %c0, %c1, ..." : --- empty   --- : "i"(p0), "i"(p1), ...
- *   |------ code --------| |--- outputs ---| |------- inputs -------|
- * 
- * Use it inside `asm volatile( ... )` like so:
- *   asm volatile(
- *       asm_inline(w0, w1, w3)
- *       asm_clobber: clobbers
- *   )
- * which expands to:
- *   asm volatile(".word %c0, %c1, %c2" 
- *       asm_out:     // empty outputs
- *       asm_in:      "i"(w0), "i"(w1), "i"(w2)
- *       asm_clobber: "$2", "$8", ...
- *   )
- */
-#define asm_words(...) m_expand(glue(GCC_ASM_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
-
-/* reg_str(n) — Stringify an integer register id into the GCC asm
- * string form (e.g. 12 → "$12"). Use this anywhere GCC's parser
- * expects a literal string identifying a register: clobber lists,
- * asm templates, etc. The two-level macro is the standard preprocessor
- * idiom for forcing one level of expansion before stringify — without
- * it, `#n` would stringify the macro name `R_T4` to `"R_T4"` instead
- * of expanding `R_T4` to its value first.
- *
- * For declaring a register variable bound to a specific GPR, use the
- * `rgcc(n)` bundle from gcc_asm.h instead — it adds the `__asm__()`
- * qualifier around the string.
- *
- *   register V3_S2* p0 __asm__(reg_str(R_T4)) = ...;        // verbose
- *   register V3_S2* p0 rgcc(R_T4) = ...;                    // bundled
- *
- *   asm volatile("nop" : : : reg_str(R_RA), "memory");      // clobber list */
-#define rlit_impl(n)  "$" #n
-#define rlit(n)       rlit_impl(n)
-
-/* ------------------------------------------------------------------------ *
- *  rgcc(n) — GCC-specific bundle for register-variable declarations.
- *
- *  Produces `__asm__(reg_str(tmpl(n, Code)))` at expansion time. 
- *  The `tmpl(n, Code)` indirection derives the preprocessor-visible `_Code`
- *  form from the enum name (which the preprocessor can't expand on its own). 
- *  So a call is:                register V3_S2* p rgcc(R_T4)               = verts[0].ptr;
- *  expands (via tmpl) to:       register V3_S2* p __asm__(rlit(R_T4_Code)) = verts[0].ptr;
- *  which (via reg_str) becomes: register V3_S2* p __asm__("$12")           = verts[0].ptr;
- *
- *  Why bundle the `__asm__()` wrapper?
- *  - The integer R_T4 (= 12, via R_T4_Code) already indicates the register.
- *  - The string "$12" is derived from it via reg_str, so they cannot drift apart.
- *  - Spelling `__asm__(reg_str(R_T4_Code))` at every call site is noise.
- *
- *  tmpl defined in dsl.h (the token-paste glue). 
- *  rgcc define here (gcc_asm.h) because the `__asm__` keyword is GCC-specific. 
- *  Anyone porting to a different compiler's asm dialect overrides rgcc, 
- *  and the integer→string derivation in rlit can be retargeted in one place.
- *
- *  For clobber lists and asm-template strings, use the bare `rlit(R_T4_Code)`.
- * ------------------------------------------------------------------------ */
-#define rgcc_(n)       __asm__(rlit(tmpl(n, Code)))
-#define rgcc(n)        rgcc_(n)
-
-/* rgcc_ref(n) — GCC operand-reference form "%N". Not currently used
- * by the placeholder-pun macros (the .word bodies are fully baked
- * at compile time and have no runtime operand references), but kept
- * here for completeness in case a future asm template needs to refer
- * to a runtime input by position. Mirror of rgcc but produces "%N"
- * instead of "$N". */
-#define rgcc_ref_(n)   "%" #n
-#define rgcc_ref(n)    rgcc_ref_(n)
-/* --- Register Constraint Aliases (for Pinned Variables) --- */
-
-#define r_use(var) "r"(var)   /* Input:  Tells GCC we are reading     this pinned register */
-#define r_set(var) "=r"(var)  /* Output: Tells GCC we are overwriting this pinned register */
-#define r_mod(var) "+r"(var)  /* Modify: Tells GCC we are reading AND writing this pinned register */
+#pragma endregion Cruft
