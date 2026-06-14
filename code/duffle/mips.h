@@ -246,6 +246,13 @@ enum { _BitOffsets = 0
 #define xor_i(rt, rs, imm)         enc_i(op_xori,  (rs),   (rt), (imm))
 #define load_ui(rt, imm)           enc_i(op_lui,   R_0,    (rt), (imm))
 
+/* Logic Opcodes */
+
+#define and_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_and)
+#define or_u(rd, rs, rt)           enc_r(op_special, (rs), (rt), (rd), 0, fc_or)
+#define xor_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_xor)
+#define nor_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_nor)
+
 /* Shift family (R-type). shift_ll/lr/ra: `sll rd, rt, shamt` */
 #define shift_ll(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sll)
 #define shift_lr(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_srl)
@@ -321,12 +328,13 @@ enum { _BitOffsets = 0
  * branch_le_zero rs, off     → blez  rs, off
  * branch_ge_zero rs, off     → bgez  rs, off
  * (For `bgez`, the opcode is `op_bcond` with rt=1 to invert the bltz condition.) */
+
 #define branch_equal(rs, rt, off)   enc_i(op_beq,   (rs), (rt), (off))
 #define branch_ne(rs, rt, off)      enc_i(op_bne,   (rs), (rt), (off))
-#define branch_lt_zero(rs, off)     enc_i(op_bltz,  R_0, (rs), (off))
-#define branch_gt_zero(rs, off)     enc_i(op_bgtz,  R_0, (rs), (off))
-#define branch_le_zero(rs, off)     enc_i(op_blez,  R_0, (rs), (off))
-#define branch_ge_zero(rs, off)     enc_i(op_bcond, R_0, (rs), (1u << 16) | ((off) & 0xFFFF))
+#define branch_lt_zero(rs, off)     enc_i(op_bcond, (rs), R_0,  (off)) /* bltz is bcond with rt=0 */
+#define branch_ge_zero(rs, off)     enc_i(op_bcond, (rs), 1,    (off)) /* bgez is bcond with rt=1 */
+#define branch_le_zero(rs, off)     enc_i(op_blez,  (rs), R_0,  (off)) /* blez has its own opcode, rt=0 */
+#define branch_gt_zero(rs, off)     enc_i(op_bgtz,  (rs), R_0,  (off)) /* bgtz has its own opcode, rt=0 */
 
 /* --- System (kernel) instructions --- */
 #define syscall()                   enc_r(op_special, R_0, R_0, R_0, 0, fc_syscall)
@@ -490,7 +498,7 @@ Code CodeBlob_(mips_flush_icache) {
 	, jump_reg(rret_addr)                       /* jr   $ra            */
 	, add_ui(rstack_ptr, rstack_ptr, 8)         /* sp += 8 (BD)        */
 };
-FI_ void mips_flush_icache(void) { C_(VoidFn*, code_mips_flush_icache)(); }
+I_ void mips_flush_icache(void) { C_(VoidFn*, code_mips_flush_icache)(); }
 
 /* Standard clobber list for pure-MIPS asm volatile blocks: caller-saved
  * GPRs that the kernel treats as volatile (v0/v1/t0/t1/ra) plus the
@@ -513,5 +521,3 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, code_mips_flush_icache)(); }
 void test_mips_asm() {
 	asm_mips_flush_icache();
 }
-
-// TAPE & EMITTERS

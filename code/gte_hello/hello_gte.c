@@ -12,6 +12,7 @@
 #include "duffle/mips.h"
 #include "duffle/gp.h"
 #include "duffle/gte.h"
+#include "duffle/lottes_tape.h"
 #include "hello_gte.h"
 
 enum {
@@ -229,6 +230,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		static_mem.cube.rot.y += 30;
 	}
 	// Draw Floor
+	if (0)
 	{
 		m3s2_rotation   (& static_mem.floor.rot,   & static_mem.tform_world);
 		m3s2_translation(& static_mem.tform_world, & static_mem.floor.pos);
@@ -281,6 +283,40 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			}
 		}
 		static_mem.floor.rot.y += 5;
+	}
+	// Draw floor tape method
+	if (1)
+	{
+    LP_ U4 mem_temp_tape[512]; // Buffer for function addresses
+    FArena tape_arena; 
+    farena_init(&tape_arena, slice_ut(mem_temp_tape, S_(mem_temp_tape)));
+    
+    TapeBuilder tb = tb_begin(&tape_arena); {
+        // Setup state atoms
+        m3s2_rotation(&static_mem.floor.rot, &static_mem.tform_world);
+        m3s2_translation(&static_mem.tform_world, &static_mem.floor.pos);
+        
+        // Push "Protocol" to tape
+        tb_emit(&tb, code_atom_set_gte_world);
+				tb_emit(&tb, (Code*)&static_mem.tform_world);
+        for (U4 i = 0; i < Floor_num_faces; i++) {
+            tb_emit(&tb, code_atom_floor_tri);
+        }
+    }
+    Slice_U4 tape = tb_end(&tb);
+
+    // 1. Setup Argument Registers (The Workspace)
+    register V3_S2* face_cursor rgcc(R_T4) = static_mem.floor.faces;
+    register V3_S2* vert_base   rgcc(R_T5) = static_mem.floor.verts;
+    register U4*    ot_base     rgcc(R_T6) = ordering_buf;
+		// --- EXECUTION ---
+		B1* prim_cursor = (B1*)r_(pa->buf)[static_mem.active_buf_id] + pa->used;
+		// 2. Fire the Tape Drive (Explicitly bind the workspace variables)
+		tape_run(tape, &prim_cursor, static_mem.floor.faces, static_mem.floor.verts, ordering_buf);
+
+    // 3. Update C-side state
+    pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[static_mem.active_buf_id];
+    static_mem.floor.rot.y += 5;
 	}
 }
 

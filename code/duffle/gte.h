@@ -271,8 +271,14 @@ enum { _C2_OPS_ = 0
  *   - rd:  COP2 control register index (0..31) */
 #define enc_gte_tx(sub, rt, rd) (enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd))
 
-#define gte_mt(rt, rd) enc_gte_tx(cop_mt, (rt), (rd)) /* Move GPR (rt) to GTE Control Register (rd) */
-#define gte_mf(rt, rd) enc_gte_tx(cop_mf, (rt), (rd)) /* Move GTE Control Register (rd) to GPR (rt) */
+// #define gte_mt(rt, rd) enc_gte_tx(cop_mt, (rt), (rd)) /* Move GPR (rt) to GTE Control Register (rd) */
+// #define gte_mf(rt, rd) enc_gte_tx(cop_mf, (rt), (rd)) /* Move GTE Control Register (rd) to GPR (rt) */
+
+/* Explicit GTE Data vs Control Register Transfers */
+#define gte_mf(rt, rd) enc_gte_tx(0x00, (rt), (rd)) /* Move from GTE Data Reg (e.g. MAC0, OTZ) */
+#define gte_cf(rt, rd) enc_gte_tx(0x02, (rt), (rd)) /* Move from GTE Control Reg */
+#define gte_mt(rt, rd) enc_gte_tx(0x04, (rt), (rd)) /* Move to GTE Data Reg (e.g. VXY0) */
+#define gte_ct(rt, rd) enc_gte_tx(0x06, (rt), (rd)) /* Move to GTE Control Reg (e.g. Matrices) */
 
 /* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
  * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]
