@@ -25,7 +25,7 @@ typedef Slice_(U4);
 
 FI_ void tape_run(Slice_U4 tape, B1** r_prim_cursor, void* face_cursor, void* vert_base, void* ot_base) {
     register U4*   tp   rgcc(R_TP) = tape.ptr;
-    register B1*   pcur rgcc(R_T7) = *r_prim_cursor;
+    register B1*   pcur rgcc(R_T7) = r_prim_cursor[0];
     register void* r_t4 rgcc(R_T4) = face_cursor;
     register void* r_t5 rgcc(R_T5) = vert_base;
     register void* r_t6 rgcc(R_T6) = ot_base;
@@ -42,15 +42,13 @@ FI_ void tape_run(Slice_U4 tape, B1** r_prim_cursor, void* face_cursor, void* ve
         : "at", "v0", "v1", "t0", "t1", "t2", "t3", "t9", "memory" 
     );
     
-    *r_prim_cursor = pcur; 
+    r_prim_cursor[0] = pcur; 
 }
 
-/* Custom TapeBuilder that bypasses FArena to guarantee tightly packed U4s */
 typedef Struct_(TapeBuilder) { U4* ptr; U4 count; };
 FI_ TapeBuilder tb_begin(FArena* arena) { return (TapeBuilder){ (U4*)arena->start, 0 }; }
 
 I_ void tb_emit(TapeBuilder* tb, Code* atom) { r_(tb->ptr)[tb->count] = u4_(atom); ++ tb->count; }
-
 I_ Slice_U4 tb_end(TapeBuilder* tb) {
     tb_emit(tb, code_tape_exit);
     return (Slice_U4){ tb->ptr, tb->count };
@@ -154,33 +152,28 @@ internal Code CodeBlob_(atom_diag_yield) {
 
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal Code CodeBlob_(atom_diag_color) {
-    /* 1. Store Primitive Data (Code 0x20, Cyan color) */
     store_word(R_0, R_T7, 0), 
     load_ui(R_AT, 0x2000),     
     or_i(R_AT, R_AT, 0xFFFF),  
     store_word(R_AT, R_T7, 4),
     
-    /* 2. Fake coordinates */
-    load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 8),
-    load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0050), store_word(R_AT, R_T7, 12),
-    load_ui(R_AT, 0x0050), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 16),
+    /* Fake coordinates - Swapped winding order to prevent GPU culling! */
+    load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 8),  /* (16, 16) */
+    load_ui(R_AT, 0x0050), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 12), /* (80, 16) */
+    load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
 
-    /* 3. Link to Ordering Table at fixed depth (10) */
-    add_ui(R_T1, R_0, 10),     /* <--- FIXED: Use add_ui for small constants! */
+    add_ui(R_T1, R_0, 10),
     shift_ll(R_T1, R_T1, 2), 
     add_u(R_T1, R_T1, R_T6),         
     
     load_word(R_AT, R_T1, 0),        
+    load_ui(R_V0, 0x0400),
     store_word(R_AT, R_T7, 0),       
     
-    shift_ll(R_AT, R_T7, 8),
-    shift_lr(R_AT, R_AT, 8),         
-    load_ui(R_V0, 0x0400),           
+    shift_ll(R_AT, R_T7, 8), shift_lr(R_AT, R_AT, 8),         
     or_u(R_AT, R_AT, R_V0),          
-    
     store_word(R_AT, R_T1, 0),       
 
-    /* 4. Advance Prim Cursor and Yield */
     add_ui(R_T7, R_T7, 20),          
     mips_yield
 };

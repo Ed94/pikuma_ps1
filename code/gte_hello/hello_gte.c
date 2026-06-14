@@ -98,7 +98,7 @@ typedef Struct_(SMemory) {
 	DoubleBuffer            screen_buf;
 	A2_OrderingTable_Buffer ordering_tbl;
 	PrimitiveArena          primitives;
-	S2                      active_buf_id;
+	S4                      active_buf_id;
 
 	M3_S2 tform_world;
 
@@ -118,7 +118,7 @@ I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 }
 #define prim_alloc(type) (type*)prim__alloc(S_(type), slit( stringify(type)))
 
-void gp_screen_init_c11(DoubleBuffer* screen_buf, S2* active_buf_id)
+void gp_screen_init_c11(DoubleBuffer* screen_buf, S4* active_buf_id)
 {
 	reset_graph(0);
 
@@ -150,7 +150,7 @@ void gp_screen_init_c11(DoubleBuffer* screen_buf, S2* active_buf_id)
 	set_display_enabled(1); // gp_DisplayEnabled
 }
 
-void gp_display_frame(DoubleBuffer* screen_buf, S2* active_buf_id, U4* ordering_buf, PrimitiveArena* pa) {
+void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_buf, PrimitiveArena* pa) {
 	draw_sync(0);
 	vsync(0);
 	displayenv_put(& r_(screen_buf->display)[active_buf_id[0] ]);
@@ -231,7 +231,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		static_mem.cube.rot.y += 30;
 	}
 	// Draw Floor
-	if (1)
+	if (0)
 	{
 		m3s2_rotation   (& static_mem.floor.rot,   & static_mem.tform_world);
 		m3s2_translation(& static_mem.tform_world, & static_mem.floor.pos);
@@ -305,11 +305,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
         }
     }
     Slice_U4 tape = tb_end(&tb);
-
-    // 1. Setup Argument Registers (The Workspace)
-    register V3_S2* face_cursor rgcc(R_T4) = static_mem.floor.faces;
-    register V3_S2* vert_base   rgcc(R_T5) = static_mem.floor.verts;
-    register U4*    ot_base     rgcc(R_T6) = ordering_buf;
 		// --- EXECUTION ---
 		B1* prim_cursor = (B1*)r_(pa->buf)[static_mem.active_buf_id] + pa->used;
 		// 2. Fire the Tape Drive (Explicitly bind the workspace variables)
@@ -336,7 +331,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				// 2. code_atom_diag_color -> Tests OT and Prim Arena memory
 				// 3. code_atom_diag_gte   -> Tests Vertex arrays and GTE Math
 				// tb_emit(&tb, code_atom_diag_yield);
-				// tb_emit(&tb, code_atom_diag_color); 
+				tb_emit(&tb, code_atom_diag_color); 
 				// tb_emit(&tb, code_atom_diag_gte); 
 			}
 		}
@@ -374,7 +369,7 @@ int main(void)
 	gp_screen_init_c11(& static_mem.screen_buf, & static_mem.active_buf_id);
 	while (1) 
 	{
-		gknown S2* active_buf_id  = & static_mem.active_buf_id;
+		gknown S4* active_buf_id  = & static_mem.active_buf_id;
 		gknown U4* ordering_buf   = r_(static_mem.ordering_tbl)[active_buf_id[0]];
 		gknown PrimitiveArena* pa = & static_mem.primitives;
 		update(pa, ordering_buf);
