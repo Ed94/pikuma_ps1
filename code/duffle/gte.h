@@ -260,7 +260,7 @@ enum {
 
 enum { _C2_OPS_ = 0
 
-	, op_lwc2    = 0x32 /* Load Word to Coprocessor 2 (GTE) */
+	, op_lwc2    = 0x32 /* Load Word  to   Coprocessor 2 (GTE) */
 	, op_swc2    = 0x3A /* Store Word from Coprocessor 2 (GTE) */
 };
 
@@ -269,7 +269,7 @@ enum { _C2_OPS_ = 0
  *   - sub: cop_mf (0x00) for cfc2, cop_mt (0x04) for ctc2
  *   - rt:  GPR source/dest
  *   - rd:  COP2 control register index (0..31) */
-#define enc_cop2_tx(sub, rt, rd) (enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd))
+#define enc_gte_tx(sub, rt, rd) (enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd))
 
 /* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
  * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]
@@ -278,8 +278,9 @@ enum { _C2_OPS_ = 0
  *   - imm: signed 16-bit offset
  * NOTE: When `rs` is a runtime register, the encoding cannot be pre-baked
  * into a .word — use the string-style `gte_load_v0` macro below instead. */
-#define enc_cop2_lwc2(rt, base, off)  enc_i(op_lwc2, (base), (rt), (off))
-#define enc_cop2_swc2(rt, base, off)  enc_i(op_swc2, (base), (rt), (off))
+#define enc_gte_lw(rt, base, off) enc_i(op_lwc2, (base), (rt), (off))
+/* Store Word */
+#define enc_gte_sw(rt, base, off) enc_i(op_swc2, (base), (rt), (off))
 
 /* Semantic aliases for the COP2 data load/store. The `c2` in `lwc2`/
  * `swc2` is redundant when we're already inside the `gte_` namespace.
@@ -287,8 +288,8 @@ enum { _C2_OPS_ = 0
  *   gte_sw rt, base, off  →  swc2 rt, off(base)
  * For the typical user-facing vector-level load (xy + z as two
  * instructions), use the higher-level `gte_load_vN` macros below. */
-#define gte_lw(rt, base, off)          enc_cop2_lwc2(rt, base, off)
-#define gte_sw(rt, base, off)          enc_cop2_swc2(rt, base, off)
+#define gte_lw(rt, base, off) enc_gte_lw(rt, base, off)
+#define gte_sw(rt, base, off) enc_gte_sw(rt, base, off)
 
 /* GTE Command Format (The math engine trigger)
  * Opcode is always MIPS_OP_COP2, RS is always 1 (CO).
@@ -304,12 +305,12 @@ enum { _C2_OPS_ = 0
 #define gte_cmd_base (enc_op(op_cop2) | (1 << 25))
 
 /* Per-field encoders. Each one does (value & mask) << shift on its own. */
-#define enc_gte_sf(sf)       (((sf)  & gte_mask_sf ) << gte_shift_sf )
-#define enc_gte_mx(mx)       (((mx)  & gte_mask_mx ) << gte_shift_mx )
-#define enc_gte_v(v)         (((v)   & gte_mask_v  ) << gte_shift_v  )
-#define enc_gte_cv(cv)       (((cv)  & gte_mask_cv ) << gte_shift_cv )
-#define enc_gte_lm(lm)       (((lm)  & gte_mask_lm ) << gte_shift_lm )
-#define enc_gte_cmd(cmd)     (((cmd) & gte_mask_cmd) << gte_shift_cmd)
+#define enc_gte_sf(sf)   (((sf)  & gte_mask_sf ) << gte_shift_sf )
+#define enc_gte_mx(mx)   (((mx)  & gte_mask_mx ) << gte_shift_mx )
+#define enc_gte_v(v)     (((v)   & gte_mask_v  ) << gte_shift_v  )
+#define enc_gte_cv(cv)   (((cv)  & gte_mask_cv ) << gte_shift_cv )
+#define enc_gte_lm(lm)   (((lm)  & gte_mask_lm ) << gte_shift_lm )
+#define enc_gte_cmd(cmd) (((cmd) & gte_mask_cmd) << gte_shift_cmd)
 
 /* Composite: all six GTE fields + the COP2/CO base. */
 #define enc_gte_cmdw(sf, mx, v, cv, lm, cmd) ( \
@@ -400,12 +401,12 @@ enum {
 	GTE_Z_Offset = 4
 };
 
-#define gte_lwc2_v0(base)   enc_cop2_lwc2(gte_in_v0_xy, (base), 0)
-#define gte_lwc2_v0z(base)  enc_cop2_lwc2(gte_in_v0_z,  (base), GTE_Z_Offset)
-#define gte_lwc2_v1(base)   enc_cop2_lwc2(gte_in_v1_xy, (base), 0)
-#define gte_lwc2_v1z(base)  enc_cop2_lwc2(gte_in_v1_z,  (base), GTE_Z_Offset)
-#define gte_lwc2_v2(base)   enc_cop2_lwc2(gte_in_v2_xy, (base), 0)
-#define gte_lwc2_v2z(base)  enc_cop2_lwc2(gte_in_v2_z,  (base), GTE_Z_Offset)
+#define gte_load_word_v0(base)   enc_gte_lw(gte_in_v0_xy, (base), 0)
+#define gte_load_word_v0z(base)  enc_gte_lw(gte_in_v0_z,  (base), GTE_Z_Offset)
+#define gte_load_word_v1(base)   enc_gte_lw(gte_in_v1_xy, (base), 0)
+#define gte_load_word_v1z(base)  enc_gte_lw(gte_in_v1_z,  (base), GTE_Z_Offset)
+#define gte_load_word_v2(base)   enc_gte_lw(gte_in_v2_xy, (base), 0)
+#define gte_load_word_v2z(base)  enc_gte_lw(gte_in_v2_z,  (base), GTE_Z_Offset)
 
 /* gte_load_vN(r_ptr, base) — placeholder-punned lwc2 loaders
  *
@@ -446,23 +447,23 @@ enum {
  * starts the clobbers section. */
 #define gte_load_v0(r_ptr, base) \
 	asm volatile(                                            \
-		asm_inline( gte_lwc2_v0(base), gte_lwc2_v0z(base) )    \
+		asm_words( gte_load_word_v0(base), gte_load_word_v0z(base) )    \
 		, "r"(r_ptr)                                           \
-		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
+		asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" \
 	)
 
 #define gte_load_v1(r_ptr, base) \
 	asm volatile(                                            \
-		asm_inline( gte_lwc2_v1(base), gte_lwc2_v1z(base) )    \
+		asm_words( gte_load_word_v1(base), gte_load_word_v1z(base) )    \
 		, "r"(r_ptr)                                           \
-		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
+		asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" \
 	)
 
 #define gte_load_v2(r_ptr, base) \
 	asm volatile(                                            \
-		asm_inline( gte_lwc2_v2(base), gte_lwc2_v2z(base) )    \
+		asm_words( gte_load_word_v2(base), gte_load_word_v2z(base) )    \
 		, "r"(r_ptr)                                           \
-		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
+		asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" \
 	)
 
 /* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — the canonical prelude to gte_cmd_rtpt.
@@ -479,11 +480,11 @@ enum {
  */
 #define gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) \
 	asm volatile(                                            \
-		asm_inline( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),         \
+		asm_words( gte_lwc2_v0(b0), gte_lwc2_v0z(b0),         \
 								gte_lwc2_v1(b1), gte_lwc2_v1z(b1),         \
 								gte_lwc2_v2(b2), gte_lwc2_v2z(b2) )        \
 		, "r"(p0), "r"(p1), "r"(p2)                            \
-		asm_clobber( reg_str(R_V0_Code), reg_str(R_T0_Code), reg_str(R_T1_Code), reg_str(R_RA_Code), "memory" )  \
+		asm_clobber( rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory" )  \
 	)
 
 /**
@@ -514,8 +515,8 @@ enum {
  */
 #define gte_rtpt()                        \
 	asm volatile(                           \
-		asm_inline( nop, nop, gte_cmdw_rtpt ) \
-		asm_clobber( clb_system )             \
+		asm_words( nop, nop, gte_cmdw_rtpt )  \
+		asm_clobber: clb_system               \
 	)
 
 #define gte_rtpt_ori() \
@@ -553,10 +554,10 @@ enum {
  * they need to survive across the call (NCLIP writes MAC0 only; it
  * is purely a sign-of-double-product computation on SXY0..2).
  */
-#define gte_nclip()                        \
-	asm volatile(                            \
-		asm_inline( nop, nop, gte_cmdw_nclip ) \
-		asm_clobber( clb_system )              \
+#define gte_nclip()                       \
+	asm volatile(                           \
+		asm_words( nop, nop, gte_cmdw_nclip ) \
+		asm_clobber: clb_system               \
 	)
 
 #define gte_stotz(r0) __asm__ volatile("swc2   $7, 0( %0 )" : : "r"(r0) : "memory")
@@ -622,20 +623,19 @@ enum {
  * get stale-RT2x/RT3x artifacts in RTPS/RTPT/MVMVA output.
  */
 #define asm_gte_matrix_set_rotation(r0) \
-	asm volatile( \
-		asm_inline(                         \
-			 load_imm(R_T4, r0,  0),          \
-			 load_imm(R_T5, r0,  4),          \
-			 enc_cop2_tx(cop_mt, R_T4,  0),   \
-			 enc_cop2_tx(cop_mt, R_T5,  1),   \
-			 load_imm(R_T4, r0,  8),          \
-			 load_imm(R_T5, r0, 12),          \
-			 load_imm(R_T6, r0, 16),          \
-			 enc_cop2_tx(cop_mt, R_T4,  2),   \
-			 enc_cop2_tx(cop_mt, R_T5,  3),   \
-			 enc_cop2_tx(cop_mt, R_T6,  4)    \
+	asm volatile(asm_words(               \
+			  load_imm(R_T4, r0,  0)          \
+			, load_imm(R_T5, r0,  4)          \
+			, enc_cop2_tx(cop_mt, R_T4,  0)   \
+			, enc_cop2_tx(cop_mt, R_T5,  1)   \
+			, load_imm(R_T4, r0,  8)          \
+			, load_imm(R_T5, r0, 12)          \
+			, load_imm(R_T6, r0, 16)          \
+			, enc_cop2_tx(cop_mt, R_T4,  2)   \
+			, enc_cop2_tx(cop_mt, R_T5,  3)   \
+			, enc_cop2_tx(cop_mt, R_T6,  4)   \
 		)                                   \
-		asm_clobber( clb_system, reg_str(R_T4_Code), reg_str(R_T5_Code), reg_str(R_T6_Code) ) \
+		asm_clobber: clb_system, reg_str(R_T4_Code), reg_str(R_T5_Code), reg_str(R_T6_Code) \
 		: \
 		: "r"(r0) \
 	)

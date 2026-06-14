@@ -18,7 +18,7 @@
  *      R_T7 = R_T7_Code,        // in the enum
  *
  *  User code should always reference the enum form (`R_T4`) at arithmetic
- *  sites and let `reg_str(R_T4_Code)` / `rgcc(R_T4)` handle the stringify
+ *  sites and let `rlit(R_T4_Code)` / `rgcc(R_T4)` handle the stringify
  *  cases — never write the bare number `12`.
  * ============================================================================ */
 #define R_0_Code    0
@@ -366,42 +366,42 @@ enum { _BitOffsets = 0
 	U4 _li2_hi_  = _li2_imm_ >> 16;                      \
 	if (_li2_lo_ <= 0x7FFFU) {                           \
 		asm volatile(                                      \
-			asm_inline(lui_op((rt), _li2_hi_),               \
-			           add_si((rt), (rt), (S2)(U2)_li2_lo_)) \
-			asm_clobber(reg_str(R_AT_Code), "memory")        \
+			asm_words(lui_op((rt), _li2_hi_),                \
+			          add_si((rt), (rt), (S2)(U2)_li2_lo_))  \
+			asm_clobber(rlit(R_AT_Code), "memory")           \
 		);                                                 \
 	}                                                    \
 	else {                                               \
 		asm volatile(                                      \
-			asm_inline(lui_op((rt), _li2_hi_),               \
-			           ori_op((rt), (rt), (U2)_li2_lo_))     \
-			asm_clobber(reg_str(R_AT_Code), "memory")        \
+			asm_words(lui_op((rt), _li2_hi_),                \
+			          ori_op((rt), (rt), (U2)_li2_lo_))      \
+			asm_clobber(rlit(R_AT_Code), "memory")           \
 		);                                                 \
 	}                                                    \
 } while (0)
 
 /* load_imm_2w_ori — force the `lui` + `ori` form regardless of lo16 sign.
  * Use when you specifically need zero-extension in the lo half. */
-#define load_imm_2w_ori(rt, imm) do {                          \
-	U4 _li2o_imm_ = (U4)(imm);                                   \
-	asm volatile(                                                \
-		asm_inline(lui_op((rt), _li2o_imm_ >> 16),                 \
-		           ori_op((rt), (rt), (U2)(_li2o_imm_ & 0xFFFFU))) \
-		asm_clobber(reg_str(R_AT_Code), "memory")                  \
-	);                                                           \
+#define load_imm_2w_ori(rt, imm) do {                         \
+	U4 _li2o_imm_ = (U4)(imm);                                  \
+	asm volatile(                                               \
+		asm_words(lui_op((rt), _li2o_imm_ >> 16),                 \
+		          ori_op((rt), (rt), (U2)(_li2o_imm_ & 0xFFFFU))) \
+		asm_clobber(rlit(R_AT_Code), "memory")                    \
+	);                                                          \
 } while (0)
 
 /* load_imm_2w_addi — force the `lui` + `addi` form regardless of lo16 sign.
  * Use when you know sign-extension is fine (e.g. lo16 is treated as
  * signed downstream) and you want a smaller effective instruction
  * (the assembler/MIPS hardware will sign-extend the imm16). */
-#define load_imm_2w_addi(rt, imm) do {                             \
-	U4 _li2a_imm_ = (U4)(imm);                                       \
-	asm volatile(                                                    \
-		asm_inline(lui_op((rt), _li2a_imm_ >> 16),                     \
-		           add_si((rt), (rt), (S2)(U2)(_li2a_imm_ & 0xFFFFU))) \
-		asm_clobber(reg_str(R_AT_Code), "memory")                      \
-	);                                                               \
+#define load_imm_2w_addi(rt, imm) do {                            \
+	U4 _li2a_imm_ = (U4)(imm);                                      \
+	asm volatile(                                                   \
+		asm_words(lui_op((rt), _li2a_imm_ >> 16),                     \
+		          add_si((rt), (rt), (S2)(U2)(_li2a_imm_ & 0xFFFFU))) \
+		asm_clobber(rlit(R_AT_Code), "memory")                        \
+	);                                                              \
 } while (0)
 
 /* load_imm rt, imm — true `li` semantics (assembler `li` pseudo)
@@ -427,37 +427,36 @@ enum { _BitOffsets = 0
 	if (__builtin_constant_p(imm) && ((U4)(imm) <= 0x7FFFU)) {       \
 		/* Small positive: addi rt, $0, imm */                         \
 		asm volatile(                                                  \
-			asm_inline(add_si((rt), R_0, (imm)))                         \
-			asm_clobber(reg_str(R_AT_Code), "memory")                    \
+			asm_words(add_si((rt), R_0, (imm)))                          \
+			asm_clobber(rlit(R_AT_Code), "memory")                       \
 		);                                                             \
 	}                                                                \
 	else if (__builtin_constant_p(imm) && ((U4)(imm) <= 0xFFFFU)) {  \
 			/* 0x8000..0xFFFF: ori rt, $0, imm (zero-extends) */         \
 			asm volatile(                                                \
-				asm_inline(ori_op((rt), R_0, (imm)))                       \
-				asm_clobber(reg_str(R_AT_Code), "memory")                  \
+				asm_words(ori_op((rt), R_0, (imm)))                        \
+				asm_clobber(rlit(R_AT_Code), "memory")                     \
 			);                                                           \
 	}                                                                \
 	else                                                             \
 	{                                                                \
 		/* > 16 bits: lui + (ori | addi).                              \
-			* If lo16 is in [0, 0x7FFF] use addi (sign-ext is harmless   \
-			* since the high half cleared bits 15..0). Otherwise ori. */ \
+		* If lo16 is in [0, 0x7FFF] use addi (sign-ext is harmless     \
+		* since the high half cleared bits 15..0). Otherwise ori. */   \
 		U4 _li_imm_ = (U4)(imm);                                       \
 		U4 _li_lo_  = _li_imm_ & 0xFFFFU;                              \
 		U4 _li_hi_  = _li_imm_ >> 16;                                  \
 		if (_li_lo_ <= 0x7FFFU) {                                      \
-			asm volatile(                                                \
-				asm_inline(lui_op((rt), _li_hi_),                          \
+			asm volatile(asm_words(                                      \
+				lui_op((rt), _li_hi_),                                     \
 				add_si((rt), (rt), (S2)(U2)_li_lo_))                       \
-				asm_clobber(reg_str(R_AT_Code), "memory")                  \
+				asm_clobber(rlit(R_AT_Code), "memory")                     \
 			);                                                           \
 		}                                                              \
 		else {                                                         \
-			asm volatile(                                                \
-				asm_inline(lui_op((rt), _li_hi_),                          \
-				ori_op((rt), (rt), (U2)_li_lo_))                           \
-				asm_clobber(reg_str(R_AT_Code), "memory")                  \
+			asm volatile(asm_words(                                      \
+				lui_op((rt), _li_hi_), ori_op((rt), (rt), (U2)_li_lo_))    \
+				asm_clobber: rlit(R_AT_Code), "memory"                     \
 			);                                                           \
 		}                                                              \
 	}                                                                \
@@ -486,26 +485,25 @@ enum {
  */
 internal
 Code CodeBlob_(mips_flush_icache) {
-	add_ui(rstack_ptr, rstack_ptr, -8),        /* sp -= 8         */
-	store_word(rret_addr, rstack_ptr, 4),      /* sw  $ra, 4($sp) */
-	add_ui(rret_0, rdiscard, bios_flushcache), /* addiu $a0, $0, 0x44 */
-	add_ui(rtmp_0, rdiscard, bios_table_addr), /* addiu $t0, $0, 0xA0 */
-	jump_link(rtmp_0, rret_addr),              /* jalr $t0, $ra   */
-	nop,                                       /* BD slot         */
-	load_word(rret_addr, rstack_ptr, 4),       /* lw  $ra, 4($sp) */
-	jump_reg(rret_addr),                       /* jr   $ra        */
-	add_ui(rstack_ptr, rstack_ptr, 8)          /* sp += 8 (BD)    */
+	  add_ui(rstack_ptr, rstack_ptr, -8)        /* sp -= 8             */
+	, store_word(rret_addr, rstack_ptr, 4)      /* sw  $ra,   4($sp)   */
+	, add_ui(rret_0, rdiscard, bios_flushcache) /* addiu $a0, $0, 0x44 */
+	, add_ui(rtmp_0, rdiscard, bios_table_addr) /* addiu $t0, $0, 0xA0 */
+	, jump_link(rtmp_0, rret_addr)              /* jalr  $t0, $ra      */
+	, nop                                       /* BD slot             */
+	, load_word(rret_addr, rstack_ptr, 4)       /* lw   $ra, 4($sp)    */
+	, jump_reg(rret_addr)                       /* jr   $ra            */
+	, add_ui(rstack_ptr, rstack_ptr, 8)         /* sp += 8 (BD)        */
 };
 FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 
 /* Standard clobber list for pure-MIPS asm volatile blocks: caller-saved
  * GPRs that the kernel treats as volatile (v0/v1/t0/t1/ra) plus the
- * "memory" barrier. The register ids are passed through `reg_str` so
+ * "memory" barrier. The register ids are passed through `rlit` so
  * the R_*_Code `#define`s are stringified into "$N" at expansion time. */
-#define clb_system \
-	rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory"
+#define clb_system rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), "memory"
 
-#define asm_mips_flush_icache() asm volatile( asm_inline( \
+#define asm_mips_flush_icache() asm volatile( asm_words( \
 		add_ui(rstack_ptr, rstack_ptr, -8)        \
 	, store_word(rret_addr, rstack_ptr, 4)      \
 	, add_ui(rret_0, rdiscard, bios_flushcache) \
@@ -515,7 +513,7 @@ FI_ void mips_flush_icache(void) { C_(VoidFn*, codeblob_mips_flush_icache)(); }
 	, load_word(rret_addr, rstack_ptr, 4)       \
 	, jump_reg(rret_addr)                       \
 	, add_ui(rstack_ptr, rstack_ptr, 8)         \
-) asm_clobber( clb_system ) )
+) asm_clobber: clb_system )
 
 void test_mips_asm() {
 	asm_mips_flush_icache();

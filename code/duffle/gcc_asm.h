@@ -4,8 +4,12 @@
 #endif
 
 /* ============================================================================
- * INLINE ASSEMBLY BLOB DISPATCHER (UP TO 99 INSTRUCTIONS)
+ * GCC INLINE ASSEMBLY MACRO DSL
+ * 
+ * 
  * ============================================================================ */
+
+ #pragma region Cruft
 
 /* --- 1. The Argument Counter --- */
 #define _ASM_COUNT_ARGS_IMPL( \
@@ -39,226 +43,308 @@
  * integer immediates (the only kind `"i"(...)` produces), the plain
  * `%N` form is the right one. Both expand to the bare immediate.
  */
-#define _STR1  "%0"
-#define _STR2  _STR1  ", %1"
-#define _STR3  _STR2  ", %2"
-#define _STR4  _STR3  ", %3"
-#define _STR5  _STR4  ", %4"
-#define _STR6  _STR5  ", %5"
-#define _STR7  _STR6  ", %6"
-#define _STR8  _STR7  ", %7"
-#define _STR9  _STR8  ", %8"
-#define _STR10 _STR9  ", %9"
-#define _STR11 _STR10 ", %10"
-#define _STR12 _STR11 ", %11"
-#define _STR13 _STR12 ", %12"
-#define _STR14 _STR13 ", %13"
-#define _STR15 _STR14 ", %14"
-#define _STR16 _STR15 ", %15"
-#define _STR17 _STR16 ", %16"
-#define _STR18 _STR17 ", %17"
-#define _STR19 _STR18 ", %18"
-#define _STR20 _STR19 ", %19"
-#define _STR21 _STR20 ", %20"
-#define _STR22 _STR21 ", %21"
-#define _STR23 _STR22 ", %22"
-#define _STR24 _STR23 ", %23"
-#define _STR25 _STR24 ", %24"
-#define _STR26 _STR25 ", %25"
-#define _STR27 _STR26 ", %26"
-#define _STR28 _STR27 ", %27"
-#define _STR29 _STR28 ", %28"
-#define _STR30 _STR29 ", %29"
-#define _STR31 _STR30 ", %30"
-#define _STR32 _STR31 ", %31"
-#define _STR33 _STR32 ", %32"
-#define _STR34 _STR33 ", %33"
-#define _STR35 _STR34 ", %34"
-#define _STR36 _STR35 ", %35"
-#define _STR37 _STR36 ", %36"
-#define _STR38 _STR37 ", %37"
-#define _STR39 _STR38 ", %38"
-#define _STR40 _STR39 ", %39"
-#define _STR41 _STR40 ", %40"
-#define _STR42 _STR41 ", %41"
-#define _STR43 _STR42 ", %42"
-#define _STR44 _STR43 ", %43"
-#define _STR45 _STR44 ", %44"
-#define _STR46 _STR45 ", %45"
-#define _STR47 _STR46 ", %46"
-#define _STR48 _STR47 ", %47"
-#define _STR49 _STR48 ", %48"
-#define _STR50 _STR49 ", %49"
-#define _STR51 _STR50 ", %50"
-#define _STR52 _STR51 ", %51"
-#define _STR53 _STR52 ", %52"
-#define _STR54 _STR53 ", %53"
-#define _STR55 _STR54 ", %54"
-#define _STR56 _STR55 ", %55"
-#define _STR57 _STR56 ", %56"
-#define _STR58 _STR57 ", %57"
-#define _STR59 _STR58 ", %58"
-#define _STR60 _STR59 ", %59"
-#define _STR61 _STR60 ", %60"
-#define _STR62 _STR61 ", %61"
-#define _STR63 _STR62 ", %62"
-#define _STR64 _STR63 ", %63"
-#define _STR65 _STR64 ", %64"
-#define _STR66 _STR65 ", %65"
-#define _STR67 _STR66 ", %66"
-#define _STR68 _STR67 ", %67"
-#define _STR69 _STR68 ", %68"
-#define _STR70 _STR69 ", %69"
-#define _STR71 _STR70 ", %70"
-#define _STR72 _STR71 ", %71"
-#define _STR73 _STR72 ", %72"
-#define _STR74 _STR73 ", %73"
-#define _STR75 _STR74 ", %74"
-#define _STR76 _STR75 ", %75"
-#define _STR77 _STR76 ", %76"
-#define _STR78 _STR77 ", %77"
-#define _STR79 _STR78 ", %78"
-#define _STR80 _STR79 ", %79"
-#define _STR81 _STR80 ", %80"
-#define _STR82 _STR81 ", %81"
-#define _STR83 _STR82 ", %82"
-#define _STR84 _STR83 ", %83"
-#define _STR85 _STR84 ", %84"
-#define _STR86 _STR85 ", %85"
-#define _STR87 _STR86 ", %86"
-#define _STR88 _STR87 ", %87"
-#define _STR89 _STR88 ", %88"
-#define _STR90 _STR89 ", %89"
-#define _STR91 _STR90 ", %90"
-#define _STR92 _STR91 ", %91"
-#define _STR93 _STR92 ", %92"
-#define _STR94 _STR93 ", %93"
-#define _STR95 _STR94 ", %94"
-#define _STR96 _STR95 ", %95"
-#define _STR97 _STR96 ", %96"
-#define _STR98 _STR97 ", %97"
-#define _STR99 _STR98 ", %98"
+#define GCC_ASM_W1                  "%0"
+#define GCC_ASM_W2   GCC_ASM_W1   ", %1"
+#define GCC_ASM_W3   GCC_ASM_W2   ", %2"
+#define GCC_ASM_W4   GCC_ASM_W3   ", %3"
+#define GCC_ASM_W5   GCC_ASM_W4   ", %4"
+#define GCC_ASM_W6   GCC_ASM_W5   ", %5"
+#define GCC_ASM_W7   GCC_ASM_W6   ", %6"
+#define GCC_ASM_W8   GCC_ASM_W7   ", %7"
+#define GCC_ASM_W9   GCC_ASM_W8   ", %8"
+#define GCC_ASM_W10  GCC_ASM_W9   ", %9"
+#define GCC_ASM_W11  GCC_ASM_W10  ", %10"
+#define GCC_ASM_W12  GCC_ASM_W11  ", %11"
+#define GCC_ASM_W13  GCC_ASM_W12  ", %12"
+#define GCC_ASM_W14  GCC_ASM_W13  ", %13"
+#define GCC_ASM_W15  GCC_ASM_W14  ", %14"
+#define GCC_ASM_W16  GCC_ASM_W15  ", %15"
+#define GCC_ASM_W17  GCC_ASM_W16  ", %16"
+#define GCC_ASM_W18  GCC_ASM_W17  ", %17"
+#define GCC_ASM_W19  GCC_ASM_W18  ", %18"
+#define GCC_ASM_W20  GCC_ASM_W19  ", %19"
+#define GCC_ASM_W21  GCC_ASM_W20  ", %20"
+#define GCC_ASM_W22  GCC_ASM_W21  ", %21"
+#define GCC_ASM_W23  GCC_ASM_W22  ", %22"
+#define GCC_ASM_W24  GCC_ASM_W23  ", %23"
+#define GCC_ASM_W25  GCC_ASM_W24  ", %24"
+#define GCC_ASM_W26  GCC_ASM_W25  ", %25"
+#define GCC_ASM_W27  GCC_ASM_W26  ", %26"
+#define GCC_ASM_W28  GCC_ASM_W27  ", %27"
+#define GCC_ASM_W29  GCC_ASM_W28  ", %28"
+#define GCC_ASM_W30  GCC_ASM_W29  ", %29"
+#define GCC_ASM_W31  GCC_ASM_W30  ", %30"
+#define GCC_ASM_W32  GCC_ASM_W31  ", %31"
+#define GCC_ASM_W33  GCC_ASM_W32  ", %32"
+#define GCC_ASM_W34  GCC_ASM_W33  ", %33"
+#define GCC_ASM_W35  GCC_ASM_W34  ", %34"
+#define GCC_ASM_W36  GCC_ASM_W35  ", %35"
+#define GCC_ASM_W37  GCC_ASM_W36  ", %36"
+#define GCC_ASM_W38  GCC_ASM_W37  ", %37"
+#define GCC_ASM_W39  GCC_ASM_W38  ", %38"
+#define GCC_ASM_W40  GCC_ASM_W39  ", %39"
+#define GCC_ASM_W41  GCC_ASM_W40  ", %40"
+#define GCC_ASM_W42  GCC_ASM_W41  ", %41"
+#define GCC_ASM_W43  GCC_ASM_W42  ", %42"
+#define GCC_ASM_W44  GCC_ASM_W43  ", %43"
+#define GCC_ASM_W45  GCC_ASM_W44  ", %44"
+#define GCC_ASM_W46  GCC_ASM_W45  ", %45"
+#define GCC_ASM_W47  GCC_ASM_W46  ", %46"
+#define GCC_ASM_W48  GCC_ASM_W47  ", %47"
+#define GCC_ASM_W49  GCC_ASM_W48  ", %48"
+#define GCC_ASM_W50  GCC_ASM_W49  ", %49"
+#define GCC_ASM_W51  GCC_ASM_W50  ", %50"
+#define GCC_ASM_W52  GCC_ASM_W51  ", %51"
+#define GCC_ASM_W53  GCC_ASM_W52  ", %52"
+#define GCC_ASM_W54  GCC_ASM_W53  ", %53"
+#define GCC_ASM_W55  GCC_ASM_W54  ", %54"
+#define GCC_ASM_W56  GCC_ASM_W55  ", %55"
+#define GCC_ASM_W57  GCC_ASM_W56  ", %56"
+#define GCC_ASM_W58  GCC_ASM_W57  ", %57"
+#define GCC_ASM_W59  GCC_ASM_W58  ", %58"
+#define GCC_ASM_W60  GCC_ASM_W59  ", %59"
+#define GCC_ASM_W61  GCC_ASM_W60  ", %60"
+#define GCC_ASM_W62  GCC_ASM_W61  ", %61"
+#define GCC_ASM_W63  GCC_ASM_W62  ", %62"
+#define GCC_ASM_W64  GCC_ASM_W63  ", %63"
+#define GCC_ASM_W65  GCC_ASM_W64  ", %64"
+#define GCC_ASM_W66  GCC_ASM_W65  ", %65"
+#define GCC_ASM_W67  GCC_ASM_W66  ", %66"
+#define GCC_ASM_W68  GCC_ASM_W67  ", %67"
+#define GCC_ASM_W69  GCC_ASM_W68  ", %68"
+#define GCC_ASM_W70  GCC_ASM_W69  ", %69"
+#define GCC_ASM_W71  GCC_ASM_W70  ", %70"
+#define GCC_ASM_W72  GCC_ASM_W71  ", %71"
+#define GCC_ASM_W73  GCC_ASM_W72  ", %72"
+#define GCC_ASM_W74  GCC_ASM_W73  ", %73"
+#define GCC_ASM_W75  GCC_ASM_W74  ", %74"
+#define GCC_ASM_W76  GCC_ASM_W75  ", %75"
+#define GCC_ASM_W77  GCC_ASM_W76  ", %76"
+#define GCC_ASM_W78  GCC_ASM_W77  ", %77"
+#define GCC_ASM_W79  GCC_ASM_W78  ", %78"
+#define GCC_ASM_W80  GCC_ASM_W79  ", %79"
+#define GCC_ASM_W81  GCC_ASM_W80  ", %80"
+#define GCC_ASM_W82  GCC_ASM_W81  ", %81"
+#define GCC_ASM_W83  GCC_ASM_W82  ", %82"
+#define GCC_ASM_W84  GCC_ASM_W83  ", %83"
+#define GCC_ASM_W85  GCC_ASM_W84  ", %84"
+#define GCC_ASM_W86  GCC_ASM_W85  ", %85"
+#define GCC_ASM_W87  GCC_ASM_W86  ", %86"
+#define GCC_ASM_W88  GCC_ASM_W87  ", %87"
+#define GCC_ASM_W89  GCC_ASM_W88  ", %88"
+#define GCC_ASM_W90  GCC_ASM_W89  ", %89"
+#define GCC_ASM_W91  GCC_ASM_W90  ", %90"
+#define GCC_ASM_W92  GCC_ASM_W91  ", %91"
+#define GCC_ASM_W93  GCC_ASM_W92  ", %92"
+#define GCC_ASM_W94  GCC_ASM_W93  ", %93"
+#define GCC_ASM_W95  GCC_ASM_W94  ", %94"
+#define GCC_ASM_W96  GCC_ASM_W95  ", %95"
+#define GCC_ASM_W97  GCC_ASM_W96  ", %96"
+#define GCC_ASM_W98  GCC_ASM_W97  ", %97"
+#define GCC_ASM_W99  GCC_ASM_W98  ", %98"
 
 /* Utilizing cascading operand strings to compress the payload */
-#define _OP10 "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7),"i"(p8),"i"(p9)
-#define _OP20 _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17),"i"(p18),"i"(p19)
-#define _OP30 _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27),"i"(p28),"i"(p29)
-#define _OP40 _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37),"i"(p38),"i"(p39)
-#define _OP50 _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47),"i"(p48),"i"(p49)
-#define _OP60 _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57),"i"(p58),"i"(p59)
-#define _OP70 _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67),"i"(p68),"i"(p69)
-#define _OP80 _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77),"i"(p78),"i"(p79)
-#define _OP90 _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87),"i"(p88),"i"(p89)
+#define GCC_ASM_I1(p0)       "i"(p0)
+#define GCC_ASM_I2(p0,  ...) "i"(p0), GCC_ASM_I1( __VA_ARGS__)
+#define GCC_ASM_I3(p0,  ...) "i"(p0), GCC_ASM_I2( __VA_ARGS__)
+#define GCC_ASM_I4(p0,  ...) "i"(p0), GCC_ASM_I3( __VA_ARGS__)
+#define GCC_ASM_I5(p0,  ...) "i"(p0), GCC_ASM_I4( __VA_ARGS__)
+#define GCC_ASM_I6(p0,  ...) "i"(p0), GCC_ASM_I5( __VA_ARGS__)
+#define GCC_ASM_I7(p0,  ...) "i"(p0), GCC_ASM_I6( __VA_ARGS__)
+#define GCC_ASM_I8(p0,  ...) "i"(p0), GCC_ASM_I7( __VA_ARGS__)
+#define GCC_ASM_I9(p0,  ...) "i"(p0), GCC_ASM_I8( __VA_ARGS__)
+#define GCC_ASM_I10(p0, ...) "i"(p0), GCC_ASM_I9( __VA_ARGS__)
+#define GCC_ASM_I11(p0, ...) "i"(p0), GCC_ASM_I10(__VA_ARGS__)
+#define GCC_ASM_I12(p0, ...) "i"(p0), GCC_ASM_I11(__VA_ARGS__)
+#define GCC_ASM_I13(p0, ...) "i"(p0), GCC_ASM_I12(__VA_ARGS__)
+#define GCC_ASM_I14(p0, ...) "i"(p0), GCC_ASM_I13(__VA_ARGS__)
+#define GCC_ASM_I15(p0, ...) "i"(p0), GCC_ASM_I14(__VA_ARGS__)
+#define GCC_ASM_I16(p0, ...) "i"(p0), GCC_ASM_I15(__VA_ARGS__)
+#define GCC_ASM_I17(p0, ...) "i"(p0), GCC_ASM_I16(__VA_ARGS__)
+#define GCC_ASM_I18(p0, ...) "i"(p0), GCC_ASM_I17(__VA_ARGS__)
+#define GCC_ASM_I19(p0, ...) "i"(p0), GCC_ASM_I18(__VA_ARGS__)
+#define GCC_ASM_I20(p0, ...) "i"(p0), GCC_ASM_I19(__VA_ARGS__)
+#define GCC_ASM_I21(p0, ...) "i"(p0), GCC_ASM_I20(__VA_ARGS__)
+#define GCC_ASM_I22(p0, ...) "i"(p0), GCC_ASM_I21(__VA_ARGS__)
+#define GCC_ASM_I23(p0, ...) "i"(p0), GCC_ASM_I22(__VA_ARGS__)
+#define GCC_ASM_I24(p0, ...) "i"(p0), GCC_ASM_I23(__VA_ARGS__)
+#define GCC_ASM_I25(p0, ...) "i"(p0), GCC_ASM_I24(__VA_ARGS__)
+#define GCC_ASM_I26(p0, ...) "i"(p0), GCC_ASM_I25(__VA_ARGS__)
+#define GCC_ASM_I27(p0, ...) "i"(p0), GCC_ASM_I26(__VA_ARGS__)
+#define GCC_ASM_I28(p0, ...) "i"(p0), GCC_ASM_I27(__VA_ARGS__)
+#define GCC_ASM_I29(p0, ...) "i"(p0), GCC_ASM_I28(__VA_ARGS__)
+#define GCC_ASM_I30(p0, ...) "i"(p0), GCC_ASM_I29(__VA_ARGS__)
+#define GCC_ASM_I31(p0, ...) "i"(p0), GCC_ASM_I30(__VA_ARGS__)
+#define GCC_ASM_I32(p0, ...) "i"(p0), GCC_ASM_I31(__VA_ARGS__)
+#define GCC_ASM_I33(p0, ...) "i"(p0), GCC_ASM_I32(__VA_ARGS__)
+#define GCC_ASM_I34(p0, ...) "i"(p0), GCC_ASM_I33(__VA_ARGS__)
+#define GCC_ASM_I35(p0, ...) "i"(p0), GCC_ASM_I34(__VA_ARGS__)
+#define GCC_ASM_I36(p0, ...) "i"(p0), GCC_ASM_I35(__VA_ARGS__)
+#define GCC_ASM_I37(p0, ...) "i"(p0), GCC_ASM_I36(__VA_ARGS__)
+#define GCC_ASM_I38(p0, ...) "i"(p0), GCC_ASM_I37(__VA_ARGS__)
+#define GCC_ASM_I39(p0, ...) "i"(p0), GCC_ASM_I38(__VA_ARGS__)
+#define GCC_ASM_I40(p0, ...) "i"(p0), GCC_ASM_I39(__VA_ARGS__)
+#define GCC_ASM_I41(p0, ...) "i"(p0), GCC_ASM_I40(__VA_ARGS__)
+#define GCC_ASM_I42(p0, ...) "i"(p0), GCC_ASM_I41(__VA_ARGS__)
+#define GCC_ASM_I43(p0, ...) "i"(p0), GCC_ASM_I42(__VA_ARGS__)
+#define GCC_ASM_I44(p0, ...) "i"(p0), GCC_ASM_I43(__VA_ARGS__)
+#define GCC_ASM_I45(p0, ...) "i"(p0), GCC_ASM_I44(__VA_ARGS__)
+#define GCC_ASM_I46(p0, ...) "i"(p0), GCC_ASM_I45(__VA_ARGS__)
+#define GCC_ASM_I47(p0, ...) "i"(p0), GCC_ASM_I46(__VA_ARGS__)
+#define GCC_ASM_I48(p0, ...) "i"(p0), GCC_ASM_I47(__VA_ARGS__)
+#define GCC_ASM_I49(p0, ...) "i"(p0), GCC_ASM_I48(__VA_ARGS__)
+#define GCC_ASM_I50(p0, ...) "i"(p0), GCC_ASM_I49(__VA_ARGS__)
+#define GCC_ASM_I51(p0, ...) "i"(p0), GCC_ASM_I50(__VA_ARGS__)
+#define GCC_ASM_I52(p0, ...) "i"(p0), GCC_ASM_I51(__VA_ARGS__)
+#define GCC_ASM_I53(p0, ...) "i"(p0), GCC_ASM_I52(__VA_ARGS__)
+#define GCC_ASM_I54(p0, ...) "i"(p0), GCC_ASM_I53(__VA_ARGS__)
+#define GCC_ASM_I55(p0, ...) "i"(p0), GCC_ASM_I54(__VA_ARGS__)
+#define GCC_ASM_I56(p0, ...) "i"(p0), GCC_ASM_I55(__VA_ARGS__)
+#define GCC_ASM_I57(p0, ...) "i"(p0), GCC_ASM_I56(__VA_ARGS__)
+#define GCC_ASM_I58(p0, ...) "i"(p0), GCC_ASM_I57(__VA_ARGS__)
+#define GCC_ASM_I59(p0, ...) "i"(p0), GCC_ASM_I58(__VA_ARGS__)
+#define GCC_ASM_I60(p0, ...) "i"(p0), GCC_ASM_I59(__VA_ARGS__)
+#define GCC_ASM_I61(p0, ...) "i"(p0), GCC_ASM_I60(__VA_ARGS__)
+#define GCC_ASM_I62(p0, ...) "i"(p0), GCC_ASM_I61(__VA_ARGS__)
+#define GCC_ASM_I63(p0, ...) "i"(p0), GCC_ASM_I62(__VA_ARGS__)
+#define GCC_ASM_I64(p0, ...) "i"(p0), GCC_ASM_I63(__VA_ARGS__)
+#define GCC_ASM_I65(p0, ...) "i"(p0), GCC_ASM_I64(__VA_ARGS__)
+#define GCC_ASM_I66(p0, ...) "i"(p0), GCC_ASM_I65(__VA_ARGS__)
+#define GCC_ASM_I67(p0, ...) "i"(p0), GCC_ASM_I66(__VA_ARGS__)
+#define GCC_ASM_I68(p0, ...) "i"(p0), GCC_ASM_I67(__VA_ARGS__)
+#define GCC_ASM_I69(p0, ...) "i"(p0), GCC_ASM_I68(__VA_ARGS__)
+#define GCC_ASM_I70(p0, ...) "i"(p0), GCC_ASM_I69(__VA_ARGS__)
+#define GCC_ASM_I71(p0, ...) "i"(p0), GCC_ASM_I70(__VA_ARGS__)
+#define GCC_ASM_I72(p0, ...) "i"(p0), GCC_ASM_I71(__VA_ARGS__)
+#define GCC_ASM_I73(p0, ...) "i"(p0), GCC_ASM_I72(__VA_ARGS__)
+#define GCC_ASM_I74(p0, ...) "i"(p0), GCC_ASM_I73(__VA_ARGS__)
+#define GCC_ASM_I75(p0, ...) "i"(p0), GCC_ASM_I74(__VA_ARGS__)
+#define GCC_ASM_I76(p0, ...) "i"(p0), GCC_ASM_I75(__VA_ARGS__)
+#define GCC_ASM_I77(p0, ...) "i"(p0), GCC_ASM_I76(__VA_ARGS__)
+#define GCC_ASM_I78(p0, ...) "i"(p0), GCC_ASM_I77(__VA_ARGS__)
+#define GCC_ASM_I79(p0, ...) "i"(p0), GCC_ASM_I78(__VA_ARGS__)
+#define GCC_ASM_I80(p0, ...) "i"(p0), GCC_ASM_I79(__VA_ARGS__)
+#define GCC_ASM_I81(p0, ...) "i"(p0), GCC_ASM_I80(__VA_ARGS__)
+#define GCC_ASM_I82(p0, ...) "i"(p0), GCC_ASM_I81(__VA_ARGS__)
+#define GCC_ASM_I83(p0, ...) "i"(p0), GCC_ASM_I82(__VA_ARGS__)
+#define GCC_ASM_I84(p0, ...) "i"(p0), GCC_ASM_I83(__VA_ARGS__)
+#define GCC_ASM_I85(p0, ...) "i"(p0), GCC_ASM_I84(__VA_ARGS__)
+#define GCC_ASM_I86(p0, ...) "i"(p0), GCC_ASM_I85(__VA_ARGS__)
+#define GCC_ASM_I87(p0, ...) "i"(p0), GCC_ASM_I86(__VA_ARGS__)
+#define GCC_ASM_I88(p0, ...) "i"(p0), GCC_ASM_I87(__VA_ARGS__)
+#define GCC_ASM_I89(p0, ...) "i"(p0), GCC_ASM_I88(__VA_ARGS__)
+#define GCC_ASM_I90(p0, ...) "i"(p0), GCC_ASM_I89(__VA_ARGS__)
+#define GCC_ASM_I91(p0, ...) "i"(p0), GCC_ASM_I90(__VA_ARGS__)
+#define GCC_ASM_I92(p0, ...) "i"(p0), GCC_ASM_I91(__VA_ARGS__)
+#define GCC_ASM_I93(p0, ...) "i"(p0), GCC_ASM_I92(__VA_ARGS__)
+#define GCC_ASM_I94(p0, ...) "i"(p0), GCC_ASM_I93(__VA_ARGS__)
+#define GCC_ASM_I95(p0, ...) "i"(p0), GCC_ASM_I94(__VA_ARGS__)
+#define GCC_ASM_I96(p0, ...) "i"(p0), GCC_ASM_I95(__VA_ARGS__)
+#define GCC_ASM_I97(p0, ...) "i"(p0), GCC_ASM_I96(__VA_ARGS__)
+#define GCC_ASM_I98(p0, ...) "i"(p0), GCC_ASM_I97(__VA_ARGS__)
+#define GCC_ASM_I99(p0, ...) "i"(p0), GCC_ASM_I98(__VA_ARGS__)
 
-/* --- The AST Generators (1 to 99) --- */
-#define _INL_1(p0)                               ".word " _STR1 : : "i"(p0)
-#define _INL_2(p0,p1)                            ".word " _STR2 : : "i"(p0),"i"(p1)
-#define _INL_3(p0,p1,p2)                         ".word " _STR3 : : "i"(p0),"i"(p1),"i"(p2)
-#define _INL_4(p0,p1,p2,p3)                      ".word " _STR4 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3)
-#define _INL_5(p0,p1,p2,p3,p4)                   ".word " _STR5 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4)
-#define _INL_6(p0,p1,p2,p3,p4,p5)                ".word " _STR6 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5)
-#define _INL_7(p0,p1,p2,p3,p4,p5,p6)             ".word " _STR7 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6)
-#define _INL_8(p0,p1,p2,p3,p4,p5,p6,p7)          ".word " _STR8 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7)
-#define _INL_9(p0,p1,p2,p3,p4,p5,p6,p7,p8)       ".word " _STR9 : : "i"(p0),"i"(p1),"i"(p2),"i"(p3),"i"(p4),"i"(p5),"i"(p6),"i"(p7),"i"(p8)
-#define _INL_10(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9)   ".word " _STR10 : : _OP10
+#define GCC_ASM_INL_1( a)      ".word " GCC_ASM_W1  : : GCC_ASM_I1( a)
+#define GCC_ASM_INL_2( a, ...) ".word " GCC_ASM_W2  : : GCC_ASM_I2( a, __VA_ARGS__)
+#define GCC_ASM_INL_3( a, ...) ".word " GCC_ASM_W3  : : GCC_ASM_I3( a, __VA_ARGS__)
+#define GCC_ASM_INL_4( a, ...) ".word " GCC_ASM_W4  : : GCC_ASM_I4( a, __VA_ARGS__)
+#define GCC_ASM_INL_5( a, ...) ".word " GCC_ASM_W5  : : GCC_ASM_I5( a, __VA_ARGS__)
+#define GCC_ASM_INL_6( a, ...) ".word " GCC_ASM_W6  : : GCC_ASM_I6( a, __VA_ARGS__)
+#define GCC_ASM_INL_7( a, ...) ".word " GCC_ASM_W7  : : GCC_ASM_I7( a, __VA_ARGS__)
+#define GCC_ASM_INL_8( a, ...) ".word " GCC_ASM_W8  : : GCC_ASM_I8( a, __VA_ARGS__)
+#define GCC_ASM_INL_9( a, ...) ".word " GCC_ASM_W9  : : GCC_ASM_I9( a, __VA_ARGS__)
+#define GCC_ASM_INL_10(a, ...) ".word " GCC_ASM_W10 : : GCC_ASM_I10(a, __VA_ARGS__)
+#define GCC_ASM_INL_11(a, ...) ".word " GCC_ASM_W11 : : GCC_ASM_I11(a, __VA_ARGS__)
+#define GCC_ASM_INL_12(a, ...) ".word " GCC_ASM_W12 : : GCC_ASM_I12(a, __VA_ARGS__)
+#define GCC_ASM_INL_13(a, ...) ".word " GCC_ASM_W13 : : GCC_ASM_I13(a, __VA_ARGS__)
+#define GCC_ASM_INL_14(a, ...) ".word " GCC_ASM_W14 : : GCC_ASM_I14(a, __VA_ARGS__)
+#define GCC_ASM_INL_15(a, ...) ".word " GCC_ASM_W15 : : GCC_ASM_I15(a, __VA_ARGS__)
+#define GCC_ASM_INL_16(a, ...) ".word " GCC_ASM_W16 : : GCC_ASM_I16(a, __VA_ARGS__)
+#define GCC_ASM_INL_17(a, ...) ".word " GCC_ASM_W17 : : GCC_ASM_I17(a, __VA_ARGS__)
+#define GCC_ASM_INL_18(a, ...) ".word " GCC_ASM_W18 : : GCC_ASM_I18(a, __VA_ARGS__)
+#define GCC_ASM_INL_19(a, ...) ".word " GCC_ASM_W19 : : GCC_ASM_I19(a, __VA_ARGS__)
+#define GCC_ASM_INL_20(a, ...) ".word " GCC_ASM_W20 : : GCC_ASM_I20(a, __VA_ARGS__)
+#define GCC_ASM_INL_21(a, ...) ".word " GCC_ASM_W21 : : GCC_ASM_I21(a, __VA_ARGS__)
+#define GCC_ASM_INL_22(a, ...) ".word " GCC_ASM_W22 : : GCC_ASM_I22(a, __VA_ARGS__)
+#define GCC_ASM_INL_23(a, ...) ".word " GCC_ASM_W23 : : GCC_ASM_I23(a, __VA_ARGS__)
+#define GCC_ASM_INL_24(a, ...) ".word " GCC_ASM_W24 : : GCC_ASM_I24(a, __VA_ARGS__)
+#define GCC_ASM_INL_25(a, ...) ".word " GCC_ASM_W25 : : GCC_ASM_I25(a, __VA_ARGS__)
+#define GCC_ASM_INL_26(a, ...) ".word " GCC_ASM_W26 : : GCC_ASM_I26(a, __VA_ARGS__)
+#define GCC_ASM_INL_27(a, ...) ".word " GCC_ASM_W27 : : GCC_ASM_I27(a, __VA_ARGS__)
+#define GCC_ASM_INL_28(a, ...) ".word " GCC_ASM_W28 : : GCC_ASM_I28(a, __VA_ARGS__)
+#define GCC_ASM_INL_29(a, ...) ".word " GCC_ASM_W29 : : GCC_ASM_I29(a, __VA_ARGS__)
+#define GCC_ASM_INL_30(a, ...) ".word " GCC_ASM_W30 : : GCC_ASM_I30(a, __VA_ARGS__)
+#define GCC_ASM_INL_31(a, ...) ".word " GCC_ASM_W31 : : GCC_ASM_I31(a, __VA_ARGS__)
+#define GCC_ASM_INL_32(a, ...) ".word " GCC_ASM_W32 : : GCC_ASM_I32(a, __VA_ARGS__)
+#define GCC_ASM_INL_33(a, ...) ".word " GCC_ASM_W33 : : GCC_ASM_I33(a, __VA_ARGS__)
+#define GCC_ASM_INL_34(a, ...) ".word " GCC_ASM_W34 : : GCC_ASM_I34(a, __VA_ARGS__)
+#define GCC_ASM_INL_35(a, ...) ".word " GCC_ASM_W35 : : GCC_ASM_I35(a, __VA_ARGS__)
+#define GCC_ASM_INL_36(a, ...) ".word " GCC_ASM_W36 : : GCC_ASM_I36(a, __VA_ARGS__)
+#define GCC_ASM_INL_37(a, ...) ".word " GCC_ASM_W37 : : GCC_ASM_I37(a, __VA_ARGS__)
+#define GCC_ASM_INL_38(a, ...) ".word " GCC_ASM_W38 : : GCC_ASM_I38(a, __VA_ARGS__)
+#define GCC_ASM_INL_39(a, ...) ".word " GCC_ASM_W39 : : GCC_ASM_I39(a, __VA_ARGS__)
+#define GCC_ASM_INL_40(a, ...) ".word " GCC_ASM_W40 : : GCC_ASM_I40(a, __VA_ARGS__)
+#define GCC_ASM_INL_41(a, ...) ".word " GCC_ASM_W41 : : GCC_ASM_I41(a, __VA_ARGS__)
+#define GCC_ASM_INL_42(a, ...) ".word " GCC_ASM_W42 : : GCC_ASM_I42(a, __VA_ARGS__)
+#define GCC_ASM_INL_43(a, ...) ".word " GCC_ASM_W43 : : GCC_ASM_I43(a, __VA_ARGS__)
+#define GCC_ASM_INL_44(a, ...) ".word " GCC_ASM_W44 : : GCC_ASM_I44(a, __VA_ARGS__)
+#define GCC_ASM_INL_45(a, ...) ".word " GCC_ASM_W45 : : GCC_ASM_I45(a, __VA_ARGS__)
+#define GCC_ASM_INL_46(a, ...) ".word " GCC_ASM_W46 : : GCC_ASM_I46(a, __VA_ARGS__)
+#define GCC_ASM_INL_47(a, ...) ".word " GCC_ASM_W47 : : GCC_ASM_I47(a, __VA_ARGS__)
+#define GCC_ASM_INL_48(a, ...) ".word " GCC_ASM_W48 : : GCC_ASM_I48(a, __VA_ARGS__)
+#define GCC_ASM_INL_49(a, ...) ".word " GCC_ASM_W49 : : GCC_ASM_I49(a, __VA_ARGS__)
+#define GCC_ASM_INL_50(a, ...) ".word " GCC_ASM_W50 : : GCC_ASM_I50(a, __VA_ARGS__)
+#define GCC_ASM_INL_51(a, ...) ".word " GCC_ASM_W51 : : GCC_ASM_I51(a, __VA_ARGS__)
+#define GCC_ASM_INL_52(a, ...) ".word " GCC_ASM_W52 : : GCC_ASM_I52(a, __VA_ARGS__)
+#define GCC_ASM_INL_53(a, ...) ".word " GCC_ASM_W53 : : GCC_ASM_I53(a, __VA_ARGS__)
+#define GCC_ASM_INL_54(a, ...) ".word " GCC_ASM_W54 : : GCC_ASM_I54(a, __VA_ARGS__)
+#define GCC_ASM_INL_55(a, ...) ".word " GCC_ASM_W55 : : GCC_ASM_I55(a, __VA_ARGS__)
+#define GCC_ASM_INL_56(a, ...) ".word " GCC_ASM_W56 : : GCC_ASM_I56(a, __VA_ARGS__)
+#define GCC_ASM_INL_57(a, ...) ".word " GCC_ASM_W57 : : GCC_ASM_I57(a, __VA_ARGS__)
+#define GCC_ASM_INL_58(a, ...) ".word " GCC_ASM_W58 : : GCC_ASM_I58(a, __VA_ARGS__)
+#define GCC_ASM_INL_59(a, ...) ".word " GCC_ASM_W59 : : GCC_ASM_I59(a, __VA_ARGS__)
+#define GCC_ASM_INL_60(a, ...) ".word " GCC_ASM_W60 : : GCC_ASM_I60(a, __VA_ARGS__)
+#define GCC_ASM_INL_61(a, ...) ".word " GCC_ASM_W61 : : GCC_ASM_I61(a, __VA_ARGS__)
+#define GCC_ASM_INL_62(a, ...) ".word " GCC_ASM_W62 : : GCC_ASM_I62(a, __VA_ARGS__)
+#define GCC_ASM_INL_63(a, ...) ".word " GCC_ASM_W63 : : GCC_ASM_I63(a, __VA_ARGS__)
+#define GCC_ASM_INL_64(a, ...) ".word " GCC_ASM_W64 : : GCC_ASM_I64(a, __VA_ARGS__)
+#define GCC_ASM_INL_65(a, ...) ".word " GCC_ASM_W65 : : GCC_ASM_I65(a, __VA_ARGS__)
+#define GCC_ASM_INL_66(a, ...) ".word " GCC_ASM_W66 : : GCC_ASM_I66(a, __VA_ARGS__)
+#define GCC_ASM_INL_67(a, ...) ".word " GCC_ASM_W67 : : GCC_ASM_I67(a, __VA_ARGS__)
+#define GCC_ASM_INL_68(a, ...) ".word " GCC_ASM_W68 : : GCC_ASM_I68(a, __VA_ARGS__)
+#define GCC_ASM_INL_69(a, ...) ".word " GCC_ASM_W69 : : GCC_ASM_I69(a, __VA_ARGS__)
+#define GCC_ASM_INL_70(a, ...) ".word " GCC_ASM_W70 : : GCC_ASM_I70(a, __VA_ARGS__)
+#define GCC_ASM_INL_71(a, ...) ".word " GCC_ASM_W71 : : GCC_ASM_I71(a, __VA_ARGS__)
+#define GCC_ASM_INL_72(a, ...) ".word " GCC_ASM_W72 : : GCC_ASM_I72(a, __VA_ARGS__)
+#define GCC_ASM_INL_73(a, ...) ".word " GCC_ASM_W73 : : GCC_ASM_I73(a, __VA_ARGS__)
+#define GCC_ASM_INL_74(a, ...) ".word " GCC_ASM_W74 : : GCC_ASM_I74(a, __VA_ARGS__)
+#define GCC_ASM_INL_75(a, ...) ".word " GCC_ASM_W75 : : GCC_ASM_I75(a, __VA_ARGS__)
+#define GCC_ASM_INL_76(a, ...) ".word " GCC_ASM_W76 : : GCC_ASM_I76(a, __VA_ARGS__)
+#define GCC_ASM_INL_77(a, ...) ".word " GCC_ASM_W77 : : GCC_ASM_I77(a, __VA_ARGS__)
+#define GCC_ASM_INL_78(a, ...) ".word " GCC_ASM_W78 : : GCC_ASM_I78(a, __VA_ARGS__)
+#define GCC_ASM_INL_79(a, ...) ".word " GCC_ASM_W79 : : GCC_ASM_I79(a, __VA_ARGS__)
+#define GCC_ASM_INL_80(a, ...) ".word " GCC_ASM_W80 : : GCC_ASM_I80(a, __VA_ARGS__)
+#define GCC_ASM_INL_81(a, ...) ".word " GCC_ASM_W81 : : GCC_ASM_I81(a, __VA_ARGS__)
+#define GCC_ASM_INL_82(a, ...) ".word " GCC_ASM_W82 : : GCC_ASM_I82(a, __VA_ARGS__)
+#define GCC_ASM_INL_83(a, ...) ".word " GCC_ASM_W83 : : GCC_ASM_I83(a, __VA_ARGS__)
+#define GCC_ASM_INL_84(a, ...) ".word " GCC_ASM_W84 : : GCC_ASM_I84(a, __VA_ARGS__)
+#define GCC_ASM_INL_85(a, ...) ".word " GCC_ASM_W85 : : GCC_ASM_I85(a, __VA_ARGS__)
+#define GCC_ASM_INL_86(a, ...) ".word " GCC_ASM_W86 : : GCC_ASM_I86(a, __VA_ARGS__)
+#define GCC_ASM_INL_87(a, ...) ".word " GCC_ASM_W87 : : GCC_ASM_I87(a, __VA_ARGS__)
+#define GCC_ASM_INL_88(a, ...) ".word " GCC_ASM_W88 : : GCC_ASM_I88(a, __VA_ARGS__)
+#define GCC_ASM_INL_89(a, ...) ".word " GCC_ASM_W89 : : GCC_ASM_I89(a, __VA_ARGS__)
+#define GCC_ASM_INL_90(a, ...) ".word " GCC_ASM_W90 : : GCC_ASM_I90(a, __VA_ARGS__)
+#define GCC_ASM_INL_91(a, ...) ".word " GCC_ASM_W91 : : GCC_ASM_I91(a, __VA_ARGS__)
+#define GCC_ASM_INL_92(a, ...) ".word " GCC_ASM_W92 : : GCC_ASM_I92(a, __VA_ARGS__)
+#define GCC_ASM_INL_93(a, ...) ".word " GCC_ASM_W93 : : GCC_ASM_I93(a, __VA_ARGS__)
+#define GCC_ASM_INL_94(a, ...) ".word " GCC_ASM_W94 : : GCC_ASM_I94(a, __VA_ARGS__)
+#define GCC_ASM_INL_95(a, ...) ".word " GCC_ASM_W95 : : GCC_ASM_I95(a, __VA_ARGS__)
+#define GCC_ASM_INL_96(a, ...) ".word " GCC_ASM_W96 : : GCC_ASM_I96(a, __VA_ARGS__)
+#define GCC_ASM_INL_97(a, ...) ".word " GCC_ASM_W97 : : GCC_ASM_I97(a, __VA_ARGS__)
+#define GCC_ASM_INL_98(a, ...) ".word " GCC_ASM_W98 : : GCC_ASM_I98(a, __VA_ARGS__)
+#define GCC_ASM_INL_99(a, ...) ".word " GCC_ASM_W99 : : GCC_ASM_I99(a, __VA_ARGS__)
 
-#define _INL_11(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10) ".word " _STR11 : : _OP10,"i"(p10)
-#define _INL_12(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11) ".word " _STR12 : : _OP10,"i"(p10),"i"(p11)
-#define _INL_13(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12) ".word " _STR13 : : _OP10,"i"(p10),"i"(p11),"i"(p12)
-#define _INL_14(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13) ".word " _STR14 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13)
-#define _INL_15(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14) ".word " _STR15 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14)
-#define _INL_16(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15) ".word " _STR16 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15)
-#define _INL_17(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16) ".word " _STR17 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16)
-#define _INL_18(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17) ".word " _STR18 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17)
-#define _INL_19(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18) ".word " _STR19 : : _OP10,"i"(p10),"i"(p11),"i"(p12),"i"(p13),"i"(p14),"i"(p15),"i"(p16),"i"(p17),"i"(p18)
-#define _INL_20(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19) ".word " _STR20 : : _OP20
-
-#define _INL_21(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20) ".word " _STR21 : : _OP20,"i"(p20)
-#define _INL_22(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21) ".word " _STR22 : : _OP20,"i"(p20),"i"(p21)
-#define _INL_23(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22) ".word " _STR23 : : _OP20,"i"(p20),"i"(p21),"i"(p22)
-#define _INL_24(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23) ".word " _STR24 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23)
-#define _INL_25(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24) ".word " _STR25 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24)
-#define _INL_26(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25) ".word " _STR26 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25)
-#define _INL_27(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26) ".word " _STR27 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26)
-#define _INL_28(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27) ".word " _STR28 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27)
-#define _INL_29(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28) ".word " _STR29 : : _OP20,"i"(p20),"i"(p21),"i"(p22),"i"(p23),"i"(p24),"i"(p25),"i"(p26),"i"(p27),"i"(p28)
-#define _INL_30(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29) ".word " _STR30 : : _OP30
-
-#define _INL_31(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30) ".word " _STR31 : : _OP30,"i"(p30)
-#define _INL_32(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31) ".word " _STR32 : : _OP30,"i"(p30),"i"(p31)
-#define _INL_33(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32) ".word " _STR33 : : _OP30,"i"(p30),"i"(p31),"i"(p32)
-#define _INL_34(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33) ".word " _STR34 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33)
-#define _INL_35(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34) ".word " _STR35 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34)
-#define _INL_36(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35) ".word " _STR36 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35)
-#define _INL_37(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36) ".word " _STR37 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36)
-#define _INL_38(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37) ".word " _STR38 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37)
-#define _INL_39(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38) ".word " _STR39 : : _OP30,"i"(p30),"i"(p31),"i"(p32),"i"(p33),"i"(p34),"i"(p35),"i"(p36),"i"(p37),"i"(p38)
-#define _INL_40(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39) ".word " _STR40 : : _OP40
-
-#define _INL_41(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40) ".word " _STR41 : : _OP40,"i"(p40)
-#define _INL_42(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41) ".word " _STR42 : : _OP40,"i"(p40),"i"(p41)
-#define _INL_43(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42) ".word " _STR43 : : _OP40,"i"(p40),"i"(p41),"i"(p42)
-#define _INL_44(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43) ".word " _STR44 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43)
-#define _INL_45(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44) ".word " _STR45 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44)
-#define _INL_46(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45) ".word " _STR46 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45)
-#define _INL_47(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46) ".word " _STR47 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46)
-#define _INL_48(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47) ".word " _STR48 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47)
-#define _INL_49(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48) ".word " _STR49 : : _OP40,"i"(p40),"i"(p41),"i"(p42),"i"(p43),"i"(p44),"i"(p45),"i"(p46),"i"(p47),"i"(p48)
-#define _INL_50(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49) ".word " _STR50 : : _OP50
-
-#define _INL_51(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50) ".word " _STR51 : : _OP50,"i"(p50)
-#define _INL_52(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51) ".word " _STR52 : : _OP50,"i"(p50),"i"(p51)
-#define _INL_53(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52) ".word " _STR53 : : _OP50,"i"(p50),"i"(p51),"i"(p52)
-#define _INL_54(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53) ".word " _STR54 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53)
-#define _INL_55(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54) ".word " _STR55 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54)
-#define _INL_56(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55) ".word " _STR56 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55)
-#define _INL_57(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56) ".word " _STR57 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56)
-#define _INL_58(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57) ".word " _STR58 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57)
-#define _INL_59(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58) ".word " _STR59 : : _OP50,"i"(p50),"i"(p51),"i"(p52),"i"(p53),"i"(p54),"i"(p55),"i"(p56),"i"(p57),"i"(p58)
-#define _INL_60(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59) ".word " _STR60 : : _OP60
-
-#define _INL_61(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60) ".word " _STR61 : : _OP60,"i"(p60)
-#define _INL_62(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61) ".word " _STR62 : : _OP60,"i"(p60),"i"(p61)
-#define _INL_63(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62) ".word " _STR63 : : _OP60,"i"(p60),"i"(p61),"i"(p62)
-#define _INL_64(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63) ".word " _STR64 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63)
-#define _INL_65(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64) ".word " _STR65 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64)
-#define _INL_66(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65) ".word " _STR66 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65)
-#define _INL_67(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66) ".word " _STR67 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66)
-#define _INL_68(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67) ".word " _STR68 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67)
-#define _INL_69(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68) ".word " _STR69 : : _OP60,"i"(p60),"i"(p61),"i"(p62),"i"(p63),"i"(p64),"i"(p65),"i"(p66),"i"(p67),"i"(p68)
-#define _INL_70(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69) ".word " _STR70 : : _OP70
-
-#define _INL_71(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70) ".word " _STR71 : : _OP70,"i"(p70)
-#define _INL_72(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71) ".word " _STR72 : : _OP70,"i"(p70),"i"(p71)
-#define _INL_73(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72) ".word " _STR73 : : _OP70,"i"(p70),"i"(p71),"i"(p72)
-#define _INL_74(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73) ".word " _STR74 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73)
-#define _INL_75(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74) ".word " _STR75 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74)
-#define _INL_76(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75) ".word " _STR76 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75)
-#define _INL_77(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76) ".word " _STR77 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76)
-#define _INL_78(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77) ".word " _STR78 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77)
-#define _INL_79(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78) ".word " _STR79 : : _OP70,"i"(p70),"i"(p71),"i"(p72),"i"(p73),"i"(p74),"i"(p75),"i"(p76),"i"(p77),"i"(p78)
-#define _INL_80(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79) ".word " _STR80 : : _OP80
-
-#define _INL_81(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80) ".word " _STR81 : : _OP80,"i"(p80)
-#define _INL_82(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81) ".word " _STR82 : : _OP80,"i"(p80),"i"(p81)
-#define _INL_83(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82) ".word " _STR83 : : _OP80,"i"(p80),"i"(p81),"i"(p82)
-#define _INL_84(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83) ".word " _STR84 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83)
-#define _INL_85(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84) ".word " _STR85 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84)
-#define _INL_86(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85) ".word " _STR86 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85)
-#define _INL_87(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86) ".word " _STR87 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86)
-#define _INL_88(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87) ".word " _STR88 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87)
-#define _INL_89(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88) ".word " _STR89 : : _OP80,"i"(p80),"i"(p81),"i"(p82),"i"(p83),"i"(p84),"i"(p85),"i"(p86),"i"(p87),"i"(p88)
-#define _INL_90(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89) ".word " _STR90 : : _OP90
-
-#define _INL_91(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90) ".word " _STR91 : : _OP90,"i"(p90)
-#define _INL_92(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91) ".word " _STR92 : : _OP90,"i"(p90),"i"(p91)
-#define _INL_93(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92) ".word " _STR93 : : _OP90,"i"(p90),"i"(p91),"i"(p92)
-#define _INL_94(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93) ".word " _STR94 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93)
-#define _INL_95(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94) ".word " _STR95 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94)
-#define _INL_96(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95) ".word " _STR96 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95)
-#define _INL_97(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96) ".word " _STR97 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96)
-#define _INL_98(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97) ".word " _STR98 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97)
-#define _INL_99(p0,p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12,p13,p14,p15,p16,p17,p18,p19,p20,p21,p22,p23,p24,p25,p26,p27,p28,p29,p30,p31,p32,p33,p34,p35,p36,p37,p38,p39,p40,p41,p42,p43,p44,p45,p46,p47,p48,p49,p50,p51,p52,p53,p54,p55,p56,p57,p58,p59,p60,p61,p62,p63,p64,p65,p66,p67,p68,p69,p70,p71,p72,p73,p74,p75,p76,p77,p78,p79,p80,p81,p82,p83,p84,p85,p86,p87,p88,p89,p90,p91,p92,p93,p94,p95,p96,p97,p98) ".word " _STR99 : : _OP90,"i"(p90),"i"(p91),"i"(p92),"i"(p93),"i"(p94),"i"(p95),"i"(p96),"i"(p97),"i"(p98)
+ #pragma endregion Cruft
 
 /* ============================================================================
  * AST BUILDERS — assemble a complete inline-asm block
@@ -266,17 +352,11 @@
  *
  * A complete GCC inline-asm statement has up to 4 sections separated by `:`:
  *   asm volatile ( "code" : OUTPUTS : INPUTS : CLOBBERS );
- *
- * Every section-builder below prepends the `:` separator that GCC requires,
- * so you can compose them inline without thinking about punctuation. The
- * master `asm_block(...)` then wraps the four sections in `asm volatile (...)`.
- *
- * give me as better example:
+ * Below are used purely for annotation.
  */
-
-#define asm_out(...)     :
-#define asm_in(...)      :
-#define asm_clobber(...) :
+#define asm_out
+#define asm_in     
+#define asm_clobber
 
 /* `asm_inline(...)` dispatches into `_INL_<count>` to emit up to 99 encoded
  * instruction words. This is the "compiled-instruction" form of `asm_code`.
@@ -288,16 +368,16 @@
  * Use it inside `asm volatile( ... )` like so:
  *   asm volatile(
  *       asm_inline(w0, w1, w3)
- *       : clobbers
+ *       asm_clobber: clobbers
  *   )
  * which expands to:
  *   asm volatile(".word %c0, %c1, %c2" 
- *       : // empty outputs
- *       : "i"(w0), "i"(w1), "i"(w2)
- *       : "$2", "$8", ...
+ *       asm_out:     // empty outputs
+ *       asm_in:      "i"(w0), "i"(w1), "i"(w2)
+ *       asm_clobber: "$2", "$8", ...
  *   )
  */
-#define asm_inline(...) m_expand(glue(_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
+#define asm_words(...) m_expand(glue(GCC_ASM_INL_, _ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
 
 /* reg_str(n) — Stringify an integer register id into the GCC asm
  * string form (e.g. 12 → "$12"). Use this anywhere GCC's parser
@@ -351,3 +431,8 @@
  * instead of "$N". */
 #define rgcc_ref_(n)   "%" #n
 #define rgcc_ref(n)    rgcc_ref_(n)
+/* --- Register Constraint Aliases (for Pinned Variables) --- */
+
+#define r_use(var) "r"(var)   /* Input:  Tells GCC we are reading     this pinned register */
+#define r_set(var) "=r"(var)  /* Output: Tells GCC we are overwriting this pinned register */
+#define r_mod(var) "+r"(var)  /* Modify: Tells GCC we are reading AND writing this pinned register */
