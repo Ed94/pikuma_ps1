@@ -286,36 +286,35 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		static_mem.floor.rot.y += 5;
 	}
 	// Draw floor tape method
-	if (0)
+	if (1)
 	{
     LP_ U4 mem_temp_tape[512]; // Buffer for function addresses
-    FArena tape_arena; 
-    farena_init(&tape_arena, slice_ut(mem_temp_tape, S_(mem_temp_tape)));
+    FArena tape_arena; farena_init(&tape_arena, slice_ut(mem_temp_tape, S_(mem_temp_tape)));
     
     TapeBuilder tb = tb_begin(&tape_arena); {
         // Setup state atoms
-        m3s2_rotation(&static_mem.floor.rot, &static_mem.tform_world);
-        m3s2_translation(&static_mem.tform_world, &static_mem.floor.pos);
+        m3s2_rotation(    & static_mem.floor.rot,   & static_mem.tform_world);
+        m3s2_translation( & static_mem.tform_world, & static_mem.floor.pos);
         
         // Push "Protocol" to tape
-        tb_emit(&tb, code_atom_set_gte_world);
-				tb_emit(&tb, (Code*)&static_mem.tform_world);
+        tb_emit(& tb, code_atom_set_gte_world);
+				tb_emit(& tb, (Code*)& static_mem.tform_world);
         for (U4 i = 0; i < Floor_num_faces; i++) {
-            tb_emit(&tb, code_atom_floor_tri);
+            tb_emit(& tb, code_atom_floor_tri);
         }
     }
-    Slice_U4 tape = tb_end(&tb);
+    Slice_U4 tape = tb_end(& tb);
 		// --- EXECUTION ---
 		B1* prim_cursor = (B1*)r_(pa->buf)[static_mem.active_buf_id] + pa->used;
 		// 2. Fire the Tape Drive (Explicitly bind the workspace variables)
-		tape_run(tape, &prim_cursor, static_mem.floor.faces, static_mem.floor.verts, ordering_buf);
+		tape_run(tape, & prim_cursor, static_mem.floor.faces, static_mem.floor.verts, ordering_buf);
 
     // 3. Update C-side state
     pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[static_mem.active_buf_id];
     static_mem.floor.rot.y += 5;
 	}
 	// --- TAPE DIAGNOSTICS ---
-	if (1)
+	if (0)
 	{
 		LP_ U4 mem_temp_tape[512]; 
 		FArena tape_arena; 
@@ -331,16 +330,16 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				// 2. code_atom_diag_color -> Tests OT and Prim Arena memory
 				// 3. code_atom_diag_gte   -> Tests Vertex arrays and GTE Math
 				// tb_emit(&tb, code_atom_diag_yield);
-				tb_emit(&tb, code_atom_diag_color); 
+				tb_emit(& tb, code_atom_diag_color); 
 				// tb_emit(&tb, code_atom_diag_gte); 
 			}
 		}
-		Slice_U4 tape = tb_end(&tb);
+		Slice_U4 tape = tb_end(& tb);
 
 		// Setup Workspace Registers
 		B1* prim_cursor = (B1*)r_(pa->buf)[static_mem.active_buf_id] + pa->used;
 		
-		tape_run(tape, &prim_cursor, static_mem.floor.faces, static_mem.floor.verts, ordering_buf);
+		tape_run(tape, & prim_cursor, static_mem.floor.faces, static_mem.floor.verts, ordering_buf);
 		
 		pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[static_mem.active_buf_id];
 		static_mem.floor.rot.y += 5;
