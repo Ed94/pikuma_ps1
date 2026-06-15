@@ -72,8 +72,8 @@
 /* ------------------------------------------------------------------------ *
  *  rgcc(n) — GCC-specific bundle for register-variable declarations.
  *
- *  Produces `__asm__(reg_str(tmpl(n, Code)))` at expansion time. 
- *  The `tmpl(n, Code)` indirection derives the preprocessor-visible `_Code`
+ *  Produces `__asm__(reg_str(tmpl(n, MipsAtom)))` at expansion time. 
+ *  The `tmpl(n, MipsAtom)` indirection derives the preprocessor-visible `_Code`
  *  form from the enum name (which the preprocessor can't expand on its own). 
  *  So a call is:                register V3_S2* p rgcc(R_T4)               = verts[0].ptr;
  *  expands (via tmpl) to:       register V3_S2* p __asm__(rlit(R_T4_Code)) = verts[0].ptr;

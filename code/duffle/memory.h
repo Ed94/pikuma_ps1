@@ -100,14 +100,15 @@ FI_ void farena_init(FArena_R arena, Slice mem) {  assert(arena != nullptr);
 	arena->used     = 0;
 }
 FI_ FArena farena_make(Slice mem) { FArena a; farena_init(& a, mem); return a; }
-I_ Slice farena_push(FArena_R arena, U4 amount, Opt_farena o) {
+I_ Slice   farena_push(FArena_R arena, U4 amount, Opt_farena o) {
 	if (amount == 0) { return (Slice){}; }
 	U4 desired   = amount * (o.type_width == 0 ? 1 : o.type_width);
 	U4 to_commit = align_pow2(desired, o.alignment ?  o.alignment : MEM_ALIGNMENT_DEFAULT);
-	mem_bump(arena->start, arena->capacity - to_commit, & arena->used, to_commit);
-	return (Slice){ arena->start + arena->used, to_commit };
+	U4 ptr       = arena->start + arena->used;
+	mem_bump(arena->start, arena->capacity, & arena->used, to_commit);
+	return (Slice){ ptr, to_commit };
 }
-FI_ void farena_reset(FArena_R arena) { arena->used = 0; }
+FI_ void farena_reset (FArena_R arena) { arena->used = 0; }
 FI_ void farena_rewind(FArena_R arena, U4 save_point) {
 	U4 end       = arena->start + arena->used; assert_bounds(save_point, arena->start, end);
 	arena->used -= save_point - arena->start;

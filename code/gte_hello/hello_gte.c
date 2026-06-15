@@ -112,7 +112,7 @@ I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 	gknown PrimitiveArena* pa  = & static_mem.primitives;
 	gknown B1*             buf = (B1*) r_(static_mem.primitives.buf)[static_mem.active_buf_id];
 	assert(pa->used + type_width < PrimitiveBuff_Len);
-	B1* next = buf + pa->used;
+	B1* next  = buf + pa->used;
 	pa->used += type_width;
 	return next;
 }
@@ -294,59 +294,57 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		gte_matrix_set_rotation   (& static_mem.tform_world);
 		gte_matrix_set_translation(& static_mem.tform_world);
 
-    LP_ U4 mem_temp_tape[512]; // Buffer for function addresses
-    FArena tape_arena; farena_init(&tape_arena, slice_ut(mem_temp_tape, S_(mem_temp_tape)));
-    
-    TapeBuilder tb = tb_begin(&tape_arena); {
-        // Setup state atoms
-        m3s2_rotation(    & static_mem.floor.rot,   & static_mem.tform_world);
-        m3s2_translation( & static_mem.tform_world, & static_mem.floor.pos);
-        
-        // Push "Protocol" to tape
-        tb_emit(& tb, code_atom_set_gte_world);
-				tb_emit(& tb, (Code*)& static_mem.tform_world);
-        for (U4 i = 0; i < Floor_num_faces; i++) {
-            tb_emit(& tb, code_atom_floor_tri);
-        }
-    }
-    Slice_U4 tape = tb_end(& tb);
-		// --- EXECUTION ---
-		B1* prim_cursor = (B1*)r_(pa->buf)[static_mem.active_buf_id] + pa->used;
-		// 2. Fire the Tape Drive (Explicitly bind the workspace variables)
-		tape_run(tape, & prim_cursor, static_mem.floor.faces, static_mem.floor.verts, ordering_buf);
+		U4 prim_base   = u4_(pa->buf[static_mem.active_buf_id]);
+		U4 prim_cursor = prim_base + pa->used;
 
-    // 3. Update C-side state
-    pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[static_mem.active_buf_id];
-    static_mem.floor.rot.y += 5;
+		// Prepare the tape.
+		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
+		TapeBuilder tb = tb_make(&tape_arena); tb_scope(& tb) {
+			// Push "Protocol" to tape
+			tb_emit(& tb, code_bind_workspace);
+			tb_data(& tb, prim_cursor);
+			tb_data(& tb, u4_(static_mem.floor.faces));
+			tb_data(& tb, u4_(static_mem.floor.verts));
+			tb_data(& tb, u4_(ordering_buf));
+            
+			tb_emit(& tb, code_set_gte_world);
+			tb_data(& tb, u4_(& static_mem.tform_world));
+            
+			for (U4 i = 0; i < Floor_num_faces; i++) {
+				tb_emit(& tb, code_floor_tri);
+			}
+			
+			tb_emit(& tb, code_sync_prim_cursor);
+			tb_data(& tb, u4_(& pa->used));
+			tb_data(& tb, prim_base);
+		}
+
+		// Fire off the tape.
+		tape_run(tb_slice(tb));
+
+		// C-side state (pa->used) has already been updated by the tape!
+		static_mem.floor.rot.y += 5;
 	}
 	// --- TAPE DIAGNOSTICS ---
 	if (0)
 	{
-		LP_ U4 mem_temp_tape[512]; 
-		FArena tape_arena; 
-		farena_init(&tape_arena, slice_ut(mem_temp_tape, S_(mem_temp_tape)));
-		
-		TapeBuilder tb = tb_begin(&tape_arena); {
+		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
+		TapeBuilder tb = tb_make(& tape_arena); tb_scope(& tb) {
 			// Skip set_gte_world atom for diagnostics to isolate the triangle loop
 			for (U4 i = 0; i < Floor_num_faces; i++) {
 				// =======================================================
 				// SWAP EMIT TO TEST DIFFERENT PARTS OF THE PIPELINE:
 				// =======================================================
-				// 1. code_atom_diag_yield -> Tests Tape Engine jump logic
-				// 2. code_atom_diag_color -> Tests OT and Prim Arena memory
-				// 3. code_atom_diag_gte   -> Tests Vertex arrays and GTE Math
-				// tb_emit(&tb, code_atom_diag_yield);
-				tb_emit(& tb, code_atom_diag_color); 
-				// tb_emit(&tb, code_atom_diag_gte); 
+				// 1. code_diag_yield -> Tests Tape Engine jump logic
+				// 2. code_diag_color -> Tests OT and Prim Arena memory
+				// 3. code_diag_gte   -> Tests Vertex arrays and GTE Math
+				// tb_emit(& tb, code_diag_yield);
+				// tb_emit(& tb, code_diag_color); 
+				// tb_emit(& tb, code_diag_gte); 
 			}
 		}
-		Slice_U4 tape = tb_end(& tb);
-
-		// Setup Workspace Registers
 		B1* prim_cursor = (B1*)r_(pa->buf)[static_mem.active_buf_id] + pa->used;
-		
-		tape_run(tape, & prim_cursor, static_mem.floor.faces, static_mem.floor.verts, ordering_buf);
-		
+		tape_run(tb_slice(tb));
 		pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[static_mem.active_buf_id];
 		static_mem.floor.rot.y += 5;
 	}
@@ -372,8 +370,7 @@ int main(void)
 	}
 	// gknown gp_screen_init();
 	gp_screen_init_c11(& static_mem.screen_buf, & static_mem.active_buf_id);
-	while (1) 
-	{
+	while (1) {
 		gknown S4* active_buf_id  = & static_mem.active_buf_id;
 		gknown U4* ordering_buf   = r_(static_mem.ordering_tbl)[active_buf_id[0]];
 		gknown PrimitiveArena* pa = & static_mem.primitives;

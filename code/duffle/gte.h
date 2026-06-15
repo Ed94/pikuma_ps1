@@ -132,7 +132,7 @@ enum {
 	gte_in_v1_z      = C2_VZ1,  /* Input Vector 1 (Z) */
 	gte_in_v2_xy     = C2_VXY2, /* Input Vector 2 (X, Y) */
 	gte_in_v2_z      = C2_VZ2,  /* Input Vector 2 (Z) */
-	gte_in_rgb       = C2_RGB,  /* Input Color (R, G, B, Code) */
+	gte_in_rgb       = C2_RGB,  /* Input Color (R, G, B, MipsAtom) */
 	gte_out_scr_xy0  = C2_SXY0, /* Output Screen Coord 0 (X, Y) */
 	gte_out_scr_xy1  = C2_SXY1, /* Output Screen Coord 1 (X, Y) */
 	gte_out_scr_xy2  = C2_SXY2, /* Output Screen Coord 2 (X, Y) */
@@ -378,6 +378,12 @@ enum { _C2_OPS_ = 0
 #define gte_cmdw_nclip  (gte_cmd_base | enc_gte_cmd(gte_cmd_nclip))
 #define gte_cmdw_op     (gte_cmd_base | enc_gte_cmd(gte_cmd_op   ))
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
+
+/* PsyQ compatibility bits for AVSZ3 (Bits 20, 22, 24 must be set) */
+#define gte_cmdw_psyq_avsz3_compat (0x15 << 20)
+#define gte_cmd_avsz3               0x2D
+
+#define gte_cmdw_avsz3 (gte_cmd_base | enc_gte_cmd(gte_cmd_avsz3) | gte_cmdw_psyq_avsz3_compat)
 
 /**
  * @brief Loads a single SVECTOR to GTE vector register V0
@@ -646,9 +652,3 @@ enum {
 		, r_use(r0)                         \
 		asm_clobber: clb_system, rlit(R_T4_Code), rlit(R_T5_Code), rlit(R_T6_Code) \
 	)
-
-/* PsyQ compatibility bits for AVSZ3 (Bits 20, 22, 24 must be set) */
-#define gte_cmdw_psyq_avsz3_compat (0x15 << 20)
-#define gte_cmd_avsz3              0x2D
-
-#define gte_cmdw_avsz3 (gte_cmd_base | enc_gte_cmd(gte_cmd_avsz3) | gte_cmdw_psyq_avsz3_compat)

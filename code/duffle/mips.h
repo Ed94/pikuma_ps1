@@ -246,6 +246,9 @@ enum { _BitOffsets = 0
 #define xor_i(rt, rs, imm)         enc_i(op_xori,  (rs),   (rt), (imm))
 #define load_ui(rt, imm)           enc_i(op_lui,   R_0,    (rt), (imm))
 
+// Ergonomic add to the same register.
+#define add_ui_1(rt_rs, imm)       enc_i(op_addiu, (rt_rs), (rt_rs), (imm))
+
 /* Logic Opcodes */
 
 #define and_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_and)
@@ -467,8 +470,8 @@ enum { _BitOffsets = 0
 
 // Binary Metaprogramming
 
-typedef U4 const Code;
-#define CodeBlob_(sym) tmpl(code,sym) [] align_(4) =
+typedef U4 const MipsAtom;
+#define MipsAtom_(sym) MipsAtom tmpl(code,sym) [] align_(4) =
 
 enum {
 	bios_flushcache = 0x44,
@@ -486,8 +489,7 @@ enum {
  *   5. lw $ra, 4($sp);  jr $ra          ; restore & return
  *   6. sp += 8
  */
-internal
-Code CodeBlob_(mips_flush_icache) {
+internal MipsAtom_(mips_flush_icache) {
 	  add_ui(rstack_ptr, rstack_ptr, -8)        /* sp -= 8             */
 	, store_word(rret_addr, rstack_ptr, 4)      /* sw  $ra,   4($sp)   */
 	, add_ui(rret_0, rdiscard, bios_flushcache) /* addiu $a0, $0, 0x44 */
