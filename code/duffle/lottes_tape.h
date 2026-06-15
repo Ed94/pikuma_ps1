@@ -99,11 +99,11 @@ internal Code CodeBlob_(atom_floor_tri) {
     nop, nop, /* Wait for NCLIP to finish */
 
     /* 4. Check NCLIP. 
-       Temporarily disabled backface culling to ensure floor is visible regardless of winding!
-       To re-enable: replace the two nops below with `branch_le_zero(R_T0, 30)` */
+       If MAC0 <= 0 (Backface), branch to end.
+       Target is 29 instructions past the delay slot. */
     gte_mf(R_T0, C2_MAC0),
     nop,                      /* <--- FILL LOAD DELAY SLOT */
-    nop,                      /* branch_le_zero(R_T0, 30), <-- CULLING DISABLED */
+    branch_le_zero(R_T0, 29), /* <--- CULLING RE-ENABLED */
     nop,                      /* <--- DELAY SLOT (Index 0) */
 
     /* 5. Store Primitive Data */
@@ -131,7 +131,7 @@ internal Code CodeBlob_(atom_floor_tri) {
     
     /* CORRECTED DMA TAG LOGIC */
     /*  18 (1)  */ shift_ll(  R_T1, R_T1, 2), 
-    /*  19 (2)  */ add_u(     R_T1, R_T1, R_T6),    /* T1 = &OrderingTable[OTZ] */
+    /*  19 (2)  */ add_u(     R_T1, R_T1, R_T6),    /* T1 = & OrderingTable[OTZ] */
     
     /*  20 (3)  */ load_word( R_AT, R_T1, 0),       /* AT = current head (old_ot) */
     /*  21 (4)  */ load_ui(   R_V0, 0x0400),        /* V0 = 0x04000000 (Length = 4) */

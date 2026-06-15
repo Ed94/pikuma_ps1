@@ -288,6 +288,12 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	// Draw floor tape method
 	if (1)
 	{
+		m3s2_rotation   (& static_mem.floor.rot,   & static_mem.tform_world);
+		m3s2_translation(& static_mem.tform_world, & static_mem.floor.pos);
+		m3s2_scale      (& static_mem.tform_world, & static_mem.floor.scale);
+		gte_matrix_set_rotation   (& static_mem.tform_world);
+		gte_matrix_set_translation(& static_mem.tform_world);
+
     LP_ U4 mem_temp_tape[512]; // Buffer for function addresses
     FArena tape_arena; farena_init(&tape_arena, slice_ut(mem_temp_tape, S_(mem_temp_tape)));
     

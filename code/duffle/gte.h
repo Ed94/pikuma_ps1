@@ -647,6 +647,8 @@ enum {
 		asm_clobber: clb_system, rlit(R_T4_Code), rlit(R_T5_Code), rlit(R_T6_Code) \
 	)
 
-// TODO(Ed): Resolve magic number.
-/* PsyQ Compliant AVSZ3 Command Word */
-#define gte_cmdw_avsz3 (gte_cmd_base | 0x0158002D)
+/* PsyQ compatibility bits for AVSZ3 (Bits 20, 22, 24 must be set) */
+#define gte_cmdw_psyq_avsz3_compat (0x15 << 20)
+#define gte_cmd_avsz3              0x2D
+
+#define gte_cmdw_avsz3 (gte_cmd_base | enc_gte_cmd(gte_cmd_avsz3) | gte_cmdw_psyq_avsz3_compat)
