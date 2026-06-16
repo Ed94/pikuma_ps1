@@ -231,13 +231,13 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		static_mem.cube.rot.y += 30;
 	}
 	// Draw cube (tape method)
-	if (0)
+	if (1)
 	{
 		m3s2_rotation   (& static_mem.cube.rot,    & static_mem.tform_world);
 		m3s2_translation(& static_mem.tform_world, & static_mem.cube.pos);
 		m3s2_scale      (& static_mem.tform_world, & static_mem.cube.scale);
-		// gte_matrix_set_rotation   (& static_mem.tform_world);
-		// gte_matrix_set_translation(& static_mem.tform_world);
+		gte_matrix_set_rotation   (& static_mem.tform_world);
+		gte_matrix_set_translation(& static_mem.tform_world);
 
 		U4 prim_base   = u4_(pa->buf[static_mem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
@@ -249,9 +249,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			tb_data(& tb, u4_(static_mem.cube.faces));
 			tb_data(& tb, u4_(static_mem.cube.verts));
 			tb_data(& tb, u4_(ordering_buf));
-
-			tb_emit(& tb, code_set_gte_world);
-			tb_data(& tb, u4_(& static_mem.tform_world));
 
 			for (U4 i = 0; i < Cube_num_faces; i++) {
 				tb_emit(& tb, code_cube_tri);
@@ -326,8 +323,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		m3s2_rotation   (& static_mem.floor.rot,   & static_mem.tform_world);
 		m3s2_translation(& static_mem.tform_world, & static_mem.floor.pos);
 		m3s2_scale      (& static_mem.tform_world, & static_mem.floor.scale);
-		// gte_matrix_set_rotation   (& static_mem.tform_world);
-		// gte_matrix_set_translation(& static_mem.tform_world);
+		gte_matrix_set_rotation   (& static_mem.tform_world);
+		gte_matrix_set_translation(& static_mem.tform_world);
 
 		U4 prim_base   = u4_(pa->buf[static_mem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;

@@ -101,6 +101,8 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, gte_sw(C2_SXY1, R_PrimCur, 12)                      \
 	, gte_sw(C2_SXY2, R_PrimCur, 16)
 
+
+	
 /* Correctly inserts a primitive into the Ordering Table linked list */
 #define mac_insert_ot_tag(r_otz, prim_length)                               \
 	  shift_ll(  R_T1, r_otz, 2)                                              \
@@ -152,8 +154,135 @@ internal MipsAtom_(set_gte_world) {
 	mips_yield()
 };
 
+/* ============================================================================
+ *  cube_tri — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
+ * ============================================================================
+ *
+ *  Reads 4 indices from R_FaceCur (V4_S2 = 8 bytes), loads 4 vertices into
+ *  the GTE, runs the PsyQ RotAverageNclip4 sequence, and renders a Poly_G4.
+ *
+ *  PsyQ RotAverageNclip4 sequence:
+ *    1. Load V0=p0, V1=p1, V2=p2
+ *    2. RTPT  → SXY0=p0, SXY1=p1, SXY2=p2, SZ1,SZ2,SZ3
+ *    3. NCLIP → MAC0 = cross(p0,p1,p2)  ← BEFORE RTPS!
+ *    4. Store SXY0 (p0) to primitive buffer
+ *    5. Load V3 into V0
+ *    6. RTPS  → SXY0=p3, SZ0
+ *    7. Store SXY0 (p3) to primitive buffer
+ *    8. AVSZ3 → OTZ from SZ1,SZ2,SZ3
+ *
+ *  PRIMITIVE FORMAT (Poly_G4 = 9 words = 36 bytes)
+ *  ------------------------------------------------
+ *  Word 0 (offset  0): OT tag  (set by mac_insert_ot_tag)
+ *  Word 1 (offset  4): c0 + code = 0x38FF00FF (magenta, opcode 0x38)
+ *  Word 2 (offset  8): p0 = SXY0 (stored BEFORE RTPS)
+ *  Word 3 (offset 12): c1 + pad = 0x0000FFFF (yellow)
+ *  Word 4 (offset 16): p1 = SXY1
+ *  Word 5 (offset 20): c2 + pad = 0x00FFFF00 (cyan)
+ *  Word 6 (offset 24): p2 = SXY2
+ *  Word 7 (offset 28): c3 + pad = 0x0000FF00 (green)
+ *  Word 8 (offset 32): p3 = SXY0 (stored AFTER RTPS)
+ *
+ *  BRANCH OFFSETS
+ *  ----------------------------------------------
+ *  Outer branch (backface cull): branch_le_zero(R_T0, 49)
+ *    → Skip 49 instructions from BD slot, land at add_ui(R_FaceCur,...)
+ *  Inner branch (OTZ bounds):    branch_equal(R_AT, R_0, 13)
+ *    → Skip 13 instructions from BD slot, land at add_ui(R_FaceCur,...)
+ * ============================================================================ */
 internal MipsAtom_(cube_tri) {
-	
+	/* ── 1. Load 4 face indices from R_FaceCur ──────────────────────────── */
+	load_half_u(R_T0, R_FaceCur, 0),  /* T0 = face->x (vertex 0 index) */
+	load_half_u(R_T1, R_FaceCur, 2),  /* T1 = face->y (vertex 1 index) */
+	load_half_u(R_T2, R_FaceCur, 4),  /* T2 = face->z (vertex 2 index) */
+	load_half_u(R_T3, R_FaceCur, 6),  /* T3 = face->w (vertex 3 index) */
+
+	/* ── 2. Load V0, V1, V2 into GTE ────────────────────────────────────── */
+	/* V0 = verts[face->x] */
+	shift_ll(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase),
+	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
+	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
+
+	/* V1 = verts[face->y] */
+	shift_ll(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase),
+	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
+	gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1),
+
+	/* V2 = verts[face->z] */
+	shift_ll(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase),
+	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
+	gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2),
+
+	/* ── 3. RTPT — transforms V0/V1/V2 → SXY0/SXY1/SXY2 + SZ1/SZ2/SZ3 ─── */
+	nop, nop, gte_cmdw_rtpt,
+
+	/* ── 4. NCLIP — backface culling on SXY0/SXY1/SXY2 (p0,p1,p2) ──────── */
+	/*     MUST be done BEFORE RTPS overwrites SXY0 with p3!                */
+	nop, nop, gte_cmdw_nclip,
+	nop, nop,
+
+	/* ── 5. Cull check: skip format/insert if MAC0 ≤ 0 (backface) ───────── */
+	gte_mf(R_T0, C2_MAC0),
+	nop,
+	branch_le_zero(R_T0, 49),  /* Skip 49 if MAC0 ≤ 0 (backface) → cull */
+	nop,                        /* BD slot */
+
+	/* ── 6. Store p0,p1,p2 to primitive buffer (BEFORE RTPS overwrites) ─── */
+	store_word(R_0, R_PrimCur, 0),
+
+	/* Word 1: c0 (BGR) + code = 0x38FF00FF (magenta, opcode 0x38) */
+	load_ui(R_AT, 0x38FF), or_i(R_AT, R_AT, 0x00FF),
+	store_word(R_AT, R_PrimCur, 4),
+
+	/* Word 2: p0 = SXY0 (stored BEFORE RTPS overwrites it) */
+	gte_sw(C2_SXY0, R_PrimCur, 8),
+
+	/* Word 3: c1 (BGR) + pad = 0x0000FFFF (yellow) */
+	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFFFF),
+	store_word(R_AT, R_PrimCur, 12),
+
+	/* Word 4: p1 = SXY1 */
+	gte_sw(C2_SXY1, R_PrimCur, 16),
+
+	/* Word 5: c2 (BGR) + pad = 0x00FFFF00 (cyan) */
+	load_ui(R_AT, 0x00FF), or_i(R_AT, R_AT, 0xFF00),
+	store_word(R_AT, R_PrimCur, 20),
+
+	/* Word 6: p2 = SXY2 */
+	gte_sw(C2_SXY2, R_PrimCur, 24),
+
+	/* Word 7: c3 (BGR) + pad = 0x0000FF00 (green) */
+	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFF00),
+	store_word(R_AT, R_PrimCur, 28),
+
+	/* ── 7. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
+	shift_ll(R_AT, R_T3, 3), add_u(R_AT, R_AT, R_VertBase),
+	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
+	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
+
+	/* ── 8. RTPS — transforms V0 (now V3) → SXY0 (p3) + SZ0 ─────────────── */
+	nop, nop, gte_cmdw_rtps,
+
+	/* Word 8: p3 = SXY0 (written AFTER RTPS with V3's screen coords) */
+	gte_sw(C2_SXY0, R_PrimCur, 32),
+
+	/* ── 9. AVSZ3 — average Z for OTZ (uses SZ1/SZ2/SZ3 from RTPT) ──────── */
+	nop, nop, gte_cmdw_avsz3,
+	nop, nop,
+	gte_mf(R_T1, C2_OTZ),
+
+	/* ── 10. Bounds check OTZ < 2048 ─────────────────────────────────────── */
+	add_ui(      R_AT, R_0,  2048),
+	slt_u(       R_AT, R_T1, R_AT),
+	branch_equal(R_AT, R_0,  13),  /* Skip 13 → land at add_ui(R_FaceCur,...) */
+	nop,                            /* BD slot */
+
+	/* ── 11. Insert into Ordering Table (length = 8 for Poly_G4) ─────────── */
+	mac_insert_ot_tag(R_T1, 0x0800),  /* 0x0800 = 8 << 8 = length 8 in tag */
+
+	/* ── 12. Advance cursors & yield ─────────────────────────────────────── */
+	add_ui(R_PrimCur, R_PrimCur, 36),  /* 9 words × 4 bytes */
+	add_ui(R_FaceCur, R_FaceCur, 8),   /* 4 × S2 = 8 bytes */
 	mips_yield()
 };
 
