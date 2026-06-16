@@ -152,6 +152,11 @@ internal MipsAtom_(set_gte_world) {
 	mips_yield()
 };
 
+internal MipsAtom_(cube_tri) {
+	
+	mips_yield()
+};
+
 internal MipsAtom_(floor_tri) {
 	mac_load_tri_indices(R_T0, R_T1, R_T2),
 	mac_load_tri_verts(  R_T0, R_T1, R_T2),
