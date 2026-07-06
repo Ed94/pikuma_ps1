@@ -5,7 +5,7 @@
 #	include "gen/hello_gte_tape.offsets.h"
 #endif
 
-#pragma region MACs
+#pragma region MACs (Mips Atom components)
 
 /* Words: 3; High: 0x20/B, Low: G/R */
 #define mac_format_f3_color(color_hi, color_lo) \
@@ -24,17 +24,25 @@
 
 internal MipsAtom_(floor_tri) {
 	// T0-T2 allocated
-	mac_load_tri_indices(R_T0, R_T1, R_T2),
-	mac_load_tri_verts(  R_T0, R_T1, R_T2),
+	// mac_load_tri_indices(R_T0, R_T1, R_T2),
+		  load_half_u(R_T0, R_FaceCur, 0 * S_(S2))
+		, load_half_u(R_T1, R_FaceCur, 1 * S_(S2))
+		, load_half_u(R_T2, R_FaceCur, 2 * S_(S2))
+	,
+	// mac_load_tri_verts(  R_T0, R_T1, R_T2),
+			shift_ll(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0)
+		, shift_ll(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1)
+		, shift_ll(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
+	,
 
 	/* 3. Execute Math */
 	nop, nop, gte_cmdw_rotate_translate_perspective_triple,
 	nop, nop, gte_cmdw_nclip,
 	nop, nop, 
 
-	/* 4. Culling (Branch forward 29 instructions if Backface) */
+	/* 4. Culling (Branch forward if Backface) */
 	gte_mf(R_T0, C2_MAC0),
-	nop, branch_le_zero(R_T0, atom_offset(floor_tri_exit)), 
+	nop, branch_le_zero(R_T0, atom_offset(culling, floor_tri_exit)), 
 	nop,                      
 	
 	/* 5. Format Primitive */
@@ -45,10 +53,10 @@ internal MipsAtom_(floor_tri) {
 	nop, nop, gte_avg_sort_z3,            
 	nop, nop, gte_mf(R_T1, C2_OTZ),      
 	
-	/* 7. Bounds Check OTZ < 2048 (Branch forward 13 instructions to skip insertion) */
+	/* 7. Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),   
 	slt_u(       R_AT, R_T1, R_AT), 
-	branch_equal(R_AT, R_0,  13),   
+	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_tri_exit)),   
 	nop, 
 	
 	/* 8. Insert into Ordering Table Linked List */

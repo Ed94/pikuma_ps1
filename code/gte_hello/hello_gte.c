@@ -246,7 +246,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		U4 prim_cursor = prim_base + pa->used;
 
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
-		TapeBuilder tb = tb_make(&tape_arena); tb_scope(& tb) {
+		TapeBuilder tb = tb_make_old(&tape_arena); tb_scope(& tb) {
 			tb_emit(& tb, code_rbind_cube_tri);
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(static_mem.cube.faces));
@@ -334,12 +334,11 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		U4 prim_cursor = prim_base + pa->used;
 
 		// Prepare the tape.
-		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
-		TapeBuilder tb = tb_make(&tape_arena); tb_scope(& tb) {
+		LP_ U4 mem_temp_tape[512];
+		TapeBuilder tb = tb_make(slice_ut_arr(mem_temp_tape)); tb_scope(& tb) {
 			// Push "Protocol" to tape
 			tb_emit(& tb, code_rbind_floor_tri);
-				// Note(Ed): This is technically argument shuffle and would be better if we did a single reference at most to a global batch context.
-				// Note(Ed): We can technically allocate a single ptr with the global offset to the working context instead of utilizing the tape for this stack of refs.
+			// TODO(Ed): Just use a single context struct ref
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(static_mem.floor.faces));
 				tb_data(& tb, u4_(static_mem.floor.verts));
@@ -367,7 +366,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	if (0)
 	{
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
-		TapeBuilder tb = tb_make(& tape_arena); tb_scope(& tb) {
+		TapeBuilder tb = tb_make_old(& tape_arena); tb_scope(& tb) {
 			// Skip set_gte_world atom for diagnostics to isolate the triangle loop
 			for (U4 i = 0; i < Floor_num_faces; i++) {
 				// =======================================================

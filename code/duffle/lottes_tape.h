@@ -62,7 +62,8 @@ FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; a
 
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
 FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->used = 0; }
-FI_ TapeBuilder tb_make(                 FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
+FI_ TapeBuilder tb_make_old(                 FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
+FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ mem.ptr, mem.len, 0 }; }
 
 #define tb_emit_(tb, atom) tb_emit(tb, tmpl(code,atom))
 FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
