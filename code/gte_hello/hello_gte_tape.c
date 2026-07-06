@@ -22,18 +22,18 @@
 
 #pragma region Baked Atoms
 
-internal MipsAtom_(floor_tri) {
+internal MipsCode code_floor_tri [] __attribute__((aligned (4))) = {
 	// T0-T2 allocated
-	// mac_load_tri_indices(R_T0, R_T1, R_T2),
-		  load_half_u(R_T0, R_FaceCur, 0 * S_(S2))
-		, load_half_u(R_T1, R_FaceCur, 1 * S_(S2))
-		, load_half_u(R_T2, R_FaceCur, 2 * S_(S2))
-	,
-	// mac_load_tri_verts(  R_T0, R_T1, R_T2),
-			shift_ll(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0)
-		, shift_ll(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1)
-		, shift_ll(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
-	,
+	mac_load_tri_indices(R_T0, R_T1, R_T2),
+	// 	  load_half_u(R_T0, R_FaceCur, 0 * S_(S2))
+	// 	, load_half_u(R_T1, R_FaceCur, 1 * S_(S2))
+	// 	, load_half_u(R_T2, R_FaceCur, 2 * S_(S2))
+	// ,
+	mac_load_tri_verts(  R_T0, R_T1, R_T2),
+	// 		shift_ll(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0)
+	// 	, shift_ll(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1)
+	// 	, shift_ll(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
+	// ,
 
 	/* 3. Execute Math */
 	nop, nop, gte_cmdw_rotate_translate_perspective_triple,

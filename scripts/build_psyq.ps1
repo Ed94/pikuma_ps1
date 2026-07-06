@@ -317,7 +317,7 @@ function generate-TapeAtomOffsets {param(
 	[Parameter(Mandatory=$true)]
 	[string]$metadata)
 
-	$gen_atom_offsets_script = join-path $path_scripts 'tape_attom.offset_gen.meta.lua'
+	$gen_atom_offsets_script = join-path $path_scripts 'tape_atom.offset_gen.meta.lua'
 
     $any_stale = $false
     foreach ($src in $sources) {

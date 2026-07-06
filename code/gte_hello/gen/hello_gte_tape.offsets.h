@@ -8,10 +8,10 @@
 #undef atom_offset
 #define atom_offset(tag, name)  atom_offset_##tag##_##name
 
-// --- atom: floor_tri (51 words) ---
+// --- atom: floor_tri (32 words) ---
 
-#define _atom_offset_culling_floor_tri_exit    17
-#define _atom_offset_bounds_chk_floor_tri_exit 3
+#define _atom_offset_culling_floor_tri_exit           17
+#define _atom_offset_bounds_chk_floor_tri_exit        3
 
 enum {
     atom_offset_culling_floor_tri_exit = _atom_offset_culling_floor_tri_exit,
