@@ -377,14 +377,14 @@ enum { _BitOffsets = 0
 		asm volatile(                                         \
 			asm_words(load_ui((rt), u4_hi(imm),                 \
 			          add_si((rt), (rt), (S2)C_(U2,u4_lo(imm))) \
-			asm_clobber: rlit(R_AT_Code), clb_mem_drain         \
+			asm_clobber: rlit(R_AT), clb_mem_drain              \
 		);                                                    \
 	}                                                       \
 	else {                                                  \
 		asm volatile(asm_words(                               \
 			load_ui((rt), u4_hi(imm)),                          \
 			or_i((rt), (rt), C_(U2,u4_lo(imm))                  \
-			asm_clobber: rlit(R_AT_Code), clb_mem_drain         \
+			asm_clobber: rlit(R_AT), clb_mem_drain              \
 		);                                                    \
 	}                                                       \
 } while (0)
@@ -395,7 +395,7 @@ enum { _BitOffsets = 0
 	asm volatile(                                       \
 		asm_words(load_ui((rt), u4_lo(imm)),              \
 		          or_i((rt), (rt), C_(U2,u4_hi(imm))) )   \
-		asm_clobber: rlit(R_AT_Code), clb_mem_drain       \
+		asm_clobber: rlit(R_AT), clb_mem_drain            \
 	);                                                  \
 } while (0)
 
@@ -408,7 +408,7 @@ enum { _BitOffsets = 0
 	asm volatile(asm_words(                       \
 		lui_op((rt), u4_lo(imm)),                   \
 		add_si((rt), (rt), (S2)C_(U2,u4_hi(imm))) ) \
-		asm_clobber: rlit(R_AT_Code), clb_mem_drain \
+		asm_clobber: rlit(R_AT), clb_mem_drain      \
 	);                                            \
 } while (0)
 
@@ -436,14 +436,14 @@ enum { _BitOffsets = 0
 		/* Small positive: addi rt, $0, imm */                         \
 		asm volatile(                                                  \
 			asm_words(add_si((rt), R_0, (imm)))                          \
-			asm_clobber: rlit(R_AT_Code), clb_mem_drain                  \
+			asm_clobber: rlit(R_AT), clb_mem_drain                       \
 		);                                                             \
 	}                                                                \
 	else if (cexpr_(imm) && ((U4)(imm) <= 0xFFFFU)) {                \
 			/* 0x8000..0xFFFF: ori rt, $0, imm (zero-extends) */         \
 			asm volatile(                                                \
 				asm_words(or_i((rt), R_0, (imm)))                          \
-				asm_clobber: rlit(R_AT_Code), clb_mem_drain                \
+				asm_clobber: rlit(R_AT), clb_mem_drain                     \
 			);                                                           \
 	}                                                                \
 	else                                                             \
@@ -455,14 +455,14 @@ enum { _BitOffsets = 0
 			asm volatile(asm_words(                                      \
 				load_ui((rt), u4_hi(imm)),                                 \
 				add_si((rt), (rt), (S2)C_(U2,u4_lo(imm)))                  \
-				asm_clobber: rlit(R_AT_Code), clb_mem_drain                \
+				asm_clobber: rlit(R_AT), clb_mem_drain                     \
 			);                                                           \
 		}                                                              \
 		else {                                                         \
 			asm volatile(asm_words(                                      \
 				load_ui((rt),             u4_hi(imm)),                     \
 				or_i((rt), (rt), C_(U2,u4_lo(imm))                         \
-				asm_clobber: rlit(R_AT_Code), clb_mem_drain                \
+				asm_clobber: rlit(R_AT), clb_mem_drain                     \
 			);                                                           \
 		}                                                              \
 	}                                                                \
@@ -470,8 +470,8 @@ enum { _BitOffsets = 0
 
 // Binary Metaprogramming
 
-typedef U4 const MipsAtom;
-#define MipsAtom_(sym) MipsAtom tmpl(code,sym) [] align_(4) =
+typedef U4 const MipsCode;
+#define MipsAtom_(sym) MipsCode tmpl(code,sym) [] align_(4) =
 
 enum {
 	bios_flushcache = 0x44,
@@ -506,7 +506,7 @@ I_ void mips_flush_icache(void) { C_(VoidFn*, code_mips_flush_icache)(); }
  * GPRs that the kernel treats as volatile (v0/v1/t0/t1/ra) plus the
  * "memory" barrier. The register ids are passed through `rlit` so
  * the R_*_Code `#define`s are stringified into "$N" at expansion time. */
-#define clb_system rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain
+#define clb_system rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain
 
 #define asm_mips_flush_icache() asm volatile( asm_words( \
 		add_ui(rstack_ptr, rstack_ptr, -8)        \

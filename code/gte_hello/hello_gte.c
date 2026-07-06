@@ -191,7 +191,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	S4 flag; //????
 
 	// Draw Cube
-	if (0)
+	if (1)
 	{
 		m3s2_rotation   (& static_mem.cube.rot,    & static_mem.tform_world);
 		m3s2_translation(& static_mem.tform_world, & static_mem.cube.pos);
@@ -230,8 +230,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// static_mem.cube.rot.z += 12;
 		static_mem.cube.rot.y += 30;
 	}
-	// Draw cube (tape method)
-	if (1)
+	// Draw cube (tape method) - two triangles per face
+	if (0)
 	{
 		m3s2_rotation   (& static_mem.cube.rot,    & static_mem.tform_world);
 		m3s2_translation(& static_mem.tform_world, & static_mem.cube.pos);
@@ -251,6 +251,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			tb_data(& tb, u4_(ordering_buf));
 
 			for (U4 i = 0; i < Cube_num_faces; i++) {
+				// Two triangles per quad face: (x,y,z) and (x,z,w)
 				tb_emit(& tb, code_cube_tri);
 			}
 

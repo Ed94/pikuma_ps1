@@ -132,7 +132,7 @@ enum {
 	gte_in_v1_z      = C2_VZ1,  /* Input Vector 1 (Z) */
 	gte_in_v2_xy     = C2_VXY2, /* Input Vector 2 (X, Y) */
 	gte_in_v2_z      = C2_VZ2,  /* Input Vector 2 (Z) */
-	gte_in_rgb       = C2_RGB,  /* Input Color (R, G, B, MipsAtom) */
+	gte_in_rgb       = C2_RGB,  /* Input Color (R, G, B, MipsCode) */
 	gte_out_scr_xy0  = C2_SXY0, /* Output Screen Coord 0 (X, Y) */
 	gte_out_scr_xy1  = C2_SXY1, /* Output Screen Coord 1 (X, Y) */
 	gte_out_scr_xy2  = C2_SXY2, /* Output Screen Coord 2 (X, Y) */
@@ -385,6 +385,10 @@ enum { _C2_OPS_ = 0
 
 #define gte_cmdw_avsz3 (gte_cmd_base | enc_gte_cmd(gte_cmd_avsz3) | gte_cmdw_psyq_avsz3_compat)
 
+/* AVSZ4 — average Z of 4 vertices (for quads) */
+#define gte_cmd_avsz4 0x2E
+#define gte_cmdw_avsz4 (gte_cmd_base | enc_gte_cmd(gte_cmd_avsz4) | gte_cmdw_psyq_avsz3_compat)
+
 /**
  * @brief Loads a single SVECTOR to GTE vector register V0
  *
@@ -460,22 +464,22 @@ enum {
  *
  * The `asm_clobber(...)` helper from gcc_asm.h prepends the colon that
  * starts the clobbers section. */
-#define gte_load_v0(r_ptr, base) asm volatile( \
+#define gte_load_v0(r_ptr, base) asm volatile(   \
 	asm_words( gte_lw_v0(base), gte_lw_v0z(base) ) \
-	asm_rpins,   r_use(r_ptr)                                    \
-	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+	asm_rpins,   r_use(r_ptr)                      \
+	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
-#define gte_load_v1(r_ptr, base) asm volatile( \
+#define gte_load_v1(r_ptr, base) asm volatile(   \
 	asm_words( gte_lw_v1(base), gte_lw_v1z(base) ) \
-	asm_rpins,   r_use(r_ptr)                                    \
-	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+	asm_rpins,   r_use(r_ptr)                      \
+	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
-#define gte_load_v2(r_ptr, base) asm volatile( \
-	asm_words( gte_lw_v2(base), gte_lw_v2z(base) ) \
-	asm_rpins,   r_use(r_ptr)                                    \
-	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+#define gte_load_v2(r_ptr, base) asm volatile(    \
+	asm_words( gte_lw_v2(base), gte_lw_v2z(base) )  \
+	asm_rpins,   r_use(r_ptr)                       \
+	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
 /* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — the canonical prelude to gte_cmd_rtpt.
@@ -497,7 +501,7 @@ enum {
 		gte_lw_v2(b2), gte_lw_v2z(b2) ) \
 	asm_rpins                             \
 		, r_use(p0), r_use(p1), r_use(p2)   \
-	asm_clobber: rlit(R_V0_Code), rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_RA_Code), clb_mem_drain \
+	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
 /**
@@ -650,5 +654,5 @@ enum {
 			, gte_mt(   R_T4,  4)             \
 		)                                   \
 		, r_use(r0)                         \
-		asm_clobber: clb_system, rlit(R_T4_Code), rlit(R_T5_Code), rlit(R_T6_Code) \
+		asm_clobber: clb_system, rlit(R_T4), rlit(R_T5), rlit(R_T6) \
 	)

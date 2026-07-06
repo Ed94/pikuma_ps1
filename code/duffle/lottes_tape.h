@@ -17,12 +17,14 @@ enum {
 	R_TapePtr  = R_T8,  /* The Instruction Stream Pointer */
 	R_PrimCur  = R_T7,  /* VRAM output cursor (primitive buffer) */
 	R_FaceCur  = R_T4,  /* Input data cursor (indices/faces) */
+	R_InCursor = R_T4,  /* Input data cursor (indices/faces) */
 	R_VertBase = R_T5,  /* Base address of the vertex array */
 	R_OtBase   = R_T6,  /* Base address of the Ordering Table */
 /* Stringification codes for the GCC inline assembler clobber lists */
 #define R_TapePtr_Code  R_T8_Code
 #define R_PrimCur_Code  R_T7_Code
 #define R_FaceCur_Code  R_T4_Code
+#define R_InCursor_Code R_T4_Code
 #define R_VertBase_Code R_T5_Code
 #define R_OtBase_Code   R_T6_Code
 };
@@ -55,12 +57,12 @@ FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; a
 	)
 	asm_rpins, r_use(tp)
 	asm_clobber: 
-			rlit(R_AT_Code)
-		, rlit(R_V0_Code), rlit(R_V1_Code)
-		, rlit(R_T0_Code), rlit(R_T1_Code), rlit(R_T2_Code), rlit(R_T3_Code)
+			rlit(R_AT)
+		, rlit(R_V0), rlit(R_V1)
+		, rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3)
 		/* Tell GCC the tape engine owns and destroys the workspace registers */
-		, rlit(R_PrimCur_Code), rlit(R_FaceCur_Code), rlit(R_VertBase_Code), rlit(R_OtBase_Code)
-		, rlit(R_T9_Code)
+		, rlit(R_PrimCur), rlit(R_FaceCur), rlit(R_VertBase), rlit(R_OtBase)
+		, rlit(R_T9)
 		, clb_mem_drain 
 ); }
 
@@ -68,7 +70,7 @@ typedef Struct_(TapeBuilder) { U4 ptr; U4 count; };
 FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->count = 0; }
 FI_ TapeBuilder tb_make(                 FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
 
-FI_ void tb_emit(TapeBuilder* tb, MipsAtom* atom) { u4_r(tb->ptr)[tb->count] = u4_(atom); ++ tb->count; }
+FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->count] = u4_(atom); ++ tb->count; }
 FI_ void tb_data(TapeBuilder* tb, U4    data) { u4_r(tb->ptr)[tb->count] = u4_(data); ++ tb->count; }
 
 FI_ Slice_U4 tb_end  (TapeBuilder* tb) { tb_emit(tb,code_tape_exit); return (Slice_U4){ C_(U4*,tb->ptr), tb->count }; }
@@ -76,21 +78,21 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 #define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,code_tape_exit))
 
 /* ---------------------------------------------------------------------------
- *  MACRO ATOMS (Reusable Assembly Components)
+ *  MACRO ATOM Components (Reusable Assembly Components)
  *  These do NOT yield. They are expanded inline inside Tape Atoms.
  * ---------------------------------------------------------------------------*/
 
 /* Loads 3 16-bit indices from the face array */
-#define mac_load_tri_indices(r_idx0, r_idx1, r_idx2) \
-	  load_half_u(r_idx0, R_FaceCur, 0) \
-	, load_half_u(r_idx1, R_FaceCur, 2) \
-	, load_half_u(r_idx2, R_FaceCur, 4)
+#define mac_load_tri_indices(rId_0, rId_1, rId_2) \
+	  load_half_u(rId_0, R_FaceCur, 0) \
+	, load_half_u(rId_1, R_FaceCur, 2) \
+	, load_half_u(rId_2, R_FaceCur, 4)
 
 /* Translates indices to vertex addresses and pushes them to GTE */
-#define mac_load_tri_verts(r_idx0, r_idx1, r_idx2) \
-	  shift_ll(R_AT, r_idx0, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
-	, shift_ll(R_AT, r_idx1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
-	, shift_ll(R_AT, r_idx2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
+#define mac_load_tri_verts(rId_0, rId_1, rId_2) \
+	  shift_ll(R_AT, rId_0, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
+	, shift_ll(R_AT, rId_1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
+	, shift_ll(R_AT, rId_2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
 
 /* Formats the primitive memory layout (Tag + Color + Coordinates) */
 #define mac_format_prim_f3(color_hi, color_lo)          \
@@ -101,8 +103,6 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, gte_sw(C2_SXY1, R_PrimCur, 12)                      \
 	, gte_sw(C2_SXY2, R_PrimCur, 16)
 
-
-	
 /* Correctly inserts a primitive into the Ordering Table linked list */
 #define mac_insert_ot_tag(r_otz, prim_length)                               \
 	  shift_ll(  R_T1, r_otz, 2)                                              \
@@ -266,8 +266,8 @@ internal MipsAtom_(cube_tri) {
 	/* Word 8: p3 = SXY0 (written AFTER RTPS with V3's screen coords) */
 	gte_sw(C2_SXY0, R_PrimCur, 32),
 
-	/* ── 9. AVSZ3 — average Z for OTZ (uses SZ1/SZ2/SZ3 from RTPT) ──────── */
-	nop, nop, gte_cmdw_avsz3,
+	/* ── 9. AVSZ4 — average Z from SZ0/SZ1/SZ2/SZ3 ────────────── */
+	nop, nop, gte_cmdw_avsz4,
 	nop, nop,
 	gte_mf(R_T1, C2_OTZ),
 
@@ -330,7 +330,7 @@ internal MipsAtom_(diag_yield) { mips_yield() };
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal MipsAtom_(diag_color) {
 	store_word(R_0, R_T7, 0), 
-	load_ui(   R_AT, 0x20FF),       /* High: MipsAtom 0x20 + Color B:FF */
+	load_ui(   R_AT, 0x20FF),       /* High: MipsCode 0x20 + Color B:FF */
 	or_i(      R_AT, R_AT, 0xFF00), /* Low:  Color G:FF, R:00 (Cyan) */
 	store_word(R_AT, R_T7, 4),
 	

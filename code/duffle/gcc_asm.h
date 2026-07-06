@@ -66,14 +66,15 @@
  *   register V3_S2* p0 rgcc(R_T4) = ...;                    // bundled
  *
  *   asm volatile("nop" : : : reg_str(R_RA), "memory");      // clobber list */
-#define rlit_impl(n)  "$" #n
-#define rlit(n)       rlit_impl(n)
+#define rlit_stringfy(n)  "$" stringify(n)
+#define rlit_tmpl(n)  rlit_stringfy(tmpl(n,Code))
+#define rlit(n)       rlit_tmpl(n)
 
 /* ------------------------------------------------------------------------ *
  *  rgcc(n) — GCC-specific bundle for register-variable declarations.
  *
- *  Produces `__asm__(reg_str(tmpl(n, MipsAtom)))` at expansion time. 
- *  The `tmpl(n, MipsAtom)` indirection derives the preprocessor-visible `_Code`
+ *  Produces `__asm__(reg_str(tmpl(n, MipsCode)))` at expansion time. 
+ *  The `tmpl(n, MipsCode)` indirection derives the preprocessor-visible `_Code`
  *  form from the enum name (which the preprocessor can't expand on its own). 
  *  So a call is:                register V3_S2* p rgcc(R_T4)               = verts[0].ptr;
  *  expands (via tmpl) to:       register V3_S2* p __asm__(rlit(R_T4_Code)) = verts[0].ptr;
@@ -91,8 +92,7 @@
  *
  *  For clobber lists and asm-template strings, use the bare `rlit(R_T4_Code)`.
  * ------------------------------------------------------------------------ */
-#define rgcc_(n)       __asm__(rlit(tmpl(n, Code)))
-#define rgcc(n)        rgcc_(n)
+#define rgcc(n) __asm__(rlit(n))
 
 /* rgcc_ref(n) — GCC operand-reference form "%N". Not currently used
  * by the placeholder-pun macros (the .word bodies are fully baked
