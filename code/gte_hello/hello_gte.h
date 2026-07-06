@@ -5,6 +5,11 @@
 #	include "duffle/gp.h"
 #endif
 
+enum {
+	PrimitiveBuff_Len = 4096,
+	OrderingTbl_Len   = 2048
+};
+
 typedef Struct_(DrawEnv_Packed) { U4 tag; U4 code[15]; };
 typedef Struct_(DrawEnv) {
 	Rect_S2 clip_area;

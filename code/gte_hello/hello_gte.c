@@ -14,11 +14,7 @@
 #include "duffle/gte.h"
 #include "duffle/lottes_tape.h"
 #include "hello_gte.h"
-
-enum {
-	PrimitiveBuff_Len = 4096,
-	OrderingTbl_Len   = 2048
-};
+#include "hello_gte_tape.c"
 
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
 typedef Array_(OrderingTable_Buffer, 2);
@@ -104,6 +100,8 @@ typedef Struct_(SMemory) {
 
 	Ent_Cube  cube;
 	Ent_Floor floor;
+
+
 };
 global SMemory static_mem;
 extern SMemory static_mem;
@@ -245,10 +243,10 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make(&tape_arena); tb_scope(& tb) {
 			tb_emit(& tb, code_rbind_cube_tri);
-			tb_data(& tb, prim_cursor);
-			tb_data(& tb, u4_(static_mem.cube.faces));
-			tb_data(& tb, u4_(static_mem.cube.verts));
-			tb_data(& tb, u4_(ordering_buf));
+				tb_data(& tb, prim_cursor);
+				tb_data(& tb, u4_(static_mem.cube.faces));
+				tb_data(& tb, u4_(static_mem.cube.verts));
+				tb_data(& tb, u4_(ordering_buf));
 
 			for (U4 i = 0; i < Cube_num_faces; i++) {
 				// Two triangles per quad face: (x,y,z) and (x,z,w)
@@ -256,8 +254,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			}
 
 			tb_emit(& tb, code_sync_prim_cursor);
-			tb_data(& tb, u4_(& pa->used));
-			tb_data(& tb, prim_base);
+				tb_data(& tb, u4_(& pa->used));
+				tb_data(& tb, prim_base);
 		}
 		tape_run(tb_slice(tb));
 
@@ -334,21 +332,24 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make(&tape_arena); tb_scope(& tb) {
 			// Push "Protocol" to tape
-			tb_emit_(& tb, rbind_floor_tri);
+			tb_emit(& tb, code_rbind_floor_tri);
+				// Note(Ed): This is technically argument shuffle and would be better if we did a single reference at most to a global batch context.
+				// Note(Ed): We can technically allocate a single ptr with the global offset to the working context instead of utilizing the tape for this stack of refs.
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(static_mem.floor.faces));
 				tb_data(& tb, u4_(static_mem.floor.verts));
 				tb_data(& tb, u4_(ordering_buf));
+
 			tb_emit(& tb, code_set_gte_world);
-			tb_data(& tb, u4_(& static_mem.tform_world));
-            
+				tb_data(& tb, u4_(& static_mem.tform_world));
+
 			for (U4 i = 0; i < Floor_num_faces; i++) {
 				tb_emit(& tb, code_floor_tri);
 			}
 			
 			tb_emit(& tb, code_sync_prim_cursor);
-			tb_data(& tb, u4_(& pa->used));
-			tb_data(& tb, prim_base);
+				tb_data(& tb, u4_(& pa->used));
+				tb_data(& tb, prim_base);
 		}
 
 		// Fire off the tape.

@@ -15,6 +15,7 @@
  *  The C compiler is completely unaware of these bindings.
  * ---------------------------------------------------------------------------*/
 enum {
+	R_AtomJmp  = R_T9,
 	R_TapePtr  = R_T8,  /* The Instruction Stream Pointer */
 	R_PrimCur  = R_T7,  /* VRAM output cursor (primitive buffer) */
 	R_FaceCur  = R_T4,  /* Input data cursor (indices/faces) */
@@ -78,33 +79,30 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  * Loads the next pointer from the tape, advances the tape, and jumps. 
  * Cost: ~ 4 cycles */
 #define mac_yield()          \
-	  load_word(R_T9, R_TapePtr, 0) \
-	, add_ui_1(       R_TapePtr, 4) \
-	, jump_reg( R_T9)               \
+	  load_word(R_AtomJmp, R_TapePtr, 0) \
+	, add_ui_1(            R_TapePtr, 4) \
+	, jump_reg( R_AtomJmp)               \
 	, nop
 
-/* Loads 3 16-bit indices from the face array */
+/* Words: 3; Loads 3 S2 indices from the face array */
 #define mac_load_tri_indices(rId_0, rId_1, rId_2) \
 	  load_half_u(rId_0, R_FaceCur, 0) \
 	, load_half_u(rId_1, R_FaceCur, 2) \
 	, load_half_u(rId_2, R_FaceCur, 4)
 
-/* Translates indices to vertex addresses and pushes them to GTE */
+/* Words: 18; Translates indices to vertex addresses and pushes them to GTE 
+	R_AT  = rId_[#] << 3; 
+	R_AT += R_VertBase;
+	R_V0  = R_AT[0];
+	gte_mt(R_V0, V.xy[#]);
+	gte_mt(R_V1, V.z [#]);
+*/
 #define mac_load_tri_verts(rId_0, rId_1, rId_2) \
 	  shift_ll(R_AT, rId_0, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
 	, shift_ll(R_AT, rId_1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
 	, shift_ll(R_AT, rId_2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
 
-/* Formats the primitive memory layout (Tag + Color + Coordinates) */
-#define mac_format_prim_f3(color_hi, color_lo)          \
-	  store_word(R_0, R_PrimCur,  0)                      \
-	, load_ui(R_AT, color_hi), or_i(R_AT, R_AT, color_lo) \
-	, store_word(R_AT, R_PrimCur, 4)                      \
-	, gte_sw(C2_SXY0, R_PrimCur, 8)                       \
-	, gte_sw(C2_SXY1, R_PrimCur, 12)                      \
-	, gte_sw(C2_SXY2, R_PrimCur, 16)
-
-/* Correctly inserts a primitive into the Ordering Table linked list */
+/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list */
 #define mac_insert_ot_tag(r_otz, prim_length)                               \
 	  shift_ll(  R_T1, r_otz, 2)                                              \
 	, add_u(     R_T1, R_T1, R_OtBase)   /* T1 = &OrderingTable[OTZ] */       \
@@ -136,7 +134,7 @@ FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode_R code) {
 	mem_copy(ab->start, u4_(code->ptr), code->len);
 	mem_bump(ab->start, ab->capacity, & ab->used, code->len);
 }
-#define atombuilder_unroll_mac(ab, mac) 
+#define atombuilder_unroll_mac(ab, mac) atombuilder_unroll(ab, slice_arg_from_array(Slice_MipsCode, mac))
 
 // When done authoring, utilize this to cap-off the atom
 FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
@@ -152,14 +150,19 @@ FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
 #pragma region Baked Mips Atoms
 // These atoms are resolved at compile time and are (usually) statically linked readonly data.
 
+typedef Struct_(Binds_SyncPrimCursor) {
+	U4 PrimtiveArena_Used;
+	U4 PrimtiveBase;
+};
 internal MipsAtom_(sync_prim_cursor) {
 	/* Pop the C-struct address and base address from the tape */
-	load_word(R_AT, R_TapePtr, 0), /* AT = &pa->used */
-	load_word(R_T0, R_TapePtr, 4), /* T0 = prim_base */
-	add_ui_1(       R_TapePtr, 8),
+	// Note(Ed): Argument shuffle....
+	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimCursor,PrimtiveArena_Used)),
+	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimCursor,PrimtiveBase)),      
+	add_ui_1(       R_TapePtr, S_(Binds_SyncPrimCursor)),
 	/* Calculate byte offset and store directly back to RAM */
-	sub_u(R_T0, R_PrimCur, R_T0),
-	store_word(R_T0, R_AT, 0),
+	sub_u(R_T0, R_PrimCur, R_T0), // R_T0 = PrimitiveArea_Used(R_AT) - R_PrimCur
+	store_word(R_T0, R_AT, 0),    // PrimitiveBase(R_AT)[0] = R_T0
 	mac_yield()
 };
 
@@ -195,6 +198,8 @@ internal MipsAtom_(rbind_cube_tri) {
 	load_word(R_VertBase, R_TapePtr, O_(Binds_CubeTri,VertBase)), 
 	load_word(R_OtBase,   R_TapePtr, O_(Binds_CubeTri,OtBase)), 
 	add_ui_1(             R_TapePtr, S_(Binds_CubeTri)),
+	// Note(Ed): This entire thing is argument shuffle?
+	// TODO(Ed): Eliminate
 	mac_yield()
 };
 
@@ -345,46 +350,11 @@ internal MipsAtom_(rbind_floor_tri) {
 	load_word(R_VertBase, R_TapePtr, O_(Binds_FloorTri,VertBase)), 
 	load_word(R_OtBase,   R_TapePtr, O_(Binds_FloorTri,OtBase)), 
 	add_ui_1(             R_TapePtr, S_(Binds_FloorTri)),
+	// Note(Ed): This entire thing is argument shuffle?
+	// TODO(Ed): Eliminate
 	mac_yield()
 };
 
-internal MipsAtom_(floor_tri) {
-	mac_load_tri_indices(R_T0, R_T1, R_T2),
-	mac_load_tri_verts(  R_T0, R_T1, R_T2),
-
-	/* 3. Execute Math */
-	nop, nop, gte_cmdw_rtpt,
-	nop, nop, gte_cmdw_nclip,
-	nop, nop, 
-
-	/* 4. Culling (Branch forward 29 instructions if Backface) */
-	gte_mf(R_T0, C2_MAC0),
-	nop,                      
-	branch_le_zero(R_T0, 29), 
-	nop,                      
-	
-	/* 5. Format Primitive */
-	mac_format_prim_f3(0x20FF, 0xFFFF), /* High: 0x20/B, Low: G/R */
-	
-	/* 6. Calculate Depth */
-	nop, nop, gte_cmdw_avsz3,            
-	nop, nop, 
-	gte_mf(R_T1, C2_OTZ),      
-	
-	/* 7. Bounds Check OTZ < 2048 (Branch forward 13 instructions to skip insertion) */
-	add_ui(      R_AT, R_0,  2048),   
-	slt_u(       R_AT, R_T1, R_AT), 
-	branch_equal(R_AT, R_0,  13),   
-	nop, 
-	
-	/* 8. Insert into Ordering Table Linked List */
-	mac_insert_ot_tag(R_T1, 0x0400), /* Length = 4 words */
-
-	add_ui(R_PrimCur, R_PrimCur, 20), /* Advance Prim Cursor (5 words) */
-	/* 9. Advance Input Cursor & Yield (Both branch targets land here) */
-	add_ui(R_FaceCur, R_FaceCur, 8),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
-	mac_yield()
-};
 
 /* DIAGNOSTIC 1: Pure tape loop test */
 internal MipsAtom_(diag_yield) { mac_yield() };

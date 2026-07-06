@@ -69,6 +69,7 @@ enum {
 /* Semantic Aliases for MIPS Registers (O32 ABI) */
 
 	, rdiscard      = R_0  /* Hardwired to 0 */
+	, rasm_tmp      = R_AT /* Assembler temporary (destroyed by some assembler pseudoinstructions!) */
 	, rret_0        = R_V0 /* Function return value */
 	, rret_1        = R_V1 /* Second return value (e.g., 64-bit) */
 	, rarg_0        = R_A0 /* First function argument */
@@ -112,21 +113,30 @@ enum {
 	, op_xori    = 0x0E /* XOR Immediate */
 	, op_lui     = 0x0F /* Load Upper Immediate */
 	, op_cop0    = 0x10 /* Coprocessor 0 (System) */
+	, op_cop1    = 0x11 /* Coprocessor 1 (Reserved, FP Unit, Omitted by Sony) */
 	, op_cop2    = 0x12 /* Coprocessor 2 (GTE) */
-	, op_la      = 0
-	, op_li      = 0
+	, op_cop3    = 0x13 /* Coprocessor 3 (Reserved, Unused)*/
+	/* 14-1F: N/A */
 	, op_lb      = 0x20 /* Load Byte */
 	, op_lh      = 0x21 /* Load Halfword */
+	, op_lwl     = 0x22 /* Load Word (Left Bits) */
 	, op_lw      = 0x23 /* Load Word */
 	, op_lbu     = 0x24 /* Load Byte Unsigned */
 	, op_lhu     = 0x25 /* Load Halfword Unsigned */
+	, op_lwr     = 0x26 /* Load Word (Right Bits) */
+	/* 27: N/A */
 	, op_sb      = 0x28 /* Store Byte */
 	, op_sh      = 0x29 /* Store Halfword */
+	, op_swl     = 0x2A /* Store Word (Left Bits) */
 	, op_sw      = 0x2B /* Store Word */
+	/* 2C-2D: N/A */
+	, op_swr     = 0x2E /* Store Word (Right Bits) */
+	/* 2F: N/A */
+	// , op_lwc0
 
 
-	, op_load_addr  = op_la
-	, op_load_imm   = op_li
+	// , op_load_addr  = op_la
+	// , op_load_imm   = op_li
 	, op_jump       = op_j
 	, op_jump_nlink = op_jal
 
@@ -245,6 +255,10 @@ enum { _BitOffsets = 0
 #define or_i(rt, rs, imm)          enc_i(op_ori,   (rs),   (rt), (imm))
 #define xor_i(rt, rs, imm)         enc_i(op_xori,  (rs),   (rt), (imm))
 #define load_ui(rt, imm)           enc_i(op_lui,   R_0,    (rt), (imm))
+
+#define load_u1 load_byte_u
+#define load_u2 load_half_u
+#define load_u4 load_word
 
 // Ergonomic add to the same register.
 #define add_ui_1(rt_rs, imm)       enc_i(op_addiu, (rt_rs), (rt_rs), (imm))

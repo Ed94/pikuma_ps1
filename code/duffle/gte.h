@@ -5,6 +5,7 @@
 #	include "mips.h"
 #endif
 
+#pragma region ASM DSL
 /* ============================================================================
  *  gte.h — Geometry Transformation Engine (COP2) for the PS1
  * ============================================================================
@@ -332,7 +333,7 @@ enum { _C2_OPS_ = 0
    | enc_gte_cmd(cmd) \
 )
 
-/* Pre-baked GTE command words for the common cases.
+/* GTE command words for the common cases.
  *
  * These are pure compile-time integer constants — the C compiler
  * constant-folds them into `.word` directives in .rodata. Use them
@@ -379,11 +380,16 @@ enum { _C2_OPS_ = 0
 #define gte_cmdw_op     (gte_cmd_base | enc_gte_cmd(gte_cmd_op   ))
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
 
+#define gte_cmdw_rotate_translate_perspective_triple gte_cmdw_rtpt
+
 /* PsyQ compatibility bits for AVSZ3 (Bits 20, 22, 24 must be set) */
 #define gte_cmdw_psyq_avsz3_compat (0x15 << 20)
 #define gte_cmd_avsz3               0x2D
 
 #define gte_cmdw_avsz3 (gte_cmd_base | enc_gte_cmd(gte_cmd_avsz3) | gte_cmdw_psyq_avsz3_compat)
+
+// Takes the three screen-space Z values of the triangle → averages them → writes the result into the OTZ register.
+#define gte_avg_sort_z3 gte_cmdw_avsz3
 
 /* AVSZ4 — average Z of 4 vertices (for quads) */
 #define gte_cmd_avsz4 0x2E
@@ -403,7 +409,7 @@ enum { _C2_OPS_ = 0
  *   asm_gte_load_v0(svector_ptr);
  */
 
-/* Pre-baked lwc2 encoding helpers parameterized on the base GPR.
+/* lwc2 encoding helpers parameterized on the base GPR.
  *
  * gte_lwc2_v0(base)  → lwc2 $0,  0(base)   ; C2_VXY0
  * gte_lwc2_v0z(base) → lwc2 $1,  4(base)   ; C2_VZ0
@@ -656,3 +662,11 @@ enum {
 		, r_use(r0)                         \
 		asm_clobber: clb_system, rlit(R_T4), rlit(R_T5), rlit(R_T6) \
 	)
+
+#pragma region ASM DSL
+
+#pragma region Reserved
+
+
+
+#pragma endregion Reserved
