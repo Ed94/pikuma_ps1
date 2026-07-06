@@ -7,6 +7,7 @@
 # include "memory.h"
 #endif
 
+
 /* ---------------------------------------------------------------------------
  *  TAPE DRIVE ABI & REGISTER ALIASES
  * ---------------------------------------------------------------------------
@@ -29,19 +30,8 @@ enum {
 #define R_OtBase_Code   R_T6_Code
 };
 
-/* The 'Yield' sequence for Tape Atoms.
- * Loads the next pointer from the tape, advances the tape, and jumps. 
- * Cost: ~ 4 cycles */
-#define mips_yield()              \
-	  load_word(R_T9, R_TapePtr, 0) \
-	, add_ui_1(       R_TapePtr, 4) \
-	, jump_reg( R_T9)               \
-	, nop
-
 /* The 'Exit' Atom */
 MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
-
-typedef Slice_(U4);
 
 /* Generalized Tape Engine Runner */
 FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; asm volatile(
@@ -66,21 +56,32 @@ FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; a
 		, clb_mem_drain 
 ); }
 
-typedef Struct_(TapeBuilder) { U4 ptr; U4 count; };
-FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->count = 0; }
+typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
+FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->used = 0; }
 FI_ TapeBuilder tb_make(                 FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
 
-FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->count] = u4_(atom); ++ tb->count; }
-FI_ void tb_data(TapeBuilder* tb, U4    data) { u4_r(tb->ptr)[tb->count] = u4_(data); ++ tb->count; }
+#define tb_emit_(tb, atom) tb_emit(tb, tmpl(code,atom))
+FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
+FI_ void tb_data(TapeBuilder* tb, U4    data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 
-FI_ Slice_U4 tb_end  (TapeBuilder* tb) { tb_emit(tb,code_tape_exit); return (Slice_U4){ C_(U4*,tb->ptr), tb->count }; }
-FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Slice_U4){ C_(U4*,tb.ptr),  tb.count }; }
+FI_ Slice_U4 tb_end  (TapeBuilder* tb) { tb_emit(tb,code_tape_exit); return (Slice_U4){ C_(U4*,tb->ptr), tb->used }; }
+FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Slice_U4){ C_(U4*,tb.ptr),  tb.used }; }
 #define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,code_tape_exit))
 
+#pragma region Macro Mips Atom Components
 /* ---------------------------------------------------------------------------
  *  MACRO ATOM Components (Reusable Assembly Components)
  *  These do NOT yield. They are expanded inline inside Tape Atoms.
  * ---------------------------------------------------------------------------*/
+
+/* The 'Yield' sequence for Tape Atoms.
+ * Loads the next pointer from the tape, advances the tape, and jumps. 
+ * Cost: ~ 4 cycles */
+#define mac_yield()          \
+	  load_word(R_T9, R_TapePtr, 0) \
+	, add_ui_1(       R_TapePtr, 4) \
+	, jump_reg( R_T9)               \
+	, nop
 
 /* Loads 3 16-bit indices from the face array */
 #define mac_load_tri_indices(rId_0, rId_1, rId_2) \
@@ -117,15 +118,39 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, shift_lr(  R_AT, R_AT, 8)                                               \
 	, store_word(R_AT, R_T1, 0)          /* OrderingTable[OTZ] = PrimCur */
 
-internal MipsAtom_(bind_workspace) {
-	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCur,  R_TapePtr,  0), 
-	load_word(R_FaceCur,  R_TapePtr,  4), 
-	load_word(R_VertBase, R_TapePtr,  8), 
-	load_word(R_OtBase,   R_TapePtr, 12), 
-	add_ui_1(             R_TapePtr, 16),
-	mips_yield()
-};
+#pragma endregion Macro Atom Components
+
+#pragma region Mips Atom Builder
+// This allows for runtime procedural authoring of mips atoms.
+
+typedef Struct_(FMipsAtom512) { U4 data[512]; U4 used; };
+
+typedef Slice_(MipsCode); typedef Slice_MipsCode MipsAtom; 
+// FArena Related
+typedef Relative_(FArena) Struct_(MipsAtomBuilder) { U4 start; U4 capacity; U4 used; };
+// Whatever the builder is writting to should most likely coresspond
+// to something that can fit within instruction cache?
+
+FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode_R code) {
+	assert(ab->capacity - ab->used - code->len);
+	mem_copy(ab->start, u4_(code->ptr), code->len);
+	mem_bump(ab->start, ab->capacity, & ab->used, code->len);
+}
+#define atombuilder_unroll_mac(ab, mac) 
+
+// When done authoring, utilize this to cap-off the atom
+FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
+	LP_ MipsAtom_(yield) { mac_yield() };
+	mem_copy(ab->start, u4_(code_yield), S_(code_yield));
+	mem_bump(ab->start, ab->capacity, & ab->used, S_(code_yield));
+}
+
+#define mipsatom_from_builder(ab) (MipsAtom){ab.start, ab.used}
+
+#pragma endregion Mips Atom Builder
+
+#pragma region Baked Mips Atoms
+// These atoms are resolved at compile time and are (usually) statically linked readonly data.
 
 internal MipsAtom_(sync_prim_cursor) {
 	/* Pop the C-struct address and base address from the tape */
@@ -135,7 +160,7 @@ internal MipsAtom_(sync_prim_cursor) {
 	/* Calculate byte offset and store directly back to RAM */
 	sub_u(R_T0, R_PrimCur, R_T0),
 	store_word(R_T0, R_AT, 0),
-	mips_yield()
+	mac_yield()
 };
 
 internal MipsAtom_(set_gte_world) {
@@ -151,7 +176,26 @@ internal MipsAtom_(set_gte_world) {
 	load_word(R_T0, R_T3, 20),    load_word(R_T1, R_T3, 24),    load_word(R_T2, R_T3, 28),
 	gte_ct(   R_T0, gte_cr_TRX),  gte_ct(   R_T1, gte_cr_TRY),  gte_ct(   R_T2, gte_cr_TRZ),
 
-	mips_yield()
+	mac_yield()
+};
+
+
+// TODO(Ed): I'm not sure yet if the bindings are redundant with the floortri atom yet.
+
+typedef Struct_(Binds_CubeTri) {
+	U4 PrimCursor;
+	U4 FaceCursor;
+	U4 VertBase;
+	U4 OtBase;
+};
+internal MipsAtom_(rbind_cube_tri) {
+	/* Pop 4 arguments from the tape directly into the workspace registers */
+	load_word(R_PrimCur,  R_TapePtr, O_(Binds_CubeTri,PrimCursor)), 
+	load_word(R_FaceCur,  R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
+	load_word(R_VertBase, R_TapePtr, O_(Binds_CubeTri,VertBase)), 
+	load_word(R_OtBase,   R_TapePtr, O_(Binds_CubeTri,OtBase)), 
+	add_ui_1(             R_TapePtr, S_(Binds_CubeTri)),
+	mac_yield()
 };
 
 /* ============================================================================
@@ -283,7 +327,25 @@ internal MipsAtom_(cube_tri) {
 	/* ── 12. Advance cursors & yield ─────────────────────────────────────── */
 	add_ui(R_PrimCur, R_PrimCur, 36),  /* 9 words × 4 bytes */
 	add_ui(R_FaceCur, R_FaceCur, 8),   /* 4 × S2 = 8 bytes */
-	mips_yield()
+	mac_yield()
+};
+
+
+typedef Struct_(Binds_FloorTri) {
+	U4 PrimCursor;
+	U4 FaceCursor;
+	U4 VertBase;
+	U4 OtBase;
+};
+
+internal MipsAtom_(rbind_floor_tri) {
+	/* Pop 4 arguments from the tape directly into the workspace registers */
+	load_word(R_PrimCur,  R_TapePtr, O_(Binds_FloorTri,PrimCursor)), 
+	load_word(R_FaceCur,  R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
+	load_word(R_VertBase, R_TapePtr, O_(Binds_FloorTri,VertBase)), 
+	load_word(R_OtBase,   R_TapePtr, O_(Binds_FloorTri,OtBase)), 
+	add_ui_1(             R_TapePtr, S_(Binds_FloorTri)),
+	mac_yield()
 };
 
 internal MipsAtom_(floor_tri) {
@@ -321,11 +383,11 @@ internal MipsAtom_(floor_tri) {
 	add_ui(R_PrimCur, R_PrimCur, 20), /* Advance Prim Cursor (5 words) */
 	/* 9. Advance Input Cursor & Yield (Both branch targets land here) */
 	add_ui(R_FaceCur, R_FaceCur, 8),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
-	mips_yield()
+	mac_yield()
 };
 
 /* DIAGNOSTIC 1: Pure tape loop test */
-internal MipsAtom_(diag_yield) { mips_yield() };
+internal MipsAtom_(diag_yield) { mac_yield() };
 
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal MipsAtom_(diag_color) {
@@ -353,7 +415,7 @@ internal MipsAtom_(diag_color) {
 
 	add_ui(R_T7, R_T7, 20),          
 
-	mips_yield()
+	mac_yield()
 };
 
 /* DIAGNOSTIC 3: Pure GTE test (No Memory Writes) */
@@ -384,5 +446,7 @@ internal MipsAtom_(diag_gte) {
 	/* Advance Face Cursor and Yield */
 	add_ui(R_T4, R_T4, 8),
 
-	mips_yield()
+	mac_yield()
 };
+
+#pragma endregion Baked Mips Atoms

@@ -244,7 +244,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make(&tape_arena); tb_scope(& tb) {
-			tb_emit(& tb, code_bind_workspace);
+			tb_emit(& tb, code_rbind_cube_tri);
 			tb_data(& tb, prim_cursor);
 			tb_data(& tb, u4_(static_mem.cube.faces));
 			tb_data(& tb, u4_(static_mem.cube.verts));
@@ -334,12 +334,11 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make(&tape_arena); tb_scope(& tb) {
 			// Push "Protocol" to tape
-			tb_emit(& tb, code_bind_workspace);
-			tb_data(& tb, prim_cursor);
-			tb_data(& tb, u4_(static_mem.floor.faces));
-			tb_data(& tb, u4_(static_mem.floor.verts));
-			tb_data(& tb, u4_(ordering_buf));
-            
+			tb_emit_(& tb, rbind_floor_tri);
+				tb_data(& tb, prim_cursor);
+				tb_data(& tb, u4_(static_mem.floor.faces));
+				tb_data(& tb, u4_(static_mem.floor.verts));
+				tb_data(& tb, u4_(ordering_buf));
 			tb_emit(& tb, code_set_gte_world);
 			tb_data(& tb, u4_(& static_mem.tform_world));
             

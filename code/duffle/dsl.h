@@ -87,7 +87,7 @@
 #define PtrSet_(type)  TypeR_(type); typedef TypeV_(type)
 #define TSet_(type)    type; typedef PtrSet_(type)
 
-#define array_len(a)                   (U8)(sizeof(a) / sizeof(typeof((a)[0])))
+#define array_len(a)                   (U4)(sizeof(a) / sizeof(typeof((a)[0])))
 #define array_decl(type, ...)          (type[]){__VA_ARGS__}
 #define Array_sym(type,len)            A ## len ## _ ## type
 #define Array_expand(type,len)         type Array_sym(type, len)[len]; typedef PtrSet_(Array_sym(type, len))
@@ -95,6 +95,7 @@
 #define Bit_(id,b)                     id = (1 << b), tmpl(id,pos) = b
 #define Enum_(underlying_type, symbol) underlying_type TSet_(symbol); enum   symbol
 #define Proc_(symbol)                  symbol
+#define Relative_(symbol)              // Does nothing but annotate that a symbol is associated with another.
 #define Struct_(symbol)                struct symbol   TSet_(symbol); struct symbol
 #define Union_(symbol)                 union  symbol   TSet_(symbol); union  symbol
 
@@ -140,7 +141,9 @@ typedef void Proc_(VoidFn) (void);
 #define tera(n)         (C_(U4, n) << 40)
 #define null             C_(U4,    0)
 #define nullptr          C_(void*, 0)
-#define O_(type,member)  C_(U4,__builtin_offsetof(type,member))
+#define O_(type, field) (C_(U4, & C_(type*,0)->field))
+ 
+#define OT_(field)       O_(typeof_ptr(& field), filed))
 #define S_(data)         C_(U4, sizeof(data))
 
 #define sop_1(op,a,b) C_(U1, s1_(a) op s1_(b))
@@ -170,8 +173,6 @@ def_signed_ops(le, <=)
 #define ge_s(a,b)  def_generic_sop(ge, a,b)
 #define le_s(a,b)  def_generic_sop(le, a,b)
 #undef def_generic_sop
-
-#define o_(field)                           offset_of(typeof_ptr(& field), filed))
 
 #define alignas                             _Alignas
 #define alignof                             _Alignof

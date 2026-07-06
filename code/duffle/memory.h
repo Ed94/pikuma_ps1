@@ -88,6 +88,8 @@ FI_ void slice_copy_(Slice dest, Slice src) {
 	slice_copy_(slice_to_ut(dest), slice_to_ut(src)); \
 } while(0)
 
+typedef Slice_(U4);
+
 #pragma endregion Slice
 
 #pragma region FArena
