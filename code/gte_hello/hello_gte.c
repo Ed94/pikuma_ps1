@@ -12,7 +12,12 @@
 #include "duffle/mips.h"
 #include "duffle/gp.h"
 #include "duffle/gte.h"
+
+#	include "duffle/gen/lottes_tape.offsets.h"
 #include "duffle/lottes_tape.h"
+
+#	include "tape_atom.metadata.h"
+#	include "gen/hello_gte_tape.offsets.h"
 #include "hello_gte.h"
 #include "hello_gte_tape.c"
 

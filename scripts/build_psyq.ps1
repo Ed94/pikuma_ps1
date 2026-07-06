@@ -311,10 +311,59 @@ function build-graphis_hello {
 }
 # build-graphis_hello
 
+function generate-TapeAtomOffsets {param(
+	[Parameter(Mandatory=$true)]
+	[string[]]$sources,
+	[Parameter(Mandatory=$true)]
+	[string]$metadata)
+
+	$gen_atom_offsets_script = join-path $path_scripts 'tape_attom.offset_gen.meta.lua'
+
+    $any_stale = $false
+    foreach ($src in $sources) {
+        $basename = [System.IO.Path]::GetFileNameWithoutExtension($src)
+        $dir      = split-path -Path $src -Parent
+        $gen_dir  = join-path $dir 'gen'
+        $out      = join-path $gen_dir "$basename.offsets.h"
+
+        if (-not (test-path $out)) { $any_stale = $true; break }
+        $src_mtime  = (get-item $src).LastWriteTimeUtc
+        $out_mtime  = (get-item $out).LastWriteTimeUtc
+        $meta_mtime = (get-item $metadata).LastWriteTimeUtc
+        if (($src_mtime -gt $out_mtime) -or ($meta_mtime -gt $out_mtime)) {
+            $any_stale = $true
+            break
+        }
+    }
+
+    if (-not $any_stale) {
+        write-host "AtomOffs  all $($sources.Count) source(s) up-to-date" -ForegroundColor DarkGray
+        return
+    }
+
+    write-host "AtomOffs  $($sources.Count) source(s)" -ForegroundColor Magenta
+    & lua $gen_atom_offsets_script $metadata @sources
+    if ($LASTEXITCODE -ne 0) {
+        write-error "Atom offset generation failed. Aborting."
+        exit 1
+    }
+}
+
 function build-gte_hello {
 	$includes += @()
 
 	$path_module = join-path $path_code 'gte_hello'
+
+	$path_duffle              = join-path $path_code 'duffle'
+	$path_gen                 = join-path $path_module 'gen'
+	$path_atom_metadata       = join-path $path_module 'tape_atom.metadata.h'
+
+	$atom_sources = @(
+        (join-path $path_duffle 'mips.h'),
+        (join-path $path_duffle 'lottes_tape.h'),
+        (join-path $path_module 'hello_gte_tape.c')
+    )
+    generate-TapeAtomOffsets -sources $atom_sources -metadata $path_atom_metadata
 
 	$assemble_args = @()
 	$assemble_args += $f_debug
@@ -353,6 +402,8 @@ function build-gte_hello {
 }
 build-gte_hello
 
+
+# NO idea if this works yet...
 function Send-ToEmulator { param(
     [string]$exePath
 )

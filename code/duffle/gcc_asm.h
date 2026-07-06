@@ -67,8 +67,8 @@
  *
  *   asm volatile("nop" : : : reg_str(R_RA), "memory");      // clobber list */
 #define rlit_stringfy(n)  "$" stringify(n)
-#define rlit_tmpl(n)  rlit_stringfy(tmpl(n,Code))
-#define rlit(n)       rlit_tmpl(n)
+#define rlit_tmpl(n)      rlit_stringfy(tmpl(n,Code))
+#define rlit(n)           rlit_tmpl(n)
 
 /* ------------------------------------------------------------------------ *
  *  rgcc(n) — GCC-specific bundle for register-variable declarations.

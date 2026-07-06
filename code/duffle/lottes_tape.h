@@ -7,7 +7,10 @@
 # include "memory.h"
 #endif
 
+typedef U4 const MipsCode;
+#define MipsAtom_(sym) MipsCode tmpl(code,sym) [] align_(4) =
 
+#pragma region Tape Drive
 /* ---------------------------------------------------------------------------
  *  TAPE DRIVE ABI & REGISTER ALIASES
  * ---------------------------------------------------------------------------
@@ -63,11 +66,13 @@ FI_ TapeBuilder tb_make(                 FArena* arena) { return (TapeBuilder){ 
 
 #define tb_emit_(tb, atom) tb_emit(tb, tmpl(code,atom))
 FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
-FI_ void tb_data(TapeBuilder* tb, U4    data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
+FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 
 FI_ Slice_U4 tb_end  (TapeBuilder* tb) { tb_emit(tb,code_tape_exit); return (Slice_U4){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Slice_U4){ C_(U4*,tb.ptr),  tb.used }; }
 #define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,code_tape_exit))
+
+#pragma endregion Tape Drive
 
 #pragma region Macro Mips Atom Components
 /* ---------------------------------------------------------------------------
@@ -149,6 +154,35 @@ FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
 
 #pragma region Baked Mips Atoms
 // These atoms are resolved at compile time and are (usually) statically linked readonly data.
+
+enum {
+	bios_flushcache = 0x44,
+	bios_table_addr = 0xA0,
+};
+
+/* Flushes the Instruction Cache (PSX A-function 0x44 via BIOS stub at 0xA0).
+ *
+ * Sequence (per MIPS ABI; arguments in arg registers, RA pushed to stack):
+ *   1. sp -= 8;  sw $ra, 4($sp)        ; save RA
+ *   2. $a0 = bios_flushcache (arg0)
+ *   3. $t0 = bios_table_addr           ; t0 = &BIOS A-function table
+ *   4. jalr $t0, $ra                    ; call BIOS(flushcache)
+ *      nop                              ; branch delay slot
+ *   5. lw $ra, 4($sp);  jr $ra          ; restore & return
+ *   6. sp += 8
+ */
+internal MipsAtom_(mips_flush_icache) {
+	  add_ui(rstack_ptr, rstack_ptr, -8)        /* sp -= 8             */
+	, store_word(rret_addr, rstack_ptr, 4)      /* sw  $ra,   4($sp)   */
+	, add_ui(rret_0, rdiscard, bios_flushcache) /* addiu $a0, $0, 0x44 */
+	, add_ui(rtmp_0, rdiscard, bios_table_addr) /* addiu $t0, $0, 0xA0 */
+	, jump_link(rtmp_0, rret_addr)              /* jalr  $t0, $ra      */
+	, nop                                       /* BD slot             */
+	, load_word(rret_addr, rstack_ptr, 4)       /* lw   $ra, 4($sp)    */
+	, jump_reg(rret_addr)                       /* jr   $ra            */
+	, add_ui(rstack_ptr, rstack_ptr, 8)         /* sp += 8 (BD)        */
+	, mac_yield()
+};
 
 typedef Struct_(Binds_SyncPrimCursor) {
 	U4 PrimtiveArena_Used;

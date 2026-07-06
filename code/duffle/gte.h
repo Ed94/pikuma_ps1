@@ -663,7 +663,7 @@ enum {
 		asm_clobber: clb_system, rlit(R_T4), rlit(R_T5), rlit(R_T6) \
 	)
 
-#pragma region ASM DSL
+#pragma endregion ASM DSL
 
 #pragma region Reserved
 

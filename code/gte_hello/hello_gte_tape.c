@@ -1,6 +1,8 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	include "duffle/lottes_tape.h"
 #	include "hello_gte.h"
+#	include "tape_atom.metadata.h"
+#	include "gen/hello_gte_tape.offsets.h"
 #endif
 
 #pragma region MACs
@@ -32,7 +34,7 @@ internal MipsAtom_(floor_tri) {
 
 	/* 4. Culling (Branch forward 29 instructions if Backface) */
 	gte_mf(R_T0, C2_MAC0),
-	nop, branch_le_zero(R_T0, 29), 
+	nop, branch_le_zero(R_T0, atom_offset(floor_tri_exit)), 
 	nop,                      
 	
 	/* 5. Format Primitive */
@@ -54,6 +56,7 @@ internal MipsAtom_(floor_tri) {
 	add_ui(R_PrimCur, R_PrimCur, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 
 	/* 9. Advance Input Cursor & Yield (Both branch targets land here) */
+atom_label(floor_tri_exit)
 	add_ui(R_FaceCur, R_FaceCur, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
 	mac_yield()
 };
