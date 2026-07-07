@@ -22,7 +22,7 @@
 
 #pragma region Baked Atoms
 
-internal MipsCode code_floor_tri [] __attribute__((aligned (4))) = {
+internal MipsAtom_(floor_tri) {
 	// T0-T2 allocated
 	mac_load_tri_indices(R_T0, R_T1, R_T2),
 	// 	  load_half_u(R_T0, R_FaceCur, 0 * S_(S2))
