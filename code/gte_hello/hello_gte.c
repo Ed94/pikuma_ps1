@@ -334,6 +334,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		m3s2_rotation   (& smem.floor.rot,   & smem.tform_world);
 		m3s2_translation(& smem.tform_world, & smem.floor.pos);
 		m3s2_scale      (& smem.tform_world, & smem.floor.scale);
+		// TODO(Ed): This can either be in the tape or here...
 		gte_matrix_set_rotation   (& smem.tform_world);
 		gte_matrix_set_translation(& smem.tform_world);
 
