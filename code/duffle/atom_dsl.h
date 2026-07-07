@@ -1,8 +1,8 @@
 /*
- * tape_atom_dsl.h
+ * atom_dsl.h
  * ============================================================================
  *
- * TAPE ATOM DSL — annotation layer for tape atoms (lottes_tape.h).
+ * ATOM DSL — annotation layer for tape atoms (lottes_tape.h).
  *
  * This header turns `__attribute__((annotate(...)))` and `_Pragma(...)` into
  * a small named DSL that the metaprogram can validate against.

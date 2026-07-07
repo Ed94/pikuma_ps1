@@ -44,14 +44,14 @@ MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 /* Generalized Tape Engine Runner */
 FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; asm volatile(
 	asm_words(
-			add_ui(    R_SP, R_SP,      -8)   /* Allocate stack space */
-		, store_word(R_RA, R_SP,       0)   /* Safely backup $ra to the stack */
-		, load_word( R_T9, R_TapePtr,  0)   /* Bootstrap the first jump */
-		, add_ui_1(  R_TapePtr, 4)          /* Advance tape */
-		, jump_nreg(R_T9)                   /* jalr $t9 */
-		, nop                               /* Branch delay slot */
-		, load_word(R_RA, R_SP, 0)          /* Restore $ra from stack */
-		, add_ui_1( R_SP, 8)                /* Deallocate stack space */
+			add_ui(    R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
+		, store_word(R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
+		, load_word( R_AtomJmp, R_TapePtr, 0)         /* Bootstrap the first jump */
+		, add_ui_1(  R_TapePtr, S_(MipsCode))         /* Advance tape */
+		, jump_nreg( R_AtomJmp)                       /* jalr $t9 */
+		, nop                                         /* Branch delay slot */
+		, load_word(R_RA, R_SP, 0)                    /* Restore $ra from stack */
+		, add_ui_1( R_SP, MipsStackAlignment)         /* Deallocate stack space */
 	)
 	asm_rpins, r_use(tp)
 	asm_clobber: 
@@ -66,7 +66,7 @@ FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; a
 
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
 FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->used = 0; }
-FI_ TapeBuilder tb_make_old(                 FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
+FI_ TapeBuilder tb_make_old(             FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
 FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ mem.ptr, mem.len, 0 }; }
 
 #define tb_emit_(tb, atom) tb_emit(tb, tmpl(code,atom))
@@ -88,17 +88,17 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 /* The 'Yield' sequence for Tape Atoms.
  * Loads the next pointer from the tape, advances the tape, and jumps. 
  * Cost: ~ 4 cycles */
-#define mac_yield()          \
-	  load_word(R_AtomJmp, R_TapePtr, 0) \
-	, add_ui_1(            R_TapePtr, 4) \
-	, jump_reg( R_AtomJmp)               \
+#define mac_yield()                               \
+	  load_word(R_AtomJmp, R_TapePtr, 0)            \
+	, add_ui_1(            R_TapePtr, S_(MipsCode)) \
+	, jump_reg( R_AtomJmp)                          \
 	, nop
 
 /* Words: 3; Loads 3 S2 indices from the face array */
 #define mac_load_tri_indices(rId_0, rId_1, rId_2) \
-	  load_half_u(rId_0, R_FaceCursor, 0) \
-	, load_half_u(rId_1, R_FaceCursor, 2) \
-	, load_half_u(rId_2, R_FaceCursor, 4)
+	  load_half_u(rId_0, R_FaceCursor, 0 * S_(S2)) \
+	, load_half_u(rId_1, R_FaceCursor, 1 * S_(S2)) \
+	, load_half_u(rId_2, R_FaceCursor, 2 * S_(S2))
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE 
 	R_AT  = rId_[#] << 3; 
@@ -112,6 +112,7 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, shift_ll(R_AT, rId_1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
 	, shift_ll(R_AT, rId_2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
 
+	//TODO(Ed): Add more type annotation
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list */
 #define mac_insert_ot_tag(r_otz, prim_length)                               \
 	  shift_ll(  R_T1, r_otz, 2)                                              \
@@ -176,6 +177,7 @@ enum {
  *   5. lw $ra, 4($sp);  jr $ra          ; restore & return
  *   6. sp += 8
  */
+// TODO(Ed): Annotate magic offsets
 internal MipsAtom_(mips_flush_icache) {
 	  add_ui(rstack_ptr, rstack_ptr, -8)        /* sp -= 8             */
 	, store_word(rret_addr, rstack_ptr, 4)      /* sw  $ra,   4($sp)   */
@@ -189,11 +191,16 @@ internal MipsAtom_(mips_flush_icache) {
 	, mac_yield()
 };
 
+typedef Struct_(Binds_SetGteWorld) {
+	U4 transform;
+};
+// TODO(Ed): Bugged, fix
 internal MipsAtom_(set_gte_world) {
 	/* Pop matrix address from tape into R_T3 ($11) */
-	load_word(R_T3,      R_TapePtr, 0),
-	add_ui_1( R_TapePtr, 4),
+	load_word(R_T3, R_TapePtr, O_(Binds_SetGteWorld,transform)),
+	add_ui_1(       R_TapePtr, S_(Binds_SetGteWorld)),
 
+// TODO(Ed): Annotate magic offsets.
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
 	load_word(R_T0, R_T3,  0),    load_word(R_T1, R_T3,  4),
 	gte_ct(   R_T0, gte_cr_RT11), gte_ct(   R_T1, gte_cr_RT12),
@@ -207,187 +214,10 @@ internal MipsAtom_(set_gte_world) {
 
 // TODO(Ed): I'm not sure yet if the bindings are redundant with the floortri atom yet.
 
-typedef Struct_(Binds_CubeTri) {
-	U4 PrimCursor;
-	U4 FaceCursor;
-	U4 VertBase;
-	U4 OtBase;
-};
-internal MipsAtom_(rbind_cube_tri) {
-	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)), 
-	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
-	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)), 
-	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)), 
-	add_ui_1(               R_TapePtr, S_(Binds_CubeTri)),
-	// Note(Ed): This entire thing is argument shuffle?
-	// TODO(Ed): Eliminate
-	mac_yield()
-};
-
-/* ============================================================================
- *  cube_tri — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
- * ============================================================================
- *
- *  Reads 4 indices from R_FaceCur (V4_S2 = 8 bytes), loads 4 vertices into
- *  the GTE, runs the PsyQ RotAverageNclip4 sequence, and renders a Poly_G4.
- *
- *  PsyQ RotAverageNclip4 sequence:
- *    1. Load V0=p0, V1=p1, V2=p2
- *    2. RTPT  → SXY0=p0, SXY1=p1, SXY2=p2, SZ1,SZ2,SZ3
- *    3. NCLIP → MAC0 = cross(p0,p1,p2)  ← BEFORE RTPS!
- *    4. Store SXY0 (p0) to primitive buffer
- *    5. Load V3 into V0
- *    6. RTPS  → SXY0=p3, SZ0
- *    7. Store SXY0 (p3) to primitive buffer
- *    8. AVSZ3 → OTZ from SZ1,SZ2,SZ3
- *
- *  PRIMITIVE FORMAT (Poly_G4 = 9 words = 36 bytes)
- *  ------------------------------------------------
- *  Word 0 (offset  0): OT tag  (set by mac_insert_ot_tag)
- *  Word 1 (offset  4): c0 + code = 0x38FF00FF (magenta, opcode 0x38)
- *  Word 2 (offset  8): p0 = SXY0 (stored BEFORE RTPS)
- *  Word 3 (offset 12): c1 + pad = 0x0000FFFF (yellow)
- *  Word 4 (offset 16): p1 = SXY1
- *  Word 5 (offset 20): c2 + pad = 0x00FFFF00 (cyan)
- *  Word 6 (offset 24): p2 = SXY2
- *  Word 7 (offset 28): c3 + pad = 0x0000FF00 (green)
- *  Word 8 (offset 32): p3 = SXY0 (stored AFTER RTPS)
- *
- *  BRANCH OFFSETS
- *  ----------------------------------------------
- *  Outer branch (backface cull): branch_le_zero(R_T0, 49)
- *    → Skip 49 instructions from BD slot, land at add_ui(R_FaceCur,...)
- *  Inner branch (OTZ bounds):    branch_equal(R_AT, R_0, 13)
- *    → Skip 13 instructions from BD slot, land at add_ui(R_FaceCur,...)
- * ============================================================================ */
-	atom_region  (cube_tri, REGION_PRIM_ARENA)
-	atom_group   (cube_tri, GROUP_RENDER_PRIMS)
-	atom_cadence (cube_tri, CADENCE_FRAME)
-	atom_annot(cube_tri, phase_work,
-		tape_regs(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
-		tape_regs(R_PrimCursor, R_FaceCursor))
-internal 
-MipsAtom_(cube_tri) {
-	/* ── 1. Load 4 face indices from R_FaceCur ──────────────────────────── */
-	load_half_u(R_T0, R_FaceCursor, 0),  /* T0 = face->x (vertex 0 index) */
-	load_half_u(R_T1, R_FaceCursor, 2),  /* T1 = face->y (vertex 1 index) */
-	load_half_u(R_T2, R_FaceCursor, 4),  /* T2 = face->z (vertex 2 index) */
-	load_half_u(R_T3, R_FaceCursor, 6),  /* T3 = face->w (vertex 3 index) */
-
-	/* ── 2. Load V0, V1, V2 into GTE ────────────────────────────────────── */
-	/* V0 = verts[face->x] */
-	shift_ll(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
-
-	/* V1 = verts[face->y] */
-	shift_ll(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1),
-
-	/* V2 = verts[face->z] */
-	shift_ll(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2),
-
-	/* ── 3. RTPT — transforms V0/V1/V2 → SXY0/SXY1/SXY2 + SZ1/SZ2/SZ3 ─── */
-	nop, nop, gte_cmdw_rtpt,
-
-	/* ── 4. NCLIP — backface culling on SXY0/SXY1/SXY2 (p0,p1,p2) ──────── */
-	/*     MUST be done BEFORE RTPS overwrites SXY0 with p3!                */
-	nop, nop, gte_cmdw_nclip,
-	nop, nop,
-
-	/* ── 5. Cull check: skip format/insert if MAC0 ≤ 0 (backface) ───────── */
-	gte_mf(R_T0, C2_MAC0),
-	nop,
-	branch_le_zero(R_T0, 49),  /* Skip 49 if MAC0 ≤ 0 (backface) → cull */
-	nop,                        /* BD slot */
-
-	/* ── 6. Store p0,p1,p2 to primitive buffer (BEFORE RTPS overwrites) ─── */
-	store_word(R_0, R_PrimCursor, 0),
-
-	/* Word 1: c0 (BGR) + code = 0x38FF00FF (magenta, opcode 0x38) */
-	load_ui(R_AT, 0x38FF), or_i(R_AT, R_AT, 0x00FF),
-	store_word(R_AT, R_PrimCursor, 4),
-
-	/* Word 2: p0 = SXY0 (stored BEFORE RTPS overwrites it) */
-	gte_sw(C2_SXY0, R_PrimCursor, 8),
-
-	/* Word 3: c1 (BGR) + pad = 0x0000FFFF (yellow) */
-	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFFFF),
-	store_word(R_AT, R_PrimCursor, 12),
-
-	/* Word 4: p1 = SXY1 */
-	gte_sw(C2_SXY1, R_PrimCursor, 16),
-
-	/* Word 5: c2 (BGR) + pad = 0x00FFFF00 (cyan) */
-	load_ui(R_AT, 0x00FF), or_i(R_AT, R_AT, 0xFF00),
-	store_word(R_AT, R_PrimCursor, 20),
-
-	/* Word 6: p2 = SXY2 */
-	gte_sw(C2_SXY2, R_PrimCursor, 24),
-
-	/* Word 7: c3 (BGR) + pad = 0x0000FF00 (green) */
-	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFF00),
-	store_word(R_AT, R_PrimCursor, 28),
-
-	/* ── 7. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
-	shift_ll(R_AT, R_T3, 3), add_u(R_AT, R_AT, R_VertBase),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
-
-	/* ── 8. RTPS — transforms V0 (now V3) → SXY0 (p3) + SZ0 ─────────────── */
-	nop, nop, gte_cmdw_rtps,
-
-	/* Word 8: p3 = SXY0 (written AFTER RTPS with V3's screen coords) */
-	gte_sw(C2_SXY0, R_PrimCursor, 32),
-
-	/* ── 9. AVSZ4 — average Z from SZ0/SZ1/SZ2/SZ3 ────────────── */
-	nop, nop, gte_cmdw_avsz4,
-	nop, nop,
-	gte_mf(R_T1, C2_OTZ),
-
-	/* ── 10. Bounds check OTZ < 2048 ─────────────────────────────────────── */
-	add_ui(      R_AT, R_0,  2048),
-	slt_u(       R_AT, R_T1, R_AT),
-	branch_equal(R_AT, R_0,  13),  /* Skip 13 → land at add_ui(R_FaceCur,...) */
-	nop,                            /* BD slot */
-
-	/* ── 11. Insert into Ordering Table (length = 8 for Poly_G4) ─────────── */
-	mac_insert_ot_tag(R_T1, 0x0800),  /* 0x0800 = 8 << 8 = length 8 in tag */
-
-	/* ── 12. Advance cursors & yield ─────────────────────────────────────── */
-	add_ui(R_PrimCursor, R_PrimCursor, 36),  /* 9 words × 4 bytes */
-	add_ui(R_FaceCursor, R_FaceCursor, 8),   /* 4 × S2 = 8 bytes */
-	mac_yield()
-};
-
-
-typedef Struct_(Binds_FloorTri) {
-	U4 PrimCursor;
-	U4 FaceCursor;
-	U4 VertBase;
-	U4 OtBase;
-};
-
-internal MipsAtom_(rbind_floor_tri) {
-	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)), 
-	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
-	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,VertBase)), 
-	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,OtBase)), 
-	add_ui_1(               R_TapePtr, S_(Binds_FloorTri)),
-	// Note(Ed): This entire thing is argument shuffle?
-	// TODO(Ed): Eliminate
-	mac_yield()
-};
-
-
 /* DIAGNOSTIC 1: Pure tape loop test */
 internal MipsAtom_(diag_yield) { mac_yield() };
 
+// TODO(Ed): Reduce magic numbers/offsets
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal MipsAtom_(diag_color) {
 	store_word(R_0, R_T7, 0), 
@@ -417,6 +247,7 @@ internal MipsAtom_(diag_color) {
 	mac_yield()
 };
 
+// TODO(Ed): Reduce magic numbers/offsets
 /* DIAGNOSTIC 3: Pure GTE test (No Memory Writes) */
 internal MipsAtom_(diag_gte) {
 	/* Load 3 indices */

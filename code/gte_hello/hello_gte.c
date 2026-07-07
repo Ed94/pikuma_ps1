@@ -96,6 +96,7 @@ typedef Struct_(Ent_Floor) {
 	A2_V3_S2 faces;
 };
 
+enum { scratchpad_size = 1024, };
 typedef Struct_(SMemory) {
 	DoubleBuffer            screen_buf;
 	A2_OrderingTable_Buffer ordering_tbl;
@@ -107,14 +108,19 @@ typedef Struct_(SMemory) {
 	Ent_Cube  cube;
 	Ent_Floor floor;
 
-
+	U4_V scratchpad; // d-cache
 };
-global SMemory static_mem;
-extern SMemory static_mem;
+global SMemory smem;
+extern SMemory smem;
+
+// TODO(Ed):
+FI_ U4* spad_warm(MipsAtom atom) {
+	return nullptr;
+}
 
 I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
-	gknown PrimitiveArena* pa  = & static_mem.primitives;
-	gknown B1*             buf = (B1*) r_(static_mem.primitives.buf)[static_mem.active_buf_id];
+	gknown PrimitiveArena* pa  = & smem.primitives;
+	gknown B1*             buf = (B1*) r_(smem.primitives.buf)[smem.active_buf_id];
 	assert(pa->used + type_width < PrimitiveBuff_Len);
 	B1* next  = buf + pa->used;
 	pa->used += type_width;
@@ -174,9 +180,9 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	orderingtbl_clear_reverse(ordering_buf, OrderingTbl_Len);
 
 	// Update the position based on acceleration and velocity
-	gknown V3_S4_R pos = & static_mem.cube.pos;
-	gknown V3_S4_R vel = & static_mem.cube.vel;
-	gknown V3_S4_R acc = & static_mem.cube.accel;
+	gknown V3_S4_R pos = & smem.cube.pos;
+	gknown V3_S4_R vel = & smem.cube.vel;
+	gknown V3_S4_R acc = & smem.cube.accel;
 	add_v3s4(vel, acc[0]);
 	add_v3s4_fp(pos, vel[0]);
 	// vel->x += acc->x;
@@ -186,7 +192,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	// pos->y += vel->y;
 	// pos->z += vel->z;
 
-	if (pos->y + 150 > static_mem.floor.pos.y) vel->y *= -1;
+	if (pos->y + 150 > smem.floor.pos.y) vel->y *= -1;
 
 	// Prep
 	S4 nclip = 0;
@@ -197,11 +203,11 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	// Draw Cube
 	if (1)
 	{
-		m3s2_rotation   (& static_mem.cube.rot,    & static_mem.tform_world);
-		m3s2_translation(& static_mem.tform_world, & static_mem.cube.pos);
-		m3s2_scale      (& static_mem.tform_world, & static_mem.cube.scale);
-		gte_matrix_set_rotation   (& static_mem.tform_world);
-		gte_matrix_set_translation(& static_mem.tform_world);
+		m3s2_rotation   (& smem.cube.rot,    & smem.tform_world);
+		m3s2_translation(& smem.tform_world, & smem.cube.pos);
+		m3s2_scale      (& smem.tform_world, & smem.cube.scale);
+		gte_matrix_set_rotation   (& smem.tform_world);
+		gte_matrix_set_translation(& smem.tform_world);
 		for (U4 face_id = 0; face_id < Cube_num_faces; face_id += 1)
 		{
 			Poly_G4* quad = prim_alloc(Poly_G4); set_poly_g4(quad);
@@ -210,11 +216,11 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			quad->c2 = rgb8(  0, 255, 255);
 			quad->c3 = rgb8(  0, 255,   0);
 
-			V4_S2* face = & static_mem.cube.faces[face_id];
-			V3_S2* p0   = & static_mem.cube.verts[face->x];
-			V3_S2* p1   = & static_mem.cube.verts[face->y];
-			V3_S2* p2   = & static_mem.cube.verts[face->z];
-			V3_S2* p3   = & static_mem.cube.verts[face->w];
+			V4_S2* face = & smem.cube.faces[face_id];
+			V3_S2* p0   = & smem.cube.verts[face->x];
+			V3_S2* p1   = & smem.cube.verts[face->y];
+			V3_S2* p2   = & smem.cube.verts[face->z];
+			V3_S2* p3   = & smem.cube.verts[face->w];
 
 			nclip = rtp_avg_nclip_a4_v3s2(
 				p0, p1, p2, p3,
@@ -229,29 +235,29 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				orderingtbl_add_primitive(ordering_buf[orderingtbl_z], quad);
 			}
 		}
-		// static_mem.cube.rot.x +=  6;
-		// static_mem.cube.rot.y +=  8;
-		// static_mem.cube.rot.z += 12;
-		static_mem.cube.rot.y += 30;
+		// smem.cube.rot.x +=  6;
+		// smem.cube.rot.y +=  8;
+		// smem.cube.rot.z += 12;
+		smem.cube.rot.y += 30;
 	}
 	// Draw cube (tape method) - two triangles per face
 	if (0)
 	{
-		m3s2_rotation   (& static_mem.cube.rot,    & static_mem.tform_world);
-		m3s2_translation(& static_mem.tform_world, & static_mem.cube.pos);
-		m3s2_scale      (& static_mem.tform_world, & static_mem.cube.scale);
-		gte_matrix_set_rotation   (& static_mem.tform_world);
-		gte_matrix_set_translation(& static_mem.tform_world);
+		m3s2_rotation   (& smem.cube.rot,    & smem.tform_world);
+		m3s2_translation(& smem.tform_world, & smem.cube.pos);
+		m3s2_scale      (& smem.tform_world, & smem.cube.scale);
+		gte_matrix_set_rotation   (& smem.tform_world);
+		gte_matrix_set_translation(& smem.tform_world);
 
-		U4 prim_base   = u4_(pa->buf[static_mem.active_buf_id]);
+		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
 
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make_old(&tape_arena); tb_scope(& tb) {
 			tb_emit(& tb, code_rbind_cube_tri);
 				tb_data(& tb, prim_cursor);
-				tb_data(& tb, u4_(static_mem.cube.faces));
-				tb_data(& tb, u4_(static_mem.cube.verts));
+				tb_data(& tb, u4_(smem.cube.faces));
+				tb_data(& tb, u4_(smem.cube.verts));
 				tb_data(& tb, u4_(ordering_buf));
 
 			for (U4 i = 0; i < Cube_num_faces; i++) {
@@ -265,25 +271,25 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		}
 		tape_run(tb_slice(tb));
 
-		static_mem.cube.rot.y += 30;
+		smem.cube.rot.y += 30;
 	}
 	// Draw Floor
 	if (0)
 	{
-		m3s2_rotation   (& static_mem.floor.rot,   & static_mem.tform_world);
-		m3s2_translation(& static_mem.tform_world, & static_mem.floor.pos);
-		m3s2_scale      (& static_mem.tform_world, & static_mem.floor.scale);
-		gte_matrix_set_rotation   (& static_mem.tform_world);
-		gte_matrix_set_translation(& static_mem.tform_world);
+		m3s2_rotation   (& smem.floor.rot,   & smem.tform_world);
+		m3s2_translation(& smem.tform_world, & smem.floor.pos);
+		m3s2_scale      (& smem.tform_world, & smem.floor.scale);
+		gte_matrix_set_rotation   (& smem.tform_world);
+		gte_matrix_set_translation(& smem.tform_world);
 		for (U4 face_id = 0; face_id < Floor_num_faces; face_id += 1)
 		{
 			Poly_F3* tri = prim_alloc(Poly_F3); set_poly_f3(tri);
 			tri->color   = rgb8(255, 255, 255);
 
-			V3_S2* face = & static_mem.floor.faces[face_id];
-			register V3_S2* p0 rgcc(R_T4) = & static_mem.floor.verts[face->x];
-			register V3_S2* p1 rgcc(R_T5) = & static_mem.floor.verts[face->y];
-			register V3_S2* p2 rgcc(R_T6) = & static_mem.floor.verts[face->z];
+			V3_S2* face = & smem.floor.faces[face_id];
+			register V3_S2* p0 rgcc(R_T4) = & smem.floor.verts[face->x];
+			register V3_S2* p1 rgcc(R_T5) = & smem.floor.verts[face->y];
+			register V3_S2* p2 rgcc(R_T6) = & smem.floor.verts[face->z];
 
 			// Three independent bases — full register discretion at the call site
 			gte_load_v0(p0, R_T4);
@@ -320,48 +326,49 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				}
 			}
 		}
-		static_mem.floor.rot.y += 5;
+		smem.floor.rot.y += 5;
 	}
 	// Draw floor tape method
 	if (1)
 	{
-		m3s2_rotation   (& static_mem.floor.rot,   & static_mem.tform_world);
-		m3s2_translation(& static_mem.tform_world, & static_mem.floor.pos);
-		m3s2_scale      (& static_mem.tform_world, & static_mem.floor.scale);
-		gte_matrix_set_rotation   (& static_mem.tform_world);
-		gte_matrix_set_translation(& static_mem.tform_world);
+		m3s2_rotation   (& smem.floor.rot,   & smem.tform_world);
+		m3s2_translation(& smem.tform_world, & smem.floor.pos);
+		m3s2_scale      (& smem.tform_world, & smem.floor.scale);
+		gte_matrix_set_rotation   (& smem.tform_world);
+		gte_matrix_set_translation(& smem.tform_world);
 
-		U4 prim_base   = u4_(pa->buf[static_mem.active_buf_id]);
+		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
 
-		// Prepare the tape.
+		// TODO(Ed): We should do a bounds check beforehand to confirm pa can hold all tris.
+		// The tape atoms in-flight should not need to care.
+
+		// Prepare the tape. (Push protocol to tape)
 		LP_ U4 mem_temp_tape[512];
 		TapeBuilder tb = tb_make(slice_ut_arr(mem_temp_tape)); tb_scope(& tb) {
-			// Push "Protocol" to tape
+			// TODO(Ed): This is bugged.
+			// tb_emit(& tb, code_set_gte_world);
+			// 	tb_data(& tb, u4_(& smem.tform_world));
+
 			tb_emit(& tb, code_rbind_floor_tri);
 			// TODO(Ed): Just use a single context struct ref
 				tb_data(& tb, prim_cursor);
-				tb_data(& tb, u4_(static_mem.floor.faces));
-				tb_data(& tb, u4_(static_mem.floor.verts));
+				tb_data(& tb, u4_(smem.floor.faces));
+				tb_data(& tb, u4_(smem.floor.verts));
 				tb_data(& tb, u4_(ordering_buf));
-
-			tb_emit(& tb, code_set_gte_world);
-				tb_data(& tb, u4_(& static_mem.tform_world));
-
 			for (U4 i = 0; i < Floor_num_faces; i++) {
 				tb_emit(& tb, code_floor_tri);
 			}
-			// After code_floor_tri iterations complete, the primitive arena's used counter is wrong.
+			// After code_floor_tri iterations complete, the primitive arena's used counter needs updating.
 			tb_emit(& tb, code_sync_primitive_arena);
 				tb_data(& tb, u4_(& pa->used));
 				tb_data(& tb, prim_base);
 		}
 
-		// Fire off the tape.
-		tape_run(tb_slice(tb));
+		tape_run(tb_slice(tb));// Fire off the tape.
 
 		// C-side state (pa->used) has already been updated by the tape!
-		static_mem.floor.rot.y += 5;
+		smem.floor.rot.y += 5;
 	}
 	// --- TAPE DIAGNOSTICS ---
 	if (0)
@@ -381,40 +388,41 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				// tb_emit(& tb, code_diag_gte); 
 			}
 		}
-		B1* prim_cursor = (B1*)r_(pa->buf)[static_mem.active_buf_id] + pa->used;
+		B1* prim_cursor = (B1*)r_(pa->buf)[smem.active_buf_id] + pa->used;
 		tape_run(tb_slice(tb));
-		pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[static_mem.active_buf_id];
-		static_mem.floor.rot.y += 5;
+		pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[smem.active_buf_id];
+		smem.floor.rot.y += 5;
 	}
 }
 
 int main(void)
 {
-	static_mem = (SMemory){0};
-	static_mem.primitives.used = 0;
-	ent_cube128_init(& static_mem.cube.verts, & static_mem.cube.faces); {
-		Ent_Cube* cube = & static_mem.cube;
+	smem = (SMemory){0};
+	smem.scratchpad = C_(U4_V, 0x1F800000);
+	smem.primitives.used = 0;
+	ent_cube128_init(& smem.cube.verts, & smem.cube.faces); {
+		Ent_Cube* cube = & smem.cube;
 		cube->rot    = v3s2(0, 0, 0);
 		// cube->pos    = v3s4(0, 0, 900);
 		cube->scale  = v3s4_fp_one();
 		cube->accel  = v3s4(0, 1, 0);
 		cube->pos    = v3s4(0, -400, 1800);
 	}
-	ent_floor_init(& static_mem.floor.verts, & static_mem.floor.faces); {
-		Ent_Floor* floor = & static_mem.floor;
+	ent_floor_init(& smem.floor.verts, & smem.floor.faces); {
+		Ent_Floor* floor = & smem.floor;
 		floor->rot   = v3s2(0, 0, 0);
 		floor->pos   = v3s4(0, 450, 1800);
 		floor->scale = v3s4_fp_one();
 	}
 	// gknown gp_screen_init();
-	gp_screen_init_c11(& static_mem.screen_buf, & static_mem.active_buf_id);
+	gp_screen_init_c11(& smem.screen_buf, & smem.active_buf_id);
 	while (1) {
-		gknown S4* active_buf_id  = & static_mem.active_buf_id;
-		gknown U4* ordering_buf   = r_(static_mem.ordering_tbl)[active_buf_id[0]];
-		gknown PrimitiveArena* pa = & static_mem.primitives;
+		gknown S4* active_buf_id  = & smem.active_buf_id;
+		gknown U4* ordering_buf   = r_(smem.ordering_tbl)[active_buf_id[0]];
+		gknown PrimitiveArena* pa = & smem.primitives;
 		update(pa, ordering_buf);
 		render();
-		gp_display_frame(& static_mem.screen_buf, active_buf_id, ordering_buf, pa);
+		gp_display_frame(& smem.screen_buf, active_buf_id, ordering_buf, pa);
 	};
 	return 0;
 }
