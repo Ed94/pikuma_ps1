@@ -10,13 +10,13 @@
 /* Words: 3; High: 0x20/B, Low: G/R */
 #define mac_format_f3_color(color_hi, color_lo) \
 	  load_ui(R_AT, color_hi), or_i(R_AT, R_AT, color_lo) \
-	, store_word(R_AT, R_PrimCur, O_(Poly_F3,color))   \
+	, store_word(R_AT, R_PrimCursor, O_(Poly_F3,color))   \
 
 /* Words: 3 */
 #define mac_gte_store_f3() \
-	  gte_sw(C2_SXY0, R_PrimCur, O_(Poly_F3,p0)) \
-	, gte_sw(C2_SXY1, R_PrimCur, O_(Poly_F3,p1)) \
-	, gte_sw(C2_SXY2, R_PrimCur, O_(Poly_F3,p2))
+	  gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
+	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
+	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2))
 
 #pragma endregion MACs
 
@@ -61,11 +61,11 @@ internal MipsCode code_floor_tri [] __attribute__((aligned (4))) = {
 	
 	/* 8. Insert into Ordering Table Linked List */
 	mac_insert_ot_tag(R_T1, 0x0400),
-	add_ui(R_PrimCur, R_PrimCur, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
+	add_ui(R_PrimCursor, R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 
 	/* 9. Advance Input Cursor & Yield (Both branch targets land here) */
 atom_label(floor_tri_exit)
-	add_ui(R_FaceCur, R_FaceCur, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
+	add_ui(R_FaceCursor, R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
 	mac_yield()
 };
 

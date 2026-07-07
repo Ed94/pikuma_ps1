@@ -36,3 +36,7 @@ charset = utf-8
 [*.{natvis, natstepfilter}]
 indent_style = tab
 indent_size  = 4
+
+[*.lua]
+indent_style = tab
+indent_size = 2

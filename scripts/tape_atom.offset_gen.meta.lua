@@ -56,7 +56,11 @@ local function write_file(path, content)
 	f:close()
 end
 
-local function ensure_dir(path) os.execute('mkdir -p "' .. path .. '"') end
+-- PowerShell aliases `mkdir` to New-Item, which treats `-p` as a path, so guard the call.
+local function ensure_dir(path)
+	local is_win = package.config:sub(1, 1) == "\\"
+	os.execute(is_win and ('if not exist "' .. path .. '" mkdir "' .. path .. '"') or ('mkdir -p "' .. path .. '" 2>/dev/null'))
+end
 
 -- ============================================================
 -- String primitives
@@ -532,11 +536,11 @@ end
 -- ============================================================
 
 local function process_source(source_path, word_counts)
-	local source = read_file(source_path)
+	local source    = read_file(source_path)
 	local atoms_raw = find_atoms(source)
 
 	if #atoms_raw == 0 then
-		io.stderr:write("  note: no MipsAtom_ declarations in " .. source_path .. "\n")
+		-- io.stderr:write("  note: no MipsAtom_ declarations in " .. source_path .. "\n")
 		return
 	end
 

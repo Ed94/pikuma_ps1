@@ -18,20 +18,20 @@ typedef U4 const MipsCode;
  *  The C compiler is completely unaware of these bindings.
  * ---------------------------------------------------------------------------*/
 enum {
-	R_AtomJmp  = R_T9,
-	R_TapePtr  = R_T8,  /* The Instruction Stream Pointer */
-	R_PrimCur  = R_T7,  /* VRAM output cursor (primitive buffer) */
-	R_FaceCur  = R_T4,  /* Input data cursor (indices/faces) */
-	R_InCursor = R_T4,  /* Input data cursor (indices/faces) */
-	R_VertBase = R_T5,  /* Base address of the vertex array */
-	R_OtBase   = R_T6,  /* Base address of the Ordering Table */
+	R_AtomJmp    = R_T9,
+	R_TapePtr    = R_T8,  /* The Instruction Stream Pointer */
+	R_PrimCursor = R_T7,  /* VRAM output cursor (primitive buffer) */
+	R_FaceCursor = R_T4,  /* Input data cursor (indices/faces) */
+	R_InCursor   = R_T4,  /* Input data cursor (indices/faces) */
+	R_VertBase   = R_T5,  /* Base address of the vertex array */
+	R_OtBase     = R_T6,  /* Base address of the Ordering Table */
 /* Stringification codes for the GCC inline assembler clobber lists */
-#define R_TapePtr_Code  R_T8_Code
-#define R_PrimCur_Code  R_T7_Code
-#define R_FaceCur_Code  R_T4_Code
-#define R_InCursor_Code R_T4_Code
-#define R_VertBase_Code R_T5_Code
-#define R_OtBase_Code   R_T6_Code
+#define R_TapePtr_Code     R_T8_Code
+#define R_PrimCursor_Code  R_T7_Code
+#define R_FaceCursor_Code  R_T4_Code
+#define R_InCursor_Code    R_T4_Code
+#define R_VertBase_Code    R_T5_Code
+#define R_OtBase_Code      R_T6_Code
 };
 
 /* The 'Exit' Atom */
@@ -55,7 +55,7 @@ FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; a
 		, rlit(R_V0), rlit(R_V1)
 		, rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3)
 		/* Tell GCC the tape engine owns and destroys the workspace registers */
-		, rlit(R_PrimCur), rlit(R_FaceCur), rlit(R_VertBase), rlit(R_OtBase)
+		, rlit(R_PrimCursor), rlit(R_FaceCursor), rlit(R_VertBase), rlit(R_OtBase)
 		, rlit(R_T9)
 		, clb_mem_drain 
 ); }
@@ -92,9 +92,9 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 
 /* Words: 3; Loads 3 S2 indices from the face array */
 #define mac_load_tri_indices(rId_0, rId_1, rId_2) \
-	  load_half_u(rId_0, R_FaceCur, 0) \
-	, load_half_u(rId_1, R_FaceCur, 2) \
-	, load_half_u(rId_2, R_FaceCur, 4)
+	  load_half_u(rId_0, R_FaceCursor, 0) \
+	, load_half_u(rId_1, R_FaceCursor, 2) \
+	, load_half_u(rId_2, R_FaceCursor, 4)
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE 
 	R_AT  = rId_[#] << 3; 
@@ -117,8 +117,8 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, shift_ll(  R_AT, R_AT, 8)          /* Strip upper 8 bits from old_ot */ \
 	, shift_lr(  R_AT, R_AT, 8)                                               \
 	, or_u(      R_AT, R_AT, R_V0)       /* Merge length */                   \
-	, store_word(R_AT, R_PrimCur, 0)     /* prim->tag = old_ot_head */        \
-	, shift_ll(  R_AT, R_PrimCur, 8)     /* AT = PrimCur & 0x00FFFFFF */      \
+	, store_word(R_AT, R_PrimCursor, 0)  /* prim->tag = old_ot_head */        \
+	, shift_ll(  R_AT, R_PrimCursor, 8)  /* AT = PrimCur & 0x00FFFFFF */      \
 	, shift_lr(  R_AT, R_AT, 8)                                               \
 	, store_word(R_AT, R_T1, 0)          /* OrderingTable[OTZ] = PrimCur */
 
@@ -196,7 +196,7 @@ internal MipsAtom_(sync_prim_cursor) {
 	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimCursor,PrimtiveBase)),      
 	add_ui_1(       R_TapePtr, S_(Binds_SyncPrimCursor)),
 	/* Calculate byte offset and store directly back to RAM */
-	sub_u(R_T0, R_PrimCur, R_T0), // R_T0 = PrimitiveArea_Used(R_AT) - R_PrimCur
+	sub_u(R_T0, R_PrimCursor, R_T0), // R_T0 = PrimitiveArea_Used(R_AT) - R_PrimCur
 	store_word(R_T0, R_AT, 0),    // PrimitiveBase(R_AT)[0] = R_T0
 	mac_yield()
 };
@@ -228,11 +228,11 @@ typedef Struct_(Binds_CubeTri) {
 };
 internal MipsAtom_(rbind_cube_tri) {
 	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCur,  R_TapePtr, O_(Binds_CubeTri,PrimCursor)), 
-	load_word(R_FaceCur,  R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
-	load_word(R_VertBase, R_TapePtr, O_(Binds_CubeTri,VertBase)), 
-	load_word(R_OtBase,   R_TapePtr, O_(Binds_CubeTri,OtBase)), 
-	add_ui_1(             R_TapePtr, S_(Binds_CubeTri)),
+	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)), 
+	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
+	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)), 
+	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)), 
+	add_ui_1(               R_TapePtr, S_(Binds_CubeTri)),
 	// Note(Ed): This entire thing is argument shuffle?
 	// TODO(Ed): Eliminate
 	mac_yield()
@@ -276,10 +276,10 @@ internal MipsAtom_(rbind_cube_tri) {
  * ============================================================================ */
 internal MipsAtom_(cube_tri) {
 	/* ── 1. Load 4 face indices from R_FaceCur ──────────────────────────── */
-	load_half_u(R_T0, R_FaceCur, 0),  /* T0 = face->x (vertex 0 index) */
-	load_half_u(R_T1, R_FaceCur, 2),  /* T1 = face->y (vertex 1 index) */
-	load_half_u(R_T2, R_FaceCur, 4),  /* T2 = face->z (vertex 2 index) */
-	load_half_u(R_T3, R_FaceCur, 6),  /* T3 = face->w (vertex 3 index) */
+	load_half_u(R_T0, R_FaceCursor, 0),  /* T0 = face->x (vertex 0 index) */
+	load_half_u(R_T1, R_FaceCursor, 2),  /* T1 = face->y (vertex 1 index) */
+	load_half_u(R_T2, R_FaceCursor, 4),  /* T2 = face->z (vertex 2 index) */
+	load_half_u(R_T3, R_FaceCursor, 6),  /* T3 = face->w (vertex 3 index) */
 
 	/* ── 2. Load V0, V1, V2 into GTE ────────────────────────────────────── */
 	/* V0 = verts[face->x] */
@@ -312,32 +312,32 @@ internal MipsAtom_(cube_tri) {
 	nop,                        /* BD slot */
 
 	/* ── 6. Store p0,p1,p2 to primitive buffer (BEFORE RTPS overwrites) ─── */
-	store_word(R_0, R_PrimCur, 0),
+	store_word(R_0, R_PrimCursor, 0),
 
 	/* Word 1: c0 (BGR) + code = 0x38FF00FF (magenta, opcode 0x38) */
 	load_ui(R_AT, 0x38FF), or_i(R_AT, R_AT, 0x00FF),
-	store_word(R_AT, R_PrimCur, 4),
+	store_word(R_AT, R_PrimCursor, 4),
 
 	/* Word 2: p0 = SXY0 (stored BEFORE RTPS overwrites it) */
-	gte_sw(C2_SXY0, R_PrimCur, 8),
+	gte_sw(C2_SXY0, R_PrimCursor, 8),
 
 	/* Word 3: c1 (BGR) + pad = 0x0000FFFF (yellow) */
 	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFFFF),
-	store_word(R_AT, R_PrimCur, 12),
+	store_word(R_AT, R_PrimCursor, 12),
 
 	/* Word 4: p1 = SXY1 */
-	gte_sw(C2_SXY1, R_PrimCur, 16),
+	gte_sw(C2_SXY1, R_PrimCursor, 16),
 
 	/* Word 5: c2 (BGR) + pad = 0x00FFFF00 (cyan) */
 	load_ui(R_AT, 0x00FF), or_i(R_AT, R_AT, 0xFF00),
-	store_word(R_AT, R_PrimCur, 20),
+	store_word(R_AT, R_PrimCursor, 20),
 
 	/* Word 6: p2 = SXY2 */
-	gte_sw(C2_SXY2, R_PrimCur, 24),
+	gte_sw(C2_SXY2, R_PrimCursor, 24),
 
 	/* Word 7: c3 (BGR) + pad = 0x0000FF00 (green) */
 	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFF00),
-	store_word(R_AT, R_PrimCur, 28),
+	store_word(R_AT, R_PrimCursor, 28),
 
 	/* ── 7. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
 	shift_ll(R_AT, R_T3, 3), add_u(R_AT, R_AT, R_VertBase),
@@ -348,7 +348,7 @@ internal MipsAtom_(cube_tri) {
 	nop, nop, gte_cmdw_rtps,
 
 	/* Word 8: p3 = SXY0 (written AFTER RTPS with V3's screen coords) */
-	gte_sw(C2_SXY0, R_PrimCur, 32),
+	gte_sw(C2_SXY0, R_PrimCursor, 32),
 
 	/* ── 9. AVSZ4 — average Z from SZ0/SZ1/SZ2/SZ3 ────────────── */
 	nop, nop, gte_cmdw_avsz4,
@@ -365,8 +365,8 @@ internal MipsAtom_(cube_tri) {
 	mac_insert_ot_tag(R_T1, 0x0800),  /* 0x0800 = 8 << 8 = length 8 in tag */
 
 	/* ── 12. Advance cursors & yield ─────────────────────────────────────── */
-	add_ui(R_PrimCur, R_PrimCur, 36),  /* 9 words × 4 bytes */
-	add_ui(R_FaceCur, R_FaceCur, 8),   /* 4 × S2 = 8 bytes */
+	add_ui(R_PrimCursor, R_PrimCursor, 36),  /* 9 words × 4 bytes */
+	add_ui(R_FaceCursor, R_FaceCursor, 8),   /* 4 × S2 = 8 bytes */
 	mac_yield()
 };
 
@@ -380,11 +380,11 @@ typedef Struct_(Binds_FloorTri) {
 
 internal MipsAtom_(rbind_floor_tri) {
 	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCur,  R_TapePtr, O_(Binds_FloorTri,PrimCursor)), 
-	load_word(R_FaceCur,  R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
-	load_word(R_VertBase, R_TapePtr, O_(Binds_FloorTri,VertBase)), 
-	load_word(R_OtBase,   R_TapePtr, O_(Binds_FloorTri,OtBase)), 
-	add_ui_1(             R_TapePtr, S_(Binds_FloorTri)),
+	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)), 
+	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
+	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,VertBase)), 
+	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,OtBase)), 
+	add_ui_1(               R_TapePtr, S_(Binds_FloorTri)),
 	// Note(Ed): This entire thing is argument shuffle?
 	// TODO(Ed): Eliminate
 	mac_yield()
