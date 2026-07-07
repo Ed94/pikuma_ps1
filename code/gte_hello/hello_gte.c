@@ -14,6 +14,7 @@
 #include "duffle/gte.h"
 
 #	include "duffle/gen/lottes_tape.offsets.h"
+#include "duffle/atom_dsl.h"
 #include "duffle/lottes_tape.h"
 
 #	include "tape_atom.metadata.h"

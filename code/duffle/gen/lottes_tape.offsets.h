@@ -4,9 +4,6 @@
 
 #pragma region lottes_tape
 
-// Dispatch macro: token-pastes <tag>_<target> to the enum name
-#undef atom_offset
-#define atom_offset(tag, name)  atom_offset_##tag##_##name
 
 #pragma endregion lottes_tape
 

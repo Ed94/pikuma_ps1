@@ -1,5 +1,6 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	include "duffle/lottes_tape.h"
+#	include "duffle/atom_dsl.h"
 #	include "hello_gte.h"
 #	include "tape_atom.metadata.h"
 #	include "gen/hello_gte_tape.offsets.h"
@@ -22,7 +23,14 @@
 
 #pragma region Baked Atoms
 
-internal MipsAtom_(floor_tri) {
+	atom_region( floor_tri, REGION_PRIM_ARENA)
+	atom_group(  floor_tri, GROUP_RENDER_FLOOR)
+	atom_cadence(floor_tri, CADENCE_FRAME)
+	atom_annot(  floor_tri, phase_work,
+		tape_regs(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
+		tape_regs(R_PrimCursor, R_FaceCursor)) 
+internal 
+MipsAtom_(floor_tri) {
 	// T0-T2 allocated
 	mac_load_tri_indices(R_T0, R_T1, R_T2),
 	// 	  load_half_u(R_T0, R_FaceCur, 0 * S_(S2))

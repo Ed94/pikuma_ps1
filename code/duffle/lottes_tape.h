@@ -5,6 +5,7 @@
 # include "mips.h"
 # include "gte.h"
 # include "memory.h"
+#	include "atom_dsl.h"
 #endif
 
 typedef U4 const MipsCode;
@@ -20,16 +21,19 @@ typedef U4 const MipsCode;
 enum {
 	R_AtomJmp    = R_T9,
 	R_TapePtr    = R_T8,  /* The Instruction Stream Pointer */
+	R_InCursor   = R_T4,  /* Input data cursor */
+
 	R_PrimCursor = R_T7,  /* VRAM output cursor (primitive buffer) */
 	R_FaceCursor = R_T4,  /* Input data cursor (indices/faces) */
-	R_InCursor   = R_T4,  /* Input data cursor (indices/faces) */
 	R_VertBase   = R_T5,  /* Base address of the vertex array */
 	R_OtBase     = R_T6,  /* Base address of the Ordering Table */
+
 /* Stringification codes for the GCC inline assembler clobber lists */
 #define R_TapePtr_Code     R_T8_Code
+#define R_InCursor_Code    R_T4_Code
+
 #define R_PrimCursor_Code  R_T7_Code
 #define R_FaceCursor_Code  R_T4_Code
-#define R_InCursor_Code    R_T4_Code
 #define R_VertBase_Code    R_T5_Code
 #define R_OtBase_Code      R_T6_Code
 };
@@ -274,7 +278,15 @@ internal MipsAtom_(rbind_cube_tri) {
  *  Inner branch (OTZ bounds):    branch_equal(R_AT, R_0, 13)
  *    → Skip 13 instructions from BD slot, land at add_ui(R_FaceCur,...)
  * ============================================================================ */
-internal MipsAtom_(cube_tri) {
+	atom_resource(cube_tri, "model_ship_cube")
+	atom_region  (cube_tri, REGION_PRIM_ARENA)
+	atom_group   (cube_tri, GROUP_RENDER_PRIMS)
+	atom_cadence (cube_tri, CADENCE_FRAME)
+	atom_annot(cube_tri, phase_work,
+		tape_regs(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
+		tape_regs(R_PrimCursor, R_FaceCursor))
+internal 
+MipsAtom_(cube_tri) {
 	/* ── 1. Load 4 face indices from R_FaceCur ──────────────────────────── */
 	load_half_u(R_T0, R_FaceCursor, 0),  /* T0 = face->x (vertex 0 index) */
 	load_half_u(R_T1, R_FaceCursor, 2),  /* T1 = face->y (vertex 1 index) */

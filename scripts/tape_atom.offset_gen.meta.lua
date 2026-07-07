@@ -502,9 +502,9 @@ local function generate_header(source_path, atoms_data)
 	add("")
 	add("#pragma region " .. basename)
 	add("")
-	add("// Dispatch macro: token-pastes <tag>_<target> to the enum name")
-	add("#undef atom_offset")
-	add("#define atom_offset(tag, name)  atom_offset_##tag##_##name")
+	-- add("// Dispatch macro: token-pastes <tag>_<target> to the enum name")
+	-- add("#undef atom_offset")
+	-- add("#define atom_offset(tag, name)  atom_offset_##tag##_##name")
 	add("")
 	for _, atom in ipairs(atoms_data) do
 		if #atom.offsets > 0 then

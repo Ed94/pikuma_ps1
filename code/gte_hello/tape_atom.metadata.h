@@ -41,7 +41,3 @@ WORD_COUNT(mac_insert_ot_tag,               11)
 WORD_COUNT(mac_yield,                        4)
 
 #undef WORD_COUNT
-
-// Used to define word markers for the lua metaprogram to calculate offsets from.
-#define atom_label(sym)
-// #define atom_offset(sym) // will be generated based on usage within a baked atom.

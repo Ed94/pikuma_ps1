@@ -81,21 +81,34 @@ $path_psyq          = join-path $path_toolchain  'psyq-4_7'
 $path_psyq_iwyu     = join-path $path_toolchain  'psyq_iwyu'
 $path_psyq_imyu_inc = join-path $path_psyq_iwyu  'include'
 
-function assemble-unit { param( 
+function Get-SourceFiles { param([Parameter(Mandatory=$true)] [string[]]$paths, [Parameter(Mandatory=$true)] [string[]]$extensions)
+	$files = @()
+	foreach ($p in $paths) {
+		if (-not (test-path $p)) { continue }
+		foreach ($ext in $extensions) {
+			Get-ChildItem -Path $p -File -Recurse -Filter "*$ext" -ErrorAction SilentlyContinue | ForEach-Object {
+				$files += $_.FullName
+			}
+		}
+	}
+	return ($files | Sort-Object -Unique)
+}
+
+function assemble-unit { param(
 	[string]  $unit,
 	[string]  $link_module,
 	[string[]]$include_paths,
 	[string[]]$user_assemble_args
 )
 	$assemble_args = @(
-		$f_arch_mips1, 
-		$f_arch_abi32, 
+		$f_arch_mips1,
+		$f_arch_abi32,
 		$f_arch_fp32,
-		$f_arch_little_endian, 
+		$f_arch_little_endian,
 		$f_arch_no_abicalls,
-		$f_arch_no_pic, 
-		$f_arch_no_llsc, 
-		$f_arch_no_shared, 
+		$f_arch_no_pic,
+		$f_arch_no_llsc,
+		$f_arch_no_shared,
 		$f_arch_no_stack_prot
 	)
 	$assemble_args += $f_no_stdlib
@@ -130,14 +143,14 @@ function compile-unit { param(
 	$compile_args += $f_no_strict_alias
 	$compile_args += @(
 		$f_arch_mips1,
-		$f_arch_abi32, 
+		$f_arch_abi32,
 		$f_arch_fp32,
 		$f_arch_little_endian,
-		$f_arch_no_abicalls, 
-		$f_arch_no_gpopt,  
-		$f_arch_no_pic, 
-		$f_arch_no_llsc,  
-		$f_arch_no_shared, 
+		$f_arch_no_abicalls,
+		$f_arch_no_gpopt,
+		$f_arch_no_pic,
+		$f_arch_no_llsc,
+		$f_arch_no_shared,
 		$f_arch_no_stack_prot
 	)
 	# $compile_args    += $f_std_c23
@@ -154,11 +167,7 @@ function compile-unit { param(
 		& $Compiler $compile_args
     if ($LASTEXITCODE -ne 0) { write-error "Compilation failed for $unit. Aborting."; exit 1 }
 }
-function link-modules { param(
-	[string[]]$link_modules,
-	[string]  $elf,
-	[string[]]$user_link_args
-)
+function link-modules { param([string[]]$link_modules, [string]  $elf, [string[]]$user_link_args)
 	$link_args = @()
 
 	$link_args += $f_no_stdlib
@@ -185,19 +194,19 @@ function link-modules { param(
 
 	$link_args += ($f_link_pass_through_prefix + $f_link_start_group)
 	$libraries = @(
-		"api", 
-		"c", 
-		"c2", 
-		"card", 
-		"cd", 
-		"comb", 
-		"ds", 
-		"etc", 
-		"gpu", 
-		"gs", 
-		"gte", 
-		"gun", 
-		"hmd", 
+		"api",
+		"c",
+		"c2",
+		"card",
+		"cd",
+		"comb",
+		"ds",
+		"etc",
+		"gpu",
+		"gs",
+		"gte",
+		"gun",
+		"hmd",
 		"math",
 		"mcrd",
 		"mcx",
@@ -226,10 +235,7 @@ function link-modules { param(
 		& mipsel-none-elf-objdump.exe -W $elf >> $dasm
 	if ($LASTEXITCODE -ne 0) { write-error "Linking failed. Aborting."; exit 1 }
 }
-function make-binary { param(
-	[string]$elf,
-	[string]$exe
-)
+function make-binary { param([string]$elf, [string]$exe)
 	Write-Host "--- Creating Binary ---" -ForegroundColor Cyan
 	write-host "Converting $elf to PS-EXE -> '$exe'"
 	$objcopy_args = ($f_objcopy_format + "binary"), $elf, $exe
@@ -311,12 +317,7 @@ function build-graphis_hello {
 }
 # build-graphis_hello
 
-function generate-TapeAtomOffsets {param(
-	[Parameter(Mandatory=$true)]
-	[string[]]$sources,
-	[Parameter(Mandatory=$true)]
-	[string]$metadata)
-
+function generate-TapeAtomOffsets {param([Parameter(Mandatory=$true)] [string[]]$sources, [Parameter(Mandatory=$true)] [string]$metadata)
 	$gen_atom_offsets_script = join-path $path_scripts 'tape_atom.offset_gen.meta.lua'
 
     $any_stale = $false
@@ -337,11 +338,11 @@ function generate-TapeAtomOffsets {param(
     }
 
     if (-not $any_stale) {
-        write-host "AtomOffs  all $($sources.Count) source(s) up-to-date" -ForegroundColor DarkGray
+        write-host "AtomOffsets  all $($sources.Count) source(s) up-to-date" -ForegroundColor DarkGray
         return
     }
 
-    write-host "AtomOffs  $($sources.Count) source(s)" -ForegroundColor Magenta
+    write-host "AtomOffsets  $($sources.Count) source(s)" -ForegroundColor Magenta
     & lua $gen_atom_offsets_script $metadata @sources
     if ($LASTEXITCODE -ne 0) {
         write-error "Atom offset generation failed. Aborting."
@@ -349,21 +350,81 @@ function generate-TapeAtomOffsets {param(
     }
 }
 
+function generate-TapeAtomAnnotations {param([Parameter(Mandatory=$true)] [string[]]$sources, [Parameter(Mandatory=$true)] [string]$metadata)
+	# Sibling to generate-TapeAtomOffsets. Validates TAPE_ATOM_* / TAPE_WORDS
+	# annotations against the metadata manifest. Emits gen/<basename>.errors.h
+	# containing #error directives for the C build to fail on annotation drift.
+	$gen_atom_annot_script = join-path $path_scripts 'tape_atom_annotation_pass.lua'
+
+    $any_stale = $false
+    foreach ($src in $sources) {
+        $basename = [System.IO.Path]::GetFileNameWithoutExtension($src)
+        $dir      = split-path -Path $src -Parent
+        $gen_dir  = join-path $dir 'gen'
+        $out_txt  = join-path $gen_dir "$basename.annotations.txt"
+        $out_err  = join-path $gen_dir "$basename.errors.h"
+
+        if (-not (test-path $out_txt) -or -not (test-path $out_err)) { $any_stale = $true; break }
+        $src_mtime     = (get-item $src).LastWriteTimeUtc
+        $out_txt_mtime = (get-item $out_txt).LastWriteTimeUtc
+        $out_err_mtime = (get-item $out_err).LastWriteTimeUtc
+        $out_mtime     = if ($out_txt_mtime -gt $out_err_mtime) { $out_txt_mtime } else { $out_err_mtime }
+        $meta_mtime    = (get-item $metadata).LastWriteTimeUtc
+        if (($src_mtime -gt $out_mtime) -or ($meta_mtime -gt $out_mtime)) {
+            $any_stale = $true
+            break
+        }
+    }
+
+    if (-not $any_stale) {
+        write-host "AtomAnnotations all $($sources.Count) source(s) up-to-date" -ForegroundColor DarkGray
+        return
+    }
+
+    write-host "AtomAnnotations $($sources.Count) source(s)" -ForegroundColor Magenta
+    & lua $gen_atom_annot_script $metadata @sources
+    if ($LASTEXITCODE -ne 0) {
+        write-error "Atom annotation generation failed. Aborting."
+        exit 1
+    }
+
+    # If any source produced annotation errors, surface them now and halt the
+    # build. The errors.h files are also #include'd via -include below, so
+    # the C build would fail at preprocessing time anyway — failing here gives
+    # a more readable error in the build log.
+    $err_count = 0
+    foreach ($src in $sources) {
+        $basename = [System.IO.Path]::GetFileNameWithoutExtension($src)
+        $dir      = split-path -Path $src -Parent
+        $gen_dir  = join-path $dir 'gen'
+        $ann_txt  = join-path $gen_dir "$basename.annotations.txt"
+        $err_h    = join-path $gen_dir "$basename.errors.h"
+        if ((test-path $ann_txt) -and (test-path $err_h)) {
+            $txt = get-content $ann_txt -raw
+            if ($txt -match 'Errors:\s+([1-9]\d*)') {
+                $err_count += [int]$Matches[1]
+                write-warning "Annotation errors in $src — see $ann_txt"
+            }
+        }
+    }
+    if ($err_count -gt 0) {
+        write-error "Annotation pass failed: $err_count error(s) across $($sources.Count) source(s). Aborting."
+        exit 1
+    }
+}
+
 function build-gte_hello {
 	$includes += @()
 
-	$path_module = join-path $path_code 'gte_hello'
+	$path_module        = join-path $path_code   'gte_hello'
+	$path_duffle        = join-path $path_code   'duffle'
+	$path_atom_metadata = join-path $path_module 'tape_atom.metadata.h'
 
-	$path_duffle              = join-path $path_code 'duffle'
-	$path_gen                 = join-path $path_module 'gen'
-	$path_atom_metadata       = join-path $path_module 'tape_atom.metadata.h'
+	$source_dirs  = @($path_duffle, $path_module)
+	$atom_sources = Get-SourceFiles -paths $source_dirs -extensions @('.h', '.c')
 
-	$atom_sources = @(
-        (join-path $path_duffle 'mips.h'),
-        (join-path $path_duffle 'lottes_tape.h'),
-        (join-path $path_module 'hello_gte_tape.c')
-    )
-    generate-TapeAtomOffsets -sources $atom_sources -metadata $path_atom_metadata
+	generate-TapeAtomAnnotations -sources $atom_sources -metadata $path_atom_metadata
+	generate-TapeAtomOffsets     -sources $atom_sources -metadata $path_atom_metadata
 
 	$assemble_args = @()
 	$assemble_args += $f_debug
@@ -408,10 +469,10 @@ function Send-ToEmulator { param(
     [string]$exePath
 )
     $uri = "http://localhost:8080/api/v1/load-exec"
-    
+
     # Absolute path is safest for the emulator web server
     $absolutePath = [System.IO.Path]::GetFullPath($exePath)
-    
+
     # Create JSON payload pointing to your compiled .ps-exe
     $body = @{
         filename = $absolutePath
