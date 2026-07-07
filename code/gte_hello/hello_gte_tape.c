@@ -27,8 +27,8 @@
 	atom_group(  floor_tri, GROUP_RENDER_FLOOR)
 	atom_cadence(floor_tri, CADENCE_FRAME)
 	atom_annot(  floor_tri, phase_work,
-		tape_regs(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
-		tape_regs(R_PrimCursor, R_FaceCursor)) 
+		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
+		atom_writes(R_PrimCursor, R_FaceCursor)) 
 internal 
 MipsAtom_(floor_tri) {
 	// T0-T2 allocated
@@ -69,11 +69,29 @@ MipsAtom_(floor_tri) {
 	
 	/* 8. Insert into Ordering Table Linked List */
 	mac_insert_ot_tag(R_T1, 0x0400),
-	add_ui(R_PrimCursor, R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
+	add_ui_1(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
+	// Note(Ed): No bounds checking, should be checked before atom runs.
 
 	/* 9. Advance Input Cursor & Yield (Both branch targets land here) */
 atom_label(floor_tri_exit)
-	add_ui(R_FaceCursor, R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
+	add_ui_1(R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
+	mac_yield()
+};
+
+typedef Struct_(Binds_SyncPrimitiveArena) { U4 PrimtiveArena_Used; U4 PrimtiveBase; };
+	atom_region( sync_primitive_arena, REGION_PRIM_ARENA)
+	atom_group(  sync_primitive_arena, GROUP_RENDER_FLOOR)
+	atom_cadence(sync_primitive_arena, CADENCE_FRAME)
+	atom_annot(  sync_primitive_arena, phase_work,
+		atom_reads( R_TapePtr, R_PrimCursor),
+		atom_writes(R_TapePtr)) 
+internal MipsAtom_(sync_primitive_arena) {
+	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,PrimtiveArena_Used)),
+	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,PrimtiveBase)),      
+	add_ui_1(       R_TapePtr, S_(Binds_SyncPrimitiveArena)),
+	/* Calculate byte offset and store directly back to RAM */
+	sub_u(     R_T0, R_PrimCursor, R_T0), // R_T0    = R_PrimCursor - prim-base
+	store_word(R_T0, R_AT, 0),            // R_AT[0] = R_T0
 	mac_yield()
 };
 

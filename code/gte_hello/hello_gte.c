@@ -259,7 +259,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_emit(& tb, code_cube_tri);
 			}
 
-			tb_emit(& tb, code_sync_prim_cursor);
+			tb_emit(& tb, code_sync_primitive_arena);
 				tb_data(& tb, u4_(& pa->used));
 				tb_data(& tb, prim_base);
 		}
@@ -351,8 +351,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			for (U4 i = 0; i < Floor_num_faces; i++) {
 				tb_emit(& tb, code_floor_tri);
 			}
-			
-			tb_emit(& tb, code_sync_prim_cursor);
+			// After code_floor_tri iterations complete, the primitive arena's used counter is wrong.
+			tb_emit(& tb, code_sync_primitive_arena);
 				tb_data(& tb, u4_(& pa->used));
 				tb_data(& tb, prim_base);
 		}

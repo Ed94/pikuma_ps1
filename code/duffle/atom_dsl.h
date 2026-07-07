@@ -206,7 +206,8 @@
  * writes at this granularity.
  *
  * ============================================================================*/
-#define tape_regs(...) (__VA_ARGS__)
+#define atom_reads(...)  (__VA_ARGS__)
+#define atom_writes(...) (__VA_ARGS__)
 
 /* ============================================================================
  * ATOM ANNOTATION MACROS

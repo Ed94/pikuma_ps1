@@ -265,7 +265,14 @@ local MACRO_EXPANSION = {
 	["CADENCE_ONDEMAND"]     = "ondemand",
 }
 
-local function valid_phase(p) return KNOWN_PHASES[p] end
+-- Phases + regions + cadences are defined further below (after TAPE_ATOM_MACROS).
+-- We expose valid_phase via upvalue once KNOWN_PHASES is defined, but for now
+-- it's a closure-resolved at call time.
+
+-- Table refs initialised later; valid_phase is hooked up below KNOWN_PHASES.
+local KNOWN_PHASES, KNOWN_REGIONS, KNOWN_CADENCES  -- forward declarations
+
+local function valid_phase(p) return KNOWN_PHASES and KNOWN_PHASES[p] or false end
 local function is_wave_context_reg(name) return WAVE_CONTEXT_REGS[name] ~= nil end
 
 -- ============================================================
@@ -315,9 +322,10 @@ end
 
 -- Extract identifier args from a parenthesized group. Returns a list
 -- of {kind, value} pairs where kind is one of:
---   "ident"  -- a bare identifier (e.g. TAPE_PHASE_WORK)
---   "regs"   -- a TAPE_REGS(...) call whose args are extracted as a list
---   "other"  -- something we can't classify (preserved as text)
+--   "ident"      -- a bare identifier (e.g. phase_work)
+--   "atom_reads" -- an atom_reads(...) call: value is the register list
+--   "atom_writes"-- an atom_writes(...) call: value is the register list
+--   "other"      -- something we can't classify (preserved as text)
 local function parse_atom_annot_args(inner)
 	-- Split at top-level commas, respecting nested parens.
 	local args = {}
@@ -325,20 +333,37 @@ local function parse_atom_annot_args(inner)
 	for _, tok in ipairs(tokens) do
 		local s = trim(tok)
 		if s ~= "" then
-			-- TAPE_REGS(...) → extract inner identifiers
-			if s:sub(1, 10) == "TAPE_REGS(" and s:sub(-1) == ")" then
-				local regs_inner = s:sub(11, -2)
+			-- Detect register-list calls: atom_reads(...) / atom_writes(...) / tape_regs(...)
+			local regs_kind = nil
+			local regs_inner = nil
+			if s:sub(-1) == ")" then
+				if s:sub(1, 11) == "atom_reads(" then
+					regs_kind = "atom_reads"
+					regs_inner = s:sub(12, -2)
+				elseif s:sub(1, 12) == "atom_writes(" then
+					regs_kind = "atom_writes"
+					regs_inner = s:sub(13, -2)
+				end
+			end
+
+			if regs_kind then
 				local regs = {}
 				for r in regs_inner:gmatch("[^,]+") do
 					local trimmed = trim(r)
 					if trimmed ~= "" then table.insert(regs, trimmed) end
 				end
-				table.insert(args, {kind = "regs", value = regs})
+				-- Resolve any phase_* / R_* alias macros
+				for i, r in ipairs(regs) do
+					if MACRO_EXPANSION[r] then regs[i] = MACRO_EXPANSION[r] end
+				end
+				table.insert(args, {kind = regs_kind, value = regs})
 			else
-				-- Bare identifier (e.g. TAPE_PHASE_WORK)
+				-- Bare identifier (e.g. phase_work)
 				local id, _ = read_ident(s, 1)
 				if id and trim(s) == id then
-					table.insert(args, {kind = "ident", value = id})
+					local v = id
+					if MACRO_EXPANSION[v] then v = MACRO_EXPANSION[v] end
+					table.insert(args, {kind = "ident", value = v})
 				else
 					table.insert(args, {kind = "other", value = s})
 				end
@@ -358,20 +383,20 @@ local TAPE_ATOM_MACROS = {
 }
 
 -- Phase token names (must match macros in tape_atom_dsl.h)
-local KNOWN_PHASES = {
+KNOWN_PHASES = {
 	["init"] = true, ["bind"] = true, ["setup"] = true,
 	["work"] = true, ["commit"] = true, ["terminate"] = true,
 }
 
 -- Region token names (must match REGION_* macros in tape_atom_dsl.h)
-local KNOWN_REGIONS = {
+KNOWN_REGIONS = {
 	["prim_arena"] = true, ["face_arena"] = true, ["vertex_arena"] = true,
 	["ot_arena"]   = true, ["heap_3d_models"] = true, ["cdrom_stream"] = true,
 	["vram_heap"]  = true,
 }
 
 -- Cadence token names (must match CADENCE_* macros in tape_atom_dsl.h)
-local KNOWN_CADENCES = {
+KNOWN_CADENCES = {
 	["frame"] = true, ["once"] = true, ["ondemand"] = true,
 }
 
@@ -403,60 +428,81 @@ local function find_atom_annotations(source)
 
 				if #args < 1 then
 					table.insert(annots, {
-						line = line_of(source, i),
+						line  = line_of(source, i),
 						macro = ident,
 						kind  = macro_def.kind,
-						error = "missing atom name (first arg)"
+						error = "missing atom name (first arg)",
 					})
 				else
 					local name = args[1].value
-					-- For TAPE_ATOM_BIND: arg layout is (name, Binds_Struct, writes)
-					-- For others:          (name, phase, reads, writes)
-					-- INIT / TERMINATE:    (name)
+					-- atom_bind: (name, Binds_Struct, writes)
+					-- atom_annot: (name, phase, reads, writes)
+					-- atom_setup / atom_commit: (name, reads)
+					-- atom_init / atom_terminate: (name)
 					local entry = {
-						line    = line_of(source, i),
-						macro   = ident,
-						name    = name,
-						kind    = macro_def.kind,
-						binds   = nil,
-						phase   = nil,
-						reads   = {},
-						writes  = {},
+						line   = line_of(source, i),
+						macro  = ident,
+						name   = name,
+						kind   = macro_def.kind,
+						binds  = nil,
+						phase  = nil,
+						reads  = {},
+						writes = {},
+						errors = {},
 					}
+
+					-- Is this arg a register-list call (any of the recognized forms)?
+					local function is_regs(a)
+						return a and (a.kind == "atom_reads" or a.kind == "atom_writes" or a.kind == "regs")
+					end
+
 					if macro_def.binds then
-						-- (name, Binds_Struct, writes)
+						-- atom_bind(name, Binds_Struct, writes)
 						if #args >= 2 and args[2].kind == "ident" then
 							entry.binds = args[2].value
 						end
-						if #args >= 3 and args[3].kind == "regs" then
+						if #args >= 3 and is_regs(args[3]) then
+							-- A bind writes the wave-context, so atom_writes(...) is the
+							-- canonical form, but legacy regs(...) is also accepted.
 							entry.writes = args[3].value
 						end
-					elseif ident == "TAPE_ATOM_INIT" or ident == "TAPE_ATOM_TERMINATE" then
-						-- (name) — no phase, no reads/writes to extract
-					elseif ident == "TAPE_ATOM_SETUP" then
-						-- (name, reads)
-						if #args >= 2 and args[2].kind == "regs" then
+					elseif ident == "atom_init" or ident == "atom_terminate" then
+						-- (name) only, no reads/writes to extract
+					elseif ident == "atom_setup" then
+						-- atom_setup(name, reads)
+						if #args >= 2 and is_regs(args[2]) then
 							entry.reads = args[2].value
 						end
-					elseif ident == "TAPE_ATOM_COMMIT" then
-						-- (name, reads)
-						if #args >= 2 and args[2].kind == "regs" then
+					elseif ident == "atom_commit" then
+						-- atom_commit(name, reads)
+						if #args >= 2 and is_regs(args[2]) then
 							entry.reads = args[2].value
 						end
-					elseif ident == "TAPE_ATOM_ANNOT" then
-						-- (name, phase, reads, writes)
+					elseif ident == "atom_annot" then
+						-- atom_annot(name, phase, reads, writes)
 						if #args >= 2 and args[2].kind == "ident" then
-							-- Expand TAPE_PHASE_* macro references
-							local phase_id = args[2].value
-							entry.phase = MACRO_EXPANSION[phase_id] or phase_id
+							entry.phase = MACRO_EXPANSION[args[2].value] or args[2].value
 						end
-						if #args >= 3 and args[3].kind == "regs" then
+						-- reads slot: atom_reads(...) is the canonical form;
+						-- atom_writes(...) in the reads slot is a likely bug.
+						if #args >= 3 and is_regs(args[3]) then
+							if args[3].kind == "atom_writes" then
+								table.insert(entry.errors,
+									"reads slot has atom_writes — swap order?")
+							end
 							entry.reads = args[3].value
 						end
-						if #args >= 4 and args[4].kind == "regs" then
+						-- writes slot: atom_writes(...) is canonical;
+						-- atom_reads(...) here is a likely bug.
+						if #args >= 4 and is_regs(args[4]) then
+							if args[4].kind == "atom_reads" then
+								table.insert(entry.errors,
+									"writes slot has atom_reads — swap order?")
+							end
 							entry.writes = args[4].value
 						end
 					end
+
 					table.insert(annots, entry)
 				end
 				i = after_paren
@@ -865,11 +911,11 @@ end
 local function validate(source_path, word_counts)
 	local source = read_file(source_path)
 
-	local annots  = find_atom_annotations(source)
-	local macros  = find_macro_word_annotations(source)
-	local pragmas = find_atom_pragmas(source)
-	local binds   = find_binds_structs(source)
-	local atoms   = find_atom_names(source)
+	local annots      = find_atom_annotations(source)
+	local macros     = find_macro_word_annotations(source)
+	local pragmas    = find_atom_pragmas(source)
+	local binds      = find_binds_structs(source)
+	local atoms      = find_atom_names(source)
 
 	-- Index for O(1) lookup
 	local atom_index = {}
@@ -891,6 +937,12 @@ local function validate(source_path, word_counts)
 				line = a.line,
 				msg  = string.format("annotation for '%s' has no matching MipsAtom_(%s) { ... }", a.name, a.name)
 			})
+		end
+		-- Per-entry parser errors (e.g. reads/writes slot mix-ups)
+		if a.errors then
+			for _, msg in ipairs(a.errors) do
+				table.insert(errors, {line = a.line, msg = string.format("'%s': %s", a.name, msg)})
+			end
 		end
 	end
 

@@ -189,22 +189,6 @@ internal MipsAtom_(mips_flush_icache) {
 	, mac_yield()
 };
 
-typedef Struct_(Binds_SyncPrimCursor) {
-	U4 PrimtiveArena_Used;
-	U4 PrimtiveBase;
-};
-internal MipsAtom_(sync_prim_cursor) {
-	/* Pop the C-struct address and base address from the tape */
-	// Note(Ed): Argument shuffle....
-	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimCursor,PrimtiveArena_Used)),
-	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimCursor,PrimtiveBase)),      
-	add_ui_1(       R_TapePtr, S_(Binds_SyncPrimCursor)),
-	/* Calculate byte offset and store directly back to RAM */
-	sub_u(R_T0, R_PrimCursor, R_T0), // R_T0 = PrimitiveArea_Used(R_AT) - R_PrimCur
-	store_word(R_T0, R_AT, 0),    // PrimitiveBase(R_AT)[0] = R_T0
-	mac_yield()
-};
-
 internal MipsAtom_(set_gte_world) {
 	/* Pop matrix address from tape into R_T3 ($11) */
 	load_word(R_T3,      R_TapePtr, 0),
@@ -220,7 +204,6 @@ internal MipsAtom_(set_gte_world) {
 
 	mac_yield()
 };
-
 
 // TODO(Ed): I'm not sure yet if the bindings are redundant with the floortri atom yet.
 
@@ -278,7 +261,6 @@ internal MipsAtom_(rbind_cube_tri) {
  *  Inner branch (OTZ bounds):    branch_equal(R_AT, R_0, 13)
  *    → Skip 13 instructions from BD slot, land at add_ui(R_FaceCur,...)
  * ============================================================================ */
-	atom_resource(cube_tri, "model_ship_cube")
 	atom_region  (cube_tri, REGION_PRIM_ARENA)
 	atom_group   (cube_tri, GROUP_RENDER_PRIMS)
 	atom_cadence (cube_tri, CADENCE_FRAME)
