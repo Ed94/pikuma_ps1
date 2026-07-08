@@ -44,14 +44,14 @@ MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 /* Generalized Tape Engine Runner */
 FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; asm volatile(
 	asm_words(
-			add_ui(    R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
-		, store_word(R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
-		, load_word( R_AtomJmp, R_TapePtr, 0)         /* Bootstrap the first jump */
-		, add_ui_self( R_TapePtr, S_(MipsCode))        /* Advance tape */
-		, call_reg(    R_AtomJmp)                      /* jalr $t9 */
-		, nop                                         /* Branch delay slot */
-		, load_word(R_RA, R_SP, 0)                    /* Restore $ra from stack */
-		, add_ui_self( R_SP, MipsStackAlignment)         /* Deallocate stack space */
+			add_ui(     R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
+		, store_word( R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
+		, load_word(  R_AtomJmp, R_TapePtr, 0)         /* Bootstrap the first jump */
+		, add_ui_self(R_TapePtr, S_(MipsCode))         /* Advance tape */
+		, call_reg(   R_AtomJmp)                       /* jalr $t9 */
+		, nop                                          /* Branch delay slot */
+		, load_word(  R_RA, R_SP, 0)                   /* Restore $ra from stack */
+		, add_ui_self(R_SP, MipsStackAlignment)        /* Deallocate stack space */
 	)
 	asm_rpins, r_use(tp)
 	asm_clobber: 
@@ -123,10 +123,10 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields).
  * Migrated from hello_gte_tape.c; takes RGB form per the Phase 3
  * convention. */
-#define mac_format_f3_color(_r, _g, _b) \
-	  load_upper_i(   R_AT, gp0_cmd_poly_f3 << 8 | (_b)) \
-	, or_i(        R_AT, R_AT, ((_g) << 8) | (_r)) \
-	, store_word(R_AT, R_PrimCursor, O_(Poly_F3,color))
+#define mac_format_f3_color(r,g,b)                  \
+	  load_upper_i(R_AT, gp0_cmd_poly_f3 << 8  | (b)) \
+	, or_i_self(   R_AT, ((g)            << 8) | (r)) \
+	, store_word(  R_AT, R_PrimCursor, O_(Poly_F3,color))
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3 */
 #define mac_gte_store_f3() \
@@ -204,16 +204,16 @@ typedef Struct_(Binds_SetGteWorld) {
 internal MipsAtom_(set_gte_world) {
 	/* Pop matrix address from tape into R_T3 ($11) */
 	load_word(R_T3, R_TapePtr, O_(Binds_SetGteWorld,transform)),
-	add_ui_self(   R_TapePtr, S_(Binds_SetGteWorld)),
+	add_ui_self(    R_TapePtr, S_(Binds_SetGteWorld)),
 
 // TODO(Ed): Annotate magic offsets.
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
-	load_word(R_T0, R_T3,  0),    load_word(R_T1, R_T3,  4),
-	gte_mv_to_ctrl_r(   R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(   R_T1, gte_cr_RT12),
-	load_word(R_T0, R_T3,  8),    load_word(R_T1, R_T3, 12),    load_word(R_T2, R_T3, 16),
-	gte_mv_to_ctrl_r(   R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(   R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(   R_T2, gte_cr_RT22),
-	load_word(R_T0, R_T3, 20),    load_word(R_T1, R_T3, 24),    load_word(R_T2, R_T3, 28),
-	gte_mv_to_ctrl_r(   R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(   R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(   R_T2, gte_cr_TRZ),
+	load_word(R_T0, R_T3, 0),  load_word(R_T1, R_T3,  4),
+	gte_mv_to_ctrl_r(R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(R_T1, gte_cr_RT12),
+	load_word(R_T0, R_T3, 8),  load_word(R_T1, R_T3, 12), load_word(R_T2, R_T3, 16),
+	gte_mv_to_ctrl_r(R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(R_T2, gte_cr_RT22),
+	load_word(R_T0, R_T3, 20), load_word(R_T1, R_T3, 24), load_word(R_T2, R_T3, 28),
+	gte_mv_to_ctrl_r(R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(R_T2, gte_cr_TRZ),
 
 	mac_yield()
 };
@@ -228,25 +228,25 @@ internal MipsAtom_(diag_yield) { mac_yield() };
 internal MipsAtom_(diag_color) {
 	store_word(  R_0, R_T7, 0), 
 	load_upper_i(R_AT, gp0_cmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
-	or_i(        R_AT, R_AT, 0xFF00), /* Low:  Color G:FF, R:00 (Cyan) */
+	or_i_self(   R_AT, 0xFF00),                      /* Low:  Color G:FF, R:00 (Cyan) */
 	store_word(  R_AT, R_T7, 4),
 	
 	/* Fake coordinates - Swapped winding order to prevent GPU culling! */
-	load_upper_i(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 8),  /* (16, 16) */
-	load_upper_i(R_AT, 0x0050), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 12), /* (80, 16) */
-	load_upper_i(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
+	load_upper_i(R_AT, 0x0010), or_i_self(R_AT, 0x0010), store_word(R_AT, R_T7, 8),  /* (16, 16) */
+	load_upper_i(R_AT, 0x0050), or_i_self(R_AT, 0x0010), store_word(R_AT, R_T7, 12), /* (80, 16) */
+	load_upper_i(R_AT, 0x0010), or_i_self(R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
 
-	add_ui(  R_T1, R_0,  10),
-	shift_lleft(R_T1, R_T1, 2), 
-	add_u(   R_T1, R_T1, R_T6),         
+	add_ui(          R_T1, R_0,  10),
+	shift_lleft_self(R_T1,       2), 
+	add_u_self(      R_T1,       R_T6),         
 	
 	load_word(   R_AT, R_T1, 0),        
 	load_upper_i(R_V0, 0x0400),   // <--- Fills load delay slot! 
 	store_word(  R_AT, R_T7, 0),       
 	
-	shift_lleft(  R_AT, R_T7, 8), shift_lright(R_AT, R_AT, 8),         
-	or_u(      R_AT, R_AT, R_V0),          
-	store_word(R_AT, R_T1, 0),       
+	shift_lleft(R_AT, R_T7, 8), shift_lright(R_AT, R_AT, 8),         
+	or_u_self(  R_AT,       R_V0),          
+	store_word( R_AT, R_T1, 0),       
 
 	add_ui(R_T7, R_T7, 20),          
 
@@ -264,15 +264,15 @@ internal MipsAtom_(diag_gte) {
 	/* Load Vertices into GTE */
 	shift_lleft( R_AT, R_T0, 3), add_u(    R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(   R_V0, C2_VXY0), gte_mv_to_data_r(   R_V1, C2_VZ0),
+	gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
 
-	shift_lleft( R_AT, R_T1, 3), add_u(    R_AT, R_AT, R_T5),
+	shift_lleft( R_AT, R_T1, 3), add_u(R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(   R_V0, C2_VXY1), gte_mv_to_data_r(   R_V1, C2_VZ1),
+	gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
 
-	shift_lleft( R_AT, R_T2, 3), add_u(    R_AT, R_AT, R_T5),
+	shift_lleft(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(   R_V0, C2_VXY2), gte_mv_to_data_r(   R_V1, C2_VZ2),
+	gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
 
 	/* Run Math */
 	nop, nop, gte_cmdw_rtpt,

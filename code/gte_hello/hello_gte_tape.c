@@ -35,7 +35,7 @@ internal MipsAtom_(rbind_cube_tri) {
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
 	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)), 
 	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)), 
-	add_ui_self(               R_TapePtr, S_(Binds_CubeTri)),
+	add_ui_self(            R_TapePtr, S_(Binds_CubeTri)),
 	// Note(Ed): This entire thing is argument shuffle?
 	// TODO(Ed): Eliminate
 	mac_yield()
@@ -225,7 +225,7 @@ typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
 internal MipsAtom_(sync_primitive_arena) {
 	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,used)),
 	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)),      
-	add_ui_self(       R_TapePtr, S_(Binds_SyncPrimitiveArena)),
+	add_ui_self(    R_TapePtr, S_(Binds_SyncPrimitiveArena)),
 	/* Calculate byte offset and store directly back to RAM */
 	sub_u(     R_T0, R_PrimCursor, R_T0), // R_T0    = R_PrimCursor - binds.cursor
 	store_word(R_T0, R_AT, 0),            // R_AT[0] = R_T0

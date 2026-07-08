@@ -355,6 +355,7 @@ enum { _BitOffsets = 0
 #define load_u4 load_word
 
 // Ergonomic add to the same register.
+#define or_i_self(rt_rs, imm)      enc_i(op_ori,   (rt_rs), (rt_rs), (imm))
 #define add_ui_self(rt_rs, imm)    enc_i(op_addiu, (rt_rs), (rt_rs), (imm))
 
 /* Logic Opcodes */
@@ -364,10 +365,14 @@ enum { _BitOffsets = 0
 #define xor_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_xor)
 #define nor_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_nor)
 
+#define or_u_self(rd_rs, rt)       enc_r(op_special, (rd_rs), (rt), (rd_rs), 0, fc_or)
+
 /* Shift family (R-type). shift_lleft/lright/aright: `sll/srl/sra rd, rt, shamt` */
 #define shift_lleft(rd, rt, shamt)  enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sll)
 #define shift_lright(rd, rt, shamt) enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_srl)
 #define shift_aright(rd, rt, shamt) enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sra)
+
+#define shift_lleft_self(rd_rt, shamt) enc_r(op_special, R_0, (rd_rt), (rd_rt), (shamt), fc_sll)
 
 #define mask_upper(rd, rt, shamt) shift_lleft(rd, rt, shamt), shift_lright(rd, rt, shamt)
 

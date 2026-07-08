@@ -63,21 +63,12 @@ U4 vsync(U4 mode)     __asm__("VSync");
 
 void draw_orderingtbl(U4* buf) __asm__("DrawOTag");
 
-/*	Primitive Handling Macros
- *	All primitive types (PolyTag, Poly_F3, Poly_F4, Poly_G3, Poly_G4,
- *	Poly_FT3, Poly_FT4, Poly_GT3, Poly_GT4) and the set_poly_* setters,
- *	set_len / set_addr / get_len / get_addr macros, and the
- *	orderingtbl_add_primitive(s) helpers all live in `duffle/gp.h`
- *	now (per the Phase 3 gp.h overhaul). This file no longer duplicates
- *	those definitions. */
-
 typedef Struct_(Tile) {
 	U4      tag;
 	RGB8    color;
 	B1      code;
 	Rect_S2 rect;
 };
-
 
 /*
 	Linear Algebra
