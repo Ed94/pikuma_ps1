@@ -112,12 +112,27 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, add_u(       R_T1, R_T1,         R_OtBase)                /* T1 = & OrderingTable[OTZ] */ \
 	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
 	, load_upper_i(R_V0, prim_length)                           /* V0 = prim_length << 16 (high 16 bits of a tag) */ \
-	, mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
+	, mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
 	, or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
 	, store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
-	, shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
-	, shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)) \
+	, shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
+	, shift_lright(R_AT, R_AT,         S_(polytag_len_bits)) \
 	, store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
+
+/* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
+ * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields).
+ * Migrated from hello_gte_tape.c; takes RGB form per the Phase 3
+ * convention. */
+#define mac_format_f3_color(_r, _g, _b) \
+	  load_upper_i(   R_AT, gp0_cmd_poly_f3 << 8 | (_b)) \
+	, or_i(        R_AT, R_AT, ((_g) << 8) | (_r)) \
+	, store_word(R_AT, R_PrimCursor, O_(Poly_F3,color))
+
+/* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3 */
+#define mac_gte_store_f3() \
+	  gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
+	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
+	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2))
 
 #pragma endregion Macro Atom Components
 
@@ -212,7 +227,7 @@ internal MipsAtom_(diag_yield) { mac_yield() };
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal MipsAtom_(diag_color) {
 	store_word(  R_0, R_T7, 0), 
-	load_upper_i(R_AT, gcmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
+	load_upper_i(R_AT, gp0_cmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
 	or_i(        R_AT, R_AT, 0xFF00), /* Low:  Color G:FF, R:00 (Cyan) */
 	store_word(  R_AT, R_T7, 4),
 	

@@ -1,84 +1,21 @@
 /* ============================================================================
- *  duffle DSL Suffix Conventions (Style B)
+ *  duffle DSL Suffix Conventions
  *  ============================================================================
  *
  *  Every mnemonic in this header follows the same suffix grammar:
  *
- *    _i        Immediate value (16-bit constant operand). Combine with
- *              _u or _s (single-letter modifier + type combined): add_ui,
- *              add_si. Examples: add_ui, add_si, and_i, or_i, xor_i,
- *              load_upper_i. and_i is sign-agnostic (andi zero-extends).
- *              load_upper_i is a unique verb; _i is the immediate marker,
- *              not a modifier+type combination.
- *
- *    _u        Unsigned (no-overflow, no-sign-extension). R-type
- *              arithmetic examples: add_u, sub_u, mult_u, div_u. I-type
- *              (combined with _i): add_ui.
- *
- *    _s        Signed (overflow-traps, sign-extends). R-type: add_s,
- *              sub_s, mult_s, div_s, set_lt_s. I-type (combined with _i):
- *              add_si.
- *
- *  --- Shift family (R-type): verb-modifier-direction ---
- *    The shift macros use `shift_<modifier><direction>`. Modifier is
- *    the single letter `l` (logical) or `a` (arithmetic). Direction
- *    is the word `left` or `right`. Combined: `_lleft`, `_lright`,
- *    `_aright`. Examples: shift_lleft(rd, rt, shamt)  (= sll)
- *                       shift_lright(rd, rt, shamt) (= srl)
- *                       shift_aright(rd, rt, shamt) (= sra)
- *    (no `_aleft`; MIPS has no `sla` — arithmetic-left is bit-identical
- *    to logical-left, so use shift_lleft for that case)
- *
- *  --- Jump/Call family ---
- *    Simple jumps keep the original short names: jump (j), jump_reg
- *    (jr), jump_link (jalr rs, rd). The jump-and-link-to variants
- *    (jal, jalr rs with default $ra) get the `call_` verb instead:
- *    call_addr (jal), call_reg (jalr rs, default $ra).
- *    Examples: jump(off)            (= j)
- *              jump_reg(rs)         (= jr)
- *              jump_link(rs, rd)    (= jalr rs, rd)
- *              call_reg(rs)         (= jalr rs, default $ra)
- *              call_addr(off)       (= jal)
- *
- *    _r        Register marker — used only when the register type needs
- *              disambiguation (e.g., GTE data register vs control
- *              register). NOT used in plain R-type arithmetic (the
- *              R-type is implicit). Examples: gte_mv_to_data_r,
- *              gte_mv_to_ctrl_r.
- *
- *    _self     Destination equals one source operand.
- *              Examples: add_ui_self (I-type, to self),
- *                        add_u_self (R-type, to self).
- *
- *    _mv_to_   Direction: data flows into X.
- *              Example: gte_mv_to_data_r, gte_mv_to_ctrl_r.
- *
- *    _mv_from_ Direction: data flows out of X.
- *              Example: gte_mv_from_data_r, gte_mv_from_ctrl_r.
- *
- *    _str      String-form — emits inline-asm string instead of `.word`.
- *              Example: gte_rtpt_asm_str.
- *
- *    _1w / _2w Emitted word count of the sequence.
- *              Example: load_imm_2w.
- *
- *    _cop2     RESERVED — DO NOT USE in macro names. The `gte_` namespace
- *              prefix already implies coprocessor 2. Use `c2` only in:
- *                (a) integer opcode enums (op_lwc2 = 0x32, op_swc2 = 0x3A)
- *                (b) vendor-mnemonic aliases (gte_mtc2, gte_mfc2)
- *
- *  Primitive commands: gp0_cmd_poly_f3 = 0x20 (byte opcode)
+ *  Primitive commands: gp0_cmd_poly_f3 = 0x20    (byte opcode)
  *  Packed 32-bit cmd:  gp0_word_poly_f3(r, g, b) (32-bit, shifted)
  *
  *  Type ordering: domain?_(direction)?_action_target_modifier_type?
- *  Examples:     add_ui                       (add + unsigned + immediate)
- *                add_s                         (add + signed, R-type implicit)
- *                shift_lleft                   (shift + logical + left)
- *                shift_aright                  (shift + arithmetic + right)
- *                call_reg(rs)                  (call + register, $ra implicit)
- *                gte_mv_to_data_r            (gte + mv + to + data + register)
- *                gte_lw_v0_xy(base)            (gte + lw + v0 + xy)
- *                load_upper_i                  (load-upper + immediate, unique verb)
+ *  Examples: add_ui             (add + unsigned + immediate)
+ *            add_s              (add + signed, R-type implicit)
+ *            shift_lleft        (shift + logical + left)
+ *            shift_aright       (shift + arithmetic + right)
+ *            call_reg(rs)       (call + register, $ra implicit)
+ *            gte_mv_to_data_r   (gte + mv + to + data + register)
+ *            gte_lw_v0_xy(base) (gte + lw + v0 + xy)
+ *            load_upper_i       (load-upper + immediate, unique verb)
  *
  *  Vendor mnemonics (gte_mtc2, gte_mfc2, gte_lwc2, gte_swc2, etc.) are
  *  NOT in this header. They live in the opt-in `gte_vendor_sym.h` for
@@ -104,10 +41,10 @@
  *  ----------
  *  1. A 32-bit instruction word is composed from per-field encoders. Each
  *     encoder knows only its own bit range; the composite ORs them together.
- *     No magic numbers inside any encoder body — every shift and mask is a
+ *     No magic numbers inside any encoder body. Every shift and mask is a
  *     named constant from the bitfield-layout enum below.
  *
- *  2. Pure (compile-time) instructions — every GTE *command* (RTPS, RTPT,
+ *  2. Pure (compile-time) instructions. Every GTE *command* (RTPS, RTPT,
  *     NCLIP, MVMVA, …) and every COP2 *transfer* (ctc2/cfc2) with a constant
  *     rs/rt/rd — are emitted as a single integer constant via
  *     `asm_inline(...)` from gcc_asm.h. The C compiler constant-folds
@@ -135,9 +72,9 @@
  *      gte_load_v0(p_in_12, R_T4);   // R_T4 = 12 = $t4 = $12
  *
  *      // Three independent bases for an RTPT pipeline:
- *      register V3_S2* p0 __asm__("$12") = verts[0].ptr;
- *      register V3_S2* p1 __asm__("$13") = verts[1].ptr;
- *      register V3_S2* p2 __asm__("$14") = verts[2].ptr;
+ *      register V3_S2* p0 gcc_reg(R_T4) = verts[0].ptr;
+ *      register V3_S2* p1 gcc_reg(R_T5) = verts[1].ptr;
+ *      register V3_S2* p2 gcc_reg(R_T6) = verts[2].ptr;
  *      gte_load_v0(p0, R_T4);
  *      gte_load_v1(p1, R_T5);
  *      gte_load_v2(p2, R_T6);
@@ -362,11 +299,11 @@ enum { _C2_OPS_ = 0
 // #define gte_mv_to_data_r(rt, rd)   enc_gte_tx(cop_mt, (rt), (rd)) /* Move GPR (rt) to GTE Control Register (rd) */
 // #define gte_mv_from_data_r(rt, rd) enc_gte_tx(cop_mf, (rt), (rd)) /* Move GTE Control Register (rd) to GPR (rt) */
 
-/* Explicit GTE Data vs Control Register Transfers */
+/* GTE Data vs Control Register Transfers */
 #define gte_mv_from_data_r(rt, rd) enc_gte_tx(0x00, (rt), (rd)) /* Move from GTE Data Reg (e.g. MAC0, OTZ) */
-#define gte_mv_from_ctrl_r(rt, rd)  enc_gte_tx(0x02, (rt), (rd)) /* Move from GTE Control Reg */
-#define gte_mv_to_data_r(rt, rd)    enc_gte_tx(0x04, (rt), (rd)) /* Move to GTE Data Reg (e.g. VXY0) */
-#define gte_mv_to_ctrl_r(rt, rd)    enc_gte_tx(0x06, (rt), (rd)) /* Move to GTE Control Reg (e.g. Matrices) */
+#define gte_mv_from_ctrl_r(rt, rd) enc_gte_tx(0x02, (rt), (rd)) /* Move from GTE Control Reg */
+#define gte_mv_to_data_r(rt, rd)   enc_gte_tx(0x04, (rt), (rd)) /* Move to GTE Data Reg (e.g. VXY0) */
+#define gte_mv_to_ctrl_r(rt, rd)   enc_gte_tx(0x06, (rt), (rd)) /* Move to GTE Control Reg (e.g. Matrices) */
 
 /* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
  * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]
@@ -388,7 +325,7 @@ enum { _C2_OPS_ = 0
 #define gte_lw(rt, base, off) enc_gte_lw(rt, base, off)
 #define gte_sw(rt, base, off) enc_gte_sw(rt, base, off)
 
-/* GTE Command Format (The math engine trigger)
+/* GTE Command Format
  * Opcode is always MIPS_OP_COP2, RS is always 1 (CO).
  * The lower 25 bits are the GTE-specific command payload.
  *

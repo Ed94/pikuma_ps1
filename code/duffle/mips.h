@@ -1,5 +1,5 @@
 /* ============================================================================
- *  duffle DSL Suffix Conventions (Style B)
+ *  duffle DSL Suffix Conventions
  *  ============================================================================
  *
  *  Every mnemonic in this header follows the same suffix grammar:
@@ -23,9 +23,9 @@
  *    The shift macros use `shift_<modifier><direction>`. Modifier is
  *    the single letter `l` (logical) or `a` (arithmetic). Direction
  *    is the word `left` or `right`. Combined: `_lleft`, `_lright`,
- *    `_aright`. Examples: shift_lleft(rd, rt, shamt)  (= sll)
- *                       shift_lright(rd, rt, shamt) (= srl)
- *                       shift_aright(rd, rt, shamt) (= sra)
+ *    `_aright`. Examples: shift_lleft( rd, rt, shamt) (= sll)
+ *                         shift_lright(rd, rt, shamt) (= srl)
+ *                         shift_aright(rd, rt, shamt) (= sra)
  *    (no `_aleft`; MIPS has no `sla` — arithmetic-left is bit-identical
  *    to logical-left, so use shift_lleft for that case)
  *
@@ -34,11 +34,11 @@
  *    (jr), jump_link (jalr rs, rd). The jump-and-link-to variants
  *    (jal, jalr rs with default $ra) get the `call_` verb instead:
  *    call_addr (jal), call_reg (jalr rs, default $ra).
- *    Examples: jump(off)            (= j)
- *              jump_reg(rs)         (= jr)
- *              jump_link(rs, rd)    (= jalr rs, rd)
- *              call_reg(rs)         (= jalr rs, default $ra)
- *              call_addr(off)       (= jal)
+ *    Examples: jump(off)         (= j)
+ *              jump_reg(rs)      (= jr)
+ *              jump_link(rs, rd) (= jalr rs, rd)
+ *              call_reg(rs)      (= jalr rs, default $ra)
+ *              call_addr(off)    (= jal)
  *
  *    _r        Register marker — used only when the register type needs
  *              disambiguation (e.g., GTE data register vs control
@@ -71,14 +71,14 @@
  *  Packed 32-bit cmd:  gp0_word_poly_f3(r, g, b) (32-bit, shifted)
  *
  *  Type ordering: domain?_(direction)?_action_target_modifier_type?
- *  Examples:     add_ui                       (add + unsigned + immediate)
- *                add_s                         (add + signed, R-type implicit)
- *                shift_lleft                   (shift + logical + left)
- *                shift_aright                  (shift + arithmetic + right)
- *                call_reg(rs)                  (call + register, $ra implicit)
- *                gte_mv_to_data_r            (gte + mv + to + data + register)
- *                gte_lw_v0_xy(base)            (gte + lw + v0 + xy)
- *                load_upper_i                  (load-upper + immediate, unique verb)
+ *  Examples: add_ui             (add + unsigned + immediate)
+ *            add_s              (add + signed, R-type implicit)
+ *            shift_lleft        (shift + logical + left)
+ *            shift_aright       (shift + arithmetic + right)
+ *            call_reg(rs)       (call + register, $ra implicit)
+ *            gte_mv_to_data_r   (gte + mv + to + data + register)
+ *            gte_lw_v0_xy(base) (gte + lw + v0 + xy)
+ *            load_upper_i       (load-upper + immediate, unique verb)
  *
  *  Vendor mnemonics (sll, srl, sra, jr, j, jal, jalr) are NOT in this
  *  header. They live in the opt-in `mips_vendor_sym.h` for users who
@@ -417,7 +417,7 @@ enum { _BitOffsets = 0
 #define div_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_div)
 #define div_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_divu)
 
-#define add_u_self(rd_rs, rt)       add_u(rd_rs, rd_rs, rt)
+#define add_u_self(rd_rs, rt)      add_u(rd_rs, rd_rs, rt)
 
 /* --- Arithmetic I-type (immediate) --- */
 #define add_si(rt, rs, imm)        enc_i(op_addi,  (rs), (rt), (imm))
@@ -503,7 +503,7 @@ enum { _BitOffsets = 0
 
 /* load_imm_2w_ori_forced — force the `lui` + `ori` form regardless of lo16 sign.
  * Use when you specifically need zero-extension in the lo half. */
-#define load_imm_2w_ori_forced(rt, imm) do {                 \
+#define load_imm_2w_ori_forced(rt, imm) do {          \
 	asm volatile(                                       \
 		asm_words(load_ui((rt), u4_lo(imm)),              \
 		          or_i((rt), (rt), C_(U2,u4_hi(imm))) )   \
@@ -515,7 +515,7 @@ enum { _BitOffsets = 0
  * Use when you know sign-extension is fine (e.g. lo16 is treated as
  * signed downstream) and you want a smaller effective instruction
  * (the assembler/MIPS hardware will sign-extend the imm16). */
-#define load_imm_2w_addi_forced(rt, imm) do {          \
+#define load_imm_2w_addi_forced(rt, imm) do {   \
 	/*U4 _li2a_imm_ = (U4)(imm);*/                \
 	asm volatile(asm_words(                       \
 		lui_op((rt), u4_lo(imm)),                   \
@@ -588,7 +588,7 @@ enum { _BitOffsets = 0
 #define clbr_volatile_gprs rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain
 
 #define asm_mips_flush_icache() asm volatile( asm_words( \
-		add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment)        \
+		add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment) \
 	, store_word(rret_addr, rstack_ptr, 4)      \
 	, add_ui(rret_0, rdiscard, bios_flushcache) \
 	, add_ui(rtmp_0, rdiscard, bios_table_addr) \
@@ -596,5 +596,5 @@ enum { _BitOffsets = 0
 	, nop                                       \
 	, load_word(rret_addr, rstack_ptr, 4)       \
 	, jump_reg(rret_addr)                       \
-	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment)         \
+	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment) \
 ) asm_clobber: clbr_volatile_gprs )

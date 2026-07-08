@@ -63,106 +63,13 @@ U4 vsync(U4 mode)     __asm__("VSync");
 
 void draw_orderingtbl(U4* buf) __asm__("DrawOTag");
 
-enum {
-	PolyTag_addr_bits = 24,
-	PolyTag_len_bits  = 8,
-};
-typedef Struct_(PolyTag) {
-	union {
-		U4 bf_addr_len;
-		struct {
-			U4 addr: 24;
-			U4 len:  8;
-		};
-	};
-	RGB8 color;
-	B1   code;
-};
-
-/*
- * Primitive Handling Macros
- */
-
-#define set_len( p, _len) 	(((PolyTag*R_)(p))->len  = (B1)(_len))
-#define set_addr(p, _addr)	(((PolyTag*R_)(p))->addr = (U4)(_addr))
-#define set_code(p, _code)	(((PolyTag*R_)(p))->code = (B1)(_code))
-
-#define get_len(p)    	    (B1)(((PolyTag*R_)(p))->len)
-#define get_code(p)   	    (B1)(((PolyTag*R_)(p))->code)
-#define get_addr(p)   	    (U4)(((PolyTag*R_)(p))->addr)
-
-#define orderingtbl_add_primitive(ot, p)		    set_addr(p,  get_addr(ot)), set_addr(ot, p)
-#define orderingtbl_add_primitives(ot, p0, p1)	set_addr(p1, get_addr(ot)), set_addr(ot, p0)
-
-/* Primitive 	Length		Code */
-
-#define set_poly_f3(p)	set_len(p, 4),  set_code(p, 0x20)
-#define set_poly_ft3(p)	set_len(p, 7),  set_code(p, 0x24)
-#define set_poly_g3(p)  set_len(p, 6),  set_code(p, 0x30)
-#define set_poly_gt3(p)	set_len(p, 9),  set_code(p, 0x34)
-#define set_poly_f4(p)	set_len(p, 5),  set_code(p, 0x28)
-#define set_poly_ft4(p)	set_len(p, 9),  set_code(p, 0x2c)
-#define set_poly_g4(p)  set_len(p, 8),  set_code(p, 0x38)
-#define set_poly_gt4(p)	set_len(p, 12), set_code(p, 0x3c)
-
-// #define setSprt8(p)	setlen(p, 3),  setcode(p, 0x74)
-// #define setSprt16(p)	setlen(p, 3),  setcode(p, 0x7c)
-// #define setSprt(p)	setlen(p, 4),  setcode(p, 0x64)
-
-// #define setTile1(p) 	set_len(p, 2),  set_code(p, 0x68)
-// #define setTile8(p) 	set_len(p, 2),  set_code(p, 0x70)
-// #define setTile16(p)	set_len(p, 2),  set_code(p, 0x78)
-#define set_tile(p) 	set_len(p, 3),  set_code(p, 0x60)
-// #define setLineF2(p)	set_len(p, 3),  set_code(p, 0x40)
-// #define setLineG2(p)	set_len(p, 4),  set_code(p, 0x50)
-// #define setLineF3(p)	set_len(p, 5),  set_code(p, 0x48),(p)->pad = 0x55555555
-// #define setLineG3(p)	set_len(p, 7),  set_code(p, 0x58),(p)->pad = 0x55555555, (p)->p2 = 0
-// #define setLineF4(p)	set_len(p, 6),  set_code(p, 0x4c),(p)->pad = 0x55555555
-// #define setLineG4(p)	set_len(p, 9),  set_code(p, 0x5c),(p)->pad = 0x55555555, (p)->p2 = 0, (p)->p3 = 0
-
-typedef Struct_(Poly_F3) {
-	U4   tag;
-	RGB8 color;
-	B1   code;
-	union {
-		struct {
-			V2_S2 p0;
-			V2_S2 p1;
-			V2_S2 p2;
-		};
-		A3_V2_S2 points;
-	};
-};
-
-typedef Struct_(Poly_G3) {
-	U4    tag; RGB8 c0; B1 code;
-	V2_S2 p0;  RGB8 c1; B1 pad1;
-	V2_S2 p1;  RGB8 c2; B1 pad2;
-	V2_S2 p2;
-};
-
-typedef Struct_(Poly_F4) {
-	U4   tag;
-	RGB8 color;
-	B1   code;
-	union {
-		struct {
-			V2_S2 p0;
-			V2_S2 p1;
-			V2_S2 p2;
-			V2_S2 p3;
-		};
-		A4_V2_S2 points;
-	};
-};
-
-typedef Struct_(Poly_G4) {
-	U4    tag; RGB8 c0; B1 code;
-	V2_S2 p0;  RGB8 c1; B1 pad1;
-	V2_S2 p1;  RGB8 c2; B1 pad2;
-	V2_S2 p2;  RGB8 c3; B1 pad3;
-	V2_S2 p3;
-};
+/*	Primitive Handling Macros
+ *	All primitive types (PolyTag, Poly_F3, Poly_F4, Poly_G3, Poly_G4,
+ *	Poly_FT3, Poly_FT4, Poly_GT3, Poly_GT4) and the set_poly_* setters,
+ *	set_len / set_addr / get_len / get_addr macros, and the
+ *	orderingtbl_add_primitive(s) helpers all live in `duffle/gp.h`
+ *	now (per the Phase 3 gp.h overhaul). This file no longer duplicates
+ *	those definitions. */
 
 typedef Struct_(Tile) {
 	U4      tag;

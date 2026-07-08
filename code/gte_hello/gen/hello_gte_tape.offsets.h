@@ -5,9 +5,9 @@
 #pragma region hello_gte_tape
 
 
-// --- atom: floor_tri (51 words) ---
+// --- atom: floor_tri (49 words) ---
 
-#define _atom_offset_culling_floor_tri_exit           17
+#define _atom_offset_culling_floor_tri_exit           15
 #define _atom_offset_bounds_chk_floor_tri_exit        3
 
 enum {

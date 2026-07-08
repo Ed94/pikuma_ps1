@@ -291,7 +291,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			register V3_S2* p1 rgcc(R_T5) = & smem.floor.verts[face->y];
 			register V3_S2* p2 rgcc(R_T6) = & smem.floor.verts[face->z];
 
-			// Three independent bases — full register discretion at the call site
 			gte_load_v0(p0, R_T4);
 			/*
 			asm volatile( ".word " "%0" ", %1" : : 

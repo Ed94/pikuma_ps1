@@ -7,26 +7,17 @@
 #endif
 
 #pragma region MACs (Mips Atom components)
-	  // load_ui(   R_AT, color_hi) \
+/* The macros mac_format_f3_color and mac_gte_store_f3 moved to
+ * lottes_tape.h during the Phase 3 gp.h overhaul. Both are now RGB-form
+ * (mac_format_f3_color takes _r, _g, _b byte values rather than raw
+ * 16-bit half-words). */
 
 enum fack {
-	ah = gcmd_poly_f3 << 8 | 0xFF,
+	ah = gp0_cmd_poly_f3 << 8 | 0xFF,
 };
 void fk() {
 	 (void*)ah;
 }
-
-/* Words: 3; High: 0x20/B, Low: G/R */
-#define mac_format_f3_color(color_hi, color_lo) \
-	  load_upper_i(   R_AT, gcmd_poly_f3 << 8 | color_hi) \
-	, or_i(      R_AT, R_AT, color_lo) \
-	, store_word(R_AT, R_PrimCursor, O_(Poly_F3,color))   \
-
-/* Words: 3 */
-#define mac_gte_store_f3() \
-	  gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
-	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
-	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2))
 
 #pragma endregion MACs
 
@@ -202,7 +193,7 @@ MipsAtom_(floor_tri) {
 	nop,                      
 	/* Format Primitive */
 	// mac_format_f3_color(0x20FF, 0xFFFF),  // works
-	mac_format_f3_color(0xFF, 0xFFFF),  // doesn't work
+	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
 	mac_gte_store_f3(),
 	/* Calculate Depth */
 	nop, nop, gte_avg_sort_z3,            
