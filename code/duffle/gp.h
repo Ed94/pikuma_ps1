@@ -46,9 +46,28 @@
  *  0x1F800000+. GP0 (offset 0x10) is the data port (commands + params).
  *  GP1 (offset 0x14) is the control port (status, ctrl writes).
  * ============================================================================ */
+/* IO base address (KSEG2 0x1F800000+ for the I/O register region).
+ * The 16-bit upper half `IO_BASE_ADDR_HI16` is the form used by
+ * tape-side macros that pin a register to hold the IO base and access
+ * ports via offsets — `lui $reg, 0x1F80` (1 word) then `sw $data,
+ * GPIO_PORT*_OFFSET($reg)` (1 word). Mirrors the `IO_BASE_ADDR equ
+ * 0x1F80` + `gpio_port0 equ 0x1810` pattern from graphics_hello/gp.s.
+ *
+ * See lottes_tape.h `R_GpIoBase` + `mac_gp0_send_imm` for the
+ * wave-context form that composes these primitives. */
 enum {
-    HW_GP0_ADDR = 0x1F801810,  /* GPU data port (commands + parameters) */
-    HW_GP1_ADDR = 0x1F801814,  /* GPU control port (status, ctrl writes) */
+    IO_BASE_ADDR      = 0x1F800000,  /* full 32-bit I/O region base */
+    IO_BASE_ADDR_HI16 = 0x1F80,      /* fits in a single `lui $reg, 0x1F80` */
+
+    /* Offsets from IO_BASE_ADDR to each port. Used by tape-side macros
+     * that pin a register to IO_BASE_ADDR and access ports via offsets:
+     *   sw $data, GPIO_PORT0_OFFSET($io_base)   ; write GP0
+     *   sw $data, GPIO_PORT1_OFFSET($io_base)   ; write GP1 */
+    GPIO_PORT0_OFFSET = 0x1810,
+    GPIO_PORT1_OFFSET = 0x1814,
+
+    HW_GP0_ADDR = (IO_BASE_ADDR_HI16 << 16) | GPIO_PORT0_OFFSET,
+    HW_GP1_ADDR = (IO_BASE_ADDR_HI16 << 16) | GPIO_PORT1_OFFSET,
 };
 
 #define HW_GP0 C_(U4 V_*, HW_GP0_ADDR)
@@ -67,7 +86,7 @@ enum {
  *  so the encoder in §10.4 can reference them by name. NO macro body
  *  past this point uses a raw shift or raw mask — every shift/width/mask
  *  is named here, named once. Mirrors the OPCODE_SHIFT / RS_SHIFT /
- *  REG_MASK convention from mips.h lines 276-293.
+ *  REG_MASK convention from mips.h.
  * ============================================================================ */
 enum {
     gp0_cmd_Nop             = 0x00,
@@ -101,13 +120,22 @@ enum {
     gp0_cmd_tile_8          = 0x68,
     gp0_cmd_tile_16         = 0x70,
 
+    /* State setters (not drawing primitives; set render context).
+     * Per PSX-SPX graphicsprocessingunitgpu.md §"GP0 Other Commands". */
+    gp0_cmd_DrawModeSetting      = 0xE1,  /* TPage / draw-mode (semi-trans, dither, etc.) */
+    gp0_cmd_SetTextureWindow     = 0xE2,
+    gp0_cmd_SetDrawArea_TopLeft  = 0xE3,
+    gp0_cmd_SetDrawArea_BotRight = 0xE4,
+    gp0_cmd_SetDrawOffset        = 0xE5,
+    gp0_cmd_SetMaskBit           = 0xE6,
+
     /* bitfield shifts / widths / masks ----
      *
      * Generic GP0/GP1 command byte (upper 8 bits of every word sent
      * to either port). Used by `enc_gp0_cmd(cmd)` and friends below. */
-    gp0_cmd_shift            = 24,
-    gp0_cmd_width            =  8,
-    gp0_cmd_mask             = 0xFF,
+    gp0_cmd_shift = 24,
+    gp0_cmd_width =  8,
+    gp0_cmd_mask  = 0xFF,
 
     /* Color word layout (lives in Poly_F3.color, Poly_G4.c0..c3, etc.):
      *   bits 31..24 = command byte
@@ -126,9 +154,8 @@ enum {
  *
  *  Layer 1.5 encoders take one field's value, mask it to its own width,
  *  and shift it to its own position. Mirrors `enc_op` / `enc_rs` /
- *  `enc_rt` in mips.h lines 295-301 and `enc_gte_sf` / `enc_gte_mx` in
- *  gte.h lines 342-347. Layer-2 composite encoders OR the per-field
- *  encoders together; layer-3 semantic macros delegate to the composites.
+ *  `enc_rt` in mips.h and `enc_gte_sf` / `enc_gte_mx` in gte.h. Layer-2 composite encoders 
+ *  OR the per-field encoders together; layer-3 semantic macros delegate to the composites.
  *  No raw shifts or magic numbers in any macro body below this point.
  * ============================================================================ */
 
@@ -148,7 +175,7 @@ enum {
 /* ---- Layer 3: semantic GP0 word builders ---- */
 
 /* Pre-baked color+command words for all 8 polygon variants.
- * Mirrors `load_word` / `add_ui` / `jump_reg` style in mips.h lines 340-388. */
+ * Mirrors `load_word` / `add_ui` / `jump_reg` style in mips.h. */
 #define gp0_word_poly_f3(r,g,b)  enc_color_word(gp0_cmd_poly_f3,  (r),(g),(b))
 #define gp0_word_poly_ft3(r,g,b) enc_color_word(gp0_cmd_poly_ft3, (r),(g),(b))
 #define gp0_word_poly_g3(r,g,b)  enc_color_word(gp0_cmd_poly_g3,  (r),(g),(b))
@@ -182,11 +209,11 @@ enum {
     gp1_cmd_HorizontalDisplayRange = 0x06,
     gp1_cmd_VerticalDisplayRange   = 0x07,
     gp1_cmd_DisplayMode            = 0x08,
-    gp1_cmd_SetTextureWindow       = 0x0E,
-    gp1_cmd_SetDrawAreaTopLeft     = 0xE0,
-    gp1_cmd_SetDrawAreaBottomRight = 0xE1,
-    gp1_cmd_SetDrawOffset          = 0xE2,
-    gp1_cmd_SetMaskBit             = 0xE3,
+    /* Note: GP1 only has commands 0x00..0x08. 
+		 * The state-setter commands (SetTextureWindow, * SetDrawArea*, 
+		 * SetDrawOffset, SetMaskBit) live in the GP0 enum as * 0xE1..0xE6. 
+		 * DrawArea word builders are below as GP0s * macros 
+		 * (since they emit GP0 commands). */
 
     /* ---- Display-mode payload flags (per PSX-SPX §"GP1 Display Mode").
      * Bit positions match the encoder shifts below; values are the
@@ -208,38 +235,42 @@ enum {
     gp1_disp_interlace_shift =  5, gp1_disp_interlace_width = 1, gp1_disp_interlace_mask = 0x1,
 
     /* GP1 horizontal display range: bits 0..11 = X2, bits 12..23 = X1 */
-    gp1_hrange_x1_shift      = 12, gp1_hrange_x1_width      = 12, gp1_hrange_x1_mask      = 0xFFF,
-    gp1_hrange_x2_shift      =  0, gp1_hrange_x2_width      = 12, gp1_hrange_x2_mask      = 0xFFF,
+    gp1_hrange_x1_shift = 12, gp1_hrange_x1_width = 12, gp1_hrange_x1_mask = 0xFFF,
+    gp1_hrange_x2_shift =  0, gp1_hrange_x2_width = 12, gp1_hrange_x2_mask = 0xFFF,
 
     /* GP1 vertical display range: bits 0..9 = Y2, bits 10..19 = Y1 */
-    gp1_vrange_y1_shift      = 10, gp1_vrange_y1_width      = 10, gp1_vrange_y1_mask      = 0x3FF,
-    gp1_vrange_y2_shift      =  0, gp1_vrange_y2_width      = 10, gp1_vrange_y2_mask      = 0x3FF,
+    gp1_vrange_y1_shift = 10, gp1_vrange_y1_width = 10, gp1_vrange_y1_mask = 0x3FF,
+    gp1_vrange_y2_shift =  0, gp1_vrange_y2_width = 10, gp1_vrange_y2_mask = 0x3FF,
 
     /* GP1 draw area (top-left or bottom-right): bits 0..9 = X, bits 10..19 = Y
      * (10-bit signed — caller pre-signs and masks with the named mask) */
-    gp1_draw_x_shift         =  0, gp1_draw_x_width         = 10, gp1_draw_x_mask         = 0x3FF,
-    gp1_draw_y_shift         = 10, gp1_draw_y_width         = 10, gp1_draw_y_mask         = 0x3FF,
+    gp1_draw_x_shift =  0, gp1_draw_x_width = 10, gp1_draw_x_mask = 0x3FF,
+    gp1_draw_y_shift = 10, gp1_draw_y_width = 10, gp1_draw_y_mask = 0x3FF,
 };
 
 /* ---- Layer 1.5: GP1 per-field encoders ---- */
-#define enc_gp1_disp_hres(h)      (((h) & gp1_disp_hres_mask)       << gp1_disp_hres_shift)
-#define enc_gp1_disp_vres(v)      (((v) & gp1_disp_vres_mask)       << gp1_disp_vres_shift)
-#define enc_gp1_disp_color(c)     (((c) & gp1_disp_color_mask)      << gp1_disp_color_shift)
-#define enc_gp1_disp_interlace(i) (((i) & gp1_disp_interlace_mask)  << gp1_disp_interlace_shift)
+#define enc_gp1_disp_hres(h)      (((h) & gp1_disp_hres_mask)     << gp1_disp_hres_shift)
+#define enc_gp1_disp_vres(v)      (((v) & gp1_disp_vres_mask)     << gp1_disp_vres_shift)
+#define enc_gp1_disp_color(c)     (((c) & gp1_disp_color_mask)    << gp1_disp_color_shift)
+#define enc_gp1_disp_interlace(i) (((i) & gp1_disp_interlace_mask << gp1_disp_interlace_shift)
 
-#define enc_gp1_hrange_x1(x1) (((x1) & gp1_hrange_x1_mask)      << gp1_hrange_x1_shift)
-#define enc_gp1_hrange_x2(x2) (((x2) & gp1_hrange_x2_mask)      << gp1_hrange_x2_shift)
-#define enc_gp1_vrange_y1(y1) (((y1) & gp1_vrange_y1_mask)      << gp1_vrange_y1_shift)
-#define enc_gp1_vrange_y2(y2) (((y2) & gp1_vrange_y2_mask)      << gp1_vrange_y2_shift)
-#define enc_gp1_draw_x(x)     (((x)  & gp1_draw_x_mask)         << gp1_draw_x_shift)
-#define enc_gp1_draw_y(y)     (((y)  & gp1_draw_y_mask)         << gp1_draw_y_shift)
+#define enc_gp1_hrange_x1(x1) (((x1) & gp1_hrange_x1_mask) << gp1_hrange_x1_shift)
+#define enc_gp1_hrange_x2(x2) (((x2) & gp1_hrange_x2_mask) << gp1_hrange_x2_shift)
+#define enc_gp1_vrange_y1(y1) (((y1) & gp1_vrange_y1_mask) << gp1_vrange_y1_shift)
+#define enc_gp1_vrange_y2(y2) (((y2) & gp1_vrange_y2_mask) << gp1_vrange_y2_shift)
+#define enc_gp1_draw_x(x)     (((x)  & gp1_draw_x_mask)    << gp1_draw_x_shift)
+#define enc_gp1_draw_y(y)     (((y)  & gp1_draw_y_mask)    << gp1_draw_y_shift)
 
 /* ---- Layer 2: GP1 composite encoders ---- */
 #define enc_gp1_disp_mode_word(h, v, c, i) (enc_gp0_cmd(gp1_cmd_DisplayMode)            | enc_gp1_disp_hres(h)  | enc_gp1_disp_vres(v) | enc_gp1_disp_color(c) | enc_gp1_disp_interlace(i))
 #define enc_gp1_hrange_word(x1, x2)        (enc_gp0_cmd(gp1_cmd_HorizontalDisplayRange) | enc_gp1_hrange_x1(x1) | enc_gp1_hrange_x2(x2))
 #define enc_gp1_vrange_word(y1, y2)        (enc_gp0_cmd(gp1_cmd_VerticalDisplayRange)   | enc_gp1_vrange_y1(y1) | enc_gp1_vrange_y2(y2))
-#define enc_gp1_draw_area_tl_word(x, y)    (enc_gp0_cmd(gp1_cmd_SetDrawAreaTopLeft)     | enc_gp1_draw_x(x)     | enc_gp1_draw_y(y))
-#define enc_gp1_draw_area_br_word(x, y)    (enc_gp0_cmd(gp1_cmd_SetDrawAreaBottomRight) | enc_gp1_draw_x(x)     | enc_gp1_draw_y(y))
+
+/* ---- Layer 2: GP0 state-setter composite encoders ----
+ * GP0(0xE3) SetDrawArea top-left and GP0(0xE4) SetDrawArea bottom-right
+ * both use the same X/Y 10-bit signed payload as GP1 DisplayRange. */
+#define enc_gp0_draw_area_tl_word(x, y)    (enc_gp0_cmd(gp0_cmd_SetDrawArea_TopLeft)  | enc_gp1_draw_x(x) | enc_gp1_draw_y(y))
+#define enc_gp0_draw_area_br_word(x, y)    (enc_gp0_cmd(gp0_cmd_SetDrawArea_BotRight) | enc_gp1_draw_x(x) | enc_gp1_draw_y(y))
 
 /* ---- Layer 3: GP1 semantic word builders ---- */
 #define gp1_word_display_enable(on)                         (enc_gp0_cmd(gp1_cmd_DisplayEnable) | ((on) & 1))
@@ -250,10 +281,74 @@ enum {
 #define gp1_word_horizontal_range(x1, x2) enc_gp1_hrange_word((x1), (x2))
 #define gp1_word_vertical_range(y1, y2)   enc_gp1_vrange_word((y1), (y2))
 
+/* ---- Layer 3: GP0 state-setter semantic word builders ---- */
 /* DrawArea: top-left = (X, Y), bottom-right = (X, Y) — X/Y in 10-bit signed.
  * Caller is responsible for sign-conversion before passing in. */
-#define gp1_word_draw_area_top_left(x, y)      enc_gp1_draw_area_tl_word((x), (y))
-#define gp1_word_draw_area_bottom_right(x, y)  enc_gp1_draw_area_br_word((x), (y))
+#define gp0_word_draw_area_top_left(x, y)     enc_gp0_draw_area_tl_word((x), (y))
+#define gp0_word_draw_area_bottom_right(x, y) enc_gp0_draw_area_br_word((x), (y))
+
+/* ============================================================================
+ *  Pre-baked GPU state words
+ *  ============================================================================
+ *
+ *  Common command words for boot-time GPU init and standard
+ *  display configurations. Each one is a pure compile-time integer
+ *  constant ready to drop into a `.word` directive.
+ *
+ *  These are the equivalents of the `gp_HorizontalDisplayRange_3168_608`,
+ *  `gp_VerticalDisplayRange_264_24`, `gp_DisplayMode_320x240_15bit_NTSC`,
+ *  `gp_SetDrawMode_DrawAllowed`, `gp_DMA_*` `.equ`s from the pre-rewrite
+ *  gp.h / graphics_hello/gp.s, rebuilt using the layer-cake encoders so
+ *  no magic numbers appear in any body.
+ * ============================================================================ */
+
+/* ---- Display enable (1-bit payload on DisplayEnable cmd) ---- */
+#define gp1_word_display_enabled   enc_gp0_cmd_word(gp1_cmd_DisplayEnable)
+#define gp1_word_display_disabled (enc_gp0_cmd_word(gp1_cmd_DisplayEnable) | 1)
+
+/* ---- DMA direction (2-bit payload on DMADirection cmd 0x04) ---- */
+enum {
+    gp1_dma_dir_Off            = 0,
+    gp1_dma_dir_FIFO           = 1,
+    gp1_dma_dir_CPU_to_GPU     = 2,
+    gp1_dma_dir_GPUREAD_to_CPU = 3,
+};
+#define gp1_word_dma_direction(dir) (enc_gp0_cmd(gp1_cmd_DMADirection) | ((dir) & 0x3))
+
+/* ---- Standard display ranges (NTSC + PAL pre-baked) ---- */
+/* Horizontal range values are in video clock units (8 units/pixel); vertical range values are scanline numbers. */
+enum {
+    /* NTSC horizontal range: X1=608, X2=3168 */
+    gp1_hrange_NTSC_x1 = 0x260,
+    gp1_hrange_NTSC_x2 = 0xC60,
+    /* PAL horizontal range (same as NTSC for most CRTs) */
+    gp1_hrange_PAL_x1  = 0x260,
+    gp1_hrange_PAL_x2  = 0xC60,
+
+    /* NTSC vertical range: Y1=24, Y2=264 */
+    gp1_vrange_NTSC_y1 = 24,
+    gp1_vrange_NTSC_y2 = 264,
+    /* PAL vertical range: Y1=24, Y2=504 */
+    gp1_vrange_PAL_y1  = 24,
+    gp1_vrange_PAL_y2  = 504,
+};
+
+#define gp1_word_horizontal_range_ntsc enc_gp1_hrange_word(gp1_hrange_NTSC_x1, gp1_hrange_NTSC_x2)
+#define gp1_word_horizontal_range_pal  enc_gp1_hrange_word(gp1_hrange_PAL_x1,  gp1_hrange_PAL_x2)
+#define gp1_word_vertical_range_ntsc   enc_gp1_vrange_word(gp1_vrange_NTSC_y1, gp1_vrange_NTSC_y2)
+#define gp1_word_vertical_range_pal    enc_gp1_vrange_word(gp1_vrange_PAL_y1,  gp1_vrange_PAL_y2)
+
+/* ---- Draw-mode setting (TPage / draw-area allowance) ---- */
+/* The pre-baked "drawing enabled" word is the standard post-init state. */
+enum {
+    gp0_DrawMode_DrawToDispBit = 10,
+};
+#define gp0_word_draw_mode_drawing_allowed (enc_gp0_cmd(gp0_cmd_DrawModeSetting) | (1 << gp0_DrawMode_DrawToDispBit))
+
+/* ---- DrawArea pre-baked at origin (0,0) and full screen (320x240) ---- */
+#define gp0_word_draw_area_top_left_origin      enc_gp0_draw_area_tl_word(0, 0)
+#define gp0_word_draw_area_bottom_right_320x240 enc_gp0_draw_area_br_word(320, 240)
+#define gp0_word_draw_area_bottom_right_640x480 enc_gp0_draw_area_br_word(640, 480)
 
 #pragma endregion GPU Ports & Commands
 
@@ -311,12 +406,7 @@ typedef Struct_(PolyTag) {
 
 /* DSL cast convention: every cast uses `C_()`, every pointer qualifier
  * is `R_` (restrict) or `V_` (volatile). No raw C-style casts. RHS values
- * are assumed to be `U4` — caller passes a `U4` directly.
- *
- * IMPORTANT: do NOT name an arg the same as a struct member being
- * accessed in the body — preprocessor substitution would replace the
- * member name with the caller's value expression, yielding `->expr`
- * which is a parse error. Use `v` (value) for the arg instead. */
+ * are assumed to be `U4` — caller passes a `U4` directly. */
 #define set_len(tag,v)  (C_(PolyTag_R,tag)->len  = u4_(v))
 #define set_addr(tag,v) (C_(PolyTag_R,tag)->addr = u4_(v))
 /* `set_code` is no longer in the new PolyTag design — the code byte lives
@@ -450,12 +540,6 @@ typedef Struct_(Poly_GT4) {
  *    bit  10      = drawing to display area (1 bit)
  *    bit  11      = texture disable   (1 bit)
  *    bits 12..31  = reserved (zero)
- *
- *  The previous version of this file had `gp0_tpage_semi_trans_shift
- *  = 7`, which is WRONG — semi-transparency lives at bits 5..6 (after Y
- *  at bit 4). Likewise the prior `gp0_tpage_clut_depth_shift = 12` and
- *  `gp0_tpage_y_flip_bit = 15` referenced fields that don't exist on the
- *  TPage word. See design.md §10.9 and PSX-SPX §"Rendering Attributes".
  * ============================================================================ */
 enum {
     /* ---- Layer 1: TPage bitfield shifts / widths / masks ---- */
@@ -480,8 +564,7 @@ enum {
     gp0_tpage_semi_trans_sub   = 0x3,
 };
 
-/* ---- Layer 1.5: TPage per-field encoders. Mirrors enc_gte_sf/mx/v in
- * gte.h lines 342-347. ---- */
+/* ---- Layer 1.5: TPage per-field encoders. Mirrors enc_gte_sf/mx/v in gte.h. ---- */
 #define enc_gp0_tpage_x(x)            (((x) & gp0_tpage_x_mask)            << gp0_tpage_x_shift)
 #define enc_gp0_tpage_y(y)            (((y) & gp0_tpage_y_mask)            << gp0_tpage_y_shift)
 #define enc_gp0_tpage_semi_trans(s)   (((s) & gp0_tpage_semi_trans_mask)   << gp0_tpage_semi_trans_shift)
@@ -490,8 +573,7 @@ enum {
 #define enc_gp0_tpage_draw_to_disp(d) (((d) & gp0_tpage_draw_to_disp_mask) << gp0_tpage_draw_to_disp_shift)
 #define enc_gp0_tpage_tex_disable(t)  (((t) & gp0_tpage_tex_disable_mask)  << gp0_tpage_tex_disable_shift)
 
-/* ---- Layer 2: TPage composite encoder. Mirrors enc_gte_cmdw in gte.h
- * line 350. ---- */
+/* ---- Layer 2: TPage composite encoder. Mirrors enc_gte_cmdw in gte.h ---- */
 #define enc_gp0_tpage_word(x, y, semi_trans, color_depth, dither, draw_to_disp, tex_disable) \
     (enc_gp0_tpage_x(x)                       \
    | enc_gp0_tpage_y(y)                       \
@@ -512,19 +594,12 @@ typedef Struct_(TexturePage) { U4 raw; };
 /* ============================================================================
  *  CLUT (Color Look-Up Table) semantics
  *  ============================================================================
- *
+ * 
  *  CLUT is loaded into VRAM by sending a GP0 command whose payload is:
  *    bits  0..5   = Y in 16-px units (palette row)
  *    bits  6..14  = X in 16-px units (palette column)
  *    bits 15..23  = reserved (zero)
  *    bits 24..31  = command byte — 0x20 (4bpp load) or 0x25 (8bpp load)
- *
- *  The previous version used `depth_4bpp ? 0 : 5` as the lower-5 bits
- *  of the cmd byte — that's an opaque ternary that hides which opcode
- *  is being sent. The two cmd-byte values are now named; one macro per
- *  depth. Mirrors the named-opcode rule from mips.h lines 188-271 and
- *  the `gte_cmd_rtpt` / `gte_cmd_nclip` named-opcode pattern from
- *  gte.h lines 209-214.
  * ============================================================================ */
 enum {
     /* ---- Layer 1: CLUT bitfield shifts / widths / masks ---- */
@@ -600,12 +675,38 @@ typedef Struct_(TIM_SectionHeader) {
 
 #pragma region Tape-Side Macros
 /* ============================================================================
- * Tape-side macro components
+ *  Tape-side GPU operations (NOT in this header)
  *  ============================================================================
  *
- *  TODO: mac_gp0_send — write a 32-bit GPU command word to HW_GP0 from
- *  within an atom body. Requires placeholder-pun on a runtime GPR holding
- *  the port address.
+ *  No `mac_gp0_send` or related macros live in gp.h. Rationale: the
+ *  Lottes tape model uses OT-DMA for primitive submission, so atom bodies
+ *  write to main RAM (the OT/primitive buffer) and to GTE state — never
+ *  directly to the GPU ports at 0x1F801810 / 0x1F801814. See
+ *  `mac_format_f3_color`, `mac_insert_ot_tag`, `mac_gte_store_f3` in
+ *  lottes_tape.h for the patterns atom bodies actually use.
+ *
+ *  If a feature need arises requires tape-side GPU port writes (e.g. DMA-kick to
+ *  start GPU consumption of the OT, VBlank sync via GP1 status poll),
+ *  the right home is `lottes_tape.h` alongside the rest of the `mac_*`
+ *  family — the encoder infrastructure is already in place:
+ *
+ *    1. The caller pins a register to hold the IO base, e.g.
+ *         register U4 r_io rgcc(R_T4) = IO_BASE_ADDR;
+ *       The compiler emits `lui R_T4, IO_BASE_ADDR_HI16` outside the
+ *       atom body (in the C prologue before tape_run).
+ *
+ *    2. The atom body uses `store_word(R_data, R_T4, GPIO_PORT0_OFFSET)`
+ *       to write to GP0, and `store_word(R_data, R_T4, GPIO_PORT1_OFFSET)`
+ *       to write to GP1. Both are preprocessor-encodable because R_T4 is
+ *       a fixed register and the GPIO_PORT*_OFFSET constants fit in the
+ *       `sw`'s 16-bit signed offset field. No placeholder-pun, no asm
+ *       constraints, no hidden register choice. Same pattern as the
+ *       old graphics_hello/hello_gp_routines.s `reg_io_offset`/`gcmd_push`
+ *       convention.
+ *
+ *  This mirrors the existing tape-side wave-context discipline: the
+ *  caller binds the IO-base register via `rgcc()`, the macro assumes
+ *  the binding is in effect, and the encoding falls out at preprocessor
+ *  time. No additional GPU-domain macro layer required.
  * ============================================================================ */
-/* #define mac_gp0_send(r_gp_port, word) ... deferred */
 #pragma endregion Tape-Side Macros

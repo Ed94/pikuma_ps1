@@ -99,10 +99,10 @@
 #define Struct_(symbol)                struct symbol   TSet_(symbol); struct symbol
 #define Union_(symbol)                 union  symbol   TSet_(symbol); union  symbol
 
-#define Opt_(proc)                    Struct_(tmpl(Opt,proc))
-#define opt_(symbol, ...)             (tmpl(Opt,symbol)){__VA_ARGS__}
-#define Ret_(proc)                    Struct_(tmpl(Ret,proc))
-#define ret_(proc)                    tmpl(Ret,proc) proc
+#define Opt_(proc)                     Struct_(tmpl(Opt,proc))
+#define opt_(symbol, ...)              (tmpl(Opt,symbol)){__VA_ARGS__}
+#define Ret_(proc)                     Struct_(tmpl(Ret,proc))
+#define ret_(proc)                     tmpl(Ret,proc) proc
 
 // Using Byte-Width convention for the fundamental types.
 typedef __UINT8_TYPE__  TSet_(U1); 

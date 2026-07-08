@@ -464,7 +464,6 @@ enum {
  * (typically one of R_T4..R_T9 for the standard "3-pointer" pattern).
  *
  * The caller MUST bind `r_ptr` to that same GPR via a register variable:
- *
  *     register V3_S2* p_in_12 __asm__("$12") = my_ptr;
  *     gte_load_v0(p_in_12, R_T4);   // R_T4 = 12, base is $12
  *
@@ -494,21 +493,21 @@ enum {
  *
  * The `asm_clobber(...)` helper from gcc_asm.h prepends the colon that
  * starts the clobbers section. */
-#define gte_load_v0(r_ptr, base) asm volatile(   \
+#define gte_load_v0(r_ptr, base) asm volatile(       \
 	asm_words( gte_lw_v0_xy(base), gte_lw_v0_z(base) ) \
-	asm_rpins,   r_use(r_ptr)                      \
+	asm_rpins,   r_use(r_ptr)                          \
 	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
-#define gte_load_v1(r_ptr, base) asm volatile(   \
+#define gte_load_v1(r_ptr, base) asm volatile(       \
 	asm_words( gte_lw_v1_xy(base), gte_lw_v1_z(base) ) \
-	asm_rpins,   r_use(r_ptr)                      \
+	asm_rpins,   r_use(r_ptr)                          \
 	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
-#define gte_load_v2(r_ptr, base) asm volatile(    \
-	asm_words( gte_lw_v2_xy(base), gte_lw_v2_z(base) )  \
-	asm_rpins,   r_use(r_ptr)                       \
+#define gte_load_v2(r_ptr, base) asm volatile(       \
+	asm_words( gte_lw_v2_xy(base), gte_lw_v2_z(base) ) \
+	asm_rpins,   r_use(r_ptr)                          \
 	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
@@ -563,7 +562,7 @@ enum {
 #define gte_rtpt()                        \
 	asm volatile(                           \
 		asm_words( nop, nop, gte_cmdw_rtpt )  \
-		asm_clobber: clbr_volatile_gprs               \
+		asm_clobber: clbr_volatile_gprs       \
 	)
 
 #define gte_rtpt_asm_str() \
@@ -635,7 +634,6 @@ enum {
  * [RT_xx, RT_xy] | [RT_xz, pad] | ...).
  *
  * Generated MIPS (mirrors the source macro):
- *
  *   lw   $12,  0( %0 )    ; word 0
  *   lw   $13,  4( %0 )    ; word 1
  *   ctc2 $12,  $0         ; → C2_RT11

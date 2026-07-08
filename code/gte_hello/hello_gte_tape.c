@@ -170,7 +170,7 @@ MipsAtom_(rbind_floor_tri) {
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
 	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,VertBase)), 
 	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,OtBase)), 
-	add_ui_self(               R_TapePtr, S_(Binds_FloorTri)),
+	add_ui_self(            R_TapePtr, S_(Binds_FloorTri)),
 	mac_yield()
 };
 
@@ -195,12 +195,13 @@ MipsAtom_(floor_tri) {
 	// mac_format_f3_color(0x20FF, 0xFFFF),  // works
 	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
 	mac_gte_store_f3(),
+	
 	/* Calculate Depth */
 	nop, nop, gte_avg_sort_z3,            
 	nop, nop, gte_mv_from_data_r(R_T1, C2_OTZ),      
 	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),   
-	set_lt_u(       R_AT, R_T1, R_AT), 
+	set_lt_u(    R_AT, R_T1, R_AT), 
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_tri_exit)),   
 	nop, 
 	/* Insert into Ordering Table Linked List */
