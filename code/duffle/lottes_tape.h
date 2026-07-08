@@ -102,9 +102,9 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
 #define mac_load_tri_verts(rId_0, rId_1, rId_2) \
-	  shift_lleft(R_AT, rId_0, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
-	, shift_lleft(R_AT, rId_1, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
-	, shift_lleft(R_AT, rId_2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
+	  shift_lleft(R_AT, rId_0, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0) \
+	, shift_lleft(R_AT, rId_1, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1) \
+	, shift_lleft(R_AT, rId_2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2)
 
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list */
 #define mac_insert_ot_tag(r_otz, prim_length) \
@@ -194,11 +194,11 @@ internal MipsAtom_(set_gte_world) {
 // TODO(Ed): Annotate magic offsets.
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
 	load_word(R_T0, R_T3,  0),    load_word(R_T1, R_T3,  4),
-	gte_ct(   R_T0, gte_cr_RT11), gte_ct(   R_T1, gte_cr_RT12),
+	gte_mv_to_ctrl_r(   R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(   R_T1, gte_cr_RT12),
 	load_word(R_T0, R_T3,  8),    load_word(R_T1, R_T3, 12),    load_word(R_T2, R_T3, 16),
-	gte_ct(   R_T0, gte_cr_RT13), gte_ct(   R_T1, gte_cr_RT21), gte_ct(   R_T2, gte_cr_RT22),
+	gte_mv_to_ctrl_r(   R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(   R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(   R_T2, gte_cr_RT22),
 	load_word(R_T0, R_T3, 20),    load_word(R_T1, R_T3, 24),    load_word(R_T2, R_T3, 28),
-	gte_ct(   R_T0, gte_cr_TRX),  gte_ct(   R_T1, gte_cr_TRY),  gte_ct(   R_T2, gte_cr_TRZ),
+	gte_mv_to_ctrl_r(   R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(   R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(   R_T2, gte_cr_TRZ),
 
 	mac_yield()
 };
@@ -249,15 +249,15 @@ internal MipsAtom_(diag_gte) {
 	/* Load Vertices into GTE */
 	shift_lleft( R_AT, R_T0, 3), add_u(    R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(   R_V0, C2_VXY0), gte_mt(   R_V1, C2_VZ0),
+	gte_mv_to_data_r(   R_V0, C2_VXY0), gte_mv_to_data_r(   R_V1, C2_VZ0),
 
 	shift_lleft( R_AT, R_T1, 3), add_u(    R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(   R_V0, C2_VXY1), gte_mt(   R_V1, C2_VZ1),
+	gte_mv_to_data_r(   R_V0, C2_VXY1), gte_mv_to_data_r(   R_V1, C2_VZ1),
 
 	shift_lleft( R_AT, R_T2, 3), add_u(    R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(   R_V0, C2_VXY2), gte_mt(   R_V1, C2_VZ2),
+	gte_mv_to_data_r(   R_V0, C2_VXY2), gte_mv_to_data_r(   R_V1, C2_VZ2),
 
 	/* Run Math */
 	nop, nop, gte_cmdw_rtpt,

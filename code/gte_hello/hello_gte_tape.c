@@ -75,17 +75,17 @@ MipsAtom_(cube_tri) {
 	/* V0 = verts[face->x] */
 	shift_lleft(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
+	gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
 
 	/* V1 = verts[face->y] */
 	shift_lleft(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1),
+	gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
 
 	/* V2 = verts[face->z] */
 	shift_lleft(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2),
+	gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
 
 	/* ── 3. RTPT — transforms V0/V1/V2 → SXY0/SXY1/SXY2 + SZ1/SZ2/SZ3 ─── */
 	nop, nop, gte_cmdw_rtpt,
@@ -96,7 +96,7 @@ MipsAtom_(cube_tri) {
 	nop, nop,
 
 	/* ── 5. Cull check: skip format/insert if MAC0 ≤ 0 (backface) ───────── */
-	gte_mf(R_T0, C2_MAC0),
+	gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop,
 	branch_le_zero(R_T0, 49),  /* Skip 49 if MAC0 ≤ 0 (backface) → cull */
 	nop,                        /* BD slot */
@@ -132,7 +132,7 @@ MipsAtom_(cube_tri) {
 	/* ── 7. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
 	shift_lleft(R_AT, R_T3, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
+	gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
 
 	/* ── 8. RTPS — transforms V0 (now V3) → SXY0 (p3) + SZ0 ─────────────── */
 	nop, nop, gte_cmdw_rtps,
@@ -143,7 +143,7 @@ MipsAtom_(cube_tri) {
 	/* ── 9. AVSZ4 — average Z from SZ0/SZ1/SZ2/SZ3 ────────────── */
 	nop, nop, gte_cmdw_avsz4,
 	nop, nop,
-	gte_mf(R_T1, C2_OTZ),
+	gte_mv_from_data_r(R_T1, C2_OTZ),
 
 	/* ── 10. Bounds check OTZ < 2048 ─────────────────────────────────────── */
 	add_ui(      R_AT, R_0,  2048),
@@ -197,7 +197,7 @@ MipsAtom_(floor_tri) {
 	nop, nop, gte_cmdw_nclip,
 	nop, nop, 
 	/* Culling (Branch forward if Backface) */
-	gte_mf(R_T0, C2_MAC0),
+	gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop, branch_le_zero(R_T0, atom_offset(culling, floor_tri_exit)), 
 	nop,                      
 	/* Format Primitive */
@@ -206,7 +206,7 @@ MipsAtom_(floor_tri) {
 	mac_gte_store_f3(),
 	/* Calculate Depth */
 	nop, nop, gte_avg_sort_z3,            
-	nop, nop, gte_mf(R_T1, C2_OTZ),      
+	nop, nop, gte_mv_from_data_r(R_T1, C2_OTZ),      
 	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),   
 	set_lt_u(       R_AT, R_T1, R_AT), 
