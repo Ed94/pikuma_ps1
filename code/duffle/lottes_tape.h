@@ -108,24 +108,23 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	gte_mt(R_V1, V.z [#]);
 */
 #define mac_load_tri_verts(rId_0, rId_1, rId_2) \
-	  shift_ll(R_AT, rId_0, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
-	, shift_ll(R_AT, rId_1, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
-	, shift_ll(R_AT, rId_2, 3), add_u(R_AT, R_AT, R_VertBase), load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
+	  shift_ll(R_AT, rId_0, v3s2_byteoff), add_u_1(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
+	, shift_ll(R_AT, rId_1, v3s2_byteoff), add_u_1(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
+	, shift_ll(R_AT, rId_2, v3s2_byteoff), add_u_1(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
 
 	//TODO(Ed): Add more type annotation
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list */
-#define mac_insert_ot_tag(r_otz, prim_length)                               \
-	  shift_ll(  R_T1, r_otz, 2)                                              \
-	, add_u(     R_T1, R_T1, R_OtBase)   /* T1 = &OrderingTable[OTZ] */       \
-	, load_word( R_AT, R_T1, 0)          /* AT = old_ot_head */               \
-	, load_ui(   R_V0, prim_length)      /* V0 = Length << 24 */              \
-	, shift_ll(  R_AT, R_AT, 8)          /* Strip upper 8 bits from old_ot */ \
-	, shift_lr(  R_AT, R_AT, 8)                                               \
-	, or_u(      R_AT, R_AT, R_V0)       /* Merge length */                   \
-	, store_word(R_AT, R_PrimCursor, 0)  /* prim->tag = old_ot_head */        \
-	, shift_ll(  R_AT, R_PrimCursor, 8)  /* AT = PrimCur & 0x00FFFFFF */      \
-	, shift_lr(  R_AT, R_AT, 8)                                               \
-	, store_word(R_AT, R_T1, 0)          /* OrderingTable[OTZ] = PrimCur */
+#define mac_insert_ot_tag(r_otz, prim_length) \
+	  shift_ll( R_T1, r_otz, 2)                              /* T1 = r_otz * S_(U4) */            \
+	, add_u(    R_T1, R_T1,         R_OtBase)                /* T1 = & OrderingTable[OTZ] */      \
+	, load_word(R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */               \
+	, load_ui(  R_V0, prim_length)                           /* V0 = prim_length << 16 (high 16 bits of a tag) */ \
+	, shift_ll_lr(R_AT, R_AT,       S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
+	, or_u(      R_AT, R_AT, R_V0)                            /* Merge length */                  \
+	, store_word(R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
+	, shift_ll(  R_AT, R_PrimCursor, S_(PolyTag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
+	, shift_lr(  R_AT, R_AT,         S_(PolyTag_len_bits))                                        \
+	, store_word(R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
 
 #pragma endregion Macro Atom Components
 
@@ -179,7 +178,7 @@ enum {
  */
 // TODO(Ed): Annotate magic offsets
 internal MipsAtom_(mips_flush_icache) {
-	  add_ui(rstack_ptr, rstack_ptr, -8)        /* sp -= 8             */
+	  add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment) /* sp -= 8 */
 	, store_word(rret_addr, rstack_ptr, 4)      /* sw  $ra,   4($sp)   */
 	, add_ui(rret_0, rdiscard, bios_flushcache) /* addiu $a0, $0, 0x44 */
 	, add_ui(rtmp_0, rdiscard, bios_table_addr) /* addiu $t0, $0, 0xA0 */
@@ -187,7 +186,7 @@ internal MipsAtom_(mips_flush_icache) {
 	, nop                                       /* BD slot             */
 	, load_word(rret_addr, rstack_ptr, 4)       /* lw   $ra, 4($sp)    */
 	, jump_reg(rret_addr)                       /* jr   $ra            */
-	, add_ui(rstack_ptr, rstack_ptr, 8)         /* sp += 8 (BD)        */
+	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment)  /* sp += 8 (BD) */
 	, mac_yield()
 };
 
@@ -221,7 +220,7 @@ internal MipsAtom_(diag_yield) { mac_yield() };
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal MipsAtom_(diag_color) {
 	store_word(R_0, R_T7, 0), 
-	load_ui(   R_AT, 0x20FF),       /* High: MipsCode 0x20 + Color B:FF */
+	load_ui(   R_AT, gcmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
 	or_i(      R_AT, R_AT, 0xFF00), /* Low:  Color G:FF, R:00 (Cyan) */
 	store_word(R_AT, R_T7, 4),
 	

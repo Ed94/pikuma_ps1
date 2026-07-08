@@ -7,6 +7,10 @@
 #define max(A, B)       (((A) > (B)) ? (A) : (B))
 #define clamp_bot(X, B) max(X, B)
 
+enum { 
+	v3s2_byteoff = 3, // log2(8), used with shift_left_logical op for index via byte offset.
+};
+
 typedef Array_(U4, 2);
 typedef Array_(S2, 2);
 typedef Array_(S2, 3);

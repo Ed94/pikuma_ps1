@@ -279,6 +279,8 @@ enum { _BitOffsets = 0
 #define shift_lr(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_srl)
 #define shift_ra(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sra)
 
+#define shift_ll_lr(rd, rt, shamt) shift_ll(rd, rt, shamt), shift_lr(rd, rt, shamt)
+
 /* jr rs — jump to address in rs. */
 #define jump_reg(rs)               enc_r(op_special, (rs), R_0, R_0, 0, fc_jr)
 
@@ -324,6 +326,8 @@ enum { _BitOffsets = 0
 #define mult_u(rd, rs, rt)         enc_r(op_special, (rs), (rt), (rd), 0, fc_multu)
 #define div_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_div)
 #define div_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_divu)
+
+#define add_u_1(rd_rs, rt) add_u(rd_rs, rd_rs, rt)
 
 /* --- Arithmetic I-type (immediate) --- */
 #define add_si(rt, rs, imm)        enc_i(op_addi,  (rs), (rt), (imm))

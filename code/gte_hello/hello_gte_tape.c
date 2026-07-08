@@ -7,10 +7,19 @@
 #endif
 
 #pragma region MACs (Mips Atom components)
+	  // load_ui(   R_AT, color_hi) \
+
+enum fack {
+	ah = gcmd_poly_f3 << 8 | 0xFF,
+};
+void fk() {
+	 (void*)ah;
+}
 
 /* Words: 3; High: 0x20/B, Low: G/R */
 #define mac_format_f3_color(color_hi, color_lo) \
-	  load_ui(R_AT, color_hi), or_i(R_AT, R_AT, color_lo) \
+	  load_ui(   R_AT, gcmd_poly_f3 << 8 | color_hi) \
+	, or_i(      R_AT, R_AT, color_lo) \
 	, store_word(R_AT, R_PrimCursor, O_(Poly_F3,color))   \
 
 /* Words: 3 */
@@ -192,7 +201,8 @@ MipsAtom_(floor_tri) {
 	nop, branch_le_zero(R_T0, atom_offset(culling, floor_tri_exit)), 
 	nop,                      
 	/* Format Primitive */
-	mac_format_f3_color(0x20FF, 0xFFFF), 
+	// mac_format_f3_color(0x20FF, 0xFFFF),  // works
+	mac_format_f3_color(0xFF, 0xFFFF),  // doesn't work
 	mac_gte_store_f3(),
 	/* Calculate Depth */
 	nop, nop, gte_avg_sort_z3,            

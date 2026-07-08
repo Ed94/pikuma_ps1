@@ -217,17 +217,17 @@ enum {
  * Same pattern as the GPR `_Code` set in mips.h. Note: indices 21-23
  * are reserved/unused on real hardware, so there's a gap. */
 #define gte_cr_RT11_Code  0
-#define gte_cr_RT12_Code  1
-#define gte_cr_RT13_Code  2
-#define gte_cr_RT21_Code  3
-#define gte_cr_RT22_Code  4
-#define gte_cr_RT23_Code  5
-#define gte_cr_RT31_Code  6
-#define gte_cr_RT32_Code  7
-#define gte_cr_RT33_Code  8
-#define gte_cr_TRX_Code   9
-#define gte_cr_TRY_Code  10
-#define gte_cr_TRZ_Code  11
+#define gte_cr_RT12_Code  1  /* packed with RT13 in bits 16..31 */
+#define gte_cr_RT13_Code  2  /* packed with RT22 in bits 16..31 */
+#define gte_cr_RT21_Code  3  /* packed with RT31 in bits 16..31 */
+#define gte_cr_RT22_Code  4  /* RT33 alone (low 16 bits used) */
+// #define gte_cr_RT23_Code  5
+// #define gte_cr_RT31_Code  6
+// #define gte_cr_RT32_Code  7
+// #define gte_cr_RT33_Code  8
+#define gte_cr_TRX_Code   5   /* PSX SDK convention: C2 r5 = TRX (alone, 32-bit) */
+#define gte_cr_TRY_Code   6   /* PSX SDK convention: C2 r6 = TRY (alone, 32-bit) */
+#define gte_cr_TRZ_Code   7   /* PSX SDK convention: C2 r7 = TRZ (alone, 32-bit) */
 #define gte_cr_L11_Code  12
 #define gte_cr_L12_Code  13
 #define gte_cr_L13_Code  14
@@ -248,8 +248,8 @@ enum {
 
 enum {
 	gte_cr_RT11 = gte_cr_RT11_Code, gte_cr_RT12 = gte_cr_RT12_Code, gte_cr_RT13 = gte_cr_RT13_Code,
-	gte_cr_RT21 = gte_cr_RT21_Code, gte_cr_RT22 = gte_cr_RT22_Code, gte_cr_RT23 = gte_cr_RT23_Code,
-	gte_cr_RT31 = gte_cr_RT31_Code, gte_cr_RT32 = gte_cr_RT32_Code, gte_cr_RT33 = gte_cr_RT33_Code,
+	gte_cr_RT21 = gte_cr_RT21_Code, gte_cr_RT22 = gte_cr_RT22_Code, //gte_cr_RT23 = gte_cr_RT23_Code,
+	// gte_cr_RT31 = gte_cr_RT31_Code, gte_cr_RT32 = gte_cr_RT32_Code, gte_cr_RT33 = gte_cr_RT33_Code,
 	gte_cr_TRX  = gte_cr_TRX_Code,  gte_cr_TRY  = gte_cr_TRY_Code,  gte_cr_TRZ  = gte_cr_TRZ_Code,
 	gte_cr_L11  = gte_cr_L11_Code,  gte_cr_L12  = gte_cr_L12_Code,  gte_cr_L13  = gte_cr_L13_Code,
 	gte_cr_L21  = gte_cr_L21_Code,  gte_cr_L22  = gte_cr_L22_Code,  gte_cr_L23  = gte_cr_L23_Code,

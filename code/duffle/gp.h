@@ -100,6 +100,12 @@ void gp_screen_init(void) __asm__("gp_screen_init_asm");
 
 // TODO REVIEW:
 
+enum {
+	gcmd_poly_f3 = 0x20,
+
+	gp_poly_f3
+};
+
 /* --- GPU Command Semantics (GP0) --- */
 
 #define GPU_CMD_CLEAR_CACHE 0x01
@@ -119,4 +125,3 @@ void gp_screen_init(void) __asm__("gp_screen_init_asm");
 
 #define HW_GP0_ADDR       0x1F801810 /* GPU Data Port */
 #define HW_GP1_ADDR       0x1F801814 /* GPU Status/Control Port */
-

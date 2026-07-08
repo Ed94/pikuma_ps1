@@ -63,9 +63,18 @@ U4 vsync(U4 mode)     __asm__("VSync");
 
 void draw_orderingtbl(U4* buf) __asm__("DrawOTag");
 
+enum {
+	PolyTag_addr_bits = 24,
+	PolyTag_len_bits  = 8,
+};
 typedef Struct_(PolyTag) {
-	U4   addr: 24;
-	U4   len:  8;
+	union {
+		U4 bf_addr_len;
+		struct {
+			U4 addr: 24;
+			U4 len:  8;
+		};
+	};
 	RGB8 color;
 	B1   code;
 };

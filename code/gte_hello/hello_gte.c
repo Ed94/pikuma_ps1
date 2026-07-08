@@ -335,8 +335,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		m3s2_translation(& smem.tform_world, & smem.floor.pos);
 		m3s2_scale      (& smem.tform_world, & smem.floor.scale);
 		// TODO(Ed): This can either be in the tape or here...
-		gte_matrix_set_rotation   (& smem.tform_world);
-		gte_matrix_set_translation(& smem.tform_world);
+		// gte_matrix_set_rotation   (& smem.tform_world);
+		// gte_matrix_set_translation(& smem.tform_world);
 
 		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
@@ -348,8 +348,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		LP_ U4 mem_temp_tape[512];
 		TapeBuilder tb = tb_make(slice_ut_arr(mem_temp_tape)); tb_scope(& tb) {
 			// TODO(Ed): This is bugged.
-			// tb_emit(& tb, code_set_gte_world);
-			// 	tb_data(& tb, u4_(& smem.tform_world));
+			tb_emit(& tb, code_set_gte_world);
+				tb_data(& tb, u4_(& smem.tform_world));
 
 			tb_emit(& tb, code_rbind_floor_tri);
 			// TODO(Ed): Just use a single context struct ref
@@ -372,7 +372,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		smem.floor.rot.y += 5;
 	}
 	// --- TAPE DIAGNOSTICS ---
-	if (0)
+	if (1)
 	{
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make_old(& tape_arena); tb_scope(& tb) {
@@ -385,7 +385,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				// 2. code_diag_color -> Tests OT and Prim Arena memory
 				// 3. code_diag_gte   -> Tests Vertex arrays and GTE Math
 				// tb_emit(& tb, code_diag_yield);
-				// tb_emit(& tb, code_diag_color); //TODO(Ed): Stopped working
+				tb_emit(& tb, code_diag_color);
 				// tb_emit(& tb, code_diag_gte); 
 			}
 		}
