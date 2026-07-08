@@ -1,3 +1,90 @@
+/* ============================================================================
+ *  duffle DSL Suffix Conventions (Style B)
+ *  ============================================================================
+ *
+ *  Every mnemonic in this header follows the same suffix grammar:
+ *
+ *    _i        Immediate value (16-bit constant operand). Combine with
+ *              _u or _s (single-letter modifier + type combined): add_ui,
+ *              add_si. Examples: add_ui, add_si, and_i, or_i, xor_i,
+ *              load_upper_i. and_i is sign-agnostic (andi zero-extends).
+ *              load_upper_i is a unique verb; _i is the immediate marker,
+ *              not a modifier+type combination.
+ *
+ *    _u        Unsigned (no-overflow, no-sign-extension). R-type
+ *              arithmetic examples: add_u, sub_u, mult_u, div_u. I-type
+ *              (combined with _i): add_ui.
+ *
+ *    _s        Signed (overflow-traps, sign-extends). R-type: add_s,
+ *              sub_s, mult_s, div_s, set_lt_s. I-type (combined with _i):
+ *              add_si.
+ *
+ *  --- Shift family (R-type): verb-modifier-direction ---
+ *    The shift macros use `shift_<modifier><direction>`. Modifier is
+ *    the single letter `l` (logical) or `a` (arithmetic). Direction
+ *    is the word `left` or `right`. Combined: `_lleft`, `_lright`,
+ *    `_aright`. Examples: shift_lleft(rd, rt, shamt)  (= sll)
+ *                       shift_lright(rd, rt, shamt) (= srl)
+ *                       shift_aright(rd, rt, shamt) (= sra)
+ *    (no `_aleft`; MIPS has no `sla` — arithmetic-left is bit-identical
+ *    to logical-left, so use shift_lleft for that case)
+ *
+ *  --- Jump/Call family ---
+ *    Simple jumps keep the original short names: jump (j), jump_reg
+ *    (jr), jump_link (jalr rs, rd). The jump-and-link-to variants
+ *    (jal, jalr rs with default $ra) get the `call_` verb instead:
+ *    call_addr (jal), call_reg (jalr rs, default $ra).
+ *    Examples: jump(off)            (= j)
+ *              jump_reg(rs)         (= jr)
+ *              jump_link(rs, rd)    (= jalr rs, rd)
+ *              call_reg(rs)         (= jalr rs, default $ra)
+ *              call_addr(off)       (= jal)
+ *
+ *    _r        Register marker — used only when the register type needs
+ *              disambiguation (e.g., GTE data register vs control
+ *              register). NOT used in plain R-type arithmetic (the
+ *              R-type is implicit). Examples: gte_mv_to_data_r,
+ *              gte_mv_to_ctrl_r.
+ *
+ *    _self     Destination equals one source operand.
+ *              Examples: add_ui_self (I-type, to self),
+ *                        add_u_self (R-type, to self).
+ *
+ *    _mv_to_   Direction: data flows into X.
+ *              Example: gte_mv_to_data_r, gte_mv_to_ctrl_r.
+ *
+ *    _mv_from_ Direction: data flows out of X.
+ *              Example: gte_mv_from_data_r, gte_mv_from_ctrl_r.
+ *
+ *    _str      String-form — emits inline-asm string instead of `.word`.
+ *              Example: gte_rtpt_asm_str.
+ *
+ *    _2w / _1w Word count of the emitted sequence.
+ *              Example: load_imm_2w.
+ *
+ *    _cop2     RESERVED — DO NOT USE in macro names. The `gte_` namespace
+ *              prefix already implies coprocessor 2. Use `c2` only in:
+ *                (a) integer opcode enums (op_lwc2 = 0x32, op_swc2 = 0x3A)
+ *                (b) vendor-mnemonic macro aliases (gte_mtc2, gte_mfc2)
+ *
+ *  Primitive commands: gp0_cmd_poly_f3 = 0x20 (byte opcode)
+ *  Packed 32-bit cmd:  gp0_word_poly_f3(r, g, b) (32-bit, shifted)
+ *
+ *  Type ordering: domain?_(direction)?_action_target_modifier_type?
+ *  Examples:     add_ui                       (add + unsigned + immediate)
+ *                add_s                         (add + signed, R-type implicit)
+ *                shift_lleft                   (shift + logical + left)
+ *                shift_aright                  (shift + arithmetic + right)
+ *                call_reg(rs)                  (call + register, $ra implicit)
+ *                gte_mv_to_data_r            (gte + mv + to + data + register)
+ *                gte_lw_v0_xy(base)            (gte + lw + v0 + xy)
+ *                load_upper_i                  (load-upper + immediate, unique verb)
+ *
+ *  Vendor mnemonics (sll, srl, sra, jr, j, jal, jalr) are NOT in this
+ *  header. They live in the opt-in `mips_vendor_sym.h` for users who
+ *  prefer the textbook MIPS assembly mnemonics.
+ * ============================================================================ */
+
 #ifdef INTELLISENSE_DIRECTIVES
 #	pragma once
 #	include "dsl.h"
@@ -243,7 +330,9 @@ enum { _BitOffsets = 0
  *   load_word(rt, base, off)   → lw   rt, off(base)
  *   store_word(rt, base, off)  → sw   rt, off(base)
  *   add_ui(rt, rs, imm)        → addiu rt, rs, imm
- *   shift_ll(rd, rt, shamt)    → sll   rd, rt, shamt
+ *   shift_lleft(rd, rt, shamt)   → sll   rd, rt, shamt
+ *   shift_lright(rd, rt, shamt)  → srl   rd, rt, shamt
+ *   shift_aright(rd, rt, shamt)  → sra   rd, rt, shamt
  *   jump_reg(rs)               → jr    rs
  *   jump_link(rs, rd)          → jalr  rs        (link in rd, default $ra)
  *   nop                        → sll   $0, $0, 0
@@ -255,7 +344,8 @@ enum { _BitOffsets = 0
 #define load_half_u(rt, base, off) enc_i(op_lhu,   (base), (rt), (off))
 #define store_word(rt, base, off)  enc_i(op_sw,    (base), (rt), (off))
 #define add_ui(rt, rs, imm)        enc_i(op_addiu, (rs),   (rt), (imm))
-#define and_si(rt, rs, imm)        enc_i(op_andi,  (rs),   (rt), (imm))
+#define and_i(rt, rs, imm)         enc_i(op_andi,  (rs),   (rt), (imm))
+// #define and_si                     and_i
 #define or_i(rt, rs, imm)          enc_i(op_ori,   (rs),   (rt), (imm))
 #define xor_i(rt, rs, imm)         enc_i(op_xori,  (rs),   (rt), (imm))
 #define load_upper_i(rt, imm)      enc_i(op_lui,   R_0,    (rt), (imm))
@@ -265,7 +355,7 @@ enum { _BitOffsets = 0
 #define load_u4 load_word
 
 // Ergonomic add to the same register.
-#define add_ui_1(rt_rs, imm)       enc_i(op_addiu, (rt_rs), (rt_rs), (imm))
+#define add_ui_self(rt_rs, imm)    enc_i(op_addiu, (rt_rs), (rt_rs), (imm))
 
 /* Logic Opcodes */
 
@@ -274,12 +364,12 @@ enum { _BitOffsets = 0
 #define xor_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_xor)
 #define nor_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_nor)
 
-/* Shift family (R-type). shift_ll/lr/ra: `sll rd, rt, shamt` */
-#define shift_ll(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sll)
-#define shift_lr(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_srl)
-#define shift_ra(rd, rt, shamt)    enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sra)
+/* Shift family (R-type). shift_lleft/lright/aright: `sll/srl/sra rd, rt, shamt` */
+#define shift_lleft(rd, rt, shamt)  enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sll)
+#define shift_lright(rd, rt, shamt) enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_srl)
+#define shift_aright(rd, rt, shamt) enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sra)
 
-#define shift_ll_lr(rd, rt, shamt) shift_ll(rd, rt, shamt), shift_lr(rd, rt, shamt)
+#define mask_upper(rd, rt, shamt) shift_lleft(rd, rt, shamt), shift_lright(rd, rt, shamt)
 
 /* jr rs — jump to address in rs. */
 #define jump_reg(rs)               enc_r(op_special, (rs), R_0, R_0, 0, fc_jr)
@@ -288,14 +378,14 @@ enum { _BitOffsets = 0
  * Layout: [op_special][rs:5][rt=0:5][rd:5][shamt=0:5][fc_jalr=0x09] */
 #define jump_link(rs, rd)          enc_r(op_special, (rs), R_0, (rd), 0, fc_jalr)
 
-/* jalr rs — link in $ra and jump to address in rs (most common form). */
-#define jump_nreg(rs)              jump_link((rs), R_RA)
+/* call_reg rs — jump-and-link to register-held address; link in $ra. */
+#define call_reg(rs)               jump_link((rs), R_RA)
 
 /* j target — absolute jump within the current 256MB region. */
 #define jump(off)                  enc_i(op_j,     R_0, R_0, (off))
 
-/* jal target — absolute call within the current 256MB region. */
-#define jump_nlink(off)            enc_i(op_jal,   R_0, R_0, (off))
+/* call_addr off — jump-and-link to immediate address. */
+#define call_addr(off)             enc_i(op_jal,   R_0, R_0, (off))
 
 /* --- Store family (mirrors the load family) --- */
 #define store_byte(rt, base, off)  enc_i(op_sb,    (base), (rt), (off))
@@ -327,17 +417,17 @@ enum { _BitOffsets = 0
 #define div_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_div)
 #define div_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_divu)
 
-#define add_u_1(rd_rs, rt) add_u(rd_rs, rd_rs, rt)
+#define add_u_self(rd_rs, rt)       add_u(rd_rs, rd_rs, rt)
 
 /* --- Arithmetic I-type (immediate) --- */
 #define add_si(rt, rs, imm)        enc_i(op_addi,  (rs), (rt), (imm))
 /* add_ui already exists above as add_ui */
 
 /* --- Set on less than (R-type and I-type) --- */
-#define slt_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_slt)
-#define slt_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_sltu)
-#define slt_si(rt, rs, imm)        enc_i(op_slti,  (rs), (rt), (imm))
-#define slt_ui(rt, rs, imm)        enc_i(op_sltiu, (rs), (rt), (imm))
+#define set_lt_s(rd, rs, rt)       enc_r(op_special, (rs), (rt), (rd), 0, fc_slt)
+#define set_lt_u(rd, rs, rt)       enc_r(op_special, (rs), (rt), (rd), 0, fc_sltu)
+#define set_lt_si(rt, rs, imm)     enc_i(op_slti,  (rs), (rt), (imm))
+#define set_lt_ui(rt, rs, imm)     enc_i(op_sltiu, (rs), (rt), (imm))
 
 /* --- Move from/to HI/LO (mult/div results) --- */
 #define mov_from_high(rd)          enc_r(op_special, R_0, R_0, (rd), 0, fc_mfhi)
@@ -366,10 +456,10 @@ enum { _BitOffsets = 0
 #define breakpoint()                enc_r(op_special, R_0, R_0, R_0, 0, fc_break)
 
 /* --- Shift-amount alias (matches the gas convention `\p3 = shamt`) --- */
-#define shift_amount(rd, rt, n)     shift_ll(rd, rt, n)
+#define shift_amount(rd, rt, n)     shift_lleft(rd, rt, n)
 
 /* nop — canonical sll $0, $0, 0 */
-#define nop shift_ll(rdiscard, rdiscard, 0)
+#define nop shift_lleft(rdiscard, rdiscard, 0)
 
 #define load_imm_1w(rt, imm)    add_ui((rt),  R_0, (imm))
 #define load_imm_1w_s0(rt, imm) add_si((rt)), R_0, (imm))
@@ -390,7 +480,7 @@ enum { _BitOffsets = 0
  *
  * For situations where you need to bypass even this choice (e.g. to
  * force a specific encoding for a known discontiguous high/low pair),
- * see `load_imm_2w_ori` and `load_imm_2w_addi` below.
+ * see `load_imm_2w_ori_forced` and `load_imm_2w_addi_forced` below.
  *
  * Statement-level (not expression-level): emits its own `asm volatile(...)`.
  */
@@ -411,9 +501,9 @@ enum { _BitOffsets = 0
 	}                                                       \
 } while (0)
 
-/* load_imm_2w_ori — force the `lui` + `ori` form regardless of lo16 sign.
+/* load_imm_2w_ori_forced — force the `lui` + `ori` form regardless of lo16 sign.
  * Use when you specifically need zero-extension in the lo half. */
-#define load_imm_2w_ori(rt, imm) do {                 \
+#define load_imm_2w_ori_forced(rt, imm) do {                 \
 	asm volatile(                                       \
 		asm_words(load_ui((rt), u4_lo(imm)),              \
 		          or_i((rt), (rt), C_(U2,u4_hi(imm))) )   \
@@ -421,11 +511,11 @@ enum { _BitOffsets = 0
 	);                                                  \
 } while (0)
 
-/* load_imm_2w_addi — force the `lui` + `addi` form regardless of lo16 sign.
+/* load_imm_2w_addi_forced — force the `lui` + `addi` form regardless of lo16 sign.
  * Use when you know sign-extension is fine (e.g. lo16 is treated as
  * signed downstream) and you want a smaller effective instruction
  * (the assembler/MIPS hardware will sign-extend the imm16). */
-#define load_imm_2w_addi(rt, imm) do {          \
+#define load_imm_2w_addi_forced(rt, imm) do {          \
 	/*U4 _li2a_imm_ = (U4)(imm);*/                \
 	asm volatile(asm_words(                       \
 		lui_op((rt), u4_lo(imm)),                   \
@@ -495,10 +585,10 @@ enum { _BitOffsets = 0
  * GPRs that the kernel treats as volatile (v0/v1/t0/t1/ra) plus the
  * "memory" barrier. The register ids are passed through `rlit` so
  * the R_*_Code `#define`s are stringified into "$N" at expansion time. */
-#define clb_system rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain
+#define clbr_volatile_gprs rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain
 
 #define asm_mips_flush_icache() asm volatile( asm_words( \
-		add_ui(rstack_ptr, rstack_ptr, -8)        \
+		add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment)        \
 	, store_word(rret_addr, rstack_ptr, 4)      \
 	, add_ui(rret_0, rdiscard, bios_flushcache) \
 	, add_ui(rtmp_0, rdiscard, bios_table_addr) \
@@ -506,5 +596,5 @@ enum { _BitOffsets = 0
 	, nop                                       \
 	, load_word(rret_addr, rstack_ptr, 4)       \
 	, jump_reg(rret_addr)                       \
-	, add_ui(rstack_ptr, rstack_ptr, 8)         \
-) asm_clobber: clb_system )
+	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment)         \
+) asm_clobber: clbr_volatile_gprs )

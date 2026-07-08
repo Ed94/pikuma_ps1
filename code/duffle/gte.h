@@ -40,7 +40,7 @@
  *      // Pure command sequence — all bits compile-time:
  *      asm volatile(
  *          asm_inline( gte_cmd_rtpt , gte_cmd_nclip , gte_cmd_avsz3 )
- *          asm_clobber( clb_system )
+ *          asm_clobber( clbr_volatile_gprs )
  *      );
  *
  *      // Runtime-base-register load — caller picks the base GPR:
@@ -530,7 +530,7 @@ enum {
  *      zero (standard rotation, no scaling, V0 vector, translation
  *      vector, no clamp).
  *
- * Clobbers the caller-saved GPRs via `clb_system` (per the kernel
+ * Clobbers the caller-saved GPRs via `clbr_volatile_gprs` (per the kernel
  * ABI) plus the standard "memory" barrier. Does not clobber any COP2
  * data/control register — those have to be saved by the caller if
  * they need to survive across the call (RTPT writes SXY0..2, SZ0..3,
@@ -539,7 +539,7 @@ enum {
 #define gte_rtpt()                        \
 	asm volatile(                           \
 		asm_words( nop, nop, gte_cmdw_rtpt )  \
-		asm_clobber: clb_system               \
+		asm_clobber: clbr_volatile_gprs               \
 	)
 
 #define gte_rtpt_ori() \
@@ -571,7 +571,7 @@ enum {
  *      (unlike RTPS/RTPT which carry the `gte_cmdw_psyq_compat`
  *      quirk), so `gte_cmdw_nclip` does NOT OR in any reserved bits.
  *
- * Clobbers the caller-saved GPRs via `clb_system` (per the kernel
+ * Clobbers the caller-saved GPRs via `clbr_volatile_gprs` (per the kernel
  * ABI) plus the standard "memory" barrier. Does not clobber any COP2
  * data/control register - those have to be saved by the caller if
  * they need to survive across the call (NCLIP writes MAC0 only; it
@@ -580,7 +580,7 @@ enum {
 #define gte_nclip()                       \
 	asm volatile(                           \
 		asm_words( nop, nop, gte_cmdw_nclip ) \
-		asm_clobber: clb_system               \
+		asm_clobber: clbr_volatile_gprs               \
 	)
 
 #define gte_stotz(r0) __asm__ volatile("swc2   $7, 0( %0 )" : : "r"(r0) : "memory")
@@ -660,7 +660,7 @@ enum {
 			, gte_mt(   R_T4,  4)             \
 		)                                   \
 		, r_use(r0)                         \
-		asm_clobber: clb_system, rlit(R_T4), rlit(R_T5), rlit(R_T6) \
+		asm_clobber: clbr_volatile_gprs, rlit(R_T4), rlit(R_T5), rlit(R_T6) \
 	)
 
 #pragma endregion ASM DSL

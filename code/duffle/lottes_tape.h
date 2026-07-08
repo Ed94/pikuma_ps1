@@ -47,11 +47,11 @@ FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; a
 			add_ui(    R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
 		, store_word(R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
 		, load_word( R_AtomJmp, R_TapePtr, 0)         /* Bootstrap the first jump */
-		, add_ui_1(  R_TapePtr, S_(MipsCode))         /* Advance tape */
-		, jump_nreg( R_AtomJmp)                       /* jalr $t9 */
+		, add_ui_self( R_TapePtr, S_(MipsCode))        /* Advance tape */
+		, call_reg(    R_AtomJmp)                      /* jalr $t9 */
 		, nop                                         /* Branch delay slot */
 		, load_word(R_RA, R_SP, 0)                    /* Restore $ra from stack */
-		, add_ui_1( R_SP, MipsStackAlignment)         /* Deallocate stack space */
+		, add_ui_self( R_SP, MipsStackAlignment)         /* Deallocate stack space */
 	)
 	asm_rpins, r_use(tp)
 	asm_clobber: 
@@ -90,7 +90,7 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  * Cost: ~ 4 cycles */
 #define mac_yield()                               \
 	  load_word(R_AtomJmp, R_TapePtr, 0)            \
-	, add_ui_1(            R_TapePtr, S_(MipsCode)) \
+	, add_ui_self(         R_TapePtr, S_(MipsCode)) \
 	, jump_reg( R_AtomJmp)                          \
 	, nop
 
@@ -100,31 +100,24 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, load_half_u(rId_1, R_FaceCursor, 1 * S_(S2)) \
 	, load_half_u(rId_2, R_FaceCursor, 2 * S_(S2))
 
-/* Words: 18; Translates indices to vertex addresses and pushes them to GTE 
-	R_AT  = rId_[#] << 3; 
-	R_AT += R_VertBase;
-	R_V0  = R_AT[0];
-	gte_mt(R_V0, V.xy[#]);
-	gte_mt(R_V1, V.z [#]);
-*/
+/* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
 #define mac_load_tri_verts(rId_0, rId_1, rId_2) \
-	  shift_ll(R_AT, rId_0, v3s2_byteoff), add_u_1(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
-	, shift_ll(R_AT, rId_1, v3s2_byteoff), add_u_1(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
-	, shift_ll(R_AT, rId_2, v3s2_byteoff), add_u_1(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
+	  shift_lleft(R_AT, rId_0, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0) \
+	, shift_lleft(R_AT, rId_1, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1) \
+	, shift_lleft(R_AT, rId_2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2)
 
-	//TODO(Ed): Add more type annotation
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list */
 #define mac_insert_ot_tag(r_otz, prim_length) \
-	  shift_ll( R_T1, r_otz, 2)                              /* T1 = r_otz * S_(U4) */            \
-	, add_u(    R_T1, R_T1,         R_OtBase)                /* T1 = & OrderingTable[OTZ] */      \
-	, load_word(R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */               \
+	  shift_lleft( R_T1, r_otz, 2)                              /* T1 = r_otz * S_(U4) */ \
+	, add_u(       R_T1, R_T1,         R_OtBase)                /* T1 = & OrderingTable[OTZ] */ \
+	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
 	, load_upper_i(R_V0, prim_length)                           /* V0 = prim_length << 16 (high 16 bits of a tag) */ \
-	, shift_ll_lr(R_AT, R_AT,       S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
-	, or_u(      R_AT, R_AT, R_V0)                            /* Merge length */                  \
-	, store_word(R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
-	, shift_ll(  R_AT, R_PrimCursor, S_(PolyTag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
-	, shift_lr(  R_AT, R_AT,         S_(PolyTag_len_bits))                                        \
-	, store_word(R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
+	, mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
+	, or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
+	, store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
+	, shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
+	, shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)) \
+	, store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
 
 #pragma endregion Macro Atom Components
 
@@ -176,16 +169,15 @@ enum {
  *   5. lw $ra, 4($sp);  jr $ra          ; restore & return
  *   6. sp += 8
  */
-// TODO(Ed): Annotate magic offsets
 internal MipsAtom_(mips_flush_icache) {
 	  add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment) /* sp -= 8 */
-	, store_word(rret_addr, rstack_ptr, 4)      /* sw  $ra,   4($sp)   */
-	, add_ui(rret_0, rdiscard, bios_flushcache) /* addiu $a0, $0, 0x44 */
-	, add_ui(rtmp_0, rdiscard, bios_table_addr) /* addiu $t0, $0, 0xA0 */
-	, jump_link(rtmp_0, rret_addr)              /* jalr  $t0, $ra      */
-	, nop                                       /* BD slot             */
-	, load_word(rret_addr, rstack_ptr, 4)       /* lw   $ra, 4($sp)    */
-	, jump_reg(rret_addr)                       /* jr   $ra            */
+	, store_word(rret_addr, rstack_ptr, S_(U4))           /* sw  $ra,   4($sp)   */
+	, add_ui(rret_0, rdiscard, bios_flushcache)           /* addiu $a0, $0, 0x44 */
+	, add_ui(rtmp_0, rdiscard, bios_table_addr)           /* addiu $t0, $0, 0xA0 */
+	, jump_link(rtmp_0, rret_addr)                        /* jalr  $t0, $ra      */
+	, nop                                                 /* BD slot             */
+	, load_word(rret_addr, rstack_ptr, S_(U4))            /* lw   $ra, 4($sp)    */
+	, jump_reg(rret_addr)                                 /* jr   $ra            */
 	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment)  /* sp += 8 (BD) */
 	, mac_yield()
 };
@@ -197,7 +189,7 @@ typedef Struct_(Binds_SetGteWorld) {
 internal MipsAtom_(set_gte_world) {
 	/* Pop matrix address from tape into R_T3 ($11) */
 	load_word(R_T3, R_TapePtr, O_(Binds_SetGteWorld,transform)),
-	add_ui_1(       R_TapePtr, S_(Binds_SetGteWorld)),
+	add_ui_self(   R_TapePtr, S_(Binds_SetGteWorld)),
 
 // TODO(Ed): Annotate magic offsets.
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
@@ -230,14 +222,14 @@ internal MipsAtom_(diag_color) {
 	load_upper_i(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
 
 	add_ui(  R_T1, R_0,  10),
-	shift_ll(R_T1, R_T1, 2), 
+	shift_lleft(R_T1, R_T1, 2), 
 	add_u(   R_T1, R_T1, R_T6),         
 	
 	load_word(   R_AT, R_T1, 0),        
 	load_upper_i(R_V0, 0x0400),   // <--- Fills load delay slot! 
 	store_word(  R_AT, R_T7, 0),       
 	
-	shift_ll(  R_AT, R_T7, 8), shift_lr(R_AT, R_AT, 8),         
+	shift_lleft(  R_AT, R_T7, 8), shift_lright(R_AT, R_AT, 8),         
 	or_u(      R_AT, R_AT, R_V0),          
 	store_word(R_AT, R_T1, 0),       
 
@@ -255,15 +247,15 @@ internal MipsAtom_(diag_gte) {
 	load_half_u(R_T2, R_T4, 4),
 
 	/* Load Vertices into GTE */
-	shift_ll( R_AT, R_T0, 3), add_u(    R_AT, R_AT, R_T5),
+	shift_lleft( R_AT, R_T0, 3), add_u(    R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
 	gte_mt(   R_V0, C2_VXY0), gte_mt(   R_V1, C2_VZ0),
 
-	shift_ll( R_AT, R_T1, 3), add_u(    R_AT, R_AT, R_T5),
+	shift_lleft( R_AT, R_T1, 3), add_u(    R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
 	gte_mt(   R_V0, C2_VXY1), gte_mt(   R_V1, C2_VZ1),
 
-	shift_ll( R_AT, R_T2, 3), add_u(    R_AT, R_AT, R_T5),
+	shift_lleft( R_AT, R_T2, 3), add_u(    R_AT, R_AT, R_T5),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
 	gte_mt(   R_V0, C2_VXY2), gte_mt(   R_V1, C2_VZ2),
 

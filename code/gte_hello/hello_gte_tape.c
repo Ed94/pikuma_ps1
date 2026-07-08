@@ -44,7 +44,7 @@ internal MipsAtom_(rbind_cube_tri) {
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
 	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)), 
 	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)), 
-	add_ui_1(               R_TapePtr, S_(Binds_CubeTri)),
+	add_ui_self(               R_TapePtr, S_(Binds_CubeTri)),
 	// Note(Ed): This entire thing is argument shuffle?
 	// TODO(Ed): Eliminate
 	mac_yield()
@@ -73,17 +73,17 @@ MipsAtom_(cube_tri) {
 
 	/* ── 2. Load V0, V1, V2 into GTE ────────────────────────────────────── */
 	/* V0 = verts[face->x] */
-	shift_ll(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase),
+	shift_lleft(R_AT, R_T0, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
 	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
 
 	/* V1 = verts[face->y] */
-	shift_ll(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase),
+	shift_lleft(R_AT, R_T1, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
 	gte_mt(R_V0, C2_VXY1), gte_mt(R_V1, C2_VZ1),
 
 	/* V2 = verts[face->z] */
-	shift_ll(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase),
+	shift_lleft(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
 	gte_mt(R_V0, C2_VXY2), gte_mt(R_V1, C2_VZ2),
 
@@ -130,7 +130,7 @@ MipsAtom_(cube_tri) {
 	store_word(R_AT, R_PrimCursor, 28),
 
 	/* ── 7. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
-	shift_ll(R_AT, R_T3, 3), add_u(R_AT, R_AT, R_VertBase),
+	shift_lleft(R_AT, R_T3, 3), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
 	gte_mt(R_V0, C2_VXY0), gte_mt(R_V1, C2_VZ0),
 
@@ -147,7 +147,7 @@ MipsAtom_(cube_tri) {
 
 	/* ── 10. Bounds check OTZ < 2048 ─────────────────────────────────────── */
 	add_ui(      R_AT, R_0,  2048),
-	slt_u(       R_AT, R_T1, R_AT),
+	set_lt_u(       R_AT, R_T1, R_AT),
 	branch_equal(R_AT, R_0,  13),  /* Skip 13 → land at add_ui(R_FaceCur,...) */
 	nop,                            /* BD slot */
 
@@ -179,7 +179,7 @@ MipsAtom_(rbind_floor_tri) {
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
 	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,VertBase)), 
 	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,OtBase)), 
-	add_ui_1(               R_TapePtr, S_(Binds_FloorTri)),
+	add_ui_self(               R_TapePtr, S_(Binds_FloorTri)),
 	mac_yield()
 };
 
@@ -209,17 +209,17 @@ MipsAtom_(floor_tri) {
 	nop, nop, gte_mf(R_T1, C2_OTZ),      
 	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),   
-	slt_u(       R_AT, R_T1, R_AT), 
+	set_lt_u(       R_AT, R_T1, R_AT), 
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_tri_exit)),   
 	nop, 
 	/* Insert into Ordering Table Linked List */
 	mac_insert_ot_tag(R_T1, 0x0400),
-	add_ui_1(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
+	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 		// Note(Ed): No bounds checking, should be checked before atom runs.
 
 /* Advance Input Cursor & Yield (Both branch targets land here) */
 atom_label(floor_tri_exit) 
-	add_ui_1(R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
+	add_ui_self(R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
 	mac_yield()
 };
 
@@ -233,7 +233,7 @@ typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
 internal MipsAtom_(sync_primitive_arena) {
 	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,used)),
 	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)),      
-	add_ui_1(       R_TapePtr, S_(Binds_SyncPrimitiveArena)),
+	add_ui_self(       R_TapePtr, S_(Binds_SyncPrimitiveArena)),
 	/* Calculate byte offset and store directly back to RAM */
 	sub_u(     R_T0, R_PrimCursor, R_T0), // R_T0    = R_PrimCursor - binds.cursor
 	store_word(R_T0, R_AT, 0),            // R_AT[0] = R_T0

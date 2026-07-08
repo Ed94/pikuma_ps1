@@ -420,7 +420,7 @@
  *   tape_words(mac_yield, 1)
  *   #define mac_yield()  \
  *       load_word(R_AtomJmp, R_TapePtr, 0), \
- *       add_ui_1(R_TapePtr, 4), \
+ *       add_ui_self(R_TapePtr, 4), \
  *       jump_reg(R_AtomJmp), \
  *       nop
  *
