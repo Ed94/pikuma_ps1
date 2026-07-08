@@ -258,7 +258,7 @@ enum { _BitOffsets = 0
 #define and_si(rt, rs, imm)        enc_i(op_andi,  (rs),   (rt), (imm))
 #define or_i(rt, rs, imm)          enc_i(op_ori,   (rs),   (rt), (imm))
 #define xor_i(rt, rs, imm)         enc_i(op_xori,  (rs),   (rt), (imm))
-#define load_ui(rt, imm)           enc_i(op_lui,   R_0,    (rt), (imm))
+#define load_upper_i(rt, imm)      enc_i(op_lui,   R_0,    (rt), (imm))
 
 #define load_u1 load_byte_u
 #define load_u2 load_half_u

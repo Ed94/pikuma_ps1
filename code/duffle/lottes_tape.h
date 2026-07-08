@@ -118,7 +118,7 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	  shift_ll( R_T1, r_otz, 2)                              /* T1 = r_otz * S_(U4) */            \
 	, add_u(    R_T1, R_T1,         R_OtBase)                /* T1 = & OrderingTable[OTZ] */      \
 	, load_word(R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */               \
-	, load_ui(  R_V0, prim_length)                           /* V0 = prim_length << 16 (high 16 bits of a tag) */ \
+	, load_upper_i(R_V0, prim_length)                           /* V0 = prim_length << 16 (high 16 bits of a tag) */ \
 	, shift_ll_lr(R_AT, R_AT,       S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
 	, or_u(      R_AT, R_AT, R_V0)                            /* Merge length */                  \
 	, store_word(R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
@@ -219,23 +219,23 @@ internal MipsAtom_(diag_yield) { mac_yield() };
 // TODO(Ed): Reduce magic numbers/offsets
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal MipsAtom_(diag_color) {
-	store_word(R_0, R_T7, 0), 
-	load_ui(   R_AT, gcmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
-	or_i(      R_AT, R_AT, 0xFF00), /* Low:  Color G:FF, R:00 (Cyan) */
-	store_word(R_AT, R_T7, 4),
+	store_word(  R_0, R_T7, 0), 
+	load_upper_i(R_AT, gcmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
+	or_i(        R_AT, R_AT, 0xFF00), /* Low:  Color G:FF, R:00 (Cyan) */
+	store_word(  R_AT, R_T7, 4),
 	
 	/* Fake coordinates - Swapped winding order to prevent GPU culling! */
-	load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 8),  /* (16, 16) */
-	load_ui(R_AT, 0x0050), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 12), /* (80, 16) */
-	load_ui(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
+	load_upper_i(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 8),  /* (16, 16) */
+	load_upper_i(R_AT, 0x0050), or_i(R_AT, R_AT, 0x0010), store_word(R_AT, R_T7, 12), /* (80, 16) */
+	load_upper_i(R_AT, 0x0010), or_i(R_AT, R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
 
 	add_ui(  R_T1, R_0,  10),
 	shift_ll(R_T1, R_T1, 2), 
 	add_u(   R_T1, R_T1, R_T6),         
 	
-	load_word( R_AT, R_T1, 0),        
-	load_ui(   R_V0, 0x0400),   // <--- Fills load delay slot! 
-	store_word(R_AT, R_T7, 0),       
+	load_word(   R_AT, R_T1, 0),        
+	load_upper_i(R_V0, 0x0400),   // <--- Fills load delay slot! 
+	store_word(  R_AT, R_T7, 0),       
 	
 	shift_ll(  R_AT, R_T7, 8), shift_lr(R_AT, R_AT, 8),         
 	or_u(      R_AT, R_AT, R_V0),          

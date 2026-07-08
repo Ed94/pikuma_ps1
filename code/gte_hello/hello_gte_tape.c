@@ -18,7 +18,7 @@ void fk() {
 
 /* Words: 3; High: 0x20/B, Low: G/R */
 #define mac_format_f3_color(color_hi, color_lo) \
-	  load_ui(   R_AT, gcmd_poly_f3 << 8 | color_hi) \
+	  load_upper_i(   R_AT, gcmd_poly_f3 << 8 | color_hi) \
 	, or_i(      R_AT, R_AT, color_lo) \
 	, store_word(R_AT, R_PrimCursor, O_(Poly_F3,color))   \
 
@@ -105,28 +105,28 @@ MipsAtom_(cube_tri) {
 	store_word(R_0, R_PrimCursor, 0),
 
 	/* Word 1: c0 (BGR) + code = 0x38FF00FF (magenta, opcode 0x38) */
-	load_ui(R_AT, 0x38FF), or_i(R_AT, R_AT, 0x00FF),
+	load_upper_i(R_AT, 0x38FF), or_i(R_AT, R_AT, 0x00FF),
 	store_word(R_AT, R_PrimCursor, 4),
 
 	/* Word 2: p0 = SXY0 (stored BEFORE RTPS overwrites it) */
 	gte_sw(C2_SXY0, R_PrimCursor, 8),
 
 	/* Word 3: c1 (BGR) + pad = 0x0000FFFF (yellow) */
-	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFFFF),
+	load_upper_i(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFFFF),
 	store_word(R_AT, R_PrimCursor, 12),
 
 	/* Word 4: p1 = SXY1 */
 	gte_sw(C2_SXY1, R_PrimCursor, 16),
 
 	/* Word 5: c2 (BGR) + pad = 0x00FFFF00 (cyan) */
-	load_ui(R_AT, 0x00FF), or_i(R_AT, R_AT, 0xFF00),
+	load_upper_i(R_AT, 0x00FF), or_i(R_AT, R_AT, 0xFF00),
 	store_word(R_AT, R_PrimCursor, 20),
 
 	/* Word 6: p2 = SXY2 */
 	gte_sw(C2_SXY2, R_PrimCursor, 24),
 
 	/* Word 7: c3 (BGR) + pad = 0x0000FF00 (green) */
-	load_ui(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFF00),
+	load_upper_i(R_AT, 0x0000), or_i(R_AT, R_AT, 0xFF00),
 	store_word(R_AT, R_PrimCursor, 28),
 
 	/* ── 7. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
