@@ -119,20 +119,43 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, shift_lright(R_AT, R_AT,         S_(polytag_len_bits)) \
 	, store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
 
+/* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given
+ * byte offset. Internal helper used by the *_format_*_color macros.
+ * Args: off = U4 byte offset, code = GP0 cmd byte (0 for c1/c2/c3 of
+ * a Poly_G4), r/g/b = 8-bit RGB byte values. */
+#define mac_pack_color_word(off, code, r,g,b) \
+		load_upper_i(R_AT, (code) << 8 | (b))   \
+	, or_i_self(   R_AT, ((g)   << 8) | (r))  \
+	, store_word(  R_AT, R_PrimCursor, (off))
+
 /* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
  * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields).
  * Migrated from hello_gte_tape.c; takes RGB form per the Phase 3
  * convention. */
-#define mac_format_f3_color(r,g,b)                  \
-	  load_upper_i(R_AT, gp0_cmd_poly_f3 << 8  | (b)) \
-	, or_i_self(   R_AT, ((g)            << 8) | (r)) \
-	, store_word(  R_AT, R_PrimCursor, O_(Poly_F3,color))
+#define mac_format_f3_color(r,g,b) mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r,g,b)
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3 */
 #define mac_gte_store_f3() \
-	  gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
+		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
 	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
 	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2))
+
+/* Words: 12; Emits the four (code|color) words of a Poly_G4.
+ * Args: rN,gN,bN are 8-bit RGB byte values for each of the 4 vertices. */
+#define mac_format_g4_color(r0,g0,b0, r1,g1,b1, r2,g2,b2, r3,g3,b3)  \
+		mac_pack_color_word(O_(Poly_G4,c0), gp0_cmd_poly_g4, r0,g0,b0) \
+	, mac_pack_color_word(O_(Poly_G4,c1), 0,               r1,g1,b1) \
+	, mac_pack_color_word(O_(Poly_G4,c2), 0,               r2,g2,b2) \
+	, mac_pack_color_word(O_(Poly_G4,c3), 0,               r3,g3,b3)
+
+/* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
+ * G4 triangle portion to p0/p1/p2. Call BEFORE the V3-RTPS, otherwise
+ * SXY0/SXY1/SXY2 get overwritten by the perspective transform. */
+#define mac_gte_store_g4_tri()                    \
+		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0)) \
+	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)) \
+	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2))
+
 
 #pragma endregion Macro Atom Components
 

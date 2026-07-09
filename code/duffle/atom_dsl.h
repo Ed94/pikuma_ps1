@@ -459,4 +459,9 @@
  * ============================================================================*/
 
 #define atom_offset(F, T) atom_offset_ ## F ## _ ## T
-#define atom_label(name) /* anchor — see metaprogram documentation */
+/* atom_label is a pure annotation for the metaprogram's offset calculations.
+ * The macro expands to a C comment, so the C preprocessor strips it to
+ * whitespace — NO instruction word is emitted in the asm. The metaprogram
+ * still recognises the literal `atom_label(name)` token in source and
+ * records the marker at the current pos. */
+#define atom_label(name) /* atom_label anchor: name */

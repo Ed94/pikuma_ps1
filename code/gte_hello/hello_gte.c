@@ -154,6 +154,10 @@ void gp_screen_init_c11(DoubleBuffer* screen_buf, S4* active_buf_id)
 
 	// Initialize and setup the GTE geometry offsets
 	geom_init();
+	// NOTE: geom_set_offset/geom_set_screen are kept as-is (the libgte versions
+	// are known to be broken in this PSYQ 4.7 build — see report 2026-07-09).
+	// The user's research wants the C-side non-tape reference to work as a
+	// known-good baseline for comparison against the tape.
 	geom_set_offset(ScreenRes_CenterX, ScreenRes_CenterY);
 	geom_set_screen(ScreenZ);
 
@@ -201,12 +205,12 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	S4 flag; //????
 
 	// Draw Cube
-	if (1)
+	if (0)
 	{
 		m3s2_rotation   (& smem.cube.rot,    & smem.tform_world);
 		m3s2_translation(& smem.tform_world, & smem.cube.pos);
 		m3s2_scale      (& smem.tform_world, & smem.cube.scale);
-		gte_matrix_set_rotation   (& smem.tform_world);
+		// gte_matrix_set_rotation   (& smem.tform_world);
 		gte_matrix_set_translation(& smem.tform_world);
 		for (U4 face_id = 0; face_id < Cube_num_faces; face_id += 1)
 		{
@@ -241,7 +245,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		smem.cube.rot.y += 30;
 	}
 	// Draw cube (tape method) - two triangles per face
-	if (0)
+	if (1)
 	{
 		m3s2_rotation   (& smem.cube.rot,    & smem.tform_world);
 		m3s2_translation(& smem.tform_world, & smem.cube.pos);
@@ -384,7 +388,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				// 2. code_diag_color -> Tests OT and Prim Arena memory
 				// 3. code_diag_gte   -> Tests Vertex arrays and GTE Math
 				// tb_emit(& tb, code_diag_yield);
-				tb_emit(& tb, code_diag_color);
+				// tb_emit(& tb, code_diag_color);
 				// tb_emit(& tb, code_diag_gte); 
 			}
 		}
