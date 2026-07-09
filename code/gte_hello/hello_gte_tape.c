@@ -22,7 +22,7 @@ typedef Struct_(Binds_CubeTri) {
 	U4 VertBase;
 	U4 OtBase;
 };
-internal MipsAtom_(rbind_cube_tri) {
+internal MipsAtom_(rbind_cube_g4_face) {
 	/* Pop 4 arguments from the tape directly into the workspace registers */
 	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)), 
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
@@ -35,20 +35,20 @@ internal MipsAtom_(rbind_cube_tri) {
 };
 
 /* ============================================================================
- *  cube_tri — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
+ *  cube_g4_face — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
  * ============================================================================
  *
  *  Reads 4 indices from R_FaceCur (V4_S2 = 8 bytes), loads 4 vertices into
  *  the GTE, runs the PsyQ RotAverageNclip4 sequence, and renders a Poly_G4.
  */
-	atom_region  (cube_tri, REGION_PRIM_ARENA)
-	atom_group   (cube_tri, GROUP_RENDER_PRIMS)
-	atom_cadence (cube_tri, CADENCE_FRAME)
-	atom_annot(cube_tri, phase_work,
+	atom_region  (cube_g4_face, REGION_PRIM_ARENA)
+	atom_group   (cube_g4_face, GROUP_RENDER_PRIMS)
+	atom_cadence (cube_g4_face, CADENCE_FRAME)
+	atom_annot(cube_g4_face, phase_work,
 			atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
 			atom_writes(R_PrimCursor, R_FaceCursor))
 internal 
-MipsAtom_(cube_tri) {
+MipsAtom_(cube_g4_face) {
 	/* ── 1. Load 4 face indices from R_FaceCur (V4_S2 = 8 bytes) ───────── */
 	load_half_u(R_T0, R_FaceCursor, 0 * S_(S2)),
 	load_half_u(R_T1, R_FaceCursor, 1 * S_(S2)),
@@ -69,7 +69,7 @@ MipsAtom_(cube_tri) {
 	/* ── 5. Cull check: skip format/insert if MAC0 ≤ 0 (backface) ───────── */
 	nop2,  gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop,                                                          /* COP2 stall */
-	branch_le_zero(R_T0, atom_offset(cull, cube_tri_exit)),
+	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
 	nop,                                                          /* BD slot    */
 
 	/* ── 6. Format c0..c3 (color+code words) BEFORE V3-RTPS ─────────────── */
@@ -99,13 +99,13 @@ MipsAtom_(cube_tri) {
 	/* ── 11. Bounds check OTZ < OrderingTbl_Len ─────────────────────────── */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),
 	set_lt_u(    R_AT, R_T1, R_AT),
-	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_tri_exit)), nop,
+	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
 
 	/* ── 12. Insert into Ordering Table (length = 8 words for Poly_G4) ──── */
 	mac_insert_ot_tag(R_T1, Poly_G4),
 
 	/* ── 13. Advance cursors & yield (both branch targets land here) ────── */
-atom_label(cube_tri_exit)
+atom_label(cube_g4_face_exit)
 	add_ui_self(R_PrimCursor, S_(Poly_G4)),     /* 9 words = Poly_G4 */
 	add_ui_self(R_FaceCursor, S_(S2) * 4),      /* 4 × S2 = 8 bytes */
 	mac_yield()
@@ -117,14 +117,14 @@ typedef Struct_(Binds_FloorTri) {
 	U4 VertBase;
 	U4 OtBase;
 };
-	atom_region(rbind_floor_tri, REGION_PRIM_ARENA)
-	atom_group(rbind_floor_tri, GROUP_RENDER_FLOOR)
-	atom_cadence(rbind_floor_tri, CADENCE_FRAME)
-	atom_annot(rbind_floor_tri, phase_bind
+	atom_region(rbind_floor_f3_face, REGION_PRIM_ARENA)
+	atom_group(rbind_floor_f3_face, GROUP_RENDER_FLOOR)
+	atom_cadence(rbind_floor_f3_face, CADENCE_FRAME)
+	atom_annot(rbind_floor_f3_face, phase_bind
 		, atom_reads()
 		, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase))
 internal 
-MipsAtom_(rbind_floor_tri) {
+MipsAtom_(rbind_floor_f3_face) {
 	/* Pop 4 arguments from the tape directly into the workspace registers */
 	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)), 
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
@@ -134,14 +134,14 @@ MipsAtom_(rbind_floor_tri) {
 	mac_yield()
 };
 
-	atom_region( floor_tri, REGION_PRIM_ARENA)
-	atom_group(  floor_tri, GROUP_RENDER_FLOOR)
-	atom_cadence(floor_tri, CADENCE_FRAME)
-	atom_annot(  floor_tri, phase_work,
+	atom_region( floor_f3_face, REGION_PRIM_ARENA)
+	atom_group(  floor_f3_face, GROUP_RENDER_FLOOR)
+	atom_cadence(floor_f3_face, CADENCE_FRAME)
+	atom_annot(  floor_f3_face, phase_work,
 		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
 		atom_writes(R_PrimCursor, R_FaceCursor)) 
 internal 
-MipsAtom_(floor_tri) {
+MipsAtom_(floor_f3_face) {
 	mac_load_tri_indices(R_T0, R_T1, R_T2),
 	mac_load_tri_verts(  R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple,
@@ -150,7 +150,7 @@ MipsAtom_(floor_tri) {
 	/* Culling (Branch forward if Backface) */
 	nop2, gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop,
-	branch_le_zero(R_T0, atom_offset(culling, floor_tri_exit)), nop,
+	branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop,
 	/* Format Primitive */
 	// mac_format_f3_color(0x20FF, 0xFFFF),  // works
 	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
@@ -162,14 +162,14 @@ MipsAtom_(floor_tri) {
 	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),   
 	set_lt_u(    R_AT, R_T1, R_AT), 
-	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_tri_exit)), nop, 
+	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop, 
 	/* Insert into Ordering Table Linked List */
 	mac_insert_ot_tag(R_T1, Poly_F3),
 	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 		// Note(Ed): No bounds checking, should be checked before atom runs.
 
 /* Advance Input Cursor & Yield (Both branch targets land here) */
-atom_label(floor_tri_exit) 
+atom_label(floor_f3_face_exit) 
 	add_ui_self(R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
 	mac_yield()
 };

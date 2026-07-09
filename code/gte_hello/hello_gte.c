@@ -258,7 +258,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make_old(&tape_arena); tb_scope(& tb) {
-			tb_emit(& tb, code_rbind_cube_tri);
+			tb_emit(& tb, code_rbind_cube_g4_face);
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(smem.cube.faces));
 				tb_data(& tb, u4_(smem.cube.verts));
@@ -266,7 +266,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 			for (U4 i = 0; i < Cube_num_faces; i++) {
 				// Two triangles per quad face: (x,y,z) and (x,z,w)
-				tb_emit(& tb, code_cube_tri);
+				tb_emit(& tb, code_cube_g4_face);
 			}
 
 			tb_emit(& tb, code_sync_primitive_arena);
@@ -354,16 +354,16 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			tb_emit(& tb, code_set_gte_world);
 				tb_data(& tb, u4_(& smem.tform_world));
 
-			tb_emit(& tb, code_rbind_floor_tri);
+			tb_emit(& tb, code_rbind_floor_f3_face);
 			// TODO(Ed): Just use a single context struct ref
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(smem.floor.faces));
 				tb_data(& tb, u4_(smem.floor.verts));
 				tb_data(& tb, u4_(ordering_buf));
 			for (U4 i = 0; i < Floor_num_faces; i++) {
-				tb_emit(& tb, code_floor_tri);
+				tb_emit(& tb, code_floor_f3_face);
 			}
-			// After code_floor_tri iterations complete, the primitive arena's used counter needs updating.
+			// After code_floor_f3_face iterations complete, the primitive arena's used counter needs updating.
 			tb_emit(& tb, code_sync_primitive_arena);
 				tb_data(& tb, u4_(& pa->used));
 				tb_data(& tb, prim_base);
