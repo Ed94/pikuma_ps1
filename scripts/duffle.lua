@@ -330,30 +330,85 @@ end
 
 -- Split a brace-body into top-level comma-separated tokens. Honors nested
 -- parens/braces/brackets and skips strings/comments.
+--
+-- FIX (2026-07-09): split at top-level NEWLINES and SEMICOLONS too, AND
+-- emit a token break after a top-level comment/string. Previous behavior
+-- glued the macro call after a comment into the same token, so
+-- `word_count_of_token` only saw the leading ident (often nil after
+-- stripping the comment), undercounting the body. See Phase 1 of the
+-- branch-offset regression investigation. Pure-comment / pure-string
+-- chunks (which now appear between real statements) are filtered out so
+-- they contribute 0 words instead of 1.
 function M.split_top_level_commas(body)
     local tokens = {}
     local i = 1
+    local len = #body
     local token_start = 1
-    while i <= #body do
+
+    -- True iff `chunk` contains any non-whitespace, non-comment, non-string
+    -- content (i.e., real token material). Walks through ws + comments
+    -- individually so a chunk like "  /* trailing */ shift_lleft(...)"
+    -- is correctly classified as having real content (the macro call).
+    local function has_real_content(chunk)
+        local k = 1
+        local klen = #chunk
+        while k <= klen do
+            if M.is_space(chunk:sub(k, k)) then
+                k = k + 1
+            else
+                local nx = M.skip_str_or_cmt(chunk, k)
+                if nx > k then
+                    k = nx  -- skipped a comment or string
+                else
+                    return true  -- found real content
+                end
+            end
+        end
+        return false
+    end
+
+    local function emit(end_pos)
+        if end_pos >= token_start then
+            local chunk = body:sub(token_start, end_pos)
+            if M.trim(chunk) ~= "" and has_real_content(chunk) then
+                tokens[#tokens + 1] = chunk
+            end
+            token_start = end_pos + 1
+        end
+    end
+
+    while i <= len do
         local c = body:byte(i)
-        if c == 40 then local _, a = M.read_parens(body, i); i = a
-        elseif c == 123 then local _, a = M.read_braces(body, i); i = a
-        elseif c == 91 then local _, a = M.read_brackets(body, i); i = a
-        elseif c == 44 then  -- ','
-            tokens[#tokens + 1] = body:sub(token_start, i - 1)
+        if c == 40 then                              -- '('
+            local _, a = M.read_parens(body, i); i = a
+        elseif c == 123 then                          -- '{'
+            local _, a = M.read_braces(body, i); i = a
+        elseif c == 91 then                           -- '['
+            local _, a = M.read_brackets(body, i); i = a
+        elseif c == 44 then                           -- ','
+            emit(i - 1)
+            i = i + 1
+            token_start = i
+        elseif c == 59 then                           -- ';'
+            emit(i - 1)
+            i = i + 1
+            token_start = i
+        elseif c == 10 then                           -- '\n'
+            emit(i - 1)
             i = i + 1
             token_start = i
         else
             local nx = M.skip_str_or_cmt(body, i)
-            -- Don't advance token_start on skip: a trailing `/* ... */` after
-            -- a macro call is part of the current entry's chunk, not the
-            -- start of the next one. This keeps comments merged into the
-            -- next entry's chunk (so they don't inflate the word count).
-            if nx > i then i = nx else i = i + 1 end
+            if nx > i then
+                -- Skipped a comment or string at top level: emit token break.
+                i = nx
+                emit(i - 1)
+            else
+                i = i + 1
+            end
         end
     end
-    local last = body:sub(token_start)
-    if M.trim(last) ~= "" then tokens[#tokens + 1] = last end
+    emit(len)
     return tokens
 end
 

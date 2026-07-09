@@ -9,10 +9,8 @@
 #endif
 
 #pragma region MACs (Mips Atom components)
-/* The macros mac_format_f3_color and mac_gte_store_f3 moved to
- * lottes_tape.h during the Phase 3 gp.h overhaul. Both are now RGB-form
- * (mac_format_f3_color takes _r, _g, _b byte values rather than raw
- * 16-bit half-words). */
+
+
 
 #pragma endregion MACs
 

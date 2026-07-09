@@ -897,10 +897,18 @@ end
 -- "slot" that contributes its own word count. For most entries
 -- (regular MIPS instructions) the count is 1. For `mac_Y(...)`
 -- calls, the count is the word count of mac_Y (recursive lookup).
+-- For encoding macros with a known multi-word count (e.g.
+-- `mask_upper` = 2), the count is taken from `word_counts`.
 --
 -- The component list passed in is the full set of components in the
 -- source, so we can resolve any `mac_X` call to its definition.
-local function compute_component_word_count(c, components)
+--
+-- FIX (2026-07-09): also consult `word_counts` (encoding macros from
+-- tape_atom.metadata.h) for non-component tokens. Previously `mask_upper`
+-- inside `mac_insert_ot_tag_*` was assumed to be 1 word instead of 2,
+-- so any atom using `mac_insert_ot_tag_*` had its branch offsets off by
+-- 1 word. See Phase 4b of the branch-offset regression investigation.
+local function compute_component_word_count(c, components, word_counts)
 	-- Build a lookup table: mac_X_name -> component
 	local comp_by_name = {}
 	for _, cc in ipairs(components) do
@@ -933,8 +941,15 @@ local function compute_component_word_count(c, components)
 				if comp_name and comp_by_name[comp_name] then
 					-- It's a `mac_X(...)` call. Recurse.
 					n = n + rec(comp_name)
+				elseif comp_name and word_counts and word_counts[comp_name] then
+					-- Encoding macro or pseudo-instruction (e.g. mask_upper = 2,
+					-- nop2 = 2). Trust the metadata — tape_atom.metadata.h is the
+					-- single source of truth for word counts.
+					n = n + word_counts[comp_name]
 				else
-					-- Regular instruction (or some other token): 1 word.
+					-- Unrecognized token. Fall back to 1 word. tape_atom.metadata.h
+					-- should declare a WORD_COUNT entry for every macro used in
+					-- a component body — add the missing entry if you see drift.
 					n = n + 1
 				end
 			end
@@ -948,7 +963,7 @@ local function compute_component_word_count(c, components)
 	return rec(c.name)
 end
 
-local function emit_component_macros_h(source_path, components)
+local function emit_component_macros_h(source_path, components, word_counts)
 		if #components == 0 then return end
 
 		local dir          = duffle.dirname(source_path)
@@ -1024,10 +1039,10 @@ local function emit_component_macros_h(source_path, components)
         -- already populated) and falls back to 1 for non-mac tokens.
         local counts_by_name = {}
         for _, cc in ipairs(components) do
-            local cc_count = compute_component_word_count(cc, components)
+            local cc_count = compute_component_word_count(cc, components, word_counts)
             counts_by_name["mac_" .. cc.name] = cc_count
         end
-        local n = compute_component_word_count(c, components)
+        local n = compute_component_word_count(c, components, word_counts)
 
         if n > 0 then
             -- Convert `//` line comments to `/* */` block comments in each
@@ -1593,7 +1608,7 @@ local function main(args)
 				local source_text = duffle.read_file(source_path)
 				local components  = find_component_atoms(source_text)
 				if #components > 0 then
-						emit_component_macros_h(source_path, components)
+						emit_component_macros_h(source_path, components, word_counts)
 				end
 		end
 
