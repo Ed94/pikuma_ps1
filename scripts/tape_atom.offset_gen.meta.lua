@@ -405,10 +405,11 @@ local function process_source(source_path, word_counts)
         })
     end
 
-    local basename = basename_no_ext(source_path)
+    local basename    = basename_no_ext(source_path)
+    local dir_basename = basename_no_ext(dirname(source_path))
     local out_dir  = dirname(source_path) .. "/gen"
     ensure_dir(out_dir)
-    local out_path = out_dir .. "/" .. basename .. ".offsets.h"
+    local out_path = out_dir .. "/" .. dir_basename .. ".offsets.h"
     write_file(out_path, generate_header(source_path, atoms_data))
 
     local total_branches = 0

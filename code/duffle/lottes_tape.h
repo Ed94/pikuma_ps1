@@ -6,18 +6,36 @@
 # include "gte.h"
 # include "memory.h"
 #	include "atom_dsl.h"
+#	include "gen/duffle.macs.h"
+#	include "gen/duffle.offsets.h"
 #endif
 
 typedef U4 const MipsCode;
-#define MipsAtom_(sym) MipsCode tmpl(code,sym) [] align_(4) =
+typedef Slice_(MipsCode);
+typedef Slice_MipsCode MipsAtom;
+#define MipsAtom_(sym)               MipsCode tmpl(code,sym) [] align_(4) =
+// Bare form: file-scope declaration with hardcoded body.
+// Used for components with no args (e.g., ac_load_tri_indices) or
+// identifier-args (hardcoded register names).
+//   MipsAtomComp_(ac_X) { body }
+// expands to:
+//   MipsCode ac_X[] align_(4) = { body };
+#define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
+// Function form: function-body block that returns a MipsAtom slice.
+// Used for components with value-args (e.g., ac_format_f3_color).
+//   FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
+// expands to:
+//   FI_ MipsAtom ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
+#define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
 
-#pragma region Tape Drive
-/* ---------------------------------------------------------------------------
- *  TAPE DRIVE ABI & REGISTER ALIASES
- * ---------------------------------------------------------------------------
- *  We map the MIPS temporary registers to a persistent global workspace.
- *  The C compiler is completely unaware of these bindings.
- * ---------------------------------------------------------------------------*/
+// Auto-generated component macros (build/gen/<dir>/<dir>.components.h)
+// are included manually by the unity build. The metaprogram puts them
+// under ./build/gen/ (not in the code dirs) so the source tree stays clean.
+
+/* Register aliases (moved up from the Tape Drive region below so that
+ * mac_yield's body and the Mips Atom Builder functions can reference
+ * them. The C compiler processes the file top-to-bottom, so the enum
+ * must be visible before any use.) */
 enum {
 	R_AtomJmp    = R_T9,
 	R_TapePtr    = R_T8,  /* The Instruction Stream Pointer */
@@ -37,6 +55,11 @@ enum {
 #define R_VertBase_Code    R_T5_Code
 #define R_OtBase_Code      R_T6_Code
 };
+
+#pragma region Tape Drive
+/* ---------------------------------------------------------------------------
+ *  TAPE DRIVE ABI & REGISTER ALIASES (the enum moved earlier; see below)
+ * ---------------------------------------------------------------------------*/
 
 /* The 'Exit' Atom */
 MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
@@ -85,71 +108,104 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  *  These do NOT yield. They are expanded inline inside Tape Atoms.
  * ---------------------------------------------------------------------------*/
 
-/* The 'Yield' sequence for Tape Atoms.
- * Loads the next pointer from the tape, advances the tape, and jumps. 
- * Cost: ~ 4 cycles */
-#define mac_yield()                               \
-	  load_word(R_AtomJmp, R_TapePtr, 0)            \
-	, add_ui_self(         R_TapePtr, S_(MipsCode)) \
-	, jump_reg( R_AtomJmp)                          \
+// The 'Yield' sequence for Tape Atoms (mac_yield). Authored as a
+// bare-form component (MipsAtomComp_). The metaprogram reads the
+// body and generates a `mac_yield(...)` macro in the auto-generated
+// duffle.macs.h header. The body is the same 4-instruction yield
+// sequence as before.
+MipsAtomComp_(ac_yield) {
+	  load_word(R_AtomJmp, R_TapePtr, 0)
+	, add_ui_self(         R_TapePtr, S_(MipsCode))
+	, jump_reg( R_AtomJmp)
 	, nop
+};
 
 /* Words: 3; Loads 3 S2 indices from the face array */
-#define mac_load_tri_indices(rId_0, rId_1, rId_2) \
-	  load_half_u(rId_0, R_FaceCursor, 0 * S_(S2)) \
-	, load_half_u(rId_1, R_FaceCursor, 1 * S_(S2)) \
-	, load_half_u(rId_2, R_FaceCursor, 2 * S_(S2))
+MipsAtomComp_(ac_load_tri_indices) {
+	  load_half_u(R_T0, R_FaceCursor, 0 * S_(S2))
+	, load_half_u(R_T1, R_FaceCursor, 1 * S_(S2))
+	, load_half_u(R_T2, R_FaceCursor, 2 * S_(S2))
+};
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
-#define mac_load_tri_verts(rId_0, rId_1, rId_2) \
-	  shift_lleft(R_AT, rId_0, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0) \
-	, shift_lleft(R_AT, rId_1, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1) \
-	, shift_lleft(R_AT, rId_2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2)
+MipsAtomComp_(ac_load_tri_verts) {
+	  shift_lleft(R_AT, R_T0, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0)
+	, shift_lleft(R_AT, R_T1, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1)
+	, shift_lleft(R_AT, R_T2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2)
+};
 
-/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list */
-#define mac_insert_ot_tag(r_otz, prim_type) \
-	  shift_lleft( R_T1, r_otz, S_(U4)/2)                       /* T1 = r_otz * S_(U4) */ \
-	, add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */ \
-	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
-	, load_upper_i(R_V0, (S_(prim_type)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = S_(prim_type without tag field) */ \
-	, mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
-	, or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
-	, store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
-	, shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
-	, shift_lright(R_AT, R_AT,         S_(polytag_len_bits)) \
+/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
+ * Hardcoded for Poly_F3 (5 words). For Poly_G4, use ac_insert_ot_tag_g4. */
+MipsAtomComp_(ac_insert_ot_tag_f3) {
+	  shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */
+	, add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */
+	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */
+	, load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = (5 - 1) << 24 = 4 << 24 */
+	, mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */
+	, or_u(        R_AT, R_AT, R_V0)                            /* Merge length */
+	, store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */
+	, shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */
+	, shift_lright(R_AT, R_AT,         S_(polytag_len_bits))
 	, store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
+};
+
+/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
+ * Hardcoded for Poly_G4 (9 words). For Poly_F3, use ac_insert_ot_tag_f3. */
+MipsAtomComp_(ac_insert_ot_tag_g4) {
+	  shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */
+	, add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */
+	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */
+	, load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = (9 - 1) << 24 = 8 << 24 */
+	, mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */
+	, or_u(        R_AT, R_AT, R_V0)                            /* Merge length */
+	, store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */
+	, shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */
+	, shift_lright(R_AT, R_AT,         S_(polytag_len_bits))
+	, store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
+};
 
 /* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given
  * byte offset. Internal helper used by the *_format_*_color macros.
  * Args: off = U4 byte offset, code = GP0 cmd byte (0 for c1/c2/c3 of
  * a Poly_G4), r/g/b = 8-bit RGB byte values. */
-#define mac_pack_color_word(off, code, r,g,b) \
-		load_upper_i(R_AT, (code) << 8  | (b))    \
-	, or_i_self(   R_AT, ((g)   << 8) | (r))    \
+FI_ MipsAtom ac_pack_color_word(U4 off, U4 code, U1 r, U1 g, U1 b)
+MipsAtomComp_Proc_(ac_pack_color_word, {
+		load_upper_i(R_AT, (code) << 8  | (b))
+	, or_i_self(   R_AT, ((g)   << 8) | (r))
 	, store_word(  R_AT, R_PrimCursor, (off))
+})
 
 /* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
  * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields).
  * Migrated from hello_gte_tape.c; takes RGB form per the Phase 3
  * convention. */
-#define mac_format_f3_color(r,g,b) mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r,g,b)
+FI_ MipsAtom ac_format_f3_color(U1 r, U1 g, U1 b)
+MipsAtomComp_Proc_(ac_format_f3_color, {
+		mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b)
+})
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen).
  * The macro name declares the pipeline position; check #6 (GTE state-
  * machine validation) verifies the call site matches the declaration. */
-#define mac_gte_store_f3_post_rtpt() \
-		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
-	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
+MipsAtomComp_(ac_gte_store_f3_post_rtpt) {
+		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0))
+	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1))
 	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2))
+};
 
 /* Words: 12; Emits the four (code|color) words of a Poly_G4.
  * Args: rN,gN,bN are 8-bit RGB byte values for each of the 4 vertices. */
-#define mac_format_g4_color(r0,g0,b0, r1,g1,b1, r2,g2,b2, r3,g3,b3)  \
-		mac_pack_color_word(O_(Poly_G4,c0), gp0_cmd_poly_g4, r0,g0,b0) \
-	, mac_pack_color_word(O_(Poly_G4,c1), 0,               r1,g1,b1) \
-	, mac_pack_color_word(O_(Poly_G4,c2), 0,               r2,g2,b2) \
+FI_ MipsAtom ac_format_g4_color(U1 r0, U1 g0, U1 b0,
+                                U1 r1, U1 g1, U1 b1,
+                                U1 r2, U1 g2, U1 b2,
+                                U1 r3, U1 g3, U1 b3)
+MipsAtomComp_Proc_(ac_format_g4_color, {
+		mac_pack_color_word(O_(Poly_G4,c0), gp0_cmd_poly_g4, r0,g0,b0)
+	, mac_pack_color_word(O_(Poly_G4,c1), 0,               r1,g1,b1)
+	, mac_pack_color_word(O_(Poly_G4,c2), 0,               r2,g2,b2)
 	, mac_pack_color_word(O_(Poly_G4,c3), 0,               r3,g3,b3)
+})
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
  * G4 triangle portion to p0/p1/p2.
@@ -159,10 +215,11 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  * three registers aligned with v0/v1/v2 you must store before RTPS).
  * The macro name declares the pipeline position; check #6 (GTE state-
  * machine validation) verifies the call site matches the declaration. */
-#define mac_gte_store_g4_p012_post_rtpt_pre_rtps() \
-		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0))  \
-	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1))  \
+MipsAtomComp_(ac_gte_store_g4_p012_post_rtpt_pre_rtps) {
+		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0))
+	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1))
 	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2))
+};
 
 /* Words: 1; Stores the V3 screen coord to the G4's p3 slot.
  * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its
@@ -177,7 +234,9 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  * instead of C2_SXY2 (which holds v3.screen after RTPS). The rename
  * encodes the pipeline position in the name so the next bug of this
  * class is impossible. */
-#define mac_gte_store_g4_p3_post_rtps() gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
+MipsAtomComp_(ac_gte_store_g4_p3_post_rtps) {
+	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
+};
 
 #pragma endregion Macro Atom Components
 
@@ -186,7 +245,6 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 
 typedef Struct_(FMipsAtom512) { U4 data[512]; U4 used; };
 
-typedef Slice_(MipsCode); typedef Slice_MipsCode MipsAtom; 
 // FArena Related
 typedef Relative_(FArena) Struct_(MipsAtomBuilder) { U4 start; U4 capacity; U4 used; };
 // Whatever the builder is writting to should most likely coresspond
@@ -243,7 +301,7 @@ internal MipsAtom_(mips_flush_icache) {
 };
 
 typedef Struct_(Binds_SetGteWorld) {
-	U4 transform;
+	M3_S2* transform;
 };
 internal MipsAtom_(set_gte_world) {
 	/* Pop matrix address from tape into R_T3 ($11) */
@@ -258,8 +316,6 @@ internal MipsAtom_(set_gte_world) {
 	gte_mv_to_ctrl_r(R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(R_T2, gte_cr_TRZ),
 	mac_yield()
 };
-
-// TODO(Ed): I'm not sure yet if the bindings are redundant with the floortri atom yet.
 
 /* DIAGNOSTIC 1: Pure tape loop test */
 internal MipsAtom_(diag_yield) { mac_yield() };

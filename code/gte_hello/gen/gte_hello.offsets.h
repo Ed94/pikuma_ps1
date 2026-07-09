@@ -5,20 +5,20 @@
 #pragma region hello_gte_tape
 
 
-// --- atom: cube_g4_face (87 words) ---
+// --- atom: cube_g4_face (44 words) ---
 
-#define _atom_offset_cull_cube_g4_face_exit           48
-#define _atom_offset_bounds_chk_cube_g4_face_exit     12
+#define _atom_offset_cull_cube_g4_face_exit           25
+#define _atom_offset_bounds_chk_cube_g4_face_exit     2
 
 enum {
     atom_offset_cull_cube_g4_face_exit = _atom_offset_cull_cube_g4_face_exit,
     atom_offset_bounds_chk_cube_g4_face_exit = _atom_offset_bounds_chk_cube_g4_face_exit,
 };
 
-// --- atom: floor_f3_face (66 words) ---
+// --- atom: floor_f3_face (30 words) ---
 
-#define _atom_offset_culling_floor_f3_face_exit       29
-#define _atom_offset_bounds_chk_floor_f3_face_exit    13
+#define _atom_offset_culling_floor_f3_face_exit       15
+#define _atom_offset_bounds_chk_floor_f3_face_exit    3
 
 enum {
     atom_offset_culling_floor_f3_face_exit = _atom_offset_culling_floor_f3_face_exit,

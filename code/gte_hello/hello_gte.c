@@ -8,17 +8,19 @@
 #include "duffle/dsl.h"
 #include "duffle/memory.h"
 #include "duffle/math.h"
+
 #include "duffle/gcc_asm.h"
 #include "duffle/mips.h"
 #include "duffle/gp.h"
 #include "duffle/gte.h"
 
-#	include "duffle/gen/lottes_tape.offsets.h"
+#	include "duffle/gen/duffle.macs.h"
+#	include "duffle/gen/duffle.offsets.h"
 #include "duffle/atom_dsl.h"
 #include "duffle/lottes_tape.h"
 
 #	include "tape_atom.metadata.h"
-#	include "gen/hello_gte_tape.offsets.h"
+#	include "gen/gte_hello.offsets.h"
 #include "hello_gte.h"
 #include "hello_gte_tape.c"
 
@@ -337,9 +339,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		m3s2_rotation   (& smem.floor.rot,   & smem.tform_world);
 		m3s2_translation(& smem.tform_world, & smem.floor.pos);
 		m3s2_scale      (& smem.tform_world, & smem.floor.scale);
-		// TODO(Ed): This can either be in the tape or here...
-		// gte_matrix_set_rotation   (& smem.tform_world);
-		// gte_matrix_set_translation(& smem.tform_world);
 
 		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
@@ -350,7 +349,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// Prepare the tape. (Push protocol to tape)
 		LP_ U4 mem_temp_tape[512];
 		TapeBuilder tb = tb_make(slice_ut_arr(mem_temp_tape)); tb_scope(& tb) {
-			// TODO(Ed): This is bugged.
 			tb_emit(& tb, code_set_gte_world);
 				tb_data(& tb, u4_(& smem.tform_world));
 

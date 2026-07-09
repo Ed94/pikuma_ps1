@@ -1,9 +1,10 @@
 #ifdef INTELLISENSE_DIRECTIVES
-#	include "duffle/lottes_tape.h"
+#	include "duffle/gen/duffle.macs.h"
+#	include "duffle/gen/duffle.offsets.h"
 #	include "duffle/atom_dsl.h"
-#	include "hello_gte.h"
+#	include "duffle/lottes_tape.h"
 #	include "tape_atom.metadata.h"
-#	include "gen/hello_gte_tape.offsets.h"
+#	include "hello_gte.h"
 #endif
 
 #pragma region MACs (Mips Atom components)
@@ -17,10 +18,10 @@
 #pragma region Baked Atoms
 
 typedef Struct_(Binds_CubeTri) {
-	U4 PrimCursor;
-	U4 FaceCursor;
-	U4 VertBase;
-	U4 OtBase;
+	U4     PrimCursor;
+	V4_S2* FaceCursor;
+	V3_S2* VertBase;
+	U4*    OtBase;
 };
 internal MipsAtom_(rbind_cube_g4_face) {
 	/* Pop 4 arguments from the tape directly into the workspace registers */
@@ -101,7 +102,7 @@ MipsAtom_(cube_g4_face) {
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
 
 	/* ── 12. Insert into Ordering Table (length = 8 words for Poly_G4) ──── */
-	mac_insert_ot_tag(R_T1, Poly_G4),
+	mac_insert_ot_tag_g4(),
 
 	/* ── 13. Advance cursors & yield (both branch targets land here) ────── */
 atom_label(cube_g4_face_exit)
@@ -111,10 +112,10 @@ atom_label(cube_g4_face_exit)
 };
 
 typedef Struct_(Binds_FloorTri) {
-	U4 PrimCursor;
-	U4 FaceCursor;
-	U4 VertBase;
-	U4 OtBase;
+	U4     PrimCursor;
+	V3_S2* FaceCursor;
+	V3_S2* VertBase;
+	U4*    OtBase;
 };
 	atom_region(rbind_floor_f3_face, REGION_PRIM_ARENA)
 	atom_group(rbind_floor_f3_face, GROUP_RENDER_FLOOR)
@@ -163,7 +164,7 @@ MipsAtom_(floor_f3_face) {
 	set_lt_u(    R_AT, R_T1, R_AT), 
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop, 
 	/* Insert into Ordering Table Linked List */
-	mac_insert_ot_tag(R_T1, Poly_F3),
+	mac_insert_ot_tag_f3(),
 	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 		// Note(Ed): No bounds checking, should be checked before atom runs.
 

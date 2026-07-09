@@ -586,6 +586,367 @@ local function find_atom_names(source)
     return out
 end
 
+-- ============================================================
+-- Find the args of the function declaration that immediately precedes
+-- a MipsAtomComponent_ invocation of the given name. Returns the
+-- args string (e.g., "U4 off, U4 code, U1 r, U1 g, U1 b") or nil
+-- if no function declaration is found.
+--
+-- Convention: function form is
+--   FI_ MipsAtom ac_X(args) MipsAtomComponent_(ac_X, { body })
+-- We find the LAST occurrence of "ac_X(" before before_pos and
+-- extract the args from inside the parens.
+--
+-- No regex (per the no_regex constraint). Uses string.find with
+-- plain mode (4th arg = true) to find the name + open paren.
+-- ============================================================
+
+local function find_function_args_for(source, name, before_pos)
+    local search      = source:sub(1, before_pos)
+    local name_paren  = name .. "("
+    local last_idx    = nil
+    local p           = 1
+    while true do
+        local s = search:find(name_paren, p, true)  -- plain (no regex)
+        if not s then break end
+        last_idx = s
+        p = s + #name_paren
+    end
+    if not last_idx then return nil end
+
+    -- Verify the preceding context ends with "MipsAtom" (with
+    -- possible qualifiers between). Check the last word is
+    -- "MipsAtom" (or the trimmed before ends with that token).
+    local before   = search:sub(1, last_idx - 1)
+    local trimmed  = duffle.trim(before)
+    if trimmed:sub(-#"MipsAtom") ~= "MipsAtom" then
+        -- Preceding context is not a function declaration.
+        -- This shouldn't happen with the convention, but guard anyway.
+        return nil
+    end
+
+    local open_paren = last_idx + #name  -- position of "("
+    local inner      = read_parens(source, open_paren)
+    if not inner then return nil end
+    return inner
+end
+
+-- Extract just the parameter NAMES from a function-args string
+-- (stripping type annotations). E.g.,
+--   "U4 off, U4 code, U1 r, U1 g, U1 b"  ->  {"off", "code", "r", "g", "b"}
+--   "U4 *ptr"                            ->  {"ptr"}
+--   ""                                   ->  nil
+-- No regex — uses duffle.is_alnum + plain string ops.
+-- ============================================================
+
+-- ============================================================
+-- Find the contiguous comment block immediately preceding `pos` in
+-- `source`. Returns the comment text (with the `/* */` or `//` markers
+-- preserved) or an empty string if no comment is adjacent.
+-- Used to copy signature comments from the source declaration
+-- (`MipsAtomComponent_` / function decl) over to the generated
+-- `mac_X` macro, so LSP/IntelliSense displays the args doc.
+-- No regex (per the no_regex constraint).
+-- ============================================================
+
+local function preceding_comment_block(source, pos)
+    local i      = pos
+    local pieces = {}
+    while true do
+        -- Skip whitespace
+        local j = i - 1
+        while j > 0 do
+            local c = source:sub(j, j)
+            if c == " " or c == "\t" or c == "\n" or c == "\r" then
+                j = j - 1
+            else
+                break
+            end
+        end
+        if j == 0 then break end
+        -- Check for /* ... */ ending at j
+        if j >= 2 and source:sub(j-1, j) == "*/" then
+            local s = source:sub(1, j - 1)
+            local last_open = nil
+            for k = #s - 1, 1, -1 do
+                if s:sub(k, k+1) == "/*" then
+                    last_open = k
+                    break
+                end
+            end
+            if last_open then
+                -- Include the leading whitespace+indentation before /*
+                local block_start = last_open
+                while block_start > 1 do
+                    local c = source:sub(block_start - 1, block_start - 1)
+                    if c == " " or c == "\t" then
+                        block_start = block_start - 1
+                    else
+                        break
+                    end
+                end
+                table.insert(pieces, 1, source:sub(block_start, j))
+                i = block_start
+            else
+                break
+            end
+        -- Check for // comment ending at j (j is at end of line, j-1 is \n)
+        elseif j >= 1 and (source:sub(j, j) == "\n" or source:sub(j, j) == "\r") then
+            -- Walk back to the start of the line
+            local line_start = j
+            while line_start > 1 and source:sub(line_start-1, line_start-1) ~= "\n" do
+                line_start = line_start - 1
+            end
+            local line = source:sub(line_start, j)
+            if line:sub(1, 2) == "//" then
+                table.insert(pieces, 1, line)
+                i = line_start - 1
+            else
+                break
+            end
+        else
+            break
+        end
+    end
+    if #pieces == 0 then return "" end
+    return table.concat(pieces, "\n")
+end
+
+-- Extract just the parameter NAMES from a function-args string
+-- (stripping type annotations). E.g.,
+--   "U4 off, U4 code, U1 r, U1 g, U1 b"  ->  {"off", "code", "r", "g", "b"}
+--   "U4 *ptr"                            ->  {"ptr"}
+--   ""                                   ->  nil
+-- No regex — uses duffle.is_alnum + plain string ops.
+-- ============================================================
+
+local function extract_arg_names(args_str)
+    if not args_str or args_str == "" then return nil end
+    local names = {}
+    local tokens = duffle.split_top_level_commas(args_str)
+    for _, tok in ipairs(tokens) do
+        local trimmed = duffle.trim(tok)
+        if trimmed ~= "" then
+            -- Walk backwards from end of trimmed arg, skipping
+            -- trailing whitespace / asterisks / brackets.
+            local i = #trimmed
+            while i > 0 do
+                local c = trimmed:sub(i, i)
+                if c == " " or c == "\t" or c == "*" or c == "]" or c == "[" then
+                    i = i - 1
+                else
+                    break
+                end
+            end
+            -- Now find the end of the last identifier (the param name).
+            local j = i
+            while j > 0 do
+                local c = trimmed:sub(j, j)
+                if duffle.is_alnum(c) or c == "_" then
+                    j = j - 1
+                else
+                    break
+                end
+            end
+            local name = trimmed:sub(j + 1, i)
+            if name ~= "" then
+                names[#names + 1] = name
+            end
+        end
+    end
+    if #names == 0 then return nil end
+    return names
+end
+
+-- ============================================================
+-- Find every MipsAtomComponent_(ac_<X>) { body } declaration in source.
+-- Supports BOTH the bare form and the function form:
+--   Bare:      MipsAtomComponent_(ac_X) { body }
+--   Function:  MipsAtomComponent_(ac_X, { body })  (with a preceding
+--              "FI_ MipsAtom ac_X(args)" function declaration)
+-- Returns: {line, name, body, args} where args is the function-args
+-- string (or nil for the bare form).
+-- ============================================================
+--  WORD_COUNT entry in gen/<dir_basename>.components.h)
+-- ============================================================
+
+local function find_component_atoms(source)
+    local line_of = duffle.LineIndex(source)
+    local out  = {}
+    local len  = #source
+    local i    = 1
+    while i <= len do
+        i = skip_ws_and_cmt(source, i); if i > len then break end
+        local ident, after = read_ident(source, i)
+        if not ident then
+            i = i + 1
+        elseif ident == "MipsAtomComp_Proc_"
+            or ident == "MipsAtomComp_" then
+            local open = skip_ws_and_cmt(source, after)
+            if source:sub(open, open) == "(" then
+                local inner, after_paren = read_parens(source, open)
+                -- Parse args: 1 arg = bare form, 2 args = function form
+                local tokens = duffle.split_top_level_commas(inner)
+                local name, body = nil, nil
+                if #tokens == 1 then
+                    name = duffle.trim(tokens[1])
+                elseif #tokens == 2 then
+                    name = duffle.trim(tokens[1])
+                    local body_raw = duffle.trim(tokens[2])
+                    -- Strip leading { and trailing } if present
+                    if #body_raw >= 2
+                       and body_raw:sub(1, 1) == "{"
+                       and body_raw:sub(-1)   == "}" then
+                        body = duffle.trim(body_raw:sub(2, -2))
+                    else
+                        body = body_raw
+                    end
+                end
+                if name and name:sub(1, 3) == "ac_" then
+                    -- Find the function args (preceding function decl).
+                    -- For the bare form this returns nil (no function).
+                    local args = find_function_args_for(source, name, open)
+                    -- Capture the preceding comment block (signature doc).
+                    -- Walk back from `i` (position of the identifier start)
+                    -- so the walk-back goes through whitespace+comment and
+                    -- stops AT the comment (not at the identifier chars).
+                    local comment = preceding_comment_block(source, i)
+                    if body == nil then
+                        -- Bare form: body is the brace block AFTER the parens.
+                        local brace = scan_to_char(source, "{", after_paren)
+                        if brace then
+                            local body_content, after_brace = read_braces(source, brace)
+                            out[#out + 1] = {
+                                line = line_of(i),
+                                name = name:sub(4),  -- strip "ac_" prefix
+                                body = body_content,
+                                args = args,
+                                comment = comment,
+                            }
+                            i = after_brace
+                        else
+                            i = open + 1
+                        end
+                    else
+                        -- Function form: body is the second arg (already extracted).
+                        out[#out + 1] = {
+                            line = line_of(i),
+                            name = name:sub(4),  -- strip "ac_" prefix
+                            body = body,
+                            args = args,
+                            comment = comment,
+                        }
+                        i = after_paren
+                    end
+                else
+                    i = open + 1
+                end
+            else
+                i = open + 1
+            end
+        else
+            i = after
+        end
+    end
+    return out
+end
+
+-- ============================================================
+-- Emit a per-directory generated header with mac_X(...) macros
+-- derived from MipsAtomComponent_ declarations + auto word-counts.
+-- Output: <source_dir>/gen/<dir_basename>.components.h
+-- ============================================================
+
+local function emit_component_macros_h(source_path, components)
+    if #components == 0 then return end
+
+    local dir          = duffle.dirname(source_path)
+    local dir_basename = duffle.basename_no_ext(dir)
+    -- Components header stays in the source dir (used by the codebase).
+    local out_dir      = dir .. "/gen"
+    local out_path     = out_dir .. "/" .. dir_basename .. ".macs.h"
+
+    local lines = {
+        -- #pragma once wrapped in #ifdef INTELLISENSE_DIRECTIVES, matching
+        -- the convention in lottes_tape.h. The build does manual unity
+        -- includes (the user controls include order), so the pragma
+        -- is only active for IDE/tooling.
+        "#ifdef INTELLISENSE_DIRECTIVES",
+        "#pragma once",
+        "#endif",
+        "// Auto-generated by tape_atom_annotation_pass.lua — DO NOT EDIT",
+        "// Source: " .. source_path,
+        "// Component atoms (MipsAtomComp_(ac_*)) -> macro variants (mac_*)",
+        "// + auto word-counts (so tape_atom.metadata.h stays manual-only",
+        "//   for encoding macros).",
+        "",
+        -- Self-contained: define WORD_COUNT if not already defined.
+        -- The metadata file (tape_atom.metadata.h) defines it as
+        --     enum { words_##name = (count) };
+        -- We use the same definition here so the auto-generated
+        -- entries below expand to compile-time constants whether
+        -- the metadata file is included first or not.
+        "#ifndef WORD_COUNT",
+        "#define WORD_COUNT(name, count)  enum { words_##name = (count) };",
+        "#endif",
+        "",
+    }
+
+    for _, c in ipairs(components) do
+        -- Emit the signature comment (if any) above the macro.
+        -- This is the same comment that preceded the MipsAtomComponent_
+        -- declaration in the source; LSP/IntelliSense shows it on the
+        -- generated mac_X macro.
+        if c.comment and c.comment ~= "" then
+            for line in (c.comment .. "\n"):gmatch("([^\n]*)\n") do
+                lines[#lines + 1] = line
+            end
+        end
+
+        -- Split body by top-level commas; filter empty tokens.
+        local tokens = {}
+        for _, t in ipairs(duffle.split_top_level_commas(c.body)) do
+            local trimmed = duffle.trim(t)
+            if trimmed ~= "" then tokens[#tokens + 1] = trimmed end
+        end
+        local n = #tokens
+
+        -- Determine the macro signature: with function args (function
+        -- form) or variadic-ignored (bare form).
+        local arg_names = extract_arg_names(c.args)
+        local sig
+        if arg_names and #arg_names > 0 then
+            sig = table.concat(arg_names, ", ")
+        else
+            sig = "..."
+        end
+
+        if n > 0 then
+            -- Emit the mac_<X>(<sig>) macro
+            lines[#lines + 1] = "#define mac_" .. c.name .. "(" .. sig .. ") \\"
+            lines[#lines + 1] = "\t" .. tokens[1] .. " \\"
+            for j = 2, n do
+                lines[#lines + 1] = ",\t" .. tokens[j] .. " \\"
+            end
+            -- Strip the trailing line-continuation on the last body line.
+            -- The last 2 chars are always " \" (space + backslash).
+            -- No regex — just trim with string.sub.
+            local last = lines[#lines]
+            if last:sub(-2) == " \\" then
+                lines[#lines] = last:sub(1, -3)
+            end
+        end
+
+        -- Emit the WORD_COUNT(mac_<X>, N) entry.
+        lines[#lines + 1] = "WORD_COUNT(mac_" .. c.name .. ", " .. n .. ")"
+        lines[#lines + 1] = ""
+    end
+
+    duffle.ensure_dir(out_dir)
+    duffle.write_file(out_path, table.concat(lines, "\n") .. "\n")
+    print(string.format("  -> %s", out_path))
+end
+
 local function find_atom_annotations(source)
     local line_of = duffle.LineIndex(source)
     local annots = {}
@@ -1056,7 +1417,8 @@ local function main(args)
     for i = 2, #args do
         local source_path = args[i]
         local basename    = basename_no_ext(source_path)
-        local out_dir     = dirname(source_path) .. "/gen"
+        local dir_basename = basename_no_ext(dirname(source_path))
+        local out_dir     = dirname(source_path) .. "/../../build/gen/" .. dir_basename
         local out_txt     = out_dir .. "/" .. basename .. ".annotations.txt"
         local out_err     = out_dir .. "/" .. basename .. ".errors.h"
 
@@ -1107,10 +1469,21 @@ local function main(args)
                 if f then f:close(); os.remove(stale) end
             end
         end
+
+        -- Emit the per-directory component-macros header (gen/<dir>.components.h)
+        -- if this source has any MipsAtomComponent_ declarations. Independent of
+        -- has_atoms: a header can have components without having full atoms.
+        -- (TODO: pass source text into validate() to avoid the double-read.)
+        local source_text = duffle.read_file(source_path)
+        local components  = find_component_atoms(source_text)
+        if #components > 0 then
+            emit_component_macros_h(source_path, components)
+        end
     end
 
-    -- Write project-level summary.
-    local summary_path = dirname(args[2]) .. "/gen/annotation_validation.txt"
+    -- Write project-level summary. Goes to build/gen/ (reporting cruft),
+    -- not the source dir.
+    local summary_path = dirname(args[2]) .. "/../../build/gen/annotation_validation.txt"
     ensure_dir(dirname(summary_path))
     write_file(summary_path, render_project_report(all_results))
     print(string.format("[summary] %s\n", summary_path))

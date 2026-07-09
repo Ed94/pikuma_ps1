@@ -5,6 +5,12 @@
 // Format: WORD_COUNT(MACRO_NAME, COUNT)
 // One line per macro that appears in your atom sources.
 //
+// This file is encoding-macros-only. The auto-generated component
+// macros (mac_X) live in duffle/gen/<dir>.macs.h (included separately
+// by the unity build). The unity build should include THIS file and
+// the .macs.h file in the same TU, with both wrapped (or the
+// include guard order handled) to avoid WORD_COUNT redeclaration.
+//
 // To regenerate: hand-count the instructions in each macro definition.
 // (You'll only need to do this once per macro — they don't change often.)
 #define WORD_COUNT(name, count)  enum { words_##name = (count) };
@@ -47,15 +53,5 @@ WORD_COUNT(gte_cmdw_nclip,                   1)
 WORD_COUNT(gte_avg_sort_z3,                  1)
 WORD_COUNT(sub_u,                            1)
 WORD_COUNT(nop2,                             2)
-WORD_COUNT(mac_load_tri_indices,             3)
-WORD_COUNT(mac_load_tri_verts,              18)
-WORD_COUNT(mac_format_f3_color,              3)
-WORD_COUNT(mac_gte_store_f3_post_rtpt,       3)
-WORD_COUNT(mac_pack_color_word,              3)
-WORD_COUNT(mac_format_g4_color,             12)
-WORD_COUNT(mac_gte_store_g4_p012_post_rtpt_pre_rtps, 3)
-WORD_COUNT(mac_gte_store_g4_p3_post_rtps,    1)
-WORD_COUNT(mac_insert_ot_tag,               11)
-WORD_COUNT(mac_yield,                        4)
 
 #undef WORD_COUNT

@@ -73,6 +73,7 @@ typedef Slice_(B1);
 
 #define slice_iter(container, iter)     (T_((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter)
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = array_decl(type,__VA_ARGS__), .len = array_len( array_decl(type,__VA_ARGS__)) }
+#define slice_from_array(type, array)     (tmpl(Slice,type)) { .ptr = array, .len = S_(array) }
 
 FI_ void slice_zero_(Slice s) { slice_assert(s); mem_zero(s.ptr, s.len); }
 #define  slice_zero(s)        slice_zero_(slice_to_ut(s))
