@@ -208,6 +208,7 @@ local function scan_atom_body(body, word_counts)
     local pos      = 0
     local labels   = {}
     local branches = {}
+    local _dbg_count = 0
     for _, tok in ipairs(split_top_level_commas(body)) do
         local k    = 1
         local tlen = #tok
@@ -426,33 +427,60 @@ end
 -- Main
 -- ============================================================
 
+-- Scan a directory recursively for files matching a pattern.
+-- No regex (per the no_regex constraint) — uses plain byte matching.
+local function scan_dir(dir, suffix)
+	local results = {}
+	local p = io.popen('dir /b /s "' .. dir .. '\\' .. suffix .. '" 2>nul')
+	if not p then return results end
+	for raw_line in p:lines() do
+		-- dir /b outputs paths with backslashes; normalize to forward.
+		local path = raw_line:gsub("\\", "/")
+		results[#results + 1] = path
+	end
+	p:close()
+	return results
+end
+
 local function main(args)
 	if #args < 2 then
 		print("Usage: luajit gen_atom_offsets.lua <metadata.h> <source1> [source2 ...]")
 		os.exit(1)
 	end
-	local word_counts = load_word_counts(args[1])
-	for i = 2, #args do
-		local source_path  = args[i]
-		-- Also load the auto-generated <dir>.macs.h for this source's
-		-- directory (if it exists). The metaprogram emits
-		-- WORD_COUNT(mac_X, N) entries there for the MipsAtomComp_
-		-- declarations in the source. Merging ensures the offset
-		-- computation has the right word counts (no "unknown macro"
-		-- warnings for the auto-generated components).
-		local source_dir   = dirname(source_path)
-		-- dirname() keeps the trailing separator; basename_no_ext()
-		-- on a path with a trailing separator returns "". Strip it.
-		if #source_dir > 0 and (source_dir:sub(-1) == "/" or source_dir:sub(-1) == "\\") then
-			source_dir = source_dir:sub(1, -2)
-		end
-		local macs_path    = source_dir .. "/gen/" .. basename_no_ext(source_dir) .. ".macs.h"
-		local ok, mc        = pcall(load_word_counts, macs_path)
-		if ok then
+	-- Find the project root (parent of the metadata file's dir).
+	local meta_dir = dirname(args[1])
+	if #meta_dir > 0 and (meta_dir:sub(-1) == "/" or meta_dir:sub(-1) == "\\") then
+		meta_dir = meta_dir:sub(1, -2)
+	end
+	local project_root = dirname(meta_dir)
+	-- Scan the project for all *.macs.h files and load their WORD_COUNT
+	-- entries as the source of truth. The metaprogram's recursive
+	-- counting (which accounts for macro-in-macro expansion) gives
+	-- the correct values; the metadata file's manually-maintained
+	-- entries are NOT loaded here (they may be wrong for recursive cases).
+	local word_counts = {}
+	local macs_files = scan_dir(project_root, "*.macs.h")
+	for _, macs_path in ipairs(macs_files) do
+		-- Convert forward slashes to backslashes for Windows file open.
+		local win_path = macs_path:gsub("/", "\\")
+		local ok, mc = pcall(load_word_counts, win_path)
+		if ok and type(mc) == "table" then
 			for name, count in pairs(mc) do
 				word_counts[name] = count
 			end
 		end
+	end
+	-- Also load the metadata's encoding-macro entries (which are NOT
+	-- in the macs.h, since the macs.h is component-only). These are
+	-- the regular 1-word-per-macro entries like load_word, add_ui, etc.
+	local meta_counts = load_word_counts(args[1])
+	for name, count in pairs(meta_counts) do
+		if not word_counts[name] then
+			word_counts[name] = count
+		end
+	end
+	for i = 2, #args do
+		local source_path  = args[i]
 		process_source(source_path, word_counts)
 	end
 end

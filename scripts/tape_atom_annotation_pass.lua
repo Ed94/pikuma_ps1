@@ -892,6 +892,62 @@ local function convert_line_comments_to_block(s)
 	return result
 end
 
+-- Compute the word count of a component body, accounting for
+-- macro expansion. Each comma-separated entry in the body is a
+-- "slot" that contributes its own word count. For most entries
+-- (regular MIPS instructions) the count is 1. For `mac_Y(...)`
+-- calls, the count is the word count of mac_Y (recursive lookup).
+--
+-- The component list passed in is the full set of components in the
+-- source, so we can resolve any `mac_X` call to its definition.
+local function compute_component_word_count(c, components)
+	-- Build a lookup table: mac_X_name -> component
+	local comp_by_name = {}
+	for _, cc in ipairs(components) do
+		comp_by_name[cc.name] = cc
+	end
+	-- Cache to avoid infinite recursion (if components cycle).
+	local cache = {}
+	local function rec(name)
+		if cache[name] then return cache[name] end
+		cache[name] = 0  -- mark as in-progress
+		local cc = comp_by_name[name]
+		local n
+		if cc then
+			local body_tokens = {}
+			for _, t in ipairs(duffle.split_top_level_commas(cc.body)) do
+				local trimmed = duffle.trim(t)
+				if trimmed ~= "" then body_tokens[#body_tokens + 1] = trimmed end
+			end
+			n = 0
+			for _, t in ipairs(body_tokens) do
+				-- Read the first identifier from the token.
+				local ident, after = duffle.read_ident(t, 1)
+				-- Components are stored without the `mac_` prefix
+				-- (e.g. "format_f3_color"). The token has `mac_format_f3_color(...)`,
+				-- so strip the `mac_` prefix to look up the component.
+				local comp_name = ident
+				if comp_name and comp_name:sub(1, 4) == "mac_" then
+					comp_name = comp_name:sub(5)
+				end
+				if comp_name and comp_by_name[comp_name] then
+					-- It's a `mac_X(...)` call. Recurse.
+					n = n + rec(comp_name)
+				else
+					-- Regular instruction (or some other token): 1 word.
+					n = n + 1
+				end
+			end
+		else
+			-- Not a known component: assume 1 word (regular instruction).
+			n = 1
+		end
+		cache[name] = n
+		return n
+	end
+	return rec(c.name)
+end
+
 local function emit_component_macros_h(source_path, components)
 		if #components == 0 then return end
 
@@ -956,19 +1012,36 @@ local function emit_component_macros_h(source_path, components)
 						sig = "..."
 				end
 
+        -- Compute the word count of the component body, accounting for
+        -- macro expansion. Each comma-separated entry in the body is one
+        -- "instruction slot", but a `mac_Y(...)` call expands to Y's
+        -- word count. The offset_gen and the metadata's WORD_COUNT table
+        -- both use this resolved count.
+        --
+        -- We compute it once per component (not per token) and emit
+        -- the value in the WORD_COUNT entry. The lookup table `counts_by_name`
+        -- is built from the components list (which find_component_atoms
+        -- already populated) and falls back to 1 for non-mac tokens.
+        local counts_by_name = {}
+        for _, cc in ipairs(components) do
+            local cc_count = compute_component_word_count(cc, components)
+            counts_by_name["mac_" .. cc.name] = cc_count
+        end
+        local n = compute_component_word_count(c, components)
+
         if n > 0 then
             -- Convert `//` line comments to `/* */` block comments in each
             -- token. C macros use `\` line-continuations; if a `//` comment
             -- appears before a `\`, the rest of the line (including the
             -- continuation) is consumed by the `//`, breaking the macro.
             -- Converting to `/* */` preserves the macro structure.
-            for j = 1, n do
+            for j = 1, #tokens do
                 tokens[j] = convert_line_comments_to_block(tokens[j])
             end
             -- Emit the mac_<X>(<sig>) macro
             lines[#lines + 1] = "#define mac_" .. c.name .. "(" .. sig .. ") \\"
             lines[#lines + 1] = "\t" .. tokens[1] .. " \\"
-            for j = 2, n do
+            for j = 2, #tokens do
                 lines[#lines + 1] = ",\t" .. tokens[j] .. " \\"
             end
 						-- Strip the trailing line-continuation on the last body line.

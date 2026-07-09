@@ -336,9 +336,9 @@ function M.split_top_level_commas(body)
     local token_start = 1
     while i <= #body do
         local c = body:byte(i)
-        if c == 40 then local _, a = M.read_parens(body, i); i = a    -- '('
-        elseif c == 123 then local _, a = M.read_braces(body, i); i = a  -- '{'
-        elseif c == 91 then local _, a = M.read_brackets(body, i); i = a  -- '['
+        if c == 40 then local _, a = M.read_parens(body, i); i = a
+        elseif c == 123 then local _, a = M.read_braces(body, i); i = a
+        elseif c == 91 then local _, a = M.read_brackets(body, i); i = a
         elseif c == 44 then  -- ','
             tokens[#tokens + 1] = body:sub(token_start, i - 1)
             i = i + 1
@@ -347,7 +347,8 @@ function M.split_top_level_commas(body)
             local nx = M.skip_str_or_cmt(body, i)
             -- Don't advance token_start on skip: a trailing `/* ... */` after
             -- a macro call is part of the current entry's chunk, not the
-            -- start of the next one.
+            -- start of the next one. This keeps comments merged into the
+            -- next entry's chunk (so they don't inflate the word count).
             if nx > i then i = nx else i = i + 1 end
         end
     end

@@ -13,7 +13,9 @@
 typedef U4 const MipsCode;
 typedef Slice_(MipsCode);
 typedef Slice_MipsCode MipsAtom;
+
 #define MipsAtom_(sym)               MipsCode tmpl(code,sym) [] align_(4) =
+
 // Bare form: file-scope declaration with hardcoded body.
 // Used for components with no args (e.g., ac_load_tri_indices) or
 // identifier-args (hardcoded register names).
@@ -21,6 +23,7 @@ typedef Slice_MipsCode MipsAtom;
 // expands to:
 //   MipsCode ac_X[] align_(4) = { body };
 #define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
+
 // Function form: function-body block that returns a MipsAtom slice.
 // Used for components with value-args (e.g., ac_format_f3_color).
 //   FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
