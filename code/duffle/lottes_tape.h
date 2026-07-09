@@ -156,6 +156,10 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)) \
 	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2))
 
+/* Words: 1; Stores the V3 screen coord (now in SXY2 after V3-RTPS — RTPS
+ * writes its result into SXY2, not SXY0) to the G4's p3 slot.
+ * Call AFTER the V3-RTPS. */
+#define mac_gte_store_g4_p3() gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
 
 #pragma endregion Macro Atom Components
 
