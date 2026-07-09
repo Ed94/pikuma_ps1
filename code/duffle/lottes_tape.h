@@ -124,8 +124,8 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  * Args: off = U4 byte offset, code = GP0 cmd byte (0 for c1/c2/c3 of
  * a Poly_G4), r/g/b = 8-bit RGB byte values. */
 #define mac_pack_color_word(off, code, r,g,b) \
-		load_upper_i(R_AT, (code) << 8 | (b))   \
-	, or_i_self(   R_AT, ((g)   << 8) | (r))  \
+		load_upper_i(R_AT, (code) << 8  | (b))    \
+	, or_i_self(   R_AT, ((g)   << 8) | (r))    \
 	, store_word(  R_AT, R_PrimCursor, (off))
 
 /* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
@@ -134,8 +134,11 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
  * convention. */
 #define mac_format_f3_color(r,g,b) mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r,g,b)
 
-/* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3 */
-#define mac_gte_store_f3() \
+/* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
+ * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen).
+ * The macro name declares the pipeline position; check #6 (GTE state-
+ * machine validation) verifies the call site matches the declaration. */
+#define mac_gte_store_f3_post_rtpt() \
 		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
 	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
 	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2))
@@ -149,17 +152,32 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, mac_pack_color_word(O_(Poly_G4,c3), 0,               r3,g3,b3)
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
- * G4 triangle portion to p0/p1/p2. Call BEFORE the V3-RTPS, otherwise
- * SXY0/SXY1/SXY2 get overwritten by the perspective transform. */
-#define mac_gte_store_g4_tri()                    \
-		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0)) \
-	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)) \
+ * G4 triangle portion to p0/p1/p2.
+ * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen,
+ * SXY2=v2.screen). MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2
+ * get overwritten with v3 (RTPS writes only to SXY2, but to keep the
+ * three registers aligned with v0/v1/v2 you must store before RTPS).
+ * The macro name declares the pipeline position; check #6 (GTE state-
+ * machine validation) verifies the call site matches the declaration. */
+#define mac_gte_store_g4_p012_post_rtpt_pre_rtps() \
+		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0))  \
+	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1))  \
 	, gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2))
 
-/* Words: 1; Stores the V3 screen coord (now in SXY2 after V3-RTPS — RTPS
- * writes its result into SXY2, not SXY0) to the G4's p3 slot.
- * Call AFTER the V3-RTPS. */
-#define mac_gte_store_g4_p3() gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
+/* Words: 1; Stores the V3 screen coord to the G4's p3 slot.
+ * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its
+ * single-vertex result to SXY2; SXY0 still holds v0.screen from the
+ * earlier RTPT — DO NOT read SXY0 here, that's the bug this name
+ * prevents).
+ * The macro name declares the pipeline position; check #6 (GTE state-
+ * machine validation) verifies the call site matches the declaration.
+ *
+ * History: this macro was named `mac_gte_store_g4_p3` until 2026-07-09
+ * when it was discovered to be reading C2_SXY0 (which held v0.screen)
+ * instead of C2_SXY2 (which holds v3.screen after RTPS). The rename
+ * encodes the pipeline position in the name so the next bug of this
+ * class is impossible. */
+#define mac_gte_store_g4_p3_post_rtps() gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
 
 #pragma endregion Macro Atom Components
 

@@ -56,11 +56,10 @@ MipsAtom_(cube_g4_face) {
 	load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)),
 
 	/* ── 2. Load V0, V1, V2 into GTE (parallel to mac_load_tri_verts) ── */
-
 	mac_load_tri_verts(R_T0, R_T1, R_T2),
 
 	/* ── 3. RTPT — transforms V0/V1/V2 → SXY0/SXY1/SXY2 + SZ1/SZ2/SZ3 ─── */
-	nop2, gte_cmdw_rtpt,
+	nop2, gte_cmdw_rotate_translate_perspective_triple,
 
 	/* ── 4. NCLIP — backface culling on SXY0/SXY1/SXY2 (p0,p1,p2) ──────── */
 	/*     MUST be done BEFORE V3-RTPS overwrites SXY0 with p3.             */
@@ -81,7 +80,7 @@ MipsAtom_(cube_g4_face) {
 		/* c3 green   */ 0x00, 0xFF, 0x00),
 
 	/* ── 7. Store p0..p2 BEFORE V3-RTPS overwrites SXY0 ─────────────────── */
-	mac_gte_store_g4_tri(),
+	mac_gte_store_g4_p012_post_rtpt_pre_rtps(),
 
 	/* ── 8. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
 	shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
@@ -89,11 +88,11 @@ MipsAtom_(cube_g4_face) {
 	gte_mv_to_data_r(R_V0, C2_VXY0),       gte_mv_to_data_r(R_V1, C2_VZ0),
 
 	/* ── 9. RTPS — transforms V0 (now V3) → SXY0 (p3) + SZ3 ─────────────── */
-	nop2, gte_cmdw_rtps,
-	mac_gte_store_g4_p3(),
+	nop2, gte_cmdw_rotate_translate_perspective_single,
+	mac_gte_store_g4_p3_post_rtps(),
 
 	/* ── 10. AVSZ4 — average Z from SZ0/SZ1/SZ2/SZ3 ─────────────────────── */
-	nop2, gte_cmdw_avsz4,
+	nop2, gte_cmdw_avg_sort_z4,
 	nop2, gte_mv_from_data_r(R_T1, C2_OTZ),
 
 	/* ── 11. Bounds check OTZ < OrderingTbl_Len ─────────────────────────── */
@@ -154,7 +153,7 @@ MipsAtom_(floor_f3_face) {
 	/* Format Primitive */
 	// mac_format_f3_color(0x20FF, 0xFFFF),  // works
 	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
-	mac_gte_store_f3(),
+	mac_gte_store_f3_post_rtpt(),
 	
 	/* Calculate Depth */
 	nop2, gte_avg_sort_z3,            

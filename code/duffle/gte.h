@@ -1,4 +1,4 @@
-/* ============================================================================
+﻿/* ============================================================================
  *  duffle DSL Suffix Conventions
  *  ============================================================================
  *
@@ -442,6 +442,7 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_cmdw_op     (gte_cmd_base | enc_gte_cmd(gte_cmd_op   ))
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
 
+#define gte_cmdw_rotate_translate_perspective_single gte_cmdw_rtps
 #define gte_cmdw_rotate_translate_perspective_triple gte_cmdw_rtpt
 
 /* PsyQ compatibility bits for AVSZ3 (Bits 20, 22, 24 must be set) */
@@ -456,6 +457,8 @@ enum { _C2_TX_SUBS_ = 0
 /* AVSZ4 — average Z of 4 vertices (for quads) */
 #define gte_cmd_avsz4 0x2E
 #define gte_cmdw_avsz4 (gte_cmd_base | enc_gte_cmd(gte_cmd_avsz4) | gte_cmdw_psyq_avsz3_compat)
+
+#define gte_cmdw_avg_sort_z4 gte_cmdw_avsz4
 
 /**
  * @brief Loads a single SVECTOR to GTE vector register V0
