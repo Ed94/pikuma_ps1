@@ -28,9 +28,8 @@ typedef Slice_MipsCode MipsAtom;
 //   FI_ MipsAtom ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
 #define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
 
-// Auto-generated component macros (build/gen/<dir>/<dir>.components.h)
+// Auto-generated component macros (<module>/gen/<dir>/<dir>.macs.h)
 // are included manually by the unity build. The metaprogram puts them
-// under ./build/gen/ (not in the code dirs) so the source tree stays clean.
 
 /* Register aliases (moved up from the Tape Drive region below so that
  * mac_yield's body and the Mips Atom Builder functions can reference
@@ -137,9 +136,9 @@ MipsAtomComp_(ac_load_tri_verts) {
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
  * Hardcoded for Poly_F3 (5 words). For Poly_G4, use ac_insert_ot_tag_g4. */
 MipsAtomComp_(ac_insert_ot_tag_f3) {
-	  shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */
-	, add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */
-	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */
+	  shift_lleft( R_T1, R_T1, S_(U4)/2)                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
+	, add_u_self(  R_T1, R_OtBase)                              // T1 = & OrderingTable[OTZ]
+	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) // AT = old_ot_head
 	, load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = (5 - 1) << 24 = 4 << 24 */
 	, mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */
 	, or_u(        R_AT, R_AT, R_V0)                            /* Merge length */
@@ -177,17 +176,14 @@ MipsAtomComp_Proc_(ac_pack_color_word, {
 
 /* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
  * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields).
- * Migrated from hello_gte_tape.c; takes RGB form per the Phase 3
- * convention. */
+ * Migrated from hello_gte_tape.c; takes RGB form per the Phase 3 convention. */
 FI_ MipsAtom ac_format_f3_color(U1 r, U1 g, U1 b)
 MipsAtomComp_Proc_(ac_format_f3_color, {
 		mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b)
 })
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
- * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen).
- * The macro name declares the pipeline position; check #6 (GTE state-
- * machine validation) verifies the call site matches the declaration. */
+ * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
 MipsAtomComp_(ac_gte_store_f3_post_rtpt) {
 		gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0))
 	, gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1))
@@ -196,10 +192,11 @@ MipsAtomComp_(ac_gte_store_f3_post_rtpt) {
 
 /* Words: 12; Emits the four (code|color) words of a Poly_G4.
  * Args: rN,gN,bN are 8-bit RGB byte values for each of the 4 vertices. */
-FI_ MipsAtom ac_format_g4_color(U1 r0, U1 g0, U1 b0,
-                                U1 r1, U1 g1, U1 b1,
-                                U1 r2, U1 g2, U1 b2,
-                                U1 r3, U1 g3, U1 b3)
+FI_ MipsAtom ac_format_g4_color(
+	U1 r0, U1 g0, U1 b0,
+  U1 r1, U1 g1, U1 b1,
+  U1 r2, U1 g2, U1 b2,
+  U1 r3, U1 g3, U1 b3)
 MipsAtomComp_Proc_(ac_format_g4_color, {
 		mac_pack_color_word(O_(Poly_G4,c0), gp0_cmd_poly_g4, r0,g0,b0)
 	, mac_pack_color_word(O_(Poly_G4,c1), 0,               r1,g1,b1)
@@ -226,14 +223,7 @@ MipsAtomComp_(ac_gte_store_g4_p012_post_rtpt_pre_rtps) {
  * single-vertex result to SXY2; SXY0 still holds v0.screen from the
  * earlier RTPT — DO NOT read SXY0 here, that's the bug this name
  * prevents).
- * The macro name declares the pipeline position; check #6 (GTE state-
- * machine validation) verifies the call site matches the declaration.
- *
- * History: this macro was named `mac_gte_store_g4_p3` until 2026-07-09
- * when it was discovered to be reading C2_SXY0 (which held v0.screen)
- * instead of C2_SXY2 (which holds v3.screen after RTPS). The rename
- * encodes the pipeline position in the name so the next bug of this
- * class is impossible. */
+ */
 MipsAtomComp_(ac_gte_store_g4_p3_post_rtps) {
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
 };
@@ -277,26 +267,25 @@ enum {
 };
 
 /* Flushes the Instruction Cache (PSX A-function 0x44 via BIOS stub at 0xA0).
- *
  * Sequence (per MIPS ABI; arguments in arg registers, RA pushed to stack):
  *   1. sp -= 8;  sw $ra, 4($sp)        ; save RA
  *   2. $a0 = bios_flushcache (arg0)
  *   3. $t0 = bios_table_addr           ; t0 = &BIOS A-function table
- *   4. jalr $t0, $ra                    ; call BIOS(flushcache)
- *      nop                              ; branch delay slot
- *   5. lw $ra, 4($sp);  jr $ra          ; restore & return
+ *   4. jalr $t0, $ra                   ; call BIOS(flushcache)
+ *      nop                             ; branch delay slot
+ *   5. lw $ra, 4($sp);  jr $ra         ; restore & return
  *   6. sp += 8
  */
 internal MipsAtom_(mips_flush_icache) {
-	  add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment) /* sp -= 8 */
-	, store_word(rret_addr, rstack_ptr, S_(U4))           /* sw  $ra,   4($sp)   */
-	, add_ui(rret_0, rdiscard, bios_flushcache)           /* addiu $a0, $0, 0x44 */
-	, add_ui(rtmp_0, rdiscard, bios_table_addr)           /* addiu $t0, $0, 0xA0 */
-	, jump_link(rtmp_0, rret_addr)                        /* jalr  $t0, $ra      */
-	, nop                                                 /* BD slot             */
-	, load_word(rret_addr, rstack_ptr, S_(U4))            /* lw   $ra, 4($sp)    */
-	, jump_reg(rret_addr)                                 /* jr   $ra            */
-	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment)  /* sp += 8 (BD) */
+	  add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment) // sp -= 8
+	, store_word(rret_addr, rstack_ptr, S_(U4))           // sw  $ra,   4($sp) 
+	, add_ui(rret_0, rdiscard, bios_flushcache)           // addiu $a0, $0, 0x44 
+	, add_ui(rtmp_0, rdiscard, bios_table_addr)           // addiu $t0, $0, 0xA0 
+	, jump_link(rtmp_0, rret_addr)                        // jalr  $t0, $ra 
+	, nop                                                 // BD slot 
+	, load_word(rret_addr, rstack_ptr, S_(U4))            // lw   $ra, 4($sp) 
+	, jump_reg(rret_addr)                                 // jr   $ra 
+	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment)  // sp += 8 (BD) 
 	, mac_yield()
 };
 

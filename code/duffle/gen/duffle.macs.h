@@ -50,14 +50,32 @@ WORD_COUNT(mac_load_tri_verts, 18)
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
  * Hardcoded for Poly_F3 (5 words). For Poly_G4, use ac_insert_ot_tag_g4. */
 #define mac_insert_ot_tag_f3(...) \
-	shift_lright(R_AT, R_AT,         S_(polytag_len_bits))
-WORD_COUNT(mac_insert_ot_tag_f3, 1)
+	shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */ \
+,	add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */ \
+,	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
+,	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = (5 - 1) << 24 = 4 << 24 */ \
+,	mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
+,	or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
+,	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
+,	shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
+,	shift_lright(R_AT, R_AT,         S_(polytag_len_bits)) \
+,	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
+WORD_COUNT(mac_insert_ot_tag_f3, 10)
 
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
  * Hardcoded for Poly_G4 (9 words). For Poly_F3, use ac_insert_ot_tag_f3. */
 #define mac_insert_ot_tag_g4(...) \
-	shift_lright(R_AT, R_AT,         S_(polytag_len_bits))
-WORD_COUNT(mac_insert_ot_tag_g4, 1)
+	shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */ \
+,	add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */ \
+,	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
+,	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = (9 - 1) << 24 = 8 << 24 */ \
+,	mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
+,	or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
+,	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
+,	shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
+,	shift_lright(R_AT, R_AT,         S_(polytag_len_bits)) \
+,	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
+WORD_COUNT(mac_insert_ot_tag_g4, 10)
 
 #define mac_pack_color_word(off, code, r, g, b) \
 	load_upper_i(R_AT, (code) << 8  | (b)) \
@@ -70,9 +88,7 @@ WORD_COUNT(mac_pack_color_word, 3)
 WORD_COUNT(mac_format_f3_color, 1)
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
- * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen).
- * The macro name declares the pipeline position; check #6 (GTE state-
- * machine validation) verifies the call site matches the declaration. */
+ * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
 #define mac_gte_store_f3_post_rtpt(...) \
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
 ,	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
@@ -105,14 +121,7 @@ WORD_COUNT(mac_gte_store_g4_p012_post_rtpt_pre_rtps, 3)
  * single-vertex result to SXY2; SXY0 still holds v0.screen from the
  * earlier RTPT — DO NOT read SXY0 here, that's the bug this name
  * prevents).
- * The macro name declares the pipeline position; check #6 (GTE state-
- * machine validation) verifies the call site matches the declaration.
- *
- * History: this macro was named `mac_gte_store_g4_p3` until 2026-07-09
- * when it was discovered to be reading C2_SXY0 (which held v0.screen)
- * instead of C2_SXY2 (which holds v3.screen after RTPS). The rename
- * encodes the pipeline position in the name so the next bug of this
- * class is impossible. */
+ */
 #define mac_gte_store_g4_p3_post_rtps(...) \
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
 WORD_COUNT(mac_gte_store_g4_p3_post_rtps, 1)

@@ -345,7 +345,10 @@ function M.split_top_level_commas(body)
             token_start = i
         else
             local nx = M.skip_str_or_cmt(body, i)
-            if nx > i then i = nx; token_start = nx else i = i + 1 end
+            -- Don't advance token_start on skip: a trailing `/* ... */` after
+            -- a macro call is part of the current entry's chunk, not the
+            -- start of the next one.
+            if nx > i then i = nx else i = i + 1 end
         end
     end
     local last = body:sub(token_start)

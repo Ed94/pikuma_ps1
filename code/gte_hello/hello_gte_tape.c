@@ -4,6 +4,7 @@
 #	include "duffle/atom_dsl.h"
 #	include "duffle/lottes_tape.h"
 #	include "tape_atom.metadata.h"
+#	include "gen/gte_hello.offsets.h"
 #	include "hello_gte.h"
 #endif
 

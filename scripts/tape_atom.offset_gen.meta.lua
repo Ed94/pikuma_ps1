@@ -427,12 +427,34 @@ end
 -- ============================================================
 
 local function main(args)
-    if #args < 2 then
-        print("Usage: luajit gen_atom_offsets.lua <metadata.h> <source1> [source2 ...]")
-        os.exit(1)
-    end
-    local word_counts = load_word_counts(args[1])
-    for i = 2, #args do process_source(args[i], word_counts) end
+	if #args < 2 then
+		print("Usage: luajit gen_atom_offsets.lua <metadata.h> <source1> [source2 ...]")
+		os.exit(1)
+	end
+	local word_counts = load_word_counts(args[1])
+	for i = 2, #args do
+		local source_path  = args[i]
+		-- Also load the auto-generated <dir>.macs.h for this source's
+		-- directory (if it exists). The metaprogram emits
+		-- WORD_COUNT(mac_X, N) entries there for the MipsAtomComp_
+		-- declarations in the source. Merging ensures the offset
+		-- computation has the right word counts (no "unknown macro"
+		-- warnings for the auto-generated components).
+		local source_dir   = dirname(source_path)
+		-- dirname() keeps the trailing separator; basename_no_ext()
+		-- on a path with a trailing separator returns "". Strip it.
+		if #source_dir > 0 and (source_dir:sub(-1) == "/" or source_dir:sub(-1) == "\\") then
+			source_dir = source_dir:sub(1, -2)
+		end
+		local macs_path    = source_dir .. "/gen/" .. basename_no_ext(source_dir) .. ".macs.h"
+		local ok, mc        = pcall(load_word_counts, macs_path)
+		if ok then
+			for name, count in pairs(mc) do
+				word_counts[name] = count
+			end
+		end
+		process_source(source_path, word_counts)
+	end
 end
 
 main({...})
