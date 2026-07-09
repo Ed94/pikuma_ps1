@@ -316,101 +316,39 @@ function build-graphis_hello {
 	make-binary $elf $exe
 }
 # build-graphis_hello
+# ps1-meta orchestrator. Replaces generate-TapeAtomOffsets +
+# generate-TapeAtomAnnotations with a single invocation. Dispatches
+# the 6 passes (word-counts / components / annotation / offsets /
+# static-analysis / report) in dependency-topological order.
 
-function generate-TapeAtomOffsets {param([Parameter(Mandatory=$true)] [string[]]$sources, [Parameter(Mandatory=$true)] [string]$metadata)
-	$gen_atom_offsets_script = join-path $path_scripts 'tape_atom.offset_gen.meta.lua'
-
-    $any_stale = $false
-    foreach ($src in $sources) {
-        $basename = [System.IO.Path]::GetFileNameWithoutExtension($src)
-        $dir      = split-path -Path $src -Parent
-        $gen_dir  = join-path $dir 'gen'
-        $out      = join-path $gen_dir "$basename.offsets.h"
-
-        if (-not (test-path $out)) { $any_stale = $true; break }
-        $src_mtime  = (get-item $src).LastWriteTimeUtc
-        $out_mtime  = (get-item $out).LastWriteTimeUtc
-        $meta_mtime = (get-item $metadata).LastWriteTimeUtc
-        if (($src_mtime -gt $out_mtime) -or ($meta_mtime -gt $out_mtime)) {
-            $any_stale = $true
-            break
-        }
-    }
-
-    if (-not $any_stale) {
-        write-host "AtomOffsets  all $($sources.Count) source(s) up-to-date" -ForegroundColor DarkGray
-        return
-    }
-
-    write-host "AtomOffsets  $($sources.Count) source(s)" -ForegroundColor Magenta
-    & luajit $gen_atom_offsets_script $metadata @sources
-    if ($LASTEXITCODE -ne 0) {
-        write-error "Atom offset generation failed. Aborting."
-        exit 1
-    }
+function any-stale {
+	param([Parameter(Mandatory=$true)][string[]]$sources,
+	      [Parameter(Mandatory=$true)][string]$metadata,
+	      [Parameter(Mandatory=$true)][string]$out_root)
+	if (-not (test-path $out_root)) { return $true }
+	$out_mtime  = (get-item $out_root).LastWriteTimeUtc
+	$src_mtime  = ($sources  | ForEach-Object { (get-item $_).LastWriteTimeUtc } | Measure-Object -Maximum).Maximum
+	$meta_mtime = (get-item $metadata).LastWriteTimeUtc
+	return ($src_mtime -gt $out_mtime) -or ($meta_mtime -gt $out_mtime)
 }
 
-function generate-TapeAtomAnnotations {param([Parameter(Mandatory=$true)] [string[]]$sources, [Parameter(Mandatory=$true)] [string]$metadata)
-	# Sibling to generate-TapeAtomOffsets. Validates TAPE_ATOM_* / TAPE_WORDS
-	# annotations against the metadata manifest. Emits gen/<basename>.errors.h
-	# containing #error directives for the C build to fail on annotation drift.
-	$gen_atom_annot_script = join-path $path_scripts 'tape_atom_annotation_pass.lua'
-
-    $any_stale = $false
-    foreach ($src in $sources) {
-        $basename = [System.IO.Path]::GetFileNameWithoutExtension($src)
-        $dir      = split-path -Path $src -Parent
-        $gen_dir  = join-path $dir 'gen'
-        $out_txt  = join-path $gen_dir "$basename.annotations.txt"
-        $out_err  = join-path $gen_dir "$basename.errors.h"
-
-        if (-not (test-path $out_txt) -or -not (test-path $out_err)) { $any_stale = $true; break }
-        $src_mtime     = (get-item $src).LastWriteTimeUtc
-        $out_txt_mtime = (get-item $out_txt).LastWriteTimeUtc
-        $out_err_mtime = (get-item $out_err).LastWriteTimeUtc
-        $out_mtime     = if ($out_txt_mtime -gt $out_err_mtime) { $out_txt_mtime } else { $out_err_mtime }
-        $meta_mtime    = (get-item $metadata).LastWriteTimeUtc
-        if (($src_mtime -gt $out_mtime) -or ($meta_mtime -gt $out_mtime)) {
-            $any_stale = $true
-            break
-        }
-    }
-
-    if (-not $any_stale) {
-        write-host "AtomAnnotations all $($sources.Count) source(s) up-to-date" -ForegroundColor DarkGray
-        return
-    }
-
-    write-host "AtomAnnotations $($sources.Count) source(s)" -ForegroundColor Magenta
-    & luajit $gen_atom_annot_script $metadata @sources
-    if ($LASTEXITCODE -ne 0) {
-        write-error "Atom annotation generation failed. Aborting."
-        exit 1
-    }
-
-    # If any source produced annotation errors, surface them now and halt the
-    # build. The errors.h files are also #include'd via -include below, so
-    # the C build would fail at preprocessing time anyway — failing here gives
-    # a more readable error in the build log.
-    $err_count = 0
-    foreach ($src in $sources) {
-        $basename = [System.IO.Path]::GetFileNameWithoutExtension($src)
-        $dir      = split-path -Path $src -Parent
-        $gen_dir  = join-path $dir 'gen'
-        $ann_txt  = join-path $gen_dir "$basename.annotations.txt"
-        $err_h    = join-path $gen_dir "$basename.errors.h"
-        if ((test-path $ann_txt) -and (test-path $err_h)) {
-            $txt = get-content $ann_txt -raw
-            if ($txt -match 'Errors:\s+([1-9]\d*)') {
-                $err_count += [int]$Matches[1]
-                write-warning "Annotation errors in $src — see $ann_txt"
-            }
-        }
-    }
-    if ($err_count -gt 0) {
-        write-error "Annotation pass failed: $err_count error(s) across $($sources.Count) source(s). Aborting."
-        exit 1
-    }
+function ps1-meta {
+	param(
+		[Parameter(Mandatory=$true)][string[]]$sources,
+		[Parameter(Mandatory=$true)][string]$metadata,
+		[string]$out_root = (join-path $path_build 'gen'),
+		[string[]]$passes  = @('--all')
+	)
+	$script = join-path $path_scripts 'ps1_meta.lua'
+	write-host "ps1-meta  $($sources.Count) source(s), passes=$($passes -join ',')" `
+		-ForegroundColor Magenta
+	$arg_list = @($passes) + @('--metadata', $metadata) + @('--out-root', $out_root)
+	foreach ($s in $sources) { $arg_list += @('--source', $s) }
+	& luajit $script @arg_list
+	if ($LASTEXITCODE -ne 0) {
+		write-error "ps1-meta failed (exit $LASTEXITCODE). Aborting."
+		exit $LASTEXITCODE
+	}
 }
 
 function build-gte_hello {
@@ -423,8 +361,12 @@ function build-gte_hello {
 	$source_dirs  = @($path_duffle, $path_module)
 	$atom_sources = Get-SourceFiles -paths $source_dirs -extensions @('.h', '.c')
 
-	generate-TapeAtomAnnotations -sources $atom_sources -metadata $path_atom_metadata
-	generate-TapeAtomOffsets     -sources $atom_sources -metadata $path_atom_metadata
+	if (any-stale -sources $atom_sources -metadata $path_atom_metadata -out_root (join-path $path_build 'gen')) {
+		ps1-meta -sources $atom_sources -metadata $path_atom_metadata -out_root (join-path $path_build 'gen')
+	} else {
+		write-host "ps1-meta  all $($atom_sources.Count) source(s) up-to-date" `
+			-ForegroundColor DarkGray
+	}
 
 	$assemble_args = @()
 	$assemble_args += $f_debug

@@ -370,8 +370,28 @@ function M.split_top_level_commas(body)
     local function emit(end_pos)
         if end_pos >= token_start then
             local chunk = body:sub(token_start, end_pos)
-            if M.trim(chunk) ~= "" and has_real_content(chunk) then
-                tokens[#tokens + 1] = chunk
+            if M.trim(chunk) ~= "" then
+                if has_real_content(chunk) then
+                    tokens[#tokens + 1] = chunk
+                elseif #tokens > 0 then
+                    -- Pure comment/string chunk at top level (no
+                    -- preceding instruction content within this chunk).
+                    -- APPEND it to the LAST token so emit-context
+                    -- callers (components.lua build_component_lines)
+                    -- can convert `// trailing comment` to `/* */`
+                    -- and emit it with the macro body. For word
+                    -- counting, count_token_words only inspects the
+                    -- leading ident, so a trailing comment doesn't
+                    -- affect the count.
+                    --
+                    -- This is the second-half fix to commit 98e27c2:
+                    -- the first fix correctly broke top-level comments
+                    -- off from the NEXT statement (fixing macro-call
+                    -- word counts); this fix preserves them on the
+                    -- PREVIOUS statement (restoring the comments in
+                    -- the emitted .macs.h output).
+                    tokens[#tokens] = tokens[#tokens] .. chunk
+                end
             end
             token_start = end_pos + 1
         end
