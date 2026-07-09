@@ -284,26 +284,64 @@ enum {
 };
 
 enum { _C2_OPS_ = 0
-
 	, op_lwc2    = 0x32 /* Load Word  to   Coprocessor 2 (GTE) */
 	, op_swc2    = 0x3A /* Store Word from Coprocessor 2 (GTE) */
 };
 
-/* COP2 (GTE) Transfer Format: ctc2 rt, rd or cfc2 rt, rd
+/* COP2 transfer sub-opcodes (5-bit field in the `rs` slot of enc_gte_tx).
+ *
+ * Spans the 2x2 {From, To} × {Data, Control} register classes that the
+ * GTE exposes:
+ *
+ *   bit 1 (0x02): register class — 0 = data,  1 = control
+ *   bit 2 (0x04): direction      — 0 = read,  1 = write
+ *
+ * The values 0x00 (sub_mfc2) and 0x04 (sub_mtc2) are the same 5-bit
+ * numbers as the general MIPS `cop_mf` / `cop_mt` defined in mips.h
+ * (which target the data register file on any coprocessor). They are
+ * re-aliased here so the four-way table reads like the spec mnemonics
+ * (MFC2 / CFC2 / MTC2 / CTC2) and so the encoding lives next to its
+ * only consumer (this header).
+ *
+ * Vendor mnemonic aliases (gte_mfc2 / gte_mtc2 / gte_cfc2 / gte_ctc2)
+ * live in gte_vendor_sym.h. */
+enum { _C2_TX_SUBS_ = 0
+	, sub_mfc2 = 0x00 /* MFC2: Move From Coprocessor 2 data   reg */
+	, sub_cfc2 = 0x02 /* CFC2: Copy From Coprocessor 2 ctrl   reg */
+	, sub_mtc2 = 0x04 /* MTC2: Move To   Coprocessor 2 data   reg */
+	, sub_ctc2 = 0x06 /* CTC2: Copy To   Coprocessor 2 ctrl   reg */
+};
+
+/* COP2 (GTE) Transfer Format: mfc2 / cfc2 / mtc2 / ctc2 rt, rd
  * Layout: [op_cop2:6][sub:5][rt:5][rd:5][0:11]
- *   - sub: cop_mf (0x00) for cfc2, cop_mt (0x04) for ctc2
+ *   - sub: one of sub_mfc2 / sub_cfc2 / sub_mtc2 / sub_ctc2
  *   - rt:  GPR source/dest
- *   - rd:  COP2 control register index (0..31) */
+ *   - rd:  COP2 register index (0..31):
+ *            data class → C2_VXY0_Code..C2_LZCR_Code (gte_in_v0_xy..gte_math_accum2 aliases)
+ *            ctrl class → gte_cr_RT11_Code..gte_cr_OFY_Code */
 #define enc_gte_tx(sub, rt, rd) (enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd))
+
 
 // #define gte_mv_to_data_r(rt, rd)   enc_gte_tx(cop_mt, (rt), (rd)) /* Move GPR (rt) to GTE Control Register (rd) */
 // #define gte_mv_from_data_r(rt, rd) enc_gte_tx(cop_mf, (rt), (rd)) /* Move GTE Control Register (rd) to GPR (rt) */
 
-/* GTE Data vs Control Register Transfers */
-#define gte_mv_from_data_r(rt, rd) enc_gte_tx(0x00, (rt), (rd)) /* Move from GTE Data Reg (e.g. MAC0, OTZ) */
-#define gte_mv_from_ctrl_r(rt, rd) enc_gte_tx(0x02, (rt), (rd)) /* Move from GTE Control Reg */
-#define gte_mv_to_data_r(rt, rd)   enc_gte_tx(0x04, (rt), (rd)) /* Move to GTE Data Reg (e.g. VXY0) */
-#define gte_mv_to_ctrl_r(rt, rd)   enc_gte_tx(0x06, (rt), (rd)) /* Move to GTE Control Reg (e.g. Matrices) */
+/* GTE Data vs Control Register Transfers
+ *
+ * Each macro emits a single .word constant for one of MFC2/CFC2/MTC2/CTC2.
+ *
+ * `rd` is the C2 register index in the file the sub-opcode names:
+ *   gte_mv_from_data_r / gte_mv_to_data_r  →  C2 data register file
+ *   gte_mv_from_ctrl_r / gte_mv_to_ctrl_r  →  C2 ctrl register file
+ *
+ * Common pairs:
+ *   gte_mv_from_data_r(R_T0, C2_MAC0)       — read MAC0 into a GPR
+ *   gte_mv_to_data_r  (R_V0, C2_VXY0)       — write GPR into VXY0
+ *   gte_mv_to_ctrl_r  (R_T0, gte_cr_RT11)   — write GPR into rotation matrix
+ *   gte_mv_from_ctrl_r(R_T0, gte_cr_OFX)    — read screen-X offset */
+#define gte_mv_from_data_r(rt, rd) enc_gte_tx(sub_mfc2, (rt), (rd)) /* Move From data reg */
+#define gte_mv_from_ctrl_r(rt, rd) enc_gte_tx(sub_cfc2, (rt), (rd)) /* Copy From ctrl reg */
+#define gte_mv_to_data_r(rt, rd)   enc_gte_tx(sub_mtc2, (rt), (rd)) /* Move To   data reg */
+#define gte_mv_to_ctrl_r(rt, rd)   enc_gte_tx(sub_ctc2, (rt), (rd)) /* Copy To   ctrl reg */
 
 /* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
  * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]

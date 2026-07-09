@@ -107,11 +107,11 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 	, shift_lleft(R_AT, rId_2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2)
 
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list */
-#define mac_insert_ot_tag(r_otz, prim_length) \
-	  shift_lleft( R_T1, r_otz, 2)                              /* T1 = r_otz * S_(U4) */ \
-	, add_u(       R_T1, R_T1,         R_OtBase)                /* T1 = & OrderingTable[OTZ] */ \
+#define mac_insert_ot_tag(r_otz, prim_type) \
+	  shift_lleft( R_T1, r_otz, S_(U4)/2)                       /* T1 = r_otz * S_(U4) */ \
+	, add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */ \
 	, load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
-	, load_upper_i(R_V0, prim_length)                           /* V0 = prim_length << 16 (high 16 bits of a tag) */ \
+	, load_upper_i(R_V0, (S_(prim_type)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = S_(prim_type without tag field) */ \
 	, mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
 	, or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
 	, store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
@@ -200,13 +200,10 @@ internal MipsAtom_(mips_flush_icache) {
 typedef Struct_(Binds_SetGteWorld) {
 	U4 transform;
 };
-// TODO(Ed): Bugged, fix
 internal MipsAtom_(set_gte_world) {
 	/* Pop matrix address from tape into R_T3 ($11) */
 	load_word(R_T3, R_TapePtr, O_(Binds_SetGteWorld,transform)),
 	add_ui_self(    R_TapePtr, S_(Binds_SetGteWorld)),
-
-// TODO(Ed): Annotate magic offsets.
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
 	load_word(R_T0, R_T3, 0),  load_word(R_T1, R_T3,  4),
 	gte_mv_to_ctrl_r(R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(R_T1, gte_cr_RT12),
@@ -214,7 +211,6 @@ internal MipsAtom_(set_gte_world) {
 	gte_mv_to_ctrl_r(R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(R_T2, gte_cr_RT22),
 	load_word(R_T0, R_T3, 20), load_word(R_T1, R_T3, 24), load_word(R_T2, R_T3, 28),
 	gte_mv_to_ctrl_r(R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(R_T2, gte_cr_TRZ),
-
 	mac_yield()
 };
 
@@ -237,15 +233,14 @@ internal MipsAtom_(diag_color) {
 	load_upper_i(R_AT, 0x0010), or_i_self(R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
 
 	add_ui(          R_T1, R_0,  10),
-	shift_lleft_self(R_T1,       2), 
+	shift_lleft_self(R_T1,       S_(U4)/2), 
 	add_u_self(      R_T1,       R_T6),         
 	
 	load_word(   R_AT, R_T1, 0),        
-	load_upper_i(R_V0, 0x0400),   // <--- Fills load delay slot! 
+	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits),
 	store_word(  R_AT, R_T7, 0),       
-	
-	shift_lleft(R_AT, R_T7, 8), shift_lright(R_AT, R_AT, 8),         
-	or_u_self(  R_AT,       R_V0),          
+	shift_lleft(R_AT, R_T7, S_(polytag_len_bits)), shift_lright(R_AT, R_AT, S_(polytag_len_bits)),         
+	or_u_self(  R_AT, R_V0),          
 	store_word( R_AT, R_T1, 0),       
 
 	add_ui(R_T7, R_T7, 20),          
@@ -275,9 +270,9 @@ internal MipsAtom_(diag_gte) {
 	gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
 
 	/* Run Math */
-	nop, nop, gte_cmdw_rtpt,
-	nop, nop, gte_cmdw_nclip,
-	nop, nop,
+	nop2, gte_cmdw_rtpt,
+	nop2, gte_cmdw_nclip,
+	nop2,
 
 	/* Advance Face Cursor and Yield */
 	add_ui(R_T4, R_T4, 8),

@@ -464,7 +464,8 @@ enum { _BitOffsets = 0
 #define shift_amount(rd, rt, n)     shift_lleft(rd, rt, n)
 
 /* nop — canonical sll $0, $0, 0 */
-#define nop shift_lleft(rdiscard, rdiscard, 0)
+#define nop  shift_lleft(rdiscard, rdiscard, 0)
+#define nop2 nop, nop
 
 #define load_imm_1w(rt, imm)    add_ui((rt),  R_0, (imm))
 #define load_imm_1w_s0(rt, imm) add_si((rt)), R_0, (imm))

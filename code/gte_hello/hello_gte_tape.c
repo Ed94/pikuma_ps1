@@ -12,13 +12,6 @@
  * (mac_format_f3_color takes _r, _g, _b byte values rather than raw
  * 16-bit half-words). */
 
-enum fack {
-	ah = gp0_cmd_poly_f3 << 8 | 0xFF,
-};
-void fk() {
-	 (void*)ah;
-}
-
 #pragma endregion MACs
 
 #pragma region Baked Atoms
@@ -143,7 +136,7 @@ MipsAtom_(cube_tri) {
 	nop,                            /* BD slot */
 
 	/* ── 11. Insert into Ordering Table (length = 8 for Poly_G4) ─────────── */
-	mac_insert_ot_tag(R_T1, 0x0800),  /* 0x0800 = 8 << 8 = length 8 in tag */
+	mac_insert_ot_tag(R_T1, Poly_G4),  /* 0x0800 = 8 << 8 = length 8 in tag */
 
 	/* ── 12. Advance cursors & yield ─────────────────────────────────────── */
 	add_ui(R_PrimCursor, R_PrimCursor, 36),  /* 9 words × 4 bytes */
@@ -184,9 +177,9 @@ internal
 MipsAtom_(floor_tri) {
 	mac_load_tri_indices(R_T0, R_T1, R_T2),
 	mac_load_tri_verts(  R_T0, R_T1, R_T2),
-	nop, nop, gte_cmdw_rotate_translate_perspective_triple,
-	nop, nop, gte_cmdw_nclip,
-	nop, nop, 
+	nop2, gte_cmdw_rotate_translate_perspective_triple,
+	nop2, gte_cmdw_nclip,
+	nop2, 
 	/* Culling (Branch forward if Backface) */
 	gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop, branch_le_zero(R_T0, atom_offset(culling, floor_tri_exit)), 
@@ -197,15 +190,15 @@ MipsAtom_(floor_tri) {
 	mac_gte_store_f3(),
 	
 	/* Calculate Depth */
-	nop, nop, gte_avg_sort_z3,            
-	nop, nop, gte_mv_from_data_r(R_T1, C2_OTZ),      
+	nop2, gte_avg_sort_z3,            
+	nop2, gte_mv_from_data_r(R_T1, C2_OTZ),      
 	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),   
 	set_lt_u(    R_AT, R_T1, R_AT), 
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_tri_exit)),   
 	nop, 
 	/* Insert into Ordering Table Linked List */
-	mac_insert_ot_tag(R_T1, 0x0400),
+	mac_insert_ot_tag(R_T1, Poly_F3),
 	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 		// Note(Ed): No bounds checking, should be checked before atom runs.
 
