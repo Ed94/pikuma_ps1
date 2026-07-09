@@ -408,24 +408,74 @@ end
 -- macro expansion. Each comma-separated entry in the body is a
 -- "slot" that contributes its own word count. For most entries
 -- (regular MIPS instructions) the count is 1. For `mac_Y(...)`
--- calls, the count is the word count of mac_Y (recursive lookup).
--- For encoding macros with a known multi-word count (e.g.
--- `mask_upper` = 2), the count is taken from `word_counts`.
+-- calls, the count is the word count of mac_Y (recursive lookup
+-- through `components`). For encoding macros with a known multi-word
+-- count (e.g. `mask_upper` = 2), the count is taken from `word_counts`.
 --
--- ADAPTATION: the original used an inline recursive `rec()` that
--- walked the components list + word_counts table. The new code
--- delegates to word_count_eval.count_body_words(body, wc), which
--- is equivalent when `wc` is pre-populated with component macros.
--- The word-counts pass (which runs before components) scans all
--- existing gen/*.macs.h files, so on any build with checked-in
--- gen/ files, wc already contains every mac_X entry.
-
+-- The lookup is memoized via `rec()` to avoid infinite recursion
+-- (e.g. if two components referenced each other). This is the
+-- same algorithm as the original tape_atom_annotation_pass.lua
+-- (commit 7d20a4d) — without it, a fresh build with no pre-existing
+-- *.macs.h files in gen/ would compute wrong counts: e.g.
+-- `mac_format_f3_color` calls `mac_pack_color_word` which isn't
+-- in `wc` yet, so the lookup falls through to the "1 word" default
+-- and produces `WORD_COUNT(mac_format_f3_color, 1)` instead of 3.
+--
 --- @param c Component
---- @param components Component[]  -- (kept for API compatibility, unused)
+--- @param components Component[]
 --- @param wc table<string, integer>
 --- @return integer
 local function compute_component_word_count(c, components, wc)
-	return count_body_words(c.body, wc)
+	-- Build component lookup table once per call.
+	local comp_by_name = {}
+	for _, cc in ipairs(components) do
+		comp_by_name[cc.name] = cc
+	end
+
+	local cache = {}
+	local function rec(name)
+		if cache[name] ~= nil then return cache[name] end
+		cache[name] = -1  -- mark in-progress (cycle detection)
+		local cc = comp_by_name[name]
+		local n
+		if cc then
+			local body_tokens = {}
+			for _, t in ipairs(split_top_level_commas(cc.body)) do
+				local trimmed = trim(t)
+				if trimmed ~= "" then body_tokens[#body_tokens + 1] = trimmed end
+			end
+			n = 0
+			for _, t in ipairs(body_tokens) do
+				-- Read the first identifier from the token.
+				local ident = read_ident(t, 1)
+				-- Components are stored without the `mac_` prefix
+				-- (e.g. "format_f3_color"). The token has `mac_format_f3_color(...)`,
+				-- so strip the `mac_` prefix to look up the component.
+				local comp_name = ident
+				if comp_name and comp_name:sub(1, 4) == "mac_" then
+					comp_name = comp_name:sub(5)
+				end
+				if comp_name and comp_by_name[comp_name] then
+					-- It's a `mac_X(...)` call. Recurse.
+					n = n + rec(comp_name)
+				elseif comp_name and wc and wc[comp_name] then
+					-- Encoding macro or pseudo-instruction (e.g. mask_upper = 2,
+					-- nop2 = 2). Trust the metadata — tape_atom.metadata.h is the
+					-- single source of truth for word counts.
+					n = n + wc[comp_name]
+				else
+					-- Unrecognized token. Fall back to 1 word.
+					n = n + 1
+				end
+			end
+		else
+			-- Not a known component: assume 1 word (regular instruction).
+			n = 1
+		end
+		cache[name] = n
+		return n
+	end
+	return rec(c.name)
 end
 
 -- ============================================================
@@ -446,8 +496,18 @@ local function build_component_lines(c, components, wc)
 
 	-- Emit the signature comment (if any) above the macro.
 	if c.comment and c.comment ~= "" then
-		for line in (c.comment .. "\n"):gmatch("([^\n]*)\n") do
-			lines[#lines + 1] = line
+		-- Hand-rolled newline splitter (no regex patterns used).
+		local s = c.comment .. "\n"
+		local i = 1
+		local len = #s
+		while i <= len do
+			local nl = s:find("\n", i, true)
+			if not nl then
+				lines[#lines + 1] = s:sub(i)
+				break
+			end
+			lines[#lines + 1] = s:sub(i, nl - 1)
+			i = nl + 1
 		end
 	end
 

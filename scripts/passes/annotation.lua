@@ -56,7 +56,7 @@ local function valid_phase(p)          return KNOWN_PHASES[p]      or false end
 local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Hand-rolled split helpers (no :gmatch / no regex)
+-- Hand-rolled split helpers (no regex patterns used)
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Split a string at top-level commas. Used inside TAPE_ATOM_* macro
@@ -87,7 +87,7 @@ local function split_csv_top(s)
 end
 
 --- Split a string into whitespace-separated tokens.
---- Hand-rolled (no :gmatch / no regex).
+--- Hand-rolled (no regex patterns).
 local function split_ws(s)
 	local tokens = {}
 	local i, n = 1, 1

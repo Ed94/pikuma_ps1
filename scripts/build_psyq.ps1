@@ -287,7 +287,7 @@ function build-graphis_hello {
 
 	$src_asm_crt    = join-path $path_nugget_common 'crt0/crt0.s'
 	$module_asm_crt = join-path $path_build         'crt0.o'
-	# assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
+	assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
 
 	$src_asm    = join-path $path_module 'hello_gpu.s'
 	$module_asm = join-path $path_build  'hello_gpu.o'
@@ -316,6 +316,7 @@ function build-graphis_hello {
 	make-binary $elf $exe
 }
 # build-graphis_hello
+
 # ps1-meta orchestrator. Replaces generate-TapeAtomOffsets +
 # generate-TapeAtomAnnotations with a single invocation. Dispatches
 # the 6 passes (word-counts / components / annotation / offsets /
@@ -375,7 +376,7 @@ function build-gte_hello {
 
 	$src_asm_crt    = join-path $path_nugget_common 'crt0/crt0.s'
 	$module_asm_crt = join-path $path_build         'crt0.o'
-	# assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
+	assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
 
 	# $src_asm    = join-path $path_module 'hello_gte.s'
 	# $module_asm = join-path $path_build  'hello_gte.o'
@@ -400,7 +401,11 @@ function build-gte_hello {
 	$link_args = @()
 	$link_args += $f_debug
 	# $link_args += $f_optimize_size
-	link-modules @($module_asm_crt, $module_c) $elf $link_args
+	$link_modules = @(
+		$module_asm_crt, 
+		$module_c
+	)
+	link-modules $link_modules $elf $link_args
 	make-binary $elf $exe
 }
 build-gte_hello

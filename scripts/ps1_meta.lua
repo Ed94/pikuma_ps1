@@ -385,7 +385,17 @@ local function topo_sort(passes, requested_set)
 		end
 	end
 
-	if #order ~= 0 then
+	-- Cycle detection: if order doesn't include all needed passes,
+	-- some are stuck with in_degree > 0 (the cycle closed on itself
+	-- before Kahn could process them). Without this check, a fully-
+	-- closed cycle (e.g. A -> B -> A) would silently return an empty
+	-- order list, leaving the orchestrator to dispatch nothing.
+	--
+	-- Note: `#needed` returns 0 for hash tables (needed is a set,
+	-- not a sequence), so we count entries explicitly.
+	local needed_count = 0
+	for _ in pairs(needed) do needed_count = needed_count + 1 end
+	if #order ~= needed_count then
 		for name, deg in pairs(in_degree) do
 			if deg > 0 then
 				error("dependency cycle detected involving pass '" .. name .. "'")
