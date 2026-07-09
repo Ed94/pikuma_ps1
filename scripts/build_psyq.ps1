@@ -343,7 +343,7 @@ function generate-TapeAtomOffsets {param([Parameter(Mandatory=$true)] [string[]]
     }
 
     write-host "AtomOffsets  $($sources.Count) source(s)" -ForegroundColor Magenta
-    & lua $gen_atom_offsets_script $metadata @sources
+    & luajit $gen_atom_offsets_script $metadata @sources
     if ($LASTEXITCODE -ne 0) {
         write-error "Atom offset generation failed. Aborting."
         exit 1
@@ -382,7 +382,7 @@ function generate-TapeAtomAnnotations {param([Parameter(Mandatory=$true)] [strin
     }
 
     write-host "AtomAnnotations $($sources.Count) source(s)" -ForegroundColor Magenta
-    & lua $gen_atom_annot_script $metadata @sources
+    & luajit $gen_atom_annot_script $metadata @sources
     if ($LASTEXITCODE -ne 0) {
         write-error "Atom annotation generation failed. Aborting."
         exit 1
