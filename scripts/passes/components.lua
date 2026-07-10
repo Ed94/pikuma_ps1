@@ -487,6 +487,83 @@ end
 -- once per component AND extend ctx.shared.word_counts.
 -- ============================================================
 
+-- ============================================================
+-- Per-component emit logic. Returns the body of lines for one
+-- component (signature comment, #define mac_X(...) line with
+-- backslash-continued tokens, then WORD_COUNT(mac_X, N) entry).
+--
+-- Extracted from emit_component_macros_h so M.run can call it
+-- once per component AND extend ctx.shared.word_counts.
+-- ============================================================
+
+--- Split a (possibly multi-line) comment into per-line entries.
+--- Hand-rolled (no regex patterns used).
+--- @param s string
+--- @return string[]
+local function split_comment_lines(s)
+	local out = {}
+	local i = 1
+	local len = #s
+	while i <= len do
+		local nl = s:find("\n", i, true)
+		if not nl then
+			out[#out + 1] = s:sub(i)
+			break
+		end
+		out[#out + 1] = s:sub(i, nl - 1)
+		i = nl + 1
+	end
+	return out
+end
+
+--- Split an atom body by top-level commas; drop empty tokens.
+--- @param body string
+--- @return string[]
+local function tokens_from_body(body)
+	local out = {}
+	for _, t in ipairs(split_top_level_commas(body)) do
+		local trimmed = trim(t)
+		if trimmed ~= "" then out[#out + 1] = trimmed end
+	end
+	return out
+end
+
+--- Determine the macro signature: function-args list (function form)
+--- or variadic-ignored (bare form).
+--- @param args_str string|nil
+--- @return string
+local function signature_from_args(args_str)
+	local arg_names = extract_arg_names(args_str)
+	if arg_names and #arg_names > 0 then
+		return table.concat(arg_names, ", ")
+	end
+	return "..."
+end
+
+--- Strip the trailing " \" (space + backslash) line continuation
+--- from the last body line. The last 2 chars are always that pair.
+local function strip_trailing_continuation(lines)
+	local last = lines[#lines]
+	if last:sub(-2) == " \\" then
+		lines[#lines] = last:sub(1, -3)
+	end
+end
+
+--- Emit the `#define mac_X(sig) \<newline>\t<tok1> \<newline>,\t<tok2> ...`
+--- block. Converts `//` line comments to `/* */` block comments in
+--- each token so they don't break the C macro `\` line continuations.
+local function emit_macro_body(lines, c, sig, tokens)
+	for j = 1, #tokens do
+		tokens[j] = convert_line_comments_to_block(tokens[j])
+	end
+	lines[#lines + 1] = "#define mac_" .. c.name .. "(" .. sig .. ") \\"
+	lines[#lines + 1] = "\t" .. tokens[1] .. " \\"
+	for j = 2, #tokens do
+		lines[#lines + 1] = ",\t" .. tokens[j] .. " \\"
+	end
+	strip_trailing_continuation(lines)
+end
+
 --- @param c Component
 --- @param components Component[]
 --- @param wc table<string, integer>
@@ -494,80 +571,19 @@ end
 local function build_component_lines(c, components, wc)
 	local lines = {}
 
-	-- Emit the signature comment (if any) above the macro.
 	if c.comment and c.comment ~= "" then
-		-- Hand-rolled newline splitter (no regex patterns used).
-		local s = c.comment .. "\n"
-		local i = 1
-		local len = #s
-		while i <= len do
-			local nl = s:find("\n", i, true)
-			if not nl then
-				lines[#lines + 1] = s:sub(i)
-				break
-			end
-			lines[#lines + 1] = s:sub(i, nl - 1)
-			i = nl + 1
+		for _, line in ipairs(split_comment_lines(c.comment)) do
+			lines[#lines + 1] = line
 		end
 	end
 
-	-- Split body by top-level commas; filter empty tokens.
-	local tokens = {}
-	for _, t in ipairs(split_top_level_commas(c.body)) do
-		local trimmed = trim(t)
-		if trimmed ~= "" then tokens[#tokens + 1] = trimmed end
+	local tokens = tokens_from_body(c.body)
+	local sig    = signature_from_args(c.args)
+	local n      = compute_component_word_count(c, components, wc)
+
+	if n > 0 then
+		emit_macro_body(lines, c, sig, tokens)
 	end
-
-	-- Determine the macro signature: with function args (function
-	-- form) or variadic-ignored (bare form).
-	local arg_names = extract_arg_names(c.args)
-	local sig
-	if arg_names and #arg_names > 0 then
-		sig = table.concat(arg_names, ", ")
-	else
-		sig = "..."
-	end
-
-        -- Compute the word count of the component body, accounting for
-        -- macro expansion. Each comma-separated entry in the body is one
-        -- "instruction slot", but a `mac_Y(...)` call expands to Y's
-        -- word count. The offset_gen and the metadata's WORD_COUNT table
-        -- both use this resolved count.
-        --
-        -- We compute it once per component (not per token) and emit
-        -- the value in the WORD_COUNT entry. The lookup table `counts_by_name`
-        -- is built from the components list (which find_component_atoms
-        -- already populated) and falls back to 1 for non-mac tokens.
-        local counts_by_name = {}
-        for _, cc in ipairs(components) do
-            local cc_count = compute_component_word_count(cc, components, wc)
-            counts_by_name["mac_" .. cc.name] = cc_count
-        end
-        local n = compute_component_word_count(c, components, wc)
-
-        if n > 0 then
-            -- Convert `//` line comments to `/* */` block comments in each
-            -- token. C macros use `\` line-continuations; if a `//` comment
-            -- appears before a `\`, the rest of the line (including the
-            -- continuation) is consumed by the `//`, breaking the macro.
-            -- Converting to `/* */` preserves the macro structure.
-            for j = 1, #tokens do
-                tokens[j] = convert_line_comments_to_block(tokens[j])
-            end
-            -- Emit the mac_<X>(<sig>) macro
-            lines[#lines + 1] = "#define mac_" .. c.name .. "(" .. sig .. ") \\"
-            lines[#lines + 1] = "\t" .. tokens[1] .. " \\"
-            for j = 2, #tokens do
-                lines[#lines + 1] = ",\t" .. tokens[j] .. " \\"
-            end
-						-- Strip the trailing line-continuation on the last body line.
-						-- The last 2 chars are always " \" (space + backslash).
-						-- No regex — just trim with string.sub.
-						local last = lines[#lines]
-						if last:sub(-2) == " \\" then
-								lines[#lines] = last:sub(1, -3)
-						end
-		end
 
 	-- Emit the WORD_COUNT(mac_<X>, N) entry.
 	lines[#lines + 1] = "WORD_COUNT(mac_" .. c.name .. ", " .. n .. ")"

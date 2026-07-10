@@ -148,6 +148,21 @@ local ALL_PASS_NAMES = {
 	"offsets", "static-analysis", "report",
 }
 
+--- Append every pass name to args.requested_set. Used by --all and
+--- by the "default to --all if no pass flags were given" fallback.
+local function request_all_passes(args)
+	for _, n in ipairs(ALL_PASS_NAMES) do
+		args.requested_set[#args.requested_set + 1] = n
+	end
+end
+
+-- Per-flag handlers. Each handler takes (args, argv, i) and returns
+-- the new i (so multi-arg flags like --source FILE advance it).
+-- Returning nil + os.exit() handles termination flags (--help).
+-- This replaces the 8-way `if/elseif/elseif...` chain that nested
+-- 4 levels deep and made the dispatch logic hard to scan.
+local FLAG_HANDLERS = {}
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLI parsing
 -- ════════════════════════════════════════════════════════════════════════════
@@ -188,6 +203,59 @@ EXAMPLE:
 ]])
 end
 
+-- Per-flag handlers. Each takes (args, argv, i) and returns the new i
+-- (so multi-arg flags like --source FILE advance it). Termination
+-- flags like --help call os.exit() instead. This replaces the 8-way
+-- `if/elseif/elseif...` chain that nested 4 levels deep and made the
+-- dispatch logic hard to scan.
+--
+-- Populated AFTER print_help so the --help handler can reference it
+-- as an upvalue (Lua resolves locals at closure-call time, but if the
+-- closure is defined before the local, it falls back to _G).
+FLAG_HANDLERS["--help"] = function(args)
+	print_help()
+	os.exit(0)
+end
+
+FLAG_HANDLERS["--dry-run"] = function(args)
+	args.dry_run = true
+end
+
+FLAG_HANDLERS["--verbose"] = function(args)
+	args.verbose = true
+end
+
+FLAG_HANDLERS["--source"] = function(args, argv, i)
+	args.sources[#args.sources + 1] = argv[i + 1]
+	return i + 1
+end
+
+FLAG_HANDLERS["--metadata"] = function(args, argv, i)
+	args.metadata = argv[i + 1]
+	return i + 1
+end
+
+FLAG_HANDLERS["--out-root"] = function(args, argv, i)
+	args.out_root = argv[i + 1]
+	return i + 1
+end
+
+FLAG_HANDLERS["--project-root"] = function(args, argv, i)
+	args.project_root = argv[i + 1]
+	return i + 1
+end
+
+-- Pass-flag handler. Reads the closed-set table, expands --all,
+-- appends to requested_set. Single-statement, no nesting.
+FLAG_HANDLERS["__pass__"] = function(args, a)
+	local name = PASS_FLAG_TO_NAME[a]
+	if name == "__all__" then
+		request_all_passes(args)
+		return
+	end
+	args.requested_set[#args.requested_set + 1] = name
+end
+
 --- Parse argv into a structured table. Validates against a closed enum.
 ---
 --- @param argv string[]
@@ -206,34 +274,11 @@ local function parse_args(argv)
 	local i = 1
 	while i <= #argv do
 		local a = argv[i]
-		if a == "--help" then
-			print_help()
-			os.exit(0)
-		elseif a == "--dry-run" then
-			args.dry_run = true
-		elseif a == "--verbose" then
-			args.verbose = true
-		elseif a == "--source" then
-			i = i + 1
-			args.sources[#args.sources + 1] = argv[i]
-		elseif a == "--metadata" then
-			i = i + 1
-			args.metadata = argv[i]
-		elseif a == "--out-root" then
-			i = i + 1
-			args.out_root = argv[i]
-		elseif a == "--project-root" then
-			i = i + 1
-			args.project_root = argv[i]
+		local handler = FLAG_HANDLERS[a]
+		if handler then
+			i = handler(args, argv, i) or i
 		elseif PASS_FLAG_TO_NAME[a] then
-			local name = PASS_FLAG_TO_NAME[a]
-			if name == "__all__" then
-				for _, n in ipairs(ALL_PASS_NAMES) do
-					args.requested_set[#args.requested_set + 1] = n
-				end
-			else
-				args.requested_set[#args.requested_set + 1] = name
-			end
+			FLAG_HANDLERS["__pass__"](args, a)
 		else
 			io.stderr:write("ps1_meta: unknown flag '" .. a .. "'\n")
 			io.stderr:write("Run with --help for usage.\n")
@@ -244,9 +289,7 @@ local function parse_args(argv)
 
 	-- Default: --all if no explicit pass flags.
 	if #args.requested_set == 0 then
-		for _, n in ipairs(ALL_PASS_NAMES) do
-			args.requested_set[#args.requested_set + 1] = n
-		end
+		request_all_passes(args)
 	end
 
 	-- Defaults: project_root = dirname(metadata).

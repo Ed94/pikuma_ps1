@@ -109,6 +109,63 @@ end
 -- Parse TAPE_ATOM_ANNOT(...) calls
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- Recognize a `atom_reads(...)` or `atom_writes(...)` register-list
+-- call embedded inside an annotation arg list. Returns the kind
+-- ("atom_reads" / "atom_writes") and the inner content, or nil if the
+-- token isn't a recognized register-list form. Flattened via a
+-- prefix lookup instead of a nested if/elseif chain.
+local REGS_CALL_PREFIX = {
+	["atom_reads("]  = { kind = "atom_reads",  inner_offset = 12 },
+	["atom_writes("] = { kind = "atom_writes", inner_offset = 13 },
+}
+
+local function parse_regs_call(s)
+	if s:sub(-1) ~= ")" then return nil end
+	local spec = REGS_CALL_PREFIX[s:sub(1, 12)]  -- longest prefix first wins
+	if not spec then return nil end
+	-- The 12-char prefix "atom_reads(" also matches "atom_writes("
+	-- would be ambiguous; the table order above handles it.
+	-- (atom_reads prefix is 11 chars, atom_writes is 12; the 12-char
+	-- lookup matches atom_writes first.)
+	return spec.kind, s:sub(spec.inner_offset, -2)
+end
+
+-- Resolve any phase_* / R_* alias macros in a register list.
+local function resolve_reg_aliases(regs)
+	for i, r in ipairs(regs) do
+		if MACRO_EXPANSION[r] then regs[i] = MACRO_EXPANSION[r] end
+	end
+	return regs
+end
+
+-- Parse a comma-separated inner content (e.g. inside atom_reads(...))
+-- into a list of trimmed identifiers with aliases resolved.
+local function parse_regs_list(inner)
+	local out = {}
+	for _, r in ipairs(split_csv_top(inner)) do
+		local trimmed = trim(r)
+		if trimmed ~= "" then out[#out + 1] = trimmed end
+	end
+	return resolve_reg_aliases(out)
+end
+
+-- Parse a single token (from split_csv_top) into an arg entry.
+-- Three forms: register-list call, bare identifier (with alias),
+-- "other" (preserved as text).
+local function parse_arg_token(s)
+	local kind, inner = parse_regs_call(s)
+	if kind then
+		return { kind = kind, value = parse_regs_list(inner) }
+	end
+	local id = read_ident(s, 1)
+	if id and trim(s) == id then
+		local v = id
+		if MACRO_EXPANSION[v] then v = MACRO_EXPANSION[v] end
+		return { kind = "ident", value = v }
+	end
+	return { kind = "other", value = s }
+end
+
 --- Extract identifier args from a parenthesized group. Returns a list
 --- of {kind, value} pairs where kind is one of:
 ---   "ident"        -- a bare identifier (e.g. phase_work)
@@ -117,45 +174,10 @@ end
 ---   "other"        -- something we can't classify (preserved as text)
 local function parse_atom_annot_args(inner)
 	local args = {}
-	local tokens = split_csv_top(inner)
-	for _, tok in ipairs(tokens) do
+	for _, tok in ipairs(split_csv_top(inner)) do
 		local s = trim(tok)
 		if s ~= "" then
-			-- Detect register-list calls: atom_reads(...) / atom_writes(...)
-			local regs_kind = nil
-			local regs_inner = nil
-			if s:sub(-1) == ")" then
-				if s:sub(1, 11) == "atom_reads(" then
-					regs_kind = "atom_reads"
-					regs_inner = s:sub(12, -2)
-				elseif s:sub(1, 12) == "atom_writes(" then
-					regs_kind = "atom_writes"
-					regs_inner = s:sub(13, -2)
-				end
-			end
-
-			if regs_kind then
-				local regs = {}
-				for _, r in ipairs(split_csv_top(regs_inner)) do
-					local trimmed = trim(r)
-					if trimmed ~= "" then regs[#regs + 1] = trimmed end
-				end
-				-- Resolve any phase_* / R_* alias macros
-				for i, r in ipairs(regs) do
-					if MACRO_EXPANSION[r] then regs[i] = MACRO_EXPANSION[r] end
-				end
-				args[#args + 1] = {kind = regs_kind, value = regs}
-			else
-				-- Bare identifier (e.g. phase_work)
-				local id = read_ident(s, 1)
-				if id and trim(s) == id then
-					local v = id
-					if MACRO_EXPANSION[v] then v = MACRO_EXPANSION[v] end
-					args[#args + 1] = {kind = "ident", value = v}
-				else
-					args[#args + 1] = {kind = "other", value = s}
-				end
-			end
+			args[#args + 1] = parse_arg_token(s)
 		end
 	end
 	return args
@@ -498,6 +520,85 @@ end
 -- / atom_bind / atom_terminate)
 -- ════════════════════════════════════════════════════════════════════════════
 
+--- True iff the parsed arg is a register-list call (any recognized form).
+local function is_regs_arg(a)
+	return a and (a.kind == "atom_reads" or a.kind == "atom_writes" or a.kind == "regs")
+end
+
+--- Per-macro arg-shape handlers. Each takes (entry, args) and mutates
+--- entry.{reads, writes, phase, binds, errors}. Replaces the 5-way
+--- `if/elseif/elseif/elseif/elseif` chain inside find_atom_annotations.
+local ANNOT_ARG_HANDLERS = {}
+
+-- atom_bind(name, Binds_Struct, writes)
+function ANNOT_ARG_HANDLERS.bind(entry, args)
+	if #args >= 2 and args[2].kind == "ident" then
+		entry.binds = args[2].value
+	end
+	if #args >= 3 and is_regs_arg(args[3]) then
+		entry.writes = args[3].value
+	end
+end
+
+-- atom_init(name) / atom_terminate(name): name only, no extra slots.
+ANNOT_ARG_HANDLERS.init      = function() end
+ANNOT_ARG_HANDLERS.terminate = function() end
+
+-- Macro name -> handler key. Replaces the `macro_def.binds` check
+-- plus the 4-way ident elseif chain.
+local MACRO_HANDLER_KEY = {
+	["atom_bind"]      = "bind",
+	["atom_annot"]     = "annot",
+	["atom_setup"]     = "reads_only",
+	["atom_commit"]    = "reads_only",
+	["atom_init"]      = "init",
+	["atom_terminate"] = "terminate",
+}
+
+-- atom_setup(name, reads) / atom_commit(name, reads): reads from slot 2.
+function ANNOT_ARG_HANDLERS.reads_only(entry, args)
+	if #args >= 2 and is_regs_arg(args[2]) then
+		entry.reads = args[2].value
+	end
+end
+
+-- atom_annot(name, phase, reads, writes)
+function ANNOT_ARG_HANDLERS.annot(entry, args)
+	if #args >= 2 and args[2].kind == "ident" then
+		entry.phase = MACRO_EXPANSION[args[2].value] or args[2].value
+	end
+	if #args >= 3 and is_regs_arg(args[3]) then
+		if args[3].kind == "atom_writes" then
+			entry.errors[#entry.errors + 1] = "reads slot has atom_writes — swap order?"
+		end
+		entry.reads = args[3].value
+	end
+	if #args >= 4 and is_regs_arg(args[4]) then
+		if args[4].kind == "atom_reads" then
+			entry.errors[#entry.errors + 1] = "writes slot has atom_reads — swap order?"
+		end
+		entry.writes = args[4].value
+	end
+end
+
+-- Build a new annotation entry with the standard shape.
+local function new_annot_entry(line, ident, name, kind)
+	return {
+		line   = line,
+		macro  = ident,
+		name   = name,
+		kind   = kind,
+		binds  = nil,
+		phase  = nil,
+		reads  = {},
+		writes = {},
+		errors = {},
+	}
+end
+
+--- Find every TAPE_ATOM_* macro call in source and convert it to a
+--- normalized annotation entry. Dispatches per-macro arg-shape via
+--- ANNOT_ARG_HANDLERS (lookup table; no nested if/elseif chain).
 local function find_atom_annotations(source)
 	local line_of = duffle.LineIndex(source)
 	local annots = {}
@@ -513,13 +614,17 @@ local function find_atom_annotations(source)
 			local j = i
 			while j <= len and source:sub(j, j) ~= "\n" do j = j + 1 end
 			i = j + 1
-		else
+			goto continue
+		end
+
 		local ident, after = read_ident(source, i)
 		if not ident then
 			i = i + 1
 		elseif TAPE_ATOM_MACROS[ident] then
 			local open = skip_ws_and_cmt(source, after)
-			if source:sub(open, open) == "(" then
+			if source:sub(open, open) ~= "(" then
+				i = open + 1
+			else
 				local inner, after_paren = read_parens(source, open)
 				local args = parse_atom_annot_args(inner)
 				local macro_def = TAPE_ATOM_MACROS[ident]
@@ -532,70 +637,17 @@ local function find_atom_annotations(source)
 						error = "missing atom name (first arg)",
 					}
 				else
-					local name = args[1].value
-					local entry = {
-						line   = line_of(i),
-						macro  = ident,
-						name   = name,
-						kind   = macro_def.kind,
-						binds  = nil,
-						phase  = nil,
-						reads  = {},
-						writes = {},
-						errors = {},
-					}
-
-					local function is_regs(a)
-						return a and (a.kind == "atom_reads" or a.kind == "atom_writes" or a.kind == "regs")
-					end
-
-					if macro_def.binds then
-						if #args >= 2 and args[2].kind == "ident" then
-							entry.binds = args[2].value
-						end
-						if #args >= 3 and is_regs(args[3]) then
-							entry.writes = args[3].value
-						end
-					elseif ident == "atom_init" or ident == "atom_terminate" then
-						-- (name) only
-					elseif ident == "atom_setup" then
-						if #args >= 2 and is_regs(args[2]) then
-							entry.reads = args[2].value
-						end
-					elseif ident == "atom_commit" then
-						if #args >= 2 and is_regs(args[2]) then
-							entry.reads = args[2].value
-						end
-					elseif ident == "atom_annot" then
-						if #args >= 2 and args[2].kind == "ident" then
-							entry.phase = MACRO_EXPANSION[args[2].value] or args[2].value
-						end
-						if #args >= 3 and is_regs(args[3]) then
-							if args[3].kind == "atom_writes" then
-								entry.errors[#entry.errors + 1] =
-									"reads slot has atom_writes — swap order?"
-							end
-							entry.reads = args[3].value
-						end
-						if #args >= 4 and is_regs(args[4]) then
-							if args[4].kind == "atom_reads" then
-								entry.errors[#entry.errors + 1] =
-									"writes slot has atom_reads — swap order?"
-							end
-							entry.writes = args[4].value
-						end
-					end
-
+					local entry = new_annot_entry(line_of(i), ident, args[1].value, macro_def.kind)
+					local handler = ANNOT_ARG_HANDLERS[MACRO_HANDLER_KEY[ident]]
+					if handler then handler(entry, args) end
 					annots[#annots + 1] = entry
 				end
 				i = after_paren
-			else
-				i = open + 1
 			end
 		else
 			i = after
 		end
-		end
+		::continue::
 	end
 	return annots
 end
@@ -727,24 +779,30 @@ local function validate(ctx, src)
 	end
 
 	-- 7. TAPE_WORDS(mac_X, N) ↔ WORD_COUNT(mac_X, N) drift.
-	for _, m in ipairs(macros) do
-		local declared = ctx.shared.word_counts[m.name]
+	--    Three outcomes: missing (error), mismatch (error), match (info).
+	--    Flattened via early-return-style helper instead of 3-way elseif.
+	local function check_macro_drift(m, declared)
 		if not declared then
 			errors[#errors + 1] = {
 				line = m.line,
 				msg  = string.format("TAPE_WORDS(%s, %d) but '%s' is not in metadata.h", m.name, m.words, m.name),
 			}
-		elseif declared ~= m.words then
+			return
+		end
+		if declared ~= m.words then
 			errors[#errors + 1] = {
 				line = m.line,
 				msg  = string.format("DRIFT: TAPE_WORDS(%s, %d) but metadata.h declares WORD_COUNT(%s, %d)", m.name, m.words, m.name, declared),
 			}
-		else
-			info[#info + 1] = {
-				line = m.line,
-				msg  = string.format("OK: %s = %d words", m.name, m.words),
-			}
+			return
 		end
+		info[#info + 1] = {
+			line = m.line,
+			msg  = string.format("OK: %s = %d words", m.name, m.words),
+		}
+	end
+	for _, m in ipairs(macros) do
+		check_macro_drift(m, ctx.shared.word_counts[m.name])
 	end
 
 	-- 8. atom_<...> _Pragma validation: resource/region/group/cadence/async
@@ -776,7 +834,8 @@ local function validate(ctx, src)
 		end
 	end
 
-	-- 9. CADENCE_ONDEMAND requires async=true.
+	-- 9. CADENCE_ONDEMAND requires async=true. Flattened as a guard
+	--    (single condition, no nested if).
 	for _, p in ipairs(pragmas) do
 		if p.attrs.cadence == "ondemand" and p.attrs.async ~= "true" then
 			errors[#errors + 1] = {
