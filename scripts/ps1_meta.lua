@@ -535,8 +535,13 @@ local function main(argv)
 			os.exit(0)
 		end
 
-		-- 3. Run passes in topological order.
+		-- 3. Run passes in topological order. We track a `had_errors`
+		-- flag instead of os.exit()'ing mid-loop, so the report pass
+		-- (and any other downstream pass) still runs and writes its
+		-- per-module reports. The exit code at the end is set to 1
+		-- if any pass reported errors.
 		ctx.shared = {}
+		local had_errors = false
 		for _, pass_name in ipairs(closed) do
 			local pass  = PASSES[pass_name]
 			local mod   = require(pass.module)
@@ -551,15 +556,24 @@ local function main(argv)
 				table.insert(ctx.upstream[pass_name], warn)
 			end
 
-			-- Stop on errors (unless this is a non-stopping pass like report).
+			-- Record errors for the exit code, but DON'T os.exit() here:
+			-- the report pass (kind="report") and any other downstream
+			-- pass still needs to run to emit its per-module files.
+			-- The legacy behavior was os.exit(1) on the first error,
+			-- which left downstream per-module reports un-emitted; the
+			-- 2026-07-10 change to per-module aggregation made that
+			-- visible to the user (build/gen had only the partial
+			-- reports from the failing pass), so we now complete
+			-- all passes and set the exit code at the end.
 			if (result.errors and #result.errors > 0) and PASS_KIND_STOP_ON_ERROR[pass.kind] then
 				for _, e in ipairs(result.errors) do
 					io.stderr:write(string.format("[%s] line %d: %s\n",
 						pass_name, e.line or 0, e.msg or ""))
 				end
-				os.exit(1)
+				had_errors = true
 			end
 		end
+		if had_errors then os.exit(1) end
 	end)
 
 	if not ok then

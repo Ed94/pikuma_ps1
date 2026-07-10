@@ -647,6 +647,156 @@ M.GP0_MACRO_CONTRIB = {
     ["mac_insert_ot_tag_g4"]                        = 1,
 }
 
+-- Per-macro cycle cost (best-case, no stalls). Used by the static-analysis
+-- `count_atom_cycles` pass (Phase 3) to emit per-atom cycle budgets. The
+-- counts cover the EXPANDED instruction sequence the macro emits (NOT just
+-- the token it appears as in source). For example:
+--
+--   mac_pack_color_word(off, cmd, r, g, b) emits:
+--     load_upper_i(R_AT, (cmd << 8) | b)        -- 1 cycle
+--     or_i_self(R_AT, (g << 8) | r)             -- 1 cycle
+--     store_word(R_AT, R_PrimCursor, off)       -- 1 cycle
+--                                              = 3 cycles total
+--
+--   mac_yield emits a control-transfer sequence (load_word, add_ui_self,
+--   jump_reg, nop) which "yields control" -- the atom body's cycle budget
+--   doesn't include the yield's cost (we model it as 0; runtime cost
+--   becomes part of the NEXT atom's prologue).
+--
+-- GTE command values are the GTE instruction's intrinsic cycles (the
+-- latency AFTER any pre-cmd `nop2` has retired). When the source emits
+-- `nop2, gte_cmdw_X` the nops' cycles are added separately (1+1) plus
+-- the gte_cmdw_X value here:
+--   rtpt = 21 + 2 nops = 23 total cycles  (matches PSX-SPX)
+--   rtps = 12 + 2 nops = 14 total
+--   nclip = 6 + 2 nops = 8 total
+--   avsz3 = 12 + 2 nops = 14 total
+--   avsz4 = 14 + 2 nops = 16 total
+--   mvmva = 6 + 2 nops = 8 total
+--   op    = 5 (no pre-cmd nops required; single-cycle atomic)
+M.INSTRUCTION_LATENCY = {
+    -- CPU ALU (single-cycle R3000A ops)
+    ["nop"]                 = 1,
+    ["nop2"]                = 2,
+    ["add_ui"]              = 1,  ["add_ui_self"]       = 1,
+    ["add_s"]               = 1,  ["add_si"]            = 1,
+    ["add_u"]               = 1,  ["add_u_self"]        = 1,
+    ["sub_u"]               = 1,  ["sub_s"]             = 1,
+    ["and_i"]               = 1,  ["and_u"]             = 1,
+    ["or_i"]                = 1,  ["or_i_self"]         = 1,
+    ["or_u"]                = 1,  ["or_u_self"]         = 1,
+    ["xor_i"]               = 1,  ["xor_u"]             = 1,
+    ["nor_u"]               = 1,
+    ["shift_lleft"]         = 1,  ["shift_lleft_self"]  = 1,
+    ["shift_lright"]        = 1,
+    ["shift_aright"]        = 1,
+    ["mask_upper"]          = 1,
+    ["mov_from_high"]       = 2,  -- mfhi: 2 cycles
+    ["mov_from_low"]        = 2,  -- mflo: 2 cycles
+    ["mov_to_high"]         = 1,  -- mthi: 1 cycle
+    ["mov_to_low"]          = 1,  -- mtlo: 1 cycle
+    -- Set-on-condition (SLT family)
+    ["set_lt_u"]            = 1,  ["set_lt_ui"]   = 1,
+    ["set_lt_s"]            = 1,  ["set_lt_si"]   = 1,
+    -- Multiply / divide (no hardware multiplier; software via inline asm)
+    ["mult_u"]              = 12, ["mult_s"]              = 12,
+    ["div_u"]               = 35, ["div_s"]               = 35,
+    -- Loads (1 cycle + load-delay slot; the delay is typically absorbed by
+    -- the next instruction in a well-pipelined sequence, so we count 1)
+    ["load_word"]           = 1,
+    ["load_half_u"]         = 1,  ["load_half"]           = 1,
+    ["load_byte_u"]         = 1,  ["load_byte"]           = 1,
+    ["load_upper_i"]        = 1,
+    -- 2-word loads (lui + ori) used for >16-bit immediates
+    ["load_imm"]            = 2,
+    ["load_imm_1w"]         = 1,
+    ["load_imm_1w_s0"]      = 1,
+    ["load_imm_2w"]         = 2,
+    ["load_imm_2w_addi_forced"] = 2,
+    ["load_imm_2w_ori_forced"]  = 2,
+    -- Stores (1 cycle each)
+    ["store_word"]          = 1,
+    ["store_half"]          = 1,
+    ["store_byte"]          = 1,
+    -- Branches (branch + BD slot nop = 2 cycles; the BD slot's nop is
+    -- counted as part of the branch's cost)
+    ["branch_equal"]        = 2,  ["branch_ne"]          = 2,
+    ["branch_le_zero"]      = 2,  ["branch_lt_zero"]     = 2,
+    ["branch_ge_zero"]      = 2,  ["branch_gt_zero"]     = 2,
+    -- Jumps (jump + BD slot nop = 2 cycles)
+    ["jump"]                = 2,  ["jump_reg"]           = 2,
+    ["jump_link"]           = 2,  ["call_reg"]           = 2,
+    ["call_addr"]           = 2,
+    -- COP2 transfers (mtc2/mfc2/ctc2/cfc2 = 1 cycle + COP2 latency; the
+    -- COP2 latency is usually absorbed by subsequent nops or by the next
+    -- GTE command's pre-fill nops, so we count 1)
+    ["gte_mv_to_data_r"]    = 1,
+    ["gte_mv_from_data_r"]  = 1,
+    ["gte_mv_to_ctrl_r"]    = 1,
+    ["gte_mv_from_ctrl_r"]  = 1,
+    ["gte_lw"]              = 1,  ["gte_lwc2"]           = 1,
+    ["gte_sw"]              = 1,  ["gte_swc2"]           = 1,
+    -- COP2 commands (intrinsic cycles, EXCLUDING the 2 pre-cmd nops that
+    -- the source typically emits as `nop2, gte_cmdw_X`; those nops are
+    -- counted separately via the `nop2` entry above)
+    ["gte_cmdw_rtpt"]       = 21,
+    ["gte_cmdw_rtps"]       = 12,
+    ["gte_cmdw_nclip"]      = 6,
+    ["gte_cmdw_avsz3"]      = 12,
+    ["gte_cmdw_avsz4"]      = 14,
+    ["gte_cmdw_mvmva"]      = 6,
+    ["gte_cmdw_op"]         = 5,
+    ["gte_cmdw_outer_product"] = 5,
+    ["gte_cmdw_wedge"]      = 5,
+    -- Long-form aliases (same cost as canonical)
+    ["gte_cmdw_rotate_translate_perspective_single"] = 12,  -- alias for rtps
+    ["gte_cmdw_rotate_translate_perspective_triple"] = 21,  -- alias for rtpt
+    ["gte_cmdw_avg_sort_z4"]                          = 14,  -- alias for avsz4
+    -- Non-cmdw aliases from gte.h (these are `#define gte_X gte_cmdw_Y`):
+    ["gte_avg_sort_z3"]                               = 12,  -- alias for avsz3
+    ["gte_avg_sort_z4"]                               = 14,  -- alias for avsz4
+    ["gte_rtps"]                                      = 12,  -- alias for rtps
+    ["gte_rtpt"]                                      = 21,  -- alias for rtpt
+    ["gte_nclip"]                                     = 6,   -- alias for nclip
+    ["gte_avsz3"]                                     = 12,
+    ["gte_avsz4"]                                     = 14,
+    -- Legacy single-cycle store helpers (gte_stotz, gte_stsxy3 are 1 cycle)
+    ["gte_stotz"]           = 1,
+    ["gte_stsxy3"]          = 1,
+    -- High-level GTE helpers (gte_load_v0/v1/v2 do multiple lwc2s)
+    ["gte_load_v0"]         = 2,  -- 1 lwc2 for VXY0 + 1 for VZ0
+    ["gte_load_v1"]         = 2,
+    ["gte_load_v2"]         = 2,
+    ["gte_load_v0v1v2"]     = 6,
+    -- mac_* helpers (cycle cost = sum of the expanded instructions)
+    -- mac_yield transfers control; cycle budget is 0 (the next atom
+    -- absorbs the cost).
+    ["mac_yield"]           = 0,
+    ["mac_pack_color_word"] = 3,  -- lui + ori + sw
+    ["mac_format_f3_color"] = 3,  -- = mac_pack_color_word
+    ["mac_format_g4_color"] = 12, -- 4 x mac_pack_color_word
+    ["mac_load_tri_indices"] = 3, -- 3 x lhu
+    ["mac_gte_load_tri_verts"] = 18, -- 3 x {sll, addu, lw, lw, mtc2, mtc2}
+    ["mac_gte_store_f3_post_rtpt"] = 3,
+    ["mac_gte_store_g3_post_rtpt"] = 3,
+    ["mac_gte_store_g4_p012_post_rtpt_pre_rtps"] = 3,
+    ["mac_gte_store_g4_p3_post_rtps"] = 1,
+    ["mac_insert_ot_tag_f3"] = 11,  -- 11 .word slots in the macro body
+    ["mac_insert_ot_tag_g4"] = 11,
+    -- Annotation markers (emit no code; pure metaprogram hints)
+    ["atom_label"]          = 0,
+    ["atom_offset"]         = 0,
+    ["atom_info"]           = 0,
+    ["atom_bind"]           = 0,
+    ["atom_reads"]          = 0,
+    ["atom_writes"]         = 0,
+}
+
+-- Default cycle cost for unknown macros. The static-analysis pass adds 1
+-- cycle per unknown token and emits a "new macro; update INSTRUCTION_LATENCY"
+-- advisory so the cycle budget stays accurate as the codebase grows.
+M.UNKNOWN_INSTRUCTION_CYCLES = 1
+
 -- Expose the lpeg_ok flag so callers can detect the LPeg-back path.
 -- True when LPeg was successfully required and the patterns above were
 -- compiled at module load time. False when running in fallback mode.

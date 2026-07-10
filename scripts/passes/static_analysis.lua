@@ -57,6 +57,12 @@ local GP0_CMD_SIZE       = duffle.GP0_CMD_SIZE
 local GP0_CMD_BY_SHAPE   = duffle.GP0_CMD_BY_SHAPE
 local GP0_MACRO_CONTRIB  = duffle.GP0_MACRO_CONTRIB
 
+-- Instruction latency table (Phase 3). Per-macro cycle cost in the
+-- best-case (no-stall) scenario. Unknown macros default to
+-- UNKNOWN_INSTRUCTION_CYCLES with a warning.
+local INSTRUCTION_LATENCY        = duffle.INSTRUCTION_LATENCY
+local UNKNOWN_INSTRUCTION_CYCLES = duffle.UNKNOWN_INSTRUCTION_CYCLES
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Source walkers
 -- ════════════════════════════════════════════════════════════════════════════
@@ -89,7 +95,17 @@ local function find_atom_bodies(source_text)
 	local i        = 1
 	while i <= len do
 		i = skip_ws_and_cmt(source_text, i); if i > len then break end
-		local ident, after = read_ident(source_text, i)
+		-- Skip preprocessor directives (#define / #include / #pragma /
+		-- etc). Otherwise the `#define MipsAtom_(sym) ...` definition
+		-- in lottes_tape.h gets matched as an atom named "sym" and
+		-- its `body` swallows the next real atom declaration via
+		-- scan_to_char("{", ...).
+		if source_text:sub(i, i) == "#" then
+			local j = i
+			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
+			i = j + 1
+		else
+			local ident, after = read_ident(source_text, i)
 		if not ident then
 			i = i + 1
 		elseif ident == "MipsAtom_"
@@ -202,6 +218,7 @@ local function find_atom_bodies(source_text)
 		else
 			i = after
 		end
+		end  -- close the new preprocessor-skip else
 	end
 	return out
 end
@@ -877,6 +894,287 @@ local function check_gpu_portstore_shape(atoms, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Check #5: per-atom cycle budget (Phase 3)
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- Compute the cycle cost of one token. The token is a string like
+--- `add_ui(R_T0, R_T1, 4)` or `nop2` or `gte_cmdw_rtpt`. Returns:
+---   cycles       - integer cycle cost (from INSTRUCTION_LATENCY, or
+---                  UNKNOWN_INSTRUCTION_CYCLES if not in the table)
+---   macro_name   - the bare ident (e.g. `add_ui`, `gte_cmdw_rtpt`,
+---                  `nop2`, `mac_yield`)
+---   unknown      - true iff the macro wasn't in INSTRUCTION_LATENCY
+--- The function strips trailing `()` from function-call style macros
+--- so `mac_yield()` and `mac_yield` resolve identically.
+local function token_cycles(tok)
+	-- Extract the leading ident. Tolerate `(...)` args.
+	local ident = tok:match("^([%w_]+)")
+	if not ident then return UNKNOWN_INSTRUCTION_CYCLES, "?", true end
+	local cost = INSTRUCTION_LATENCY[ident]
+	if cost == nil then
+		return UNKNOWN_INSTRUCTION_CYCLES, ident, true
+	end
+	return cost, ident, false
+end
+
+--- Find every `atom_label(name)` token in the token list and return a
+--- map `label_name -> token_idx`. Labels are 0-cost markers; the path
+--- walker uses them as branch targets.
+local function find_atom_labels(tokens)
+	local labels = {}
+	for i, t in ipairs(tokens) do
+		local name = t.tok:match("^atom_label%s*%(%s*([%w_]+)%s*%)")
+		if name then labels[name] = i end
+	end
+	return labels
+end
+
+--- Find every `branch_*(...)` token in the token list and return a map
+--- `token_idx -> label_name|false`. If the branch's args contain an
+--- `atom_offset(F, label)` call, the label name is recorded; otherwise
+--- the branch's target is unknown (likely a literal offset) and we
+--- record `false` as a sentinel. The CFG walker checks KEY PRESENCE
+--- (via `is_branch(i)`) to decide whether a token is a branch; it
+--- checks the value to decide whether the taken-path target is known.
+--- (We can't use `nil` for the unknown-target case because `targets[i] = nil`
+--- REMOVES the key from the Lua table, which would make `is_branch(i)`
+--- return false for both "not a branch" and "branch with unknown target".)
+local function find_branch_targets(tokens)
+	local targets = {}
+	for i, t in ipairs(tokens) do
+		if t.tok:match("^branch_[%w_]+%s*%(") then
+			-- branch_<cond>(rs, atom_offset(F, label))   or
+			-- branch_<cond>(rs, rt, atom_offset(F, label))
+			-- atom_offset's arg list is (flag, name); we want the name.
+			local label = t.tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)")
+			targets[i] = label or false  -- `false` = known branch, unknown target
+		end
+	end
+	return targets
+end
+
+--- Walk all paths through an atom body and return per-path cycle sums.
+--- Builds a tiny CFG: each token has a "next" pointer; branches have two
+--- (fall-through + taken). The BD-slot nop after a branch is absorbed
+--- into the branch's cost (MIPS-accurate: BD slot always runs), and is
+--- SKIPPED when continuing down the fall-through path (otherwise we'd
+--- double-count it).
+---
+--- Returns:
+---   cycles_min     - shortest path through the body (sum of token costs)
+---   cycles_max     - longest path through the body
+---   branches       - number of branches in the body
+---   paths          - number of distinct paths reached (terminated at
+---                    mac_yield or end-of-body)
+---   has_loops      - true iff a path re-entered a token it had visited
+---                    (warning; loop bodies aren't supported)
+---   unknown_macros - list of unique macro names not in INSTRUCTION_LATENCY
+---   cycles_full    - sum of ALL token costs (the previous "best case"
+---                    value; included for backward-compat; double-counts
+---                    the BD-slot nop relative to cycles_min/max)
+local function analyze_atom_paths(atom)
+	local tokens = tokenize_body(atom.body)
+	local labels   = find_atom_labels(tokens)
+	local branches = find_branch_targets(tokens)
+
+	-- Pre-compute per-token cycle costs and identify terminators.
+	local n        = #tokens
+	local costs    = {}
+	local unknown_set = {}
+	for i, t in ipairs(tokens) do
+		local c, _, unknown = token_cycles(t.tok)
+		costs[i] = c
+		if unknown then
+			unknown_set[t.tok:match("^([%w_]+)") or "?"] = true
+		end
+	end
+
+	-- A token is a terminator if it's `mac_yield` or `mac_yield(...)`.
+	-- The yield transfers control; we don't count its cost (the next
+	-- atom's prologue absorbs it).
+	local function is_terminator(i)
+		local tok = tokens[i].tok
+		return tok == "mac_yield" or tok:match("^mac_yield%s*%(")
+	end
+
+	-- CFG successor function. Returns a list of next token indices for
+	-- the given position. Branch tokens produce 2 successors (fall-through
+	-- + taken); normal tokens produce 1 (next); terminators produce 0.
+	-- BD-slot absorption: a branch at i skips i+1 (the BD slot) in its
+	-- fall-through path; the BD slot's cost is added to the branch's
+	-- own cost instead (so it's counted once).
+	--
+	-- A token is a "branch" if its index is a KEY in the `branches`
+	-- map (regardless of whether the value is nil — a branch with
+	-- nil target means "literal offset, taken path is unknown").
+	-- We check key-presence via `branches[i] ~= nil` because
+	-- `branches[i]` returns nil for both "absent" AND "present with
+	-- nil value" — distinguishing them requires the key check.
+	local function is_branch(i)
+		local v = branches[i]
+		if v == nil then return false end
+		-- v is non-nil: either a string (atom_offset target) or false
+		-- (literal offset, no target). Both indicate a branch.
+		return true
+	end
+	local function successors(i)
+		local tok = tokens[i].tok
+		if is_terminator(i) then
+			return {}, i  -- empty list; term = i signals "path ends here"
+		end
+		if is_branch(i) then
+			local label = branches[i]  -- may be false for literal-offset branches
+			local succ  = {}
+			-- Fall-through: skip the BD slot (i+1). Use i+2.
+			if i + 2 <= n then
+				succ[#succ + 1] = i + 2
+			end
+			-- Taken: only if the branch has a known atom_offset target.
+			if label then
+				local label_pos = labels[label]
+				if label_pos and label_pos + 1 <= n then
+					succ[#succ + 1] = label_pos + 1
+				end
+			end
+			-- For literal-offset branches (label == false), the taken
+			-- path would jump to a non-tracked address; conservatively
+			-- omit. Return (succ, nil) -- the second value is the
+			-- terminator marker (nil = not a terminator).
+			return succ, nil
+		end
+		-- Normal token: just the next one
+		if i + 1 <= n then
+			return { i + 1 }, nil
+		end
+		return {}, nil
+	end
+
+	-- DFS through all paths. Track the current cycle sum, a visited set
+	-- scoped to the current path (to detect loops), and a count of paths.
+	-- Cap recursion at MAX_PATHS to prevent runaway exploration on
+	-- pathological bodies.
+	local MAX_PATHS = 64
+	local cycles_min = math.huge
+	local cycles_max = -1
+	local path_count = 0
+	local has_loops = false
+	local function dfs(i, acc, visited)
+		if path_count >= MAX_PATHS then return end
+		if _G._DEBUG_DFS then
+			io.stderr:write(string.format("dfs(i=%d, acc=%d)\n", i, acc))
+		end
+		if visited[i] then
+			has_loops = true
+			if _G._DEBUG_DFS_LOOP then
+				io.stderr:write(string.format("  -> LOOP at i=%d (tok=%s) acc=%d\n",
+					i, tokens[i].tok, acc))
+			end
+			return
+		end
+
+		-- Add this token's cost. For a branch, ADD the BD-slot cost too
+		-- (and skip the BD slot in the successor list — already done in
+		-- `successors` above for fall-through; for taken path the BD
+		-- slot was at i+1 which is now skipped entirely).
+		local cost = costs[i]
+		if is_branch(i) and i + 1 <= n then
+			cost = cost + costs[i + 1]
+		end
+		local new_acc = acc + cost
+
+		local succ, term = successors(i)
+		if term then
+			-- Terminator: record the path's cycle sum. We do NOT add
+			-- the terminator token to `visited` -- a path ends here, so
+			-- a different path that ALSO reaches this terminator is a
+			-- legitimate new path (not a loop). If we marked it
+			-- visited, subsequent paths that reach the same terminator
+			-- would be incorrectly flagged as loops.
+			path_count = path_count + 1
+			if new_acc < cycles_min then cycles_min = new_acc end
+			if new_acc > cycles_max then cycles_max = new_acc end
+			return
+		end
+		visited[i] = true
+		for _, next_i in ipairs(succ) do
+			dfs(next_i, new_acc, visited)
+		end
+		visited[i] = nil
+	end
+	if n >= 1 then dfs(1, 0, {}) end
+
+	-- cycles_full: sum of every token's cost (the previous model; useful
+	-- for comparing against the path-aware min/max).
+	local cycles_full = 0
+	for i = 1, n do cycles_full = cycles_full + costs[i] end
+
+	-- If no paths were recorded (e.g. atom body is empty), cycles_min/max
+	-- default to 0 (atom costs nothing). cycles_full is 0 too in that case.
+	if cycles_min == math.huge then cycles_min = 0 end
+	if cycles_max == -1 then cycles_max = 0 end
+
+	local unknown_list = {}
+	for k in pairs(unknown_set) do unknown_list[#unknown_list + 1] = k end
+	table.sort(unknown_list)
+
+	-- branch_count: number of `branch_*(...)` tokens. (More useful than
+	-- `#branches` which is the size of the targets map and would be equal
+	-- to #branches anyway, but the rename is clearer.)
+	local branch_count = 0
+	for _ in pairs(branches) do branch_count = branch_count + 1 end
+
+	return {
+		cycles_min     = cycles_min,
+		cycles_max     = cycles_max,
+		cycles_full    = cycles_full,
+		branches       = branch_count,
+		paths          = path_count,
+		has_loops      = has_loops,
+		unknown_macros = unknown_list,
+	}
+end
+
+--- Backward-compat wrapper: returns total cycle count (the previous
+--- "best case" value, which over-counts BD-slot nops) + unknown macro
+--- list. New code should call `analyze_atom_paths(atom)` instead.
+local function count_atom_cycles(atom)
+	local tokens = tokenize_body(atom.body)
+	local total  = 0
+	local unknown_set = {}
+	for _, t in ipairs(tokens) do
+		local c, _, unknown = token_cycles(t.tok)
+		total = total + c
+		if unknown then
+			unknown_set[t.tok:match("^([%w_]+)") or "?"] = true
+		end
+	end
+	local unknown_list = {}
+	for k in pairs(unknown_set) do unknown_list[#unknown_list + 1] = k end
+	return total, unknown_list
+end
+
+--- Per-source check that emits one finding per unknown macro seen
+--- (deduplicated across atoms so the warning section doesn't get
+--- spammed with N copies of "macro X not in INSTRUCTION_LATENCY").
+local function check_per_atom_cycle_budget(atoms, findings)
+	local unknown_seen = {}
+	for _, a in ipairs(atoms) do
+		local _, unknown_macros = count_atom_cycles(a)
+		for _, name in ipairs(unknown_macros) do
+			if not unknown_seen[name] then
+				unknown_seen[name] = a.line
+				findings[#findings + 1] = {
+					atom = a.name, line = a.line,
+					check = "per_atom_cycle_budget", kind = "warning",
+					msg = string.format("%s at line %d uses macro `%s` which is not in INSTRUCTION_LATENCY; cycle count will be +%d per call (best-case). Add an entry to duffle.M.INSTRUCTION_LATENCY.",
+						a.name, a.line, name, UNKNOWN_INSTRUCTION_CYCLES),
+				}
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Per-source validation
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -898,9 +1196,25 @@ local function validate(ctx, src)
 	check_mac_yield_uniformity(atoms, findings)
 	check_abi_handoff(atoms, atom_infos, binds_index, findings)
 	check_gpu_portstore_shape(atoms, findings)
+	check_per_atom_cycle_budget(atoms, findings)
 
-	-- Phase 3 (per-atom cycle budget) hooks go here when reactivated.
-	-- emit per-atom cycle counts via INSTRUCTION_LATENCY table
+	-- Phase 3 cycle-budget output: attach per-path cycle data to each
+	-- atom. Best-case (no-stall) cycle count with BD-slot absorbed; the
+	-- `cycles_full` field is the legacy sum-of-all-tokens value (kept
+	-- for backward compat; over-counts BD-slot nops).
+	local cycles_by_atom = {}
+	for _, a in ipairs(atoms) do
+		local p = analyze_atom_paths(a)
+		a.paths = p
+		a.cycles = p.cycles_max     -- default for any code that reads .cycles
+		a.cycles_min = p.cycles_min
+		a.cycles_max = p.cycles_max
+		a.cycles_full = p.cycles_full
+		a.branch_count = p.branches
+		a.unknown_macros = p.unknown_macros
+		a.has_loops = p.has_loops
+		cycles_by_atom[a.name] = p
+	end
 
 	local errors   = {}
 	local warnings = {}
@@ -921,6 +1235,28 @@ local function validate(ctx, src)
 		line = 0,
 		msg  = string.format("scanned: %d atom bodies; %d findings", #atoms, #findings),
 	}
+
+	-- Phase 3: cycle-budget summary line. Per-path min/max totals.
+	if #atoms > 0 then
+		local total_min     = 0
+		local total_max     = 0
+		local max_atom_cyc  = 0
+		local max_atom_name = nil
+		for _, a in ipairs(atoms) do
+			local p = a.paths or {}
+			total_min = total_min + (p.cycles_min or 0)
+			total_max = total_max + (p.cycles_max or 0)
+			if (p.cycles_max or 0) > max_atom_cyc then
+				max_atom_cyc  = p.cycles_max
+				max_atom_name = a.name
+			end
+		end
+		info[#info + 1] = {
+			line = 0,
+			msg  = string.format("cycles: path-aware min=%d max=%d across %d atoms; worst atom=%s (%d); best-case, no stalls; BD-slot nops absorbed into branch costs",
+				total_min, total_max, #atoms, max_atom_name or "?", max_atom_cyc),
+		}
+	end
 
 	return {
 		atoms    = atoms,
@@ -1010,6 +1346,145 @@ local function emit_static_analysis_txt(ctx, src, result)
 	return out_path
 end
 
+-- (Old per-source emit function above kept for backward compat but no
+-- longer called from M.run; replaced by `emit_module_static_analysis_txt`
+-- which aggregates by directory. Kept because some test harnesses may
+-- still call it directly.)
+
+--- Per-directory emit. Aggregates atoms + findings across every source
+--- in `dir_sources` and writes a single report to
+--- `<out_root>/<dir_basename>.static_analysis.txt`. Called only when
+--- at least one atom was found (the caller in M.run handles the skip).
+local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, findings, errors, warnings, info)
+	-- Module basename = last component of `dir` ("code/duffle" -> "duffle").
+	local dir_basename = dir:match("([^/\\]+)$") or dir
+	local out_path = ctx.out_root .. "/" .. dir_basename .. ".static_analysis.txt"
+	if ctx.dry_run then return out_path end
+	ensure_dir(ctx.out_root)
+
+	local lines = {}
+	local function add(s) lines[#lines + 1] = s end
+
+	add("========================================================")
+	add("STATIC ANALYSIS PASS -- module " .. dir_basename)
+	add("========================================================")
+	add(string.format("Sources: %d", #dir_sources))
+	for _, s in ipairs(dir_sources) do
+		add("  " .. s.path)
+	end
+	add("")
+
+	-- Tally atoms by kind for the header summary
+	local n_atoms, n_bare, n_proc = 0, 0, 0
+	for _, a in ipairs(atoms) do
+		n_atoms = n_atoms + 1
+		if a.kind == "comp_bare" then n_bare = n_bare + 1
+		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
+		end
+	end
+	local header_atoms = string.format("Atoms: %d", n_atoms)
+	if n_bare > 0 or n_proc > 0 then
+		header_atoms = header_atoms .. string.format("  (atoms: %d, comp_bare: %d, comp_proc: %d)",
+			n_atoms - n_bare - n_proc, n_bare, n_proc)
+	end
+	add(string.format("%s   Findings: %d   Errors: %d   Warnings: %d",
+		header_atoms, #findings, #errors, #warnings))
+	add("")
+
+	-- Group findings by atom (with source prefix when multi-source module)
+	local multi_source = #dir_sources > 1
+	local by_atom = {}
+	for _, f in ipairs(findings) do
+		by_atom[f.atom] = by_atom[f.atom] or {}
+		by_atom[f.atom][#by_atom[f.atom] + 1] = f
+	end
+
+	if next(by_atom) == nil then
+		add("  (no findings -- every atom passed all checks)")
+	else
+		add("── Findings by atom ─────────────────────────────────────")
+		for _, a in ipairs(atoms) do
+			local fs = by_atom[a.name]
+			if fs then
+				local label = a.name
+				if multi_source and a.source_path then
+					label = string.format("%s  (%s)", a.name, a.source_path:match("([^/\\]+)$") or a.source_path)
+				end
+				add(string.format("  %s   line %d", label, a.line))
+				for _, f in ipairs(fs) do
+					add(string.format("      [%s] %s", f.check, f.msg))
+				end
+			end
+		end
+	end
+
+	add("")
+	add("── Errors ──────────────────────────────────────────────")
+	if #errors == 0 then add("  (none)") end
+	for _, e in ipairs(errors) do
+		add(string.format("  X line %d  %s", e.line, e.msg))
+	end
+
+	add("")
+	add("── Warnings ────────────────────────────────────────────")
+	if #warnings == 0 then add("  (none)") end
+	for _, w in ipairs(warnings) do
+		add(string.format("  ! line %d  %s", w.line, w.msg))
+	end
+
+	-- Per-atom cycle counts (Phase 3 path-aware). For each atom:
+	--   min   = shortest path through the body (earliest exit)
+	--   max   = longest path through the body (full fall-through)
+	--   br    = number of branch instructions
+	--   paths = number of distinct paths reached
+	-- Both min and max are best-case (no stalls); BD-slot nops are
+	-- absorbed into branch costs (MIPS semantics). The previous "best
+	-- case" model counted every token separately, which double-counted
+	-- BD-slot nops; the path-aware model is the MIPS-accurate value.
+	add("")
+	add("── Per-atom cycle counts (path-aware, best case, no stalls) ─")
+	if #atoms == 0 then
+		add("  (no atoms)")
+	else
+		-- Sort atoms by max cycles descending for quick scanning.
+		local sorted = {}
+		for _, a in ipairs(atoms) do sorted[#sorted + 1] = a end
+		table.sort(sorted, function(x, y) return (x.cycles_max or 0) > (y.cycles_max or 0) end)
+		for _, a in ipairs(sorted) do
+			local p = a.paths or {}
+			local br_count = p.branches or 0
+			local path_count = p.paths or 0
+			local loops_tag = p.has_loops and "  [loop!]" or ""
+			local unknown_tag = ""
+			if a.unknown_macros and #a.unknown_macros > 0 then
+				unknown_tag = string.format("  [unknown: %s]",
+					table.concat(a.unknown_macros, ", "))
+			end
+			local name_label = a.name
+			if multi_source and a.source_path then
+				name_label = string.format("%s  (%s)", a.name, a.source_path:match("([^/\\]+)$") or a.source_path)
+			end
+			if br_count > 0 then
+				add(string.format("  %-44s  min=%4d  max=%4d  br=%d  paths=%d  (line %d)%s%s",
+					name_label, p.cycles_min or 0, p.cycles_max or 0, br_count, path_count,
+					a.line, loops_tag, unknown_tag))
+			else
+				add(string.format("  %-44s  %4d cycles  (line %d, no branches)%s%s",
+					name_label, p.cycles_min or 0, a.line, loops_tag, unknown_tag))
+			end
+		end
+	end
+
+	add("")
+	add("── Info ────────────────────────────────────────────────")
+	for _, i_ in ipairs(info) do
+		add(string.format("  %s", i_.msg))
+	end
+
+	write_file(out_path, table.concat(lines, "\n") .. "\n")
+	return out_path
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- M.run — orchestrator entry
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1025,17 +1500,71 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
+	-- Phase 3.7+: aggregate per-DIRECTORY (per-module). One
+	-- static_analysis.txt per source-directory, emitted only if the
+	-- directory contains at least one atom. Empty-source directories
+	-- (e.g. duffle headers with no atoms) produce no report.
+	--
+	-- Group sources by `src.dir`. The first component of `dir` is the
+	-- module name (e.g. "code/duffle" -> "duffle", "code/gte_hello" ->
+	-- "gte_hello"). Output path is `<out_root>/<module_basename>.static_analysis.txt`.
+	local by_dir = {}
 	for _, src in ipairs(ctx.sources) do
-		local result = validate(ctx, src)
-		local out_path = emit_static_analysis_txt(ctx, src, result)
-		if out_path then
-			table.insert(outputs, { static_analysis_txt = out_path })
+		by_dir[src.dir] = by_dir[src.dir] or {}
+		table.insert(by_dir[src.dir], src)
+	end
+
+	for dir, dir_sources in pairs(by_dir) do
+		-- Run validate() against every source in this directory; accumulate
+		-- atoms / findings / errors / warnings. The validate() function
+		-- does its own per-source analysis (Binds indexing, atom
+		-- discovery, all 5 checks) and attaches path-aware cycle data to
+		-- each atom it finds.
+		local all_atoms    = {}
+		local all_findings = {}
+		local dir_errors   = {}
+		local dir_warnings = {}
+		local all_info     = {}
+		for _, src in ipairs(dir_sources) do
+			local result = validate(ctx, src)
+			-- Tag each atom with its source so the render step can prefix
+			-- the atom line with "<filename>:" when atoms from multiple
+			-- sources live in the same module (e.g. lottes_tape.h +
+			-- atom_dsl.h both declaring atoms).
+			for _, a in ipairs(result.atoms) do
+				a.source_path = src.path
+				all_atoms[#all_atoms + 1] = a
+			end
+			for _, f in ipairs(result.findings) do
+				all_findings[#all_findings + 1] = f
+			end
+			for _, e in ipairs(result.errors) do
+				dir_errors[#dir_errors + 1] = e
+			end
+			for _, w in ipairs(result.warnings) do
+				dir_warnings[#dir_warnings + 1] = w
+			end
+			for _, i_ in ipairs(result.info) do
+				all_info[#all_info + 1] = i_
+			end
 		end
-		for _, e in ipairs(result.errors) do
-			errors[#errors + 1] = { line = e.line, msg = e.msg }
-		end
-		for _, w in ipairs(result.warnings) do
-			warnings[#warnings + 1] = { line = w.line, msg = w.msg }
+
+		-- Skip directories with zero atoms. The previous behavior emitted
+		-- a "<no atoms>" report per source; the new behavior emits nothing
+		-- at all (a directory with only headers / no MipsAtom_ is
+		-- "nothing to report").
+		if #all_atoms == 0 then
+			-- Still aggregate errors/warnings so orchestrator sees them,
+			-- but don't write a file.
+			for _, e in ipairs(dir_errors) do errors[#errors + 1] = e end
+			for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
+		else
+			local out_path = emit_module_static_analysis_txt(ctx, dir, dir_sources, all_atoms, all_findings, dir_errors, dir_warnings, all_info)
+			if out_path then
+				table.insert(outputs, { static_analysis_txt = out_path })
+			end
+			for _, e in ipairs(dir_errors) do errors[#errors + 1] = e end
+			for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
 		end
 	end
 
