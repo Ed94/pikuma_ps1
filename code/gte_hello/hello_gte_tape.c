@@ -3,7 +3,7 @@
 #	include "duffle/gen/duffle.offsets.h"
 #	include "duffle/atom_dsl.h"
 #	include "duffle/lottes_tape.h"
-#	include "tape_atom.metadata.h"
+#	include "duffle/word_count.metadata.h"
 #	include "gen/gte_hello.offsets.h"
 #	include "hello_gte.h"
 #endif
@@ -22,15 +22,16 @@ typedef Struct_(Binds_CubeTri) {
 	V3_S2* VertBase;
 	U4*    OtBase;
 };
-internal MipsAtom_(rbind_cube_g4_face) {
+internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri)
+,	atom_reads(R_TapePtr)
+,	atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
+){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
 	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)), 
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
 	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)), 
 	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)), 
 	add_ui_self(            R_TapePtr, S_(Binds_CubeTri)),
-	// Note(Ed): This entire thing is argument shuffle?
-	// TODO(Ed): Eliminate
 	mac_yield()
 };
 
@@ -41,14 +42,11 @@ internal MipsAtom_(rbind_cube_g4_face) {
  *  Reads 4 indices from R_FaceCur (V4_S2 = 8 bytes), loads 4 vertices into
  *  the GTE, runs the PsyQ RotAverageNclip4 sequence, and renders a Poly_G4.
  */
-	atom_region  (cube_g4_face, REGION_PRIM_ARENA)
-	atom_group   (cube_g4_face, GROUP_RENDER_PRIMS)
-	atom_cadence (cube_g4_face, CADENCE_FRAME)
-	atom_annot(cube_g4_face, phase_work,
-			atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
-			atom_writes(R_PrimCursor, R_FaceCursor))
 internal 
-MipsAtom_(cube_g4_face) {
+MipsAtom_(cube_g4_face) atom_info(
+		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
+		atom_writes(R_PrimCursor, R_FaceCursor)
+){
 	/* ── 1. Load 4 face indices from R_FaceCur (V4_S2 = 8 bytes) ───────── */
 	load_half_u(R_T0, R_FaceCursor, 0 * S_(S2)),
 	load_half_u(R_T1, R_FaceCursor, 1 * S_(S2)),
@@ -116,14 +114,11 @@ typedef Struct_(Binds_FloorTri) {
 	V3_S2* VertBase;
 	U4*    OtBase;
 };
-	atom_region(rbind_floor_f3_face, REGION_PRIM_ARENA)
-	atom_group(rbind_floor_f3_face, GROUP_RENDER_FLOOR)
-	atom_cadence(rbind_floor_f3_face, CADENCE_FRAME)
-	atom_annot(rbind_floor_f3_face, phase_bind
-		, atom_reads()
-		, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase))
 internal 
-MipsAtom_(rbind_floor_f3_face) {
+MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri)
+	, atom_reads(R_TapePtr)
+	, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
+){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
 	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)), 
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
@@ -133,14 +128,11 @@ MipsAtom_(rbind_floor_f3_face) {
 	mac_yield()
 };
 
-	atom_region( floor_f3_face, REGION_PRIM_ARENA)
-	atom_group(  floor_f3_face, GROUP_RENDER_FLOOR)
-	atom_cadence(floor_f3_face, CADENCE_FRAME)
-	atom_annot(  floor_f3_face, phase_work,
-		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
-		atom_writes(R_PrimCursor, R_FaceCursor)) 
 internal 
-MipsAtom_(floor_f3_face) {
+MipsAtom_(floor_f3_face) atom_info(
+	, atom_reads(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
+	, atom_writes(R_PrimCursor, R_FaceCursor)
+) {
 	mac_load_tri_indices(R_T0, R_T1, R_T2),
 	mac_load_tri_verts(  R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple,
@@ -174,13 +166,10 @@ atom_label(floor_f3_face_exit)
 };
 
 typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
-	atom_region( sync_primitive_arena, REGION_PRIM_ARENA)
-	atom_group(  sync_primitive_arena, GROUP_RENDER_FLOOR)
-	atom_cadence(sync_primitive_arena, CADENCE_FRAME)
-	atom_annot(  sync_primitive_arena, phase_work,
-		atom_reads( R_TapePtr, R_PrimCursor),
-		atom_writes(R_TapePtr)) 
-internal MipsAtom_(sync_primitive_arena) {
+internal MipsAtom_(sync_primitive_arena) atom_info(atom_bind(Binds_SyncPrimitiveArena)
+	, atom_reads( R_TapePtr, R_PrimCursor)
+	, atom_writes(R_TapePtr)
+){
 	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,used)),
 	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)),      
 	add_ui_self(    R_TapePtr, S_(Binds_SyncPrimitiveArena)),

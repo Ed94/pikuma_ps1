@@ -21,12 +21,6 @@
  *      gte_swc2(rt, base, off)  -> gte_sw(rt, base, off)
  *      (the lower-level vector variants gte_lw_v0_xy etc. don't have
  *      vendor mnemonics; they're already gte_-prefixed and short)
- *
- *  The vendor mnemonics are NOT registered with the duffle word-count
- *  metadata (tape_atom.metadata.h). They expand to the duffle canonical
- *  macros which DO have word-count entries. Verification: V3 (objdump
- *  byte-identical) holds.
- *
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES

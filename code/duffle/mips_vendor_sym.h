@@ -21,12 +21,6 @@
  *      jal  -> call_addr         (jump-and-link to immediate address)
  *      jalr -> call_reg          (jump-and-link to register, default $ra)
  *      (for the 2-arg `jalr rs, rd`, use `jump_link(rs, rd)` directly)
- *
- *  The vendor mnemonics are NOT registered with the duffle word-count
- *  metadata (tape_atom.metadata.h). They expand to the duffle canonical
- *  macros which DO have word-count entries. Verification: V2 (objdump
- *  byte-identical) holds.
- *
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES

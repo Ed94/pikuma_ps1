@@ -326,11 +326,15 @@ function any-stale {
 	param([Parameter(Mandatory=$true)][string[]]$sources,
 	      [Parameter(Mandatory=$true)][string]$metadata,
 	      [Parameter(Mandatory=$true)][string]$out_root)
-	if (-not (test-path $out_root)) { return $true }
-	$out_mtime  = (get-item $out_root).LastWriteTimeUtc
-	$src_mtime  = ($sources  | ForEach-Object { (get-item $_).LastWriteTimeUtc } | Measure-Object -Maximum).Maximum
-	$meta_mtime = (get-item $metadata).LastWriteTimeUtc
-	return ($src_mtime -gt $out_mtime) -or ($meta_mtime -gt $out_mtime)
+	# Always return true. ps1-meta writes to TWO locations:
+	#   1. <out_root>          (annotation + offsets passes — build/gen/)
+	#   2. <src.dir>/gen/      (component pass — code/duffle/gen/, etc.)
+	# Tracking only <out_root>'s mtime is fragile — if the in-source
+	# gen dir was wiped but <out_root> still exists with a newer mtime,
+	# we'd skip the regen and the compile would fail with a missing
+	# duffle.macs.h. ps1-meta is fast enough (~100ms) that always
+	# running it is the safe default.
+	return $true
 }
 
 function ps1-meta {
@@ -357,7 +361,7 @@ function build-gte_hello {
 
 	$path_module        = join-path $path_code   'gte_hello'
 	$path_duffle        = join-path $path_code   'duffle'
-	$path_atom_metadata = join-path $path_module 'tape_atom.metadata.h'
+	$path_atom_metadata = join-path $path_duffle 'word_count.metadata.h'
 
 	$source_dirs  = @($path_duffle, $path_module)
 	$atom_sources = Get-SourceFiles -paths $source_dirs -extensions @('.h', '.c')

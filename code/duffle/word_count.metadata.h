@@ -1,4 +1,4 @@
-// tape_atom.metadata.h
+// word_count.metadata.h
 // Single source of truth for instruction-word counts.
 // Used by C (to define compile-time constants) AND Python (to count positions).
 //

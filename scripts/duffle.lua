@@ -1,8 +1,6 @@
 -- duffle.lua
 --
 -- Shared primitives + domain tables for the tape-atom metaprograms.
--- Both `tape_atom_annotation_pass.lua` and `tape_atom.offset_gen.meta.lua`
--- `require("duffle")` for these.
 --
 -- 5.3-compatible Lua (no 5.4/5.5-only features):
 --   - no <close> / <toclose>
@@ -499,54 +497,14 @@ M.WAVE_CONTEXT_REGS = {
     ["R_OtBase"]     = { alias = "R_T6", size = 4, role = "base pointer (ordering table)" },
 }
 
-M.MACRO_EXPANSION = {
-    ["phase_init"]      = "init",
-    ["phase_bind"]      = "bind",
-    ["phase_setup"]     = "setup",
-    ["phase_work"]      = "work",
-    ["phase_commit"]    = "commit",
-    ["phase_terminate"] = "terminate",
-    ["REGION_PRIM_ARENA"]   = "prim_arena",
-    ["REGION_FACE_ARENA"]   = "face_arena",
-    ["REGION_VERTEX_ARENA"] = "vertex_arena",
-    ["REGION_OT_ARENA"]     = "ot_arena",
-    ["REGION_HEAP_3D"]      = "heap_3d_models",
-    ["REGION_CDROM_STREAM"] = "cdrom_stream",
-    ["REGION_VRAM"]         = "vram_heap",
-    ["CADENCE_FRAME"]       = "frame",
-    ["CADENCE_ONCE"]        = "once",
-    ["CADENCE_ONDEMAND"]    = "ondemand",
-}
-
-M.KNOWN_PHASES = {
-    ["init"]      = true, ["bind"]   = true, ["setup"]    = true,
-    ["work"]      = true, ["commit"] = true, ["terminate"] = true,
-}
-M.KNOWN_REGIONS = {
-    ["prim_arena"]     = true, ["face_arena"]     = true,
-    ["vertex_arena"]   = true, ["ot_arena"]       = true,
-    ["heap_3d_models"] = true, ["cdrom_stream"]   = true,
-    ["vram_heap"]      = true,
-}
-M.KNOWN_CADENCES = {
-    ["frame"]    = true, ["once"] = true, ["ondemand"] = true,
-}
-
+-- The annotation DSL has been reduced to a single annotation macro:
+--   atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
+-- All phase / region / cadence / async / resource / group tokens have
+-- been dropped. They may be reintroduced later as optional sub-calls
+-- of atom_info; for now, the parser only recognizes atom_info + its
+-- three sub-calls (atom_bind, atom_reads, atom_writes).
 M.TAPE_ATOM_MACROS = {
-    ["atom_annot"]     = { kind = "work",      binds = false },
-    ["atom_bind"]      = { kind = "bind",      binds = true  },
-    ["atom_setup"]     = { kind = "setup",     binds = false },
-    ["atom_commit"]    = { kind = "commit",    binds = false },
-    ["atom_init"]      = { kind = "init",      binds = false },
-    ["atom_terminate"] = { kind = "terminate", binds = false },
-}
-
-M.ATOM_PRAGMA_KINDS = {
-    ["resource"] = { kind = "string" },
-    ["region"]   = { kind = "ident",  allowed = M.KNOWN_REGIONS },
-    ["group"]    = { kind = "ident" },
-    ["cadence"]  = { kind = "ident",  allowed = M.KNOWN_CADENCES },
-    ["async"]    = { kind = "ident",  allowed = { ["true"] = true, ["false"] = true } },
+    ["atom_info"] = { kind = "info", binds = false },
 }
 
 -- Expose the lpeg_ok flag so callers can detect the LPeg-back path.

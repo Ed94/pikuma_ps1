@@ -27,7 +27,7 @@
  *  descriptive; no vendor alias is provided for them.
  *
  *  The vendor mnemonics are NOT registered with the duffle word-count
- *  metadata (tape_atom.metadata.h). They expand to the duffle canonical
+ *  metadata (word_counts.metadata.h). They expand to the duffle canonical
  *  macros which DO have word-count entries (the ones emitted by
  *  mac_format_f3_color / mac_gte_store_f3 / etc.). Verification: V13
  *  (objdump byte-identical) holds.

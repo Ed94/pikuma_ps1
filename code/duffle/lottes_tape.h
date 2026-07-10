@@ -31,13 +31,9 @@ typedef Slice_MipsCode MipsAtom;
 //   FI_ MipsAtom ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
 #define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
 
-// Auto-generated component macros (<module>/gen/<dir>/<dir>.macs.h)
-// are included manually by the unity build. The metaprogram puts them
+// Auto-generated component macros (<module>/gen/<dir>/<dir>.macs.h) are included manually by the unity build.
 
-/* Register aliases (moved up from the Tape Drive region below so that
- * mac_yield's body and the Mips Atom Builder functions can reference
- * them. The C compiler processes the file top-to-bottom, so the enum
- * must be visible before any use.) */
+/* Register aliases */
 enum {
 	R_AtomJmp    = R_T9,
 	R_TapePtr    = R_T8,  /* The Instruction Stream Pointer */
@@ -287,7 +283,10 @@ internal MipsAtom_(mips_flush_icache) {
 typedef Struct_(Binds_SetGteWorld) {
 	M3_S2* transform;
 };
-internal MipsAtom_(set_gte_world) {
+internal MipsAtom_(set_gte_world) atom_info(
+		atom_bind(Binds_SetGteWorld)
+	,	atom_reads(R_TapePtr)
+){
 	/* Pop matrix address from tape into R_T3 ($11) */
 	load_word(R_T3, R_TapePtr, O_(Binds_SetGteWorld,transform)),
 	add_ui_self(    R_TapePtr, S_(Binds_SetGteWorld)),

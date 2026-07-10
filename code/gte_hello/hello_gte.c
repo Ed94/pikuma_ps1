@@ -18,8 +18,8 @@
 #	include "duffle/gen/duffle.offsets.h"
 #include "duffle/atom_dsl.h"
 #include "duffle/lottes_tape.h"
+#include "duffle/word_count.metadata.h"
 
-#	include "tape_atom.metadata.h"
 #	include "gen/gte_hello.offsets.h"
 #include "hello_gte.h"
 

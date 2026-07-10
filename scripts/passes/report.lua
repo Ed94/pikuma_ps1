@@ -38,9 +38,8 @@ local function render_source_report(source_path, result)
 	add("ANNOTATION PASS — " .. source_path)
 	add("========================================================")
 	add("")
-	add(string.format("Atoms: %d   Annotations: %d   Pragmas: %d   Binds structs: %d   Macro decls: %d",
+	add(string.format("Atoms: %d   Annotations: %d   Binds structs: %d   Macro decls: %d",
 		#result.atoms, #result.annots,
-		(result.pragmas and #result.pragmas or 0),
 		#result.binds, #result.macros))
 	add("")
 
@@ -55,9 +54,7 @@ local function render_source_report(source_path, result)
 		if a.error then
 			add(string.format("  ✗ line %d  %s  [ERROR: %s]", a.line, a.macro or "?", a.error))
 		else
-			local line = string.format("  %s  line %d  %s  phase=%s",
-				a.kind == "work" and "●" or (a.kind == "bind" and "◆" or "○"),
-				a.line, a.name, a.phase or a.kind)
+			local line = string.format("  ●  line %d  %s", a.line, a.name)
 			if a.binds then line = line .. "  binds=" .. a.binds end
 			if #a.reads > 0 then line = line .. "  reads={" .. table.concat(a.reads, ",") .. "}" end
 			if #a.writes > 0 then line = line .. "  writes={" .. table.concat(a.writes, ",") .. "}" end
@@ -78,16 +75,6 @@ local function render_source_report(source_path, result)
 	add("── Macro word-count declarations ─────────────────────────")
 	for _, m in ipairs(result.macros) do
 		add(string.format("  %s  line %d  words=%d", m.name, m.line, m.words))
-	end
-	add("")
-
-	add("── Atom pragmas (resource / region / group / cadence / async) ─")
-	if not result.pragmas or #result.pragmas == 0 then add("  (none)") end
-	for _, p in ipairs(result.pragmas or {}) do
-		local kvs = {}
-		for k, v in pairs(p.attrs) do kvs[#kvs + 1] = k .. "=" .. v end
-		table.sort(kvs)
-		add(string.format("  ◇ line %d  %s  {%s}", p.line, p.name, table.concat(kvs, ", ")))
 	end
 	add("")
 

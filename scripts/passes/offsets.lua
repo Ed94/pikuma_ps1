@@ -2,7 +2,6 @@
 --
 -- Generate <module>/gen/<basename>.offsets.h with branch offset
 -- immediates for every atom_offset(F, T) reference in atom bodies.
--- Ported from scripts/tape_atom.offset_gen.meta.lua:148-389.
 --
 -- The branch offset regression we just fixed in commit 98e27c2 must
 -- NOT return. The fix was in duffle.lua's split_top_level_commas +

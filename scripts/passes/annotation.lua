@@ -47,12 +47,8 @@ local split_top_level_commas = duffle.split_top_level_commas
 
 -- Domain tables (single source of truth in duffle.lua).
 local WAVE_CONTEXT_REGS = duffle.WAVE_CONTEXT_REGS
-local MACRO_EXPANSION   = duffle.MACRO_EXPANSION
-local KNOWN_PHASES      = duffle.KNOWN_PHASES
 local TAPE_ATOM_MACROS  = duffle.TAPE_ATOM_MACROS
-local ATOM_PRAGMA_KINDS = duffle.ATOM_PRAGMA_KINDS
 
-local function valid_phase(p)          return KNOWN_PHASES[p]      or false end
 local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -109,32 +105,44 @@ end
 -- Parse TAPE_ATOM_ANNOT(...) calls
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Recognize a `atom_reads(...)` or `atom_writes(...)` register-list
--- call embedded inside an annotation arg list. Returns the kind
--- ("atom_reads" / "atom_writes") and the inner content, or nil if the
--- token isn't a recognized register-list form. Flattened via a
--- prefix lookup instead of a nested if/elseif chain.
+-- Recognize a `atom_bind(...)`, `atom_reads(...)`, or `atom_writes(...)`
+-- sub-call embedded inside an atom_info arg list. Returns the kind
+-- ("atom_bind" / "atom_reads" / "atom_writes") and the inner content,
+-- or nil if the token isn't a recognized sub-call form. Flattened via
+-- a prefix lookup instead of a nested if/elseif chain.
 local REGS_CALL_PREFIX = {
-	["atom_reads("]  = { kind = "atom_reads",  inner_offset = 12 },
 	["atom_writes("] = { kind = "atom_writes", inner_offset = 13 },
+	["atom_reads("]  = { kind = "atom_reads",  inner_offset = 12 },
+	["atom_bind("]   = { kind = "atom_bind",   inner_offset = 11, single_ident = true },
 }
 
 local function parse_regs_call(s)
 	if s:sub(-1) ~= ")" then return nil end
-	local spec = REGS_CALL_PREFIX[s:sub(1, 12)]  -- longest prefix first wins
+	-- Try longest prefix first so "atom_writes(" wins over "atom_reads("
+	-- when both 12-char prefixes would otherwise match. Lengths:
+	--   atom_writes(  = 12 chars, offset 13
+	--   atom_reads(   = 11 chars, offset 12
+	--   atom_bind(    = 10 chars, offset 11
+	local spec = REGS_CALL_PREFIX[s:sub(1, 12)]
+	if not spec then
+		spec = REGS_CALL_PREFIX[s:sub(1, 11)]
+	end
+	if not spec then
+		spec = REGS_CALL_PREFIX[s:sub(1, 10)]
+	end
 	if not spec then return nil end
-	-- The 12-char prefix "atom_reads(" also matches "atom_writes("
-	-- would be ambiguous; the table order above handles it.
-	-- (atom_reads prefix is 11 chars, atom_writes is 12; the 12-char
-	-- lookup matches atom_writes first.)
-	return spec.kind, s:sub(spec.inner_offset, -2)
+	local inner = s:sub(spec.inner_offset, -2)
+	if spec.single_ident then
+		-- atom_bind takes a single Binds_* type ident. Trim and pass through.
+		return spec.kind, trim(inner)
+	end
+	return spec.kind, inner
 end
 
 -- Resolve any phase_* / R_* alias macros in a register list.
+-- (Phase / region / cadence aliases have been dropped. Kept as an
+-- identity function so callers can stay uniform.)
 local function resolve_reg_aliases(regs)
-	for i, r in ipairs(regs) do
-		if MACRO_EXPANSION[r] then regs[i] = MACRO_EXPANSION[r] end
-	end
 	return regs
 end
 
@@ -150,18 +158,19 @@ local function parse_regs_list(inner)
 end
 
 -- Parse a single token (from split_csv_top) into an arg entry.
--- Three forms: register-list call, bare identifier (with alias),
+-- Three forms: register-list call, bare identifier,
 -- "other" (preserved as text).
 local function parse_arg_token(s)
 	local kind, inner = parse_regs_call(s)
 	if kind then
+		if kind == "atom_bind" then
+			return { kind = kind, value = inner }  -- single ident, not a list
+		end
 		return { kind = kind, value = parse_regs_list(inner) }
 	end
 	local id = read_ident(s, 1)
 	if id and trim(s) == id then
-		local v = id
-		if MACRO_EXPANSION[v] then v = MACRO_EXPANSION[v] end
-		return { kind = "ident", value = v }
+		return { kind = "ident", value = id }
 	end
 	return { kind = "other", value = s }
 end
@@ -256,136 +265,6 @@ local function find_macro_word_annotations(source)
 				i = j
 			else
 				i = after
-			end
-		end
-	end
-	return out
-end
-
--- ════════════════════════════════════════════════════════════════════════════
--- Parse `atom_<...>` Pragma / _Pragma annotations
--- ════════════════════════════════════════════════════════════════════════════
-
-local ATOM_ATTR_MACROS = {
-	["atom_resource"] = "resource",
-	["atom_region"]   = "region",
-	["atom_group"]    = "group",
-	["atom_cadence"]  = "cadence",
-	["atom_async"]    = "async",
-}
-
---- Parse macro form: `atom_<key>(atom_name, value, ...)`.
---- Returns (true, entry, str_end) on success, (false) on no match.
-local function try_parse_atom_attr_macro(source, i, line_of)
-	local ident, after = read_ident(source, i)
-	if not ident then return false end
-	local key = ATOM_ATTR_MACROS[ident]
-	if not key then return false end
-	local open = skip_ws_and_cmt(source, after)
-	if source:sub(open, open) ~= "(" then return false end
-
-	local body, body_end = read_parens(source, open)
-	local first, after_name = read_ident(body, 1)
-	if not first then return false end
-
-	local j = after_name
-	while j <= #body and is_space(body:sub(j, j)) do j = j + 1 end
-	if body:sub(j, j) ~= "," then return false end
-	j = j + 1
-	while j <= #body and is_space(body:sub(j, j)) do j = j + 1 end
-
-	local value
-	if body:sub(j, j) == '"' then
-		local k = j + 1
-		while k <= #body do
-			local c = body:sub(k, k)
-			if c == "\\" then
-				k = k + 2
-			elseif c == '"' then
-				break
-			else
-				k = k + 1
-			end
-		end
-		if body:sub(k, k) ~= '"' then return false end
-		value = body:sub(j + 1, k - 1)
-	else
-		local id2, after_id = read_ident(body, j)
-		if not id2 then return false end
-		value = id2
-		if MACRO_EXPANSION[value] then value = MACRO_EXPANSION[value] end
-	end
-
-	return true, {
-		line  = line_of(i),
-		name  = first,
-		attrs = { [key] = value },
-	}, body_end
-end
-
-local function find_atom_pragmas(source)
-	local line_of = duffle.LineIndex(source)
-	local out = {}
-	local len = #source
-	local i   = 1
-	while i <= len do
-		i = skip_ws_and_cmt(source, i); if i > len then break end
-		if source:sub(i, i) == "#" then
-			local j = i
-			while j <= len and source:sub(j, j) ~= "\n" do j = j + 1 end
-			i = j + 1
-		else
-			local got, entry, next_i = try_parse_atom_attr_macro(source, i, line_of)
-			if got then
-				out[#out + 1] = entry
-				i = next_i
-			else
-				local ident, after = read_ident(source, i)
-				if not ident then
-					i = i + 1
-				elseif ident == "_Pragma" then
-					local open = skip_ws_and_cmt(source, after)
-					if source:sub(open, open) == "(" then
-						local str, str_end = read_parens(source, open)
-						str = trim(str)
-						if str:sub(1, 1) == '"' and str:sub(-1) == '"' then
-							local inner = str:sub(2, -2)
-							local sp1 = find_byte(inner, " ", 1)
-							if sp1 and trim(inner:sub(1, sp1 - 1)) == "atom" then
-								local rest = trim(inner:sub(sp1 + 1))
-								local sp2 = find_byte(rest, " ", 1)
-								if sp2 then
-									local name = trim(rest:sub(1, sp2 - 1))
-									local attrs_str = trim(rest:sub(sp2 + 1))
-									local attrs = {}
-									local got_any = false
-									for _, pair in ipairs(split_ws(attrs_str)) do
-										local eq = find_byte(pair, "=", 1)
-										if eq then
-											local k = trim(pair:sub(1, eq - 1))
-											local v = trim(pair:sub(eq + 1))
-											if MACRO_EXPANSION[v] then v = MACRO_EXPANSION[v] end
-											attrs[k] = v
-											got_any = true
-										end
-									end
-									if got_any then
-										out[#out + 1] = {
-											line  = line_of(i),
-											name  = name,
-											attrs = attrs,
-										}
-									end
-								end
-							end
-						end
-						i = str_end
-					else
-						i = open + 1
-					end
-				else
-					i = after
-				end
 			end
 		end
 	end
@@ -526,58 +405,35 @@ local function is_regs_arg(a)
 end
 
 --- Per-macro arg-shape handlers. Each takes (entry, args) and mutates
---- entry.{reads, writes, phase, binds, errors}. Replaces the 5-way
---- `if/elseif/elseif/elseif/elseif` chain inside find_atom_annotations.
+--- Per-atom_info sub-call dispatch. Each takes (entry, args) and mutates
+--- entry.{reads, writes, binds, errors}. The new annotation shape is:
+---
+---   MipsAtom_(name) atom_info(
+---        atom_bind(Binds_X)
+---      , atom_reads(...)
+---      , atom_writes(...)
+---   ) { ... };
+---
+--- All sub-calls are order-independent; each is dispatched on its
+--- `kind` (atom_bind / atom_reads / atom_writes) when parsed.
 local ANNOT_ARG_HANDLERS = {}
 
--- atom_bind(name, Binds_Struct, writes)
-function ANNOT_ARG_HANDLERS.bind(entry, args)
-	if #args >= 2 and args[2].kind == "ident" then
-		entry.binds = args[2].value
-	end
-	if #args >= 3 and is_regs_arg(args[3]) then
-		entry.writes = args[3].value
-	end
-end
-
--- atom_init(name) / atom_terminate(name): name only, no extra slots.
-ANNOT_ARG_HANDLERS.init      = function() end
-ANNOT_ARG_HANDLERS.terminate = function() end
-
--- Macro name -> handler key. Replaces the `macro_def.binds` check
--- plus the 4-way ident elseif chain.
-local MACRO_HANDLER_KEY = {
-	["atom_bind"]      = "bind",
-	["atom_annot"]     = "annot",
-	["atom_setup"]     = "reads_only",
-	["atom_commit"]    = "reads_only",
-	["atom_init"]      = "init",
-	["atom_terminate"] = "terminate",
-}
-
--- atom_setup(name, reads) / atom_commit(name, reads): reads from slot 2.
-function ANNOT_ARG_HANDLERS.reads_only(entry, args)
-	if #args >= 2 and is_regs_arg(args[2]) then
-		entry.reads = args[2].value
-	end
-end
-
--- atom_annot(name, phase, reads, writes)
-function ANNOT_ARG_HANDLERS.annot(entry, args)
-	if #args >= 2 and args[2].kind == "ident" then
-		entry.phase = MACRO_EXPANSION[args[2].value] or args[2].value
-	end
-	if #args >= 3 and is_regs_arg(args[3]) then
-		if args[3].kind == "atom_writes" then
-			entry.errors[#entry.errors + 1] = "reads slot has atom_writes — swap order?"
+-- atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
+function ANNOT_ARG_HANDLERS.info(entry, args)
+	for _, arg in ipairs(args) do
+		if arg.kind == "atom_bind" then
+			entry.binds = arg.value
+		elseif arg.kind == "atom_reads" then
+			entry.reads = arg.value
+		elseif arg.kind == "atom_writes" then
+			entry.writes = arg.value
+		elseif arg.kind == "ident" then
+			-- Reserved for future phase tokens. Currently ignored.
+			-- (Could be reintroduced as `phase_*` sub-calls of atom_info.)
+		else
+			entry.errors[#entry.errors + 1] = string.format(
+				"unexpected atom_info arg kind=%s value=%s", arg.kind, tostring(arg.value))
 		end
-		entry.reads = args[3].value
-	end
-	if #args >= 4 and is_regs_arg(args[4]) then
-		if args[4].kind == "atom_reads" then
-			entry.errors[#entry.errors + 1] = "writes slot has atom_reads — swap order?"
-		end
-		entry.writes = args[4].value
 	end
 end
 
@@ -589,16 +445,17 @@ local function new_annot_entry(line, ident, name, kind)
 		name   = name,
 		kind   = kind,
 		binds  = nil,
-		phase  = nil,
 		reads  = {},
 		writes = {},
 		errors = {},
 	}
 end
 
---- Find every TAPE_ATOM_* macro call in source and convert it to a
---- normalized annotation entry. Dispatches per-macro arg-shape via
---- ANNOT_ARG_HANDLERS (lookup table; no nested if/elseif chain).
+--- Find every MipsAtom_(name) declaration in source, then look for an
+--- immediately-following atom_info(...) call. If present, parse its
+--- sub-calls into a normalized annotation entry linked to the MipsAtom_
+--- name. If no atom_info follows, emit NO annotation entry (atoms
+--- without annotations are valid in the new minimal shape).
 local function find_atom_annotations(source)
 	local line_of = duffle.LineIndex(source)
 	local annots = {}
@@ -607,9 +464,6 @@ local function find_atom_annotations(source)
 	while i <= len do
 		i = skip_ws_and_cmt(source, i); if i > len then break end
 		-- Skip preprocessor directives (lines starting with #).
-		-- Without this guard, `#define atom_init(name) ...` macro
-		-- definitions get misinterpreted as annotation calls with
-		-- the literal placeholder "name" as the atom name.
 		if source:sub(i, i) == "#" then
 			local j = i
 			while j <= len and source:sub(j, j) ~= "\n" do j = j + 1 end
@@ -620,29 +474,44 @@ local function find_atom_annotations(source)
 		local ident, after = read_ident(source, i)
 		if not ident then
 			i = i + 1
-		elseif TAPE_ATOM_MACROS[ident] then
+		elseif ident == "MipsAtom_" then
 			local open = skip_ws_and_cmt(source, after)
 			if source:sub(open, open) ~= "(" then
 				i = open + 1
-			else
-				local inner, after_paren = read_parens(source, open)
-				local args = parse_atom_annot_args(inner)
-				local macro_def = TAPE_ATOM_MACROS[ident]
+				goto continue
+			end
+			local inner, after_paren = read_parens(source, open)
+			local a = 1
+			while a <= #inner and is_space(inner:sub(a, a)) do a = a + 1 end
+			local b = a
+			while b <= #inner and is_alnum(inner:sub(b, b)) do b = b + 1 end
+			local name = inner:sub(a, b - 1)
 
-				if #args < 1 then
-					annots[#annots + 1] = {
-						line  = line_of(i),
-						macro = ident,
-						kind  = macro_def.kind,
-						error = "missing atom name (first arg)",
-					}
-				else
-					local entry = new_annot_entry(line_of(i), ident, args[1].value, macro_def.kind)
-					local handler = ANNOT_ARG_HANDLERS[MACRO_HANDLER_KEY[ident]]
-					if handler then handler(entry, args) end
+			-- Look for atom_info(...) right after MipsAtom_(name).
+			local lookahead = skip_ws_and_cmt(source, after_paren)
+			local look_ident, look_after = read_ident(source, lookahead)
+			if look_ident == "atom_info" then
+				local info_open = skip_ws_and_cmt(source, look_after)
+				if source:sub(info_open, info_open) == "(" then
+					local info_inner, info_after = read_parens(source, info_open)
+					local args = parse_atom_annot_args(info_inner)
+					local entry = new_annot_entry(line_of(lookahead), "atom_info", name, "info")
+					ANNOT_ARG_HANDLERS.info(entry, args)
 					annots[#annots + 1] = entry
+					i = info_after
+				else
+					i = info_open + 1
 				end
+			else
+				-- No atom_info follows this MipsAtom_. Valid in new shape.
 				i = after_paren
+			end
+
+			-- Skip past the body { ... } if present.
+			local brace = scan_to_char(source, "{", i)
+			if brace then
+				local _, after_brace = read_braces(source, brace)
+				i = after_brace
 			end
 		else
 			i = after
@@ -661,7 +530,6 @@ local function validate(ctx, src)
 
 	local annots      = find_atom_annotations(source)
 	local macros     = find_macro_word_annotations(source)
-	local pragmas    = find_atom_pragmas(source)
 	local binds      = find_binds_structs(source)
 	local atoms      = find_atom_names(source)
 
@@ -692,37 +560,26 @@ local function validate(ctx, src)
 		end
 	end
 
-	-- 2. Every atom must have exactly one annotation (no orphans, no duplicates).
+	-- 2. Every atom may have AT MOST ONE annotation (no duplicates).
+	--    (Atoms with ZERO annotations are valid in the new minimal shape.)
 	local count_per_atom = {}
 	for _, a in ipairs(annots) do
 		if a.name and not a.error then
 			count_per_atom[a.name] = (count_per_atom[a.name] or 0) + 1
 		end
 	end
-	for _, atom in ipairs(atoms) do
-		local n = count_per_atom[atom.name] or 0
-		if n == 0 then
-			warnings[#warnings + 1] = {
-				line = atom.line,
-				msg  = string.format("MipsAtom_(%s) has no TAPE_ATOM_* annotation", atom.name),
-			}
-		elseif n > 1 then
+	for name, n in pairs(count_per_atom) do
+		if n > 1 then
 			errors[#errors + 1] = {
-				line = atom.line,
-				msg  = string.format("MipsAtom_(%s) has %d annotations (expected 1)", atom.name, n),
+				line = atom_index[name] and atom_index[name].line or 0,
+				msg  = string.format("MipsAtom_(%s) has %d annotations (expected at most 1)", name, n),
 			}
 		end
 	end
 
-	-- 3. Phase validity.
-	for _, a in ipairs(annots) do
-		if a.name and not a.error and a.phase and not valid_phase(a.phase) then
-			errors[#errors + 1] = {
-				line = a.line,
-				msg  = string.format("'%s' has unknown phase '%s' (expected one of init/bind/setup/work/commit/terminate)", a.name, a.phase),
-			}
-		end
-	end
+	-- 3. (Phase validity check DROPPED. Phases were removed from the
+	--    annotation DSL. They may be reintroduced later as sub-calls of
+	--    atom_info, at which point ordering checks will go here.)
 
 	-- 4. BIND atoms must reference a real Binds_* struct.
 	for _, a in ipairs(annots) do
@@ -764,16 +621,14 @@ local function validate(ctx, src)
 		end
 	end
 
-	-- 6. WORK reads should be a subset of BIND writes (the wave contract).
+	-- 6. INFO reads should be wave-context registers (or R_TapePtr for rbind).
 	for _, a in ipairs(annots) do
-		if a.kind == "work" then
-			for _, r in ipairs(a.reads) do
-				if not is_wave_context_reg(r) and r ~= "R_TapePtr" then
-					warnings[#warnings + 1] = {
-						line = a.line,
-						msg  = string.format("work atom '%s' reads '%s' which is not a known wave-context register", a.name, r),
-					}
-				end
+		for _, r in ipairs(a.reads) do
+			if not is_wave_context_reg(r) and r ~= "R_TapePtr" then
+				warnings[#warnings + 1] = {
+					line = a.line,
+					msg  = string.format("atom '%s' reads '%s' which is not a known wave-context register", a.name, r),
+				}
 			end
 		end
 	end
@@ -805,51 +660,19 @@ local function validate(ctx, src)
 		check_macro_drift(m, ctx.shared.word_counts[m.name])
 	end
 
-	-- 8. atom_<...> _Pragma validation: resource/region/group/cadence/async
-	for _, p in ipairs(pragmas) do
-		if not atom_index[p.name] then
-			errors[#errors + 1] = {
-				line = p.line,
-				msg  = string.format("pragma references unknown atom '%s'", p.name),
-			}
-		end
+	-- 8. (atom_<...> _Pragma validation DROPPED. The pragma macros
+	--    atom_resource / atom_region / atom_group / atom_cadence /
+	--    atom_async were removed from atom_dsl.h. They may be
+	--    reintroduced later as sub-calls of atom_info.)
 
-		for k, v in pairs(p.attrs) do
-			local spec = ATOM_PRAGMA_KINDS[k]
-			if not spec then
-				errors[#errors + 1] = {
-					line = p.line,
-					msg  = string.format("'%s' has unknown pragma key '%s' (allowed: resource/region/group/cadence/async)", p.name, k),
-				}
-			elseif spec.allowed and not spec.allowed[v] then
-				local allowed = {}
-				for kk in pairs(spec.allowed) do allowed[#allowed + 1] = kk end
-				table.sort(allowed)
-				local allowed_str = table.concat(allowed, ", ")
-				errors[#errors + 1] = {
-					line = p.line,
-					msg  = string.format("'%s' pragma %s=%s but '%s' is not allowed (allowed: %s)", p.name, k, v, v, allowed_str),
-				}
-			end
-		end
-	end
-
-	-- 9. CADENCE_ONDEMAND requires async=true. Flattened as a guard
-	--    (single condition, no nested if).
-	for _, p in ipairs(pragmas) do
-		if p.attrs.cadence == "ondemand" and p.attrs.async ~= "true" then
-			errors[#errors + 1] = {
-				line = p.line,
-				msg  = string.format("'%s' is CADENCE_ONDEMAND but does not declare atom_async(true)", p.name),
-			}
-		end
-	end
+	-- 9. (CADENCE_ONDEMAND requires async check DROPPED. Same reason
+	--    as #8.)
 
 	-- 10. Information summary.
 	info[#info + 1] = {
 		line = 0,
-		msg  = string.format("scanned: %d atom(s), %d annotation(s), %d pragma(s), %d macro-word-decl(s), %d binds struct(s)",
-			#atoms, #annots, #pragmas, #macros, #binds),
+		msg  = string.format("scanned: %d atom(s), %d annotation(s), %d macro-word-decl(s), %d binds struct(s)",
+			#atoms, #annots, #macros, #binds),
 	}
 
 	return {
