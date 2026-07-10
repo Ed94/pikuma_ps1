@@ -51,10 +51,7 @@
  * tape-side macros that pin a register to hold the IO base and access
  * ports via offsets — `lui $reg, 0x1F80` (1 word) then `sw $data,
  * GPIO_PORT*_OFFSET($reg)` (1 word). Mirrors the `IO_BASE_ADDR equ
- * 0x1F80` + `gpio_port0 equ 0x1810` pattern from graphics_hello/gp.s.
- *
- * See lottes_tape.h `R_GpIoBase` + `mac_gp0_send_imm` for the
- * wave-context form that composes these primitives. */
+ * 0x1F80` + `gpio_port0 equ 0x1810` pattern from graphics_hello/gp.s. */
 enum {
     IO_BASE_ADDR      = 0x1F800000,  /* full 32-bit I/O region base */
     IO_BASE_ADDR_HI16 = 0x1F80,      /* fits in a single `lui $reg, 0x1F80` */
@@ -120,8 +117,7 @@ enum {
     gp0_cmd_tile_8          = 0x68,
     gp0_cmd_tile_16         = 0x70,
 
-    /* State setters (not drawing primitives; set render context).
-     * Per PSX-SPX graphicsprocessingunitgpu.md §"GP0 Other Commands". */
+    /* State setters (not drawing primitives; set render context). */
     gp0_cmd_DrawModeSetting      = 0xE1,  /* TPage / draw-mode (semi-trans, dither, etc.) */
     gp0_cmd_SetTextureWindow     = 0xE2,
     gp0_cmd_SetDrawArea_TopLeft  = 0xE3,
@@ -130,9 +126,7 @@ enum {
     gp0_cmd_SetMaskBit           = 0xE6,
 
     /* bitfield shifts / widths / masks ----
-     *
-     * Generic GP0/GP1 command byte (upper 8 bits of every word sent
-     * to either port). Used by `enc_gp0_cmd(cmd)` and friends below. */
+     * Generic GP0/GP1 command byte (upper 8 bits of every word sent to either port). */
     gp0_cmd_shift = 24,
     gp0_cmd_width =  8,
     gp0_cmd_mask  = 0xFF,
@@ -294,12 +288,6 @@ enum {
  *  Common command words for boot-time GPU init and standard
  *  display configurations. Each one is a pure compile-time integer
  *  constant ready to drop into a `.word` directive.
- *
- *  These are the equivalents of the `gp_HorizontalDisplayRange_3168_608`,
- *  `gp_VerticalDisplayRange_264_24`, `gp_DisplayMode_320x240_15bit_NTSC`,
- *  `gp_SetDrawMode_DrawAllowed`, `gp_DMA_*` `.equ`s from the pre-rewrite
- *  gp.h / graphics_hello/gp.s, rebuilt using the layer-cake encoders so
- *  no magic numbers appear in any body.
  * ============================================================================ */
 
 /* ---- Display enable (1-bit payload on DisplayEnable cmd) ---- */
@@ -391,8 +379,8 @@ typedef Struct_(RGB8) { B1 r; B1 g; B1 b; };
 
 /* ---------- PolyTag (the OT-link header; 1 word) ---------- */
 enum {
-    polytag_len_bits  =  8,
-    polytag_addr_bits = 24,
+    PolyTag_len_bits  =  8,
+    PolyTag_addr_bits = 24,
 };
 typedef Struct_(PolyTag) {
 	union {
@@ -468,7 +456,7 @@ typedef Struct_(Poly_FT3) {
     V2_S2 p2; U1 u2; U1 v2;
 };
 
-/* ---------- Poly_FT4 (Flat Textured Quad; placeholder layout) ---------- */
+/* ---------- Poly_FT4 (Flat Textured Quad) ---------- */
 typedef Struct_(Poly_FT4) {
     U4   tag;
     RGB8 color;
@@ -481,7 +469,7 @@ typedef Struct_(Poly_FT4) {
     V2_S2 p3; U1 u3; U1 v3;
 };
 
-/* ---------- Poly_GT3 (Gouraud Textured Triangle; placeholder layout) ---------- */
+/* ---------- Poly_GT3 (Gouraud Textured Triangle) ---------- */
 typedef Struct_(Poly_GT3) {
     U4    tag; RGB8 c0; B1 code;
     V2_S2 p0;  RGB8 c1; B1 pad1;
@@ -494,7 +482,7 @@ typedef Struct_(Poly_GT3) {
     V2_S2 tp2; U1 u2; U1 v2;
 };
 
-/* ---------- Poly_GT4 (Gouraud Textured Quad; placeholder layout) ---------- */
+/* ---------- Poly_GT4 (Gouraud Textured Quad) ---------- */
 typedef Struct_(Poly_GT4) {
     U4    tag; RGB8 c0; B1 code;
     V2_S2 p0;  RGB8 c1; B1 pad1;
@@ -509,7 +497,7 @@ typedef Struct_(Poly_GT4) {
     V2_S2 tp3; U1 u3; U1 v3;
 };
 
-/* ---------- Primitive setters (C-level, no emitted words) ----------
+/* ---------- Primitive setters (C-level) ----------
  * DSL cast convention: every cast via C_(), every pointer via R_/V_. */
 #define set_poly_f3(p)  set_len(p, 4),  C_(Poly_F3_R, p)->code = gp0_cmd_poly_f3
 #define set_poly_ft3(p) set_len(p, 7),  C_(Poly_FT3_R,p)->code = gp0_cmd_poly_ft3
@@ -647,7 +635,7 @@ enum {
  *
  *  Future?: add `tim_load_to_vram(tim_ptr, vram_addr)` that
  *  emits the necessary GP0 commands. Stoppped for now at the
- *  struct + enum level for this track.
+ *  struct + enum level.
  * ============================================================================ */
 enum {
     tim_file_id_magic = 0x10,
@@ -660,7 +648,7 @@ enum {
 };
 
 typedef Struct_(TIM_Header) {
-    U4 file_id;        /* always 0x10 = "TIM" magic */
+    U4 file_id;       /* always 0x10 = "TIM" magic */
     U4 version;       /* ignored; always 0 */
     U4 flags;         /* bits 0..2 = type, bit 3 = has_clut */
 };

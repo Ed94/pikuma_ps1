@@ -134,12 +134,12 @@ MipsAtomComp_(ac_insert_ot_tag_f3) {
 	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
 	add_u_self(  R_T1, R_OtBase),                              // T1 = & OrderingTable[OTZ]
 	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // AT = old_ot_head
-	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits), // V0 = (5 - 1) << 24 = 4 << 24
-	mask_upper(  R_AT, R_AT,         S_(polytag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
+	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (5 - 1) << 24 = 4 << 24
+	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
 	or_u(        R_AT, R_AT, R_V0),                            // Merge length
 	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)), // prim->tag = packed(prim_length, old_addr)
-	shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits)),    // AT = (prim_length << 24) | old_addr
-	shift_lright(R_AT, R_AT,         S_(polytag_len_bits)),
+	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
+	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
 	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // OrderingTable[OTZ] = PrimCursor
 };
 
@@ -149,22 +149,20 @@ MipsAtomComp_(ac_insert_ot_tag_g4) {
 	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
 	add_u_self(  R_T1, R_OtBase),                              // T1 = & OrderingTable[OTZ]
 	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // AT = old_ot_head
-	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits), // V0 = (9 - 1) << 24 = 8 << 24
-	mask_upper(  R_AT, R_AT,         S_(polytag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
+	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (9 - 1) << 24 = 8 << 24
+	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
 	or_u(        R_AT, R_AT, R_V0),                            // Merge length
 	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)), // prim->tag = packed(prim_length, old_addr)
-	shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits)),    // AT = (prim_length << 24) | old_addr
-	shift_lright(R_AT, R_AT,         S_(polytag_len_bits)),
+	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
+	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
 	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // OrderingTable[OTZ] = PrimCursor
 };
 
 /* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given
- * byte offset. Internal helper used by the *_format_*_color macros.
- * Args: off = U4 byte offset, code = GP0 cmd byte (0 for c1/c2/c3 of
- * a Poly_G4), r/g/b = 8-bit RGB byte values. */
-FI_ MipsAtom ac_pack_color_word(U4 off, U4 code, U1 r, U1 g, U1 b)
+ * byte offset. Internal helper used by the *_format_*_color macros. */
+FI_ MipsAtom ac_pack_color_word(U4 off, U4 cmd, U1 r, U1 g, U1 b)
 MipsAtomComp_Proc_(ac_pack_color_word, {
-	load_upper_i(R_AT, (code) << 8  | (b)),
+	load_upper_i(R_AT, (cmd) << 8  | (b)),
 	or_i_self(   R_AT, ((g)   << 8) | (r)),
 	store_word(  R_AT, R_PrimCursor, (off)),
 })
@@ -199,8 +197,8 @@ MipsAtomComp_Proc_(ac_format_g4_color, {
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
  * G4 triangle portion to p0/p1/p2.
- * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen,
- * SXY2=v2.screen). MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2
+ * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). 
+ * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2
  * get overwritten with v3 (RTPS writes only to SXY2, but to keep the
  * three registers aligned with v0/v1/v2 you must store before RTPS).
  * The macro name declares the pipeline position; check #6 (GTE state-
@@ -321,9 +319,9 @@ internal MipsAtom_(diag_color) {
 	add_u_self(      R_T1,       R_T6),         
 	
 	load_word(   R_AT, R_T1, 0),        
-	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits),
+	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits),
 	store_word(  R_AT, R_T7, 0),       
-	shift_lleft(R_AT, R_T7, S_(polytag_len_bits)), shift_lright(R_AT, R_AT, S_(polytag_len_bits)),         
+	shift_lleft(R_AT, R_T7, S_(PolyTag_len_bits)), shift_lright(R_AT, R_AT, S_(PolyTag_len_bits)),         
 	or_u_self(  R_AT, R_V0),          
 	store_word( R_AT, R_T1, 0),       
 

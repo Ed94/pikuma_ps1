@@ -51,12 +51,12 @@ WORD_COUNT(mac_gte_load_tri_verts, 18)
 	shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */ \
 ,	add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */ \
 ,	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
-,	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = (5 - 1) << 24 = 4 << 24 */ \
-,	mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
+,	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits) /* V0 = (5 - 1) << 24 = 4 << 24 */ \
+,	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
 ,	or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
 ,	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
-,	shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
-,	shift_lright(R_AT, R_AT,         S_(polytag_len_bits)) \
+,	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
+,	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)) \
 ,	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
 WORD_COUNT(mac_insert_ot_tag_f3, 11)
 
@@ -66,17 +66,17 @@ WORD_COUNT(mac_insert_ot_tag_f3, 11)
 	shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */ \
 ,	add_u_self(  R_T1, R_OtBase)                              /* T1 = & OrderingTable[OTZ] */ \
 ,	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* AT = old_ot_head */ \
-,	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << polytag_len_bits) /* V0 = (9 - 1) << 24 = 8 << 24 */ \
-,	mask_upper(  R_AT, R_AT,         S_(polytag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
+,	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits) /* V0 = (9 - 1) << 24 = 8 << 24 */ \
+,	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
 ,	or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
 ,	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)) /* prim->tag = packed(prim_length, old_addr) */ \
-,	shift_lleft( R_AT, R_PrimCursor, S_(polytag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
-,	shift_lright(R_AT, R_AT,         S_(polytag_len_bits)) \
+,	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
+,	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)) \
 ,	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)) /* OrderingTable[OTZ] = PrimCursor */
 WORD_COUNT(mac_insert_ot_tag_g4, 11)
 
-#define mac_pack_color_word(off, code, r, g, b) \
-	load_upper_i(R_AT, (code) << 8  | (b)) \
+#define mac_pack_color_word(off, cmd, r, g, b) \
+	load_upper_i(R_AT, (cmd) << 8  | (b)) \
 ,	or_i_self(   R_AT, ((g)   << 8) | (r)) \
 ,	store_word(  R_AT, R_PrimCursor, (off))
 WORD_COUNT(mac_pack_color_word, 3)
@@ -102,8 +102,8 @@ WORD_COUNT(mac_format_g4_color, 12)
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
  * G4 triangle portion to p0/p1/p2.
- * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen,
- * SXY2=v2.screen). MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2
+ * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). 
+ * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2
  * get overwritten with v3 (RTPS writes only to SXY2, but to keep the
  * three registers aligned with v0/v1/v2 you must store before RTPS).
  * The macro name declares the pipeline position; check #6 (GTE state-
