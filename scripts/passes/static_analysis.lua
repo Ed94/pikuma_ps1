@@ -56,12 +56,27 @@ local GTE_PIPELINE_LATENCY = duffle.GTE_PIPELINE_LATENCY
 -- Source walkers
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Walk source-as-written, return a list of `{line, name, body, body_off}`
---- for every `MipsAtom_(name) { body }` declaration. Comments / strings
---- inside `name` and `body` are tolerated; `body` is the raw brace
---- inner text (with surrounding whitespace, no leading/trailing `{` `}`).
---- `body_off` is the character offset of `body[1]` in `source_text`,
---- used to compute per-token line numbers later.
+--- Walk source-as-written, return a list of `{line, name, body,
+--- body_off, kind}` for every:
+---   `MipsAtom_(name) { body };`               -> kind = "atom"     (baked atom)
+---   `MipsAtomComp_(name) { body };`           -> kind = "comp_bare" (static-array component)
+---   `MipsAtomComp_Proc_(name, { body })`     -> kind = "comp_proc" (procedural component)
+---
+--- All three forms are recognized because the user explicitly uses
+--- both bare components (e.g. `ac_gte_store_f3_post_rtpt`) and
+--- procedural components (e.g. `ac_format_f3_color(r, g, b)`) inside
+--- atom bodies. The two component forms generate macro equivalents
+--- (in gen/duffle.macs.h) that atoms call via `mac_*` -- so the parent
+--- atom body is what needs the GTE pipeline-fill + mac_yield checks.
+--- The component bodies themselves don't need mac_yield (control
+--- transfer is the parent atom's job) but they DO need pre-fill nops
+--- before any gte_cmdw_X they contain.
+---
+--- Comments / strings inside `name` and `body` are tolerated; `body`
+--- is the raw brace inner text (with surrounding whitespace, no
+--- leading/trailing `{` `}`). `body_off` is the character offset of
+--- `body[1]` in `source_text`, used to compute per-token line numbers
+--- later.
 local function find_atom_bodies(source_text)
 	local line_of  = duffle.LineIndex(source_text)
 	local out      = {}
@@ -72,35 +87,111 @@ local function find_atom_bodies(source_text)
 		local ident, after = read_ident(source_text, i)
 		if not ident then
 			i = i + 1
-		elseif ident == "MipsAtom_" then
+		elseif ident == "MipsAtom_"
+		    or ident == "MipsAtomComp_"
+		    or ident == "MipsAtomComp_Proc_" then
+			-- Determine the kind from the exact ident (3 distinct macros,
+			-- each with its own kind).
+			local kind
+			if     ident == "MipsAtom_"             then kind = "atom"
+			elseif ident == "MipsAtomComp_"         then kind = "comp_bare"
+			else                                         kind = "comp_proc"
+			end
+
 			local open = skip_ws_and_cmt(source_text, after)
 			if source_text:sub(open, open) ~= "(" then
 				i = open + 1
 			else
 				local inner, after_paren = read_parens(source_text, open)
-				local n = 1
-				while n <= #inner and inner:sub(n, n):match("[%s]") do n = n + 1 end
-				local m = n
-				while m <= #inner and inner:sub(m, m):match("[%w_]") do m = m + 1 end
-				local name = inner:sub(n, m - 1)
-				if name ~= "" then
-					local brace = scan_to_char(source_text, "{", after_paren)
-					if brace then
-						local body, after_brace = read_braces(source_text, brace)
-						-- `body` starts at brace + 1 (the char after `{`).
-						local body_off = brace + 1
-						out[#out + 1] = {
-							line     = line_of(i),
-							name     = name,
-							body     = body,
-							body_off = body_off,
-						}
-						i = after_brace
-					else
+
+				if kind == "comp_proc" then
+					-- MipsAtomComp_Proc_(sym, { body })
+					-- The body is inside the LAST `{ ... }` in the args
+					-- (the macro takes 2 args: sym name, then body in {}).
+					-- Find the last `{` in `inner`, then the matching `}`.
+					local last_open
+					for k = #inner, 1, -1 do
+						if inner:sub(k, k) == "{" then last_open = k; break end
+					end
+					if not last_open then
 						i = open + 1
+					else
+						-- Walk forward to find matching `}` honoring balanced
+						-- ()/[] and strings. We could call duffle.read_braces
+						-- from last_open+1, but read_braces expects to start at
+						-- the brace itself. Inline the walk for clarity.
+						local depth = 1
+						local j = last_open + 1
+						while j <= #inner and depth > 0 do
+							local c = inner:byte(j)
+							if c == 123 then
+								depth = depth + 1; j = j + 1
+							elseif c == 125 then
+								depth = depth - 1
+								if depth == 0 then break end
+								j = j + 1
+							elseif c == 40 then
+								local _, a = read_parens(inner, j); j = a
+							elseif c == 91 then
+								local _, a = read_brackets(inner, j); j = a
+							elseif c == 34 or c == 39 then
+								j = duffle.skip_str_or_cmt(inner, j) + 1
+							else
+								j = j + 1
+							end
+						end
+						if depth ~= 0 then
+							-- unmatched; bail
+							i = open + 1
+						else
+							-- First ident in `inner` is the comp name.
+							local name_match = inner:match("^%s*([%w_]+)")
+							local name = name_match or "?"
+							local body     = inner:sub(last_open + 1, j - 1)
+							-- body_off in full source: position right after the
+							-- LAST `{` in `inner`, which sits at `open+1+last_open`
+							-- (open+1 = just inside the outer paren, +last_open
+							-- = at the `{`).
+							local body_off = open + 1 + last_open
+							out[#out + 1] = {
+								line     = line_of(i),
+								name     = name,
+								body     = body,
+								body_off = body_off + 1,
+								kind     = kind,
+							}
+							i = after_paren
+						end
 					end
 				else
-					i = open + 1
+					-- MipsAtom_(sym) { body };  OR
+					-- MipsAtomComp_(sym) { body };
+					-- name is the first arg, body is the FIRST { ... } after
+					-- the paren.
+					local a = 1
+					while a <= #inner and inner:sub(a, a):match("[%s]") do a = a + 1 end
+					local b = a
+					while b <= #inner and inner:sub(b, b):match("[%w_]") do b = b + 1 end
+					local name = inner:sub(a, b - 1)
+					if name == "" then
+						i = open + 1
+					else
+						local brace = scan_to_char(source_text, "{", after_paren)
+						if brace then
+							local body, after_brace = read_braces(source_text, brace)
+							local body_off = brace + 1
+							out[#out + 1] = {
+								line     = line_of(i),
+								name     = name,
+								body     = body,
+								body_off = body_off,
+								kind     = kind,
+							}
+							i = after_brace
+						else
+							i = open + 1
+						end
+					end
 				end
 			end
 		else
@@ -312,9 +403,22 @@ end
 --- { jump_reg(rret_addr), nop }` are valid as-is; mac_yield at the end
 --- is the contract.
 local function check_mac_yield_uniformity(atoms, findings)
+	-- Per-kind semantics:
+	--   MipsAtom_          (baked atom): exactly 1 mac_yield at the end of
+	--                          the body. Control transfer is the atom's job.
+	--   MipsAtomComp_      (bare static-array component): ZERO mac_yield.
+	--                          The component is invoked from inside an atom
+	--                          body; the parent atom does the yield.
+	--   MipsAtomComp_Proc_ (procedural component): ZERO mac_yield.
+	--                          Same reasoning -- it's a function returning
+	--                          a MipsAtom slice, invoked from a parent atom.
+	--
+	-- The GTE pipeline-fill check applies to all 3 kinds (see
+	-- check_gte_pipeline_fill). Only the mac_yield rule branches on kind.
 	for _, a in ipairs(atoms) do
 		local tokens = tokenize_body(a.body)
 		local line_in_body = build_body_line_index(a.body)
+
 		local count = 0
 		local last_idx = 0
 		for i, t in ipairs(tokens) do
@@ -329,46 +433,68 @@ local function check_mac_yield_uniformity(atoms, findings)
 		local function line_for(idx)
 			return a.line + line_in_body[tokens[idx].rel]
 		end
-		if count == 0 then
-			findings[#findings + 1] = {
-				atom  = a.name,
-				line  = a.line,
-				check = "mac_yield_uniformity",
-				msg   = string.format(
-					"%s at line %d has no `mac_yield()`; every atom must hand control to the next via mac_yield at end",
-					a.name, a.line),
-			}
-		elseif count > 1 then
-			findings[#findings + 1] = {
-				atom  = a.name,
-				line  = line_for(last_idx),
-				check = "mac_yield_uniformity",
-				msg   = string.format(
-					"%s at line %d has %d `mac_yield()` calls; exactly 1 is allowed",
-					a.name, line_for(last_idx), count),
-			}
-		elseif last_idx < #tokens then
-			-- 1 call, but not the last token. Check if there's anything
-			-- AFTER mac_yield (compiler tolerance is `macro_yield, nop`).
-			-- We DON'T fail if the post-token is just `nop` or `nop2` or
-			-- a branch with `, nop` delay slot -- it's the standard
-			-- "yield, then BD nop" idiom.
-			local post_non_nop = false
-			for j = last_idx + 1, #tokens do
-				local t = tokens[j].tok
-				if t ~= "" and t ~= "nop" and t ~= "nop2" and not t:match("%,%s*nop%)%s*$") then
-					post_non_nop = true
-					break
-				end
-			end
-			if post_non_nop then
+
+		if a.kind == "atom" then
+			-- Baked atom: exactly 1 yield at the end.
+			if count == 0 then
+				findings[#findings + 1] = {
+					atom  = a.name,
+					line  = a.line,
+					check = "mac_yield_uniformity",
+					kind  = "warning",
+					msg   = string.format(
+						"%s at line %d has no `mac_yield()`; every atom must hand control to the next via mac_yield at end",
+						a.name, a.line),
+				}
+			elseif count > 1 then
 				findings[#findings + 1] = {
 					atom  = a.name,
 					line  = line_for(last_idx),
 					check = "mac_yield_uniformity",
+					kind  = "warning",
 					msg   = string.format(
-						"%s at line %d has `mac_yield()` at token %d/%d; the yield must be the LAST non-nop token in the body",
-						a.name, line_for(last_idx), last_idx, #tokens),
+						"%s at line %d has %d `mac_yield()` calls; exactly 1 is allowed",
+						a.name, line_for(last_idx), count),
+				}
+			elseif last_idx < #tokens then
+				-- 1 call, but not the last token. We DON'T fail if the
+				-- post-token is just `nop` or `nop2` or a branch with `, nop`
+				-- delay slot -- it's the standard "yield, then BD nop" idiom.
+				local post_non_nop = false
+				for j = last_idx + 1, #tokens do
+					local t = tokens[j].tok
+					if t ~= "" and t ~= "nop" and t ~= "nop2"
+					   and not t:match("%,%s*nop%)%s*$") then
+						post_non_nop = true
+						break
+					end
+				end
+				if post_non_nop then
+					findings[#findings + 1] = {
+						atom  = a.name,
+						line  = line_for(last_idx),
+						check = "mac_yield_uniformity",
+						kind  = "warning",
+						msg   = string.format(
+							"%s at line %d has `mac_yield()` at token %d/%d; the yield must be the LAST non-nop token in the body",
+							a.name, line_for(last_idx), last_idx, #tokens),
+					}
+				end
+			end
+		else
+			-- Component (comp_bare or comp_proc): ZERO yields. The parent
+			-- atom does the yield. A yield inside a component would either
+			-- be dead code (bare) or prematurely terminate the function
+			-- (proc). Both are bugs.
+			if count > 0 then
+				findings[#findings + 1] = {
+					atom  = a.name,
+					line  = line_for(last_idx),
+					check = "mac_yield_uniformity",
+					kind  = "warning",
+					msg   = string.format(
+						"%s at line %d is a %s component but has %d `mac_yield()` call(s); components must not yield (the parent atom does)",
+						a.name, line_for(last_idx), a.kind, count),
 				}
 			end
 		end
@@ -438,8 +564,21 @@ local function emit_static_analysis_txt(ctx, src, result)
 	add("STATIC ANALYSIS PASS -- " .. src.path)
 	add("========================================================")
 	add("")
-	add(string.format("Atoms: %d   Findings: %d   Errors: %d   Warnings: %d",
-		#result.atoms, #result.findings, #result.errors, #result.warnings))
+	-- Tally atoms by kind for the header summary
+	local n_atoms, n_bare, n_proc = 0, 0, 0
+	for _, a in ipairs(result.atoms) do
+		n_atoms = n_atoms + 1
+		if a.kind == "comp_bare" then n_bare = n_bare + 1
+		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
+		end
+	end
+	local header_atoms = string.format("Atoms: %d", n_atoms)
+	if n_bare > 0 or n_proc > 0 then
+		header_atoms = header_atoms .. string.format("  (atoms: %d, comp_bare: %d, comp_proc: %d)",
+			n_atoms - n_bare - n_proc, n_bare, n_proc)
+	end
+	add(string.format("%s   Findings: %d   Errors: %d   Warnings: %d",
+		header_atoms, #result.findings, #result.errors, #result.warnings))
 	add("")
 
 	-- Group findings by atom for readability
