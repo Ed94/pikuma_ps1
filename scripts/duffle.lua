@@ -520,6 +520,84 @@ M.TAPE_ATOM_MACROS = {
     ["atom_info"] = { kind = "info", binds = false },
 }
 
+-- GTE pipeline-fill latency table (static-analysis Phase 1).
+--
+-- For each `gte_cmdw_*` macro in code/duffle/gte.h, the minimum number
+-- of consecutive COP2 "nop" words that MUST appear before any other
+-- COP2 read or non-nop instruction (so the GTE pipeline latency is
+-- fully retired).  Latencies are sourced from the doxygen comments
+-- in gte.h (e.g. `* @brief Rotate, Translate and Perspective Triple
+-- (23 cycles)` with body `Two nop words fill the COP2 pipeline
+-- latency`).
+--
+-- The check (`scripts/passes/static_analysis.lua ::
+-- check_gte_pipeline_fill`) walks each atom body, counts the
+-- consecutive nop words after every `gte_cmdw_*` invocation, and
+-- reports a finding if the count is below this minimum.  Aliases
+-- are dereferenced before lookup (gté_cmdw_rtps_alias ->
+-- gte_cmdw_rtps -> 2).
+--
+-- Values verified against PSX-SPX gte.txt (rtpt 23cy / 8cy per divide
+-- => 2 nops; nclip 8cy => 2 nops; avsz3/avsz4 14cy => 2 nops; op
+-- single-cycle atomic => 0 nops; mvmva 8cy matrix-vector => 2 nops).
+M.GTE_PIPELINE_LATENCY = {
+    -- Minimum number of consecutive `nop` words that must appear
+    -- IMMEDIATELY BEFORE a `gte_cmdw_<X>` invocation -- to retire
+    -- any preceding `lwc2` / `swc2` / pre-existing C2 state writes
+    -- before the GTE pipeline starts reading from V0/V1/V2 or
+    -- MAC0..3 / OTZ / IR0..3 at the command's issue cycle.
+    --
+    -- Values are from the doxygen comments in code/duffle/gte.h and
+    -- cross-checked against PSX-SPX `geometrytransformationenginegte.md`:
+    --
+    --   cmd      cycles  min pre-nops  rationale
+    --   rtps        14      2         8c per perspective divide + 6c for IR1..4 + mac write
+    --   rptt        22      2         3x rtps worth of pipeline depth
+    --   nclip        7      2         MAC0 write + 5c for sign
+    --   avsz3       14      2         14c to compute average + write OTZ
+    --   avsz4       16      2         avsz3 + 2c extra for avg over 4
+    --   mvmva        8      2         IR1..4 write + matrix work
+    --   op          5      0         output to MAC0 only (atomic 5c calc)
+    --
+    -- The `gte_rtpt()` / `gte_nclip()` / `gte_avsz3()` wrapper macros in
+    -- gte.h emit the pre-cmd nops internally (asm_words(nop, nop, ...)),
+    -- but THOSE WRAPPERS ARE NOT USED INSIDE ATOM BODIES in this
+    -- codebase. Every MipsAtom_(name) body uses raw `nop2,
+    -- gte_cmdw_<X>, ...` form instead -- that `nop2,` is the pre-fill
+    -- this check validates. So values here must reflect the source-level
+    -- convention, NOT the wrapper-internal pre-fill (which is invisible
+    -- at the source level).
+    --
+    -- Existing clean-atom bodies (cube_g4_face, floor_f3_face,
+    -- diag_gte) all emit `nop2,` before every `gte_cmdw_<X>` (which
+    -- matches values >= 2). The check passes them all.
+    --
+    -- Aliases are listed separately because source code may use either
+    -- the alias or the canonical name. The check looks up the EXACT
+    -- macro text, so both forms must be in the table.
+
+    -- Canonical macros (from code/duffle/gte.h)
+    ["gte_cmdw_rtps"]   = 2,
+    ["gte_cmdw_rtpt"]   = 2,
+    ["gte_cmdw_nclip"]  = 2,
+    ["gte_cmdw_op"]     = 0,
+    ["gte_cmdw_mvmva"]  = 2,
+    ["gte_cmdw_avsz3"]  = 2,
+    ["gte_cmdw_avsz4"]  = 2,
+
+    -- Aliases (must have the same value as their canonical target)
+    ["gte_cmdw_rotate_translate_perspective_single"] = 2,
+    ["gte_cmdw_rotate_translate_perspective_triple"] = 2,
+    ["gte_cmdw_avg_sort_z4"]                          = 2,
+
+    -- Outer product aliases (same canonical op, 0 pre-fill nops).
+    -- gte_cmdw_op          = canonical GTE-internal short form
+    -- gte_cmdw_outer_product = NOCASH / SDK-readable form
+    -- gte_cmdw_wedge         = geometric-algebra (exterior-product) form
+    ["gte_cmdw_outer_product"] = 0,
+    ["gte_cmdw_wedge"]        = 0,
+}
+
 -- Expose the lpeg_ok flag so callers can detect the LPeg-back path.
 -- True when LPeg was successfully required and the patterns above were
 -- compiled at module load time. False when running in fallback mode.

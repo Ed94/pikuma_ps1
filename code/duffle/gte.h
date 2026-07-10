@@ -440,6 +440,8 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_cmdw_rtpt   (gte_cmd_base | enc_gte_cmd(gte_cmd_rtpt ) | gte_cmdw_psyq_compat)
 #define gte_cmdw_nclip  (gte_cmd_base | enc_gte_cmd(gte_cmd_nclip))
 #define gte_cmdw_op     (gte_cmd_base | enc_gte_cmd(gte_cmd_op   ))
+#define gte_cmdw_outer_product gte_cmdw_op      /* "outer product" -- NOCASH/Sdk terminology */
+#define gte_cmdw_wedge        gte_cmdw_op      /* "wedge product"  -- geometric-algebra terminology */
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
 
 #define gte_cmdw_rotate_translate_perspective_single gte_cmdw_rtps
@@ -713,14 +715,14 @@ enum {
 		asm_words(                          \
 			  load_word(R_T5, R_T4,  0)       \
 			, load_word(R_T6, R_T4,  4)       \
-			, gte_mt(   R_T5,        0)       \
-			, gte_mt(   R_T6,        1)       \
+			, gte_mv_to_data_r(   R_T5,  0)   \
+			, gte_mv_to_data_r(   R_T6,  1)   \
 			, load_word(R_T5, R_T4,  8)       \
 			, load_word(R_T6, R_T4, 12)       \
 			, load_word(R_T4, R_T4, 16)       \
-			, gte_mt(   R_T5,  2)             \
-			, gte_mt(   R_T6,  3)             \
-			, gte_mt(   R_T4,  4)             \
+			, gte_mv_to_data_r(   R_T5,  2)   \
+			, gte_mv_to_data_r(   R_T6,  3)   \
+			, gte_mv_to_data_r(   R_T4,  4)   \
 		)                                   \
 		, r_use(r0)                         \
 		asm_clobber: clbr_volatile_gprs, rlit(R_T4), rlit(R_T5), rlit(R_T6) \
