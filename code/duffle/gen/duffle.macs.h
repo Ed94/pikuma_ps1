@@ -24,7 +24,7 @@ WORD_COUNT(mac_yield, 4)
 WORD_COUNT(mac_load_tri_indices, 3)
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
-#define mac_load_tri_verts(...) \
+#define mac_gte_load_tri_verts(...) \
 	shift_lleft(R_AT, R_T0, v3s2_byteoff) \
 ,	add_u_self(R_AT, R_VertBase) \
 ,	load_word(R_V0, R_AT, O_(V3_S2,x)) \
@@ -43,7 +43,7 @@ WORD_COUNT(mac_load_tri_indices, 3)
 ,	load_word(R_V1, R_AT, O_(V3_S2,z)) \
 ,	gte_mv_to_data_r(R_V0, C2_VXY2) \
 ,	gte_mv_to_data_r(R_V1, C2_VZ2)
-WORD_COUNT(mac_load_tri_verts, 18)
+WORD_COUNT(mac_gte_load_tri_verts, 18)
 
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
  * Hardcoded for Poly_F3 (5 words). For Poly_G4, use ac_insert_ot_tag_g4. */

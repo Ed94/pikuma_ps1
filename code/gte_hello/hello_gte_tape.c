@@ -38,7 +38,6 @@ internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri)
 /* ============================================================================
  *  cube_g4_face — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
  * ============================================================================
- *
  *  Reads 4 indices from R_FaceCur (V4_S2 = 8 bytes), loads 4 vertices into
  *  the GTE, runs the PsyQ RotAverageNclip4 sequence, and renders a Poly_G4.
  */
@@ -47,61 +46,42 @@ MipsAtom_(cube_g4_face) atom_info(
 		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
 		atom_writes(R_PrimCursor, R_FaceCursor)
 ){
-	/* ── 1. Load 4 face indices from R_FaceCur (V4_S2 = 8 bytes) ───────── */
 	load_half_u(R_T0, R_FaceCursor, 0 * S_(S2)),
 	load_half_u(R_T1, R_FaceCursor, 1 * S_(S2)),
 	load_half_u(R_T2, R_FaceCursor, 2 * S_(S2)),
 	load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)),
 
-	/* ── 2. Load V0, V1, V2 into GTE (parallel to mac_load_tri_verts) ── */
-	mac_load_tri_verts(R_T0, R_T1, R_T2),
-
-	/* ── 3. RTPT — transforms V0/V1/V2 → SXY0/SXY1/SXY2 + SZ1/SZ2/SZ3 ─── */
+	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple,
-
-	/* ── 4. NCLIP — backface culling on SXY0/SXY1/SXY2 (p0,p1,p2) ──────── */
-	/*     MUST be done BEFORE V3-RTPS overwrites SXY0 with p3.             */
 	nop2, gte_cmdw_nclip,
 
-	/* ── 5. Cull check: skip format/insert if MAC0 ≤ 0 (backface) ───────── */
 	nop2,  gte_mv_from_data_r(R_T0, C2_MAC0),
-	nop,                                                          /* COP2 stall */
-	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
-	nop,                                                          /* BD slot    */
+	nop,
+	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)), nop,
 
-	/* ── 6. Format c0..c3 (color+code words) BEFORE V3-RTPS ─────────────── */
 	store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
 	mac_format_g4_color(
 		/* c0 magenta */ 0xFF, 0x00, 0xFF,
 		/* c1 yellow  */ 0xFF, 0xFF, 0x00,
 		/* c2 cyan    */ 0x00, 0xFF, 0xFF,
 		/* c3 green   */ 0x00, 0xFF, 0x00),
-
-	/* ── 7. Store p0..p2 BEFORE V3-RTPS overwrites SXY0 ─────────────────── */
 	mac_gte_store_g4_p012_post_rtpt_pre_rtps(),
 
-	/* ── 8. Load V3 = verts[face->w] into V0 ─────────────────────────────── */
 	shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, O_(V3_S2, x)),   load_word(R_V1, R_AT, O_(V3_S2, z)),
 	gte_mv_to_data_r(R_V0, C2_VXY0),       gte_mv_to_data_r(R_V1, C2_VZ0),
 
-	/* ── 9. RTPS — transforms V0 (now V3) → SXY0 (p3) + SZ3 ─────────────── */
 	nop2, gte_cmdw_rotate_translate_perspective_single,
 	mac_gte_store_g4_p3_post_rtps(),
 
-	/* ── 10. AVSZ4 — average Z from SZ0/SZ1/SZ2/SZ3 ─────────────────────── */
 	nop2, gte_cmdw_avg_sort_z4,
 	nop2, gte_mv_from_data_r(R_T1, C2_OTZ),
 
-	/* ── 11. Bounds check OTZ < OrderingTbl_Len ─────────────────────────── */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),
 	set_lt_u(    R_AT, R_T1, R_AT),
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
-
-	/* ── 12. Insert into Ordering Table (length = 8 words for Poly_G4) ──── */
 	mac_insert_ot_tag_g4(),
 
-	/* ── 13. Advance cursors & yield (both branch targets land here) ────── */
 atom_label(cube_g4_face_exit)
 	add_ui_self(R_PrimCursor, S_(Poly_G4)),     /* 9 words = Poly_G4 */
 	add_ui_self(R_FaceCursor, S_(S2) * 4),      /* 4 × S2 = 8 bytes */
@@ -130,11 +110,11 @@ MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri)
 
 internal 
 MipsAtom_(floor_f3_face) atom_info(
-	, atom_reads(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
+	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 	, atom_writes(R_PrimCursor, R_FaceCursor)
 ) {
-	mac_load_tri_indices(R_T0, R_T1, R_T2),
-	mac_load_tri_verts(  R_T0, R_T1, R_T2),
+	mac_load_tri_indices(  R_T0, R_T1, R_T2),
+	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple,
 	nop2, gte_cmdw_nclip,
  
