@@ -1231,10 +1231,20 @@ local function validate(ctx, src)
 			warnings[#warnings + 1] = { line = f.line, msg = f.msg }
 		end
 	end
-	info[#info + 1] = {
-		line = 0,
-		msg  = string.format("scanned: %d atom bodies; %d findings", #atoms, #findings),
-	}
+	-- Per-source "scanned:" summary line. Includes the source basename
+	-- for traceability (the old format was just "scanned: N atom
+	-- bodies; M findings" which is unidentifiable when the module has
+	-- multiple sources). Sources with 0 atoms (pure-header files like
+	-- dsl.h, mips.h, etc.) are SKIPPED — the per-module header already
+	-- lists them in the "Sources:" section, and emitting a noisy
+	-- "0 atom bodies" line per header is just clutter.
+	if #atoms > 0 or #findings > 0 then
+		info[#info + 1] = {
+			line = 0,
+			msg  = string.format("scanned: %s: %d atom bodies; %d findings",
+				src.basename, #atoms, #findings),
+		}
+	end
 
 	-- Phase 3: cycle-budget summary line. Per-path min/max totals.
 	if #atoms > 0 then
@@ -1476,9 +1486,63 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	end
 
 	add("")
-	add("── Info ────────────────────────────────────────────────")
-	for _, i_ in ipairs(info) do
-		add(string.format("  %s", i_.msg))
+	add("── Per-source scan summary ──────────────────────────────")
+	-- One line per source that contributed atoms. The line includes
+	-- the source basename + per-source atom count + (if path-aware
+	-- cycle data is present) the min..max cycle range. Sources with
+	-- 0 atoms are skipped (they're just header files that declared
+	-- no MipsAtom_ — they're already listed in the module's
+	-- "Sources:" section above).
+	--
+	-- TODO: per-source finding attribution. Currently we can't tell
+	-- which source a given error/warning came from (errors/warnings
+	-- only carry atom-name + line, not source-path). The per-atom
+	-- cycle section already shows which atoms are in which source
+	-- via the `(file_basename)` suffix. Adding source attribution to
+	-- error/warning would be a future enhancement.
+	for _, src in ipairs(dir_sources) do
+		local src_atoms = {}
+		for _, a in ipairs(atoms) do
+			if a.source_path == src.path then
+				src_atoms[#src_atoms + 1] = a
+			end
+		end
+		if #src_atoms == 0 then
+			goto continue
+		end
+		local atom_count = #src_atoms
+		local mn, mx = math.huge, -1
+		for _, a in ipairs(src_atoms) do
+			local p = a.paths or {}
+			if (p.cycles_min or 0) < mn then mn = p.cycles_min or 0 end
+			if (p.cycles_max or 0) > mx then mx = p.cycles_max or 0 end
+		end
+		local path_str
+		if mx > 0 then
+			path_str = string.format("  cycles=%d..%d", mn, mx)
+		else
+			path_str = string.format("  %d cycles", mn)
+		end
+		add(string.format("  %-30s  %d atom%s%s",
+			src.basename, atom_count,
+			atom_count == 1 and "" or "s",
+			path_str))
+		::continue::
+	end
+
+	-- Module-level findings summary (across all sources).
+	local total_errs = #errors
+	local total_warns = #warnings
+	add("")
+	add(string.format("Module findings:  %d error(s), %d warning(s)", total_errs, total_warns))
+
+	-- Per-source "scanned:" info lines (each line includes the source
+	-- basename for traceability).
+	if #info > 0 then
+		add("")
+		for _, i_ in ipairs(info) do
+			add(string.format("  %s", i_.msg))
+		end
 	end
 
 	write_file(out_path, table.concat(lines, "\n") .. "\n")
