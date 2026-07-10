@@ -598,6 +598,55 @@ M.GTE_PIPELINE_LATENCY = {
     ["gte_cmdw_wedge"]        = 0,
 }
 
+-- GP0 packet sizes (total words including the 1-word tag) per GP0 cmd byte.
+-- Verified against code/duffle/gp.h struct sizes + the set_poly_* macros
+-- (which encode "len" = "words after tag"):
+--   set_poly_f3(p)   -> set_len(p, 4)   -> 5 total  GP0 0x20
+--   set_poly_ft3(p)  -> set_len(p, 7)   -> 8 total  GP0 0x24
+--   set_poly_f4(p)   -> set_len(p, 5)   -> 6 total  GP0 0x28
+--   set_poly_ft4(p)  -> set_len(p, 9)   -> 10 total GP0 0x2C
+--   set_poly_g3(p)   -> set_len(p, 6)   -> 7 total  GP0 0x30
+--   set_poly_gt3(p)  -> set_len(p, 9)   -> 10 total GP0 0x34
+--   set_poly_g4(p)   -> set_len(p, 8)   -> 9 total  GP0 0x38
+--   set_poly_gt4(p)  -> set_len(p, 12)  -> 13 total GP0 0x3C
+M.GP0_CMD_SIZE = {
+    [0x20] =  5,  -- Poly_F3
+    [0x24] =  8,  -- Poly_FT3
+    [0x28] =  6,  -- Poly_F4
+    [0x2C] = 10,  -- Poly_FT4
+    [0x30] =  7,  -- Poly_G3
+    [0x34] = 10,  -- Poly_GT3
+    [0x38] =  9,  -- Poly_G4
+    [0x3C] = 13,  -- Poly_GT4
+}
+
+-- Shape suffix (after `ac_format_` / `mac_format_` prefix) -> GP0 cmd byte.
+-- Lets the static-analysis check derive the cmd byte from a macro name
+-- like `mac_format_g4_color` -> `g4` -> 0x38 -> 9 expected words.
+M.GP0_CMD_BY_SHAPE = {
+    ["f3"]  = 0x20, ["ft3"] = 0x24,
+    ["f4"]  = 0x28, ["ft4"] = 0x2C,
+    ["g3"]  = 0x30, ["gt3"] = 0x34,
+    ["g4"]  = 0x38, ["gt4"] = 0x3C,
+}
+
+-- Per-macro prim-buffer contribution (NOT .text instruction count --
+-- this is "how many 32-bit words does this macro write to the primitive
+-- being built in main RAM"). Sum across `mac_format_X_color` +
+-- `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X` calls in an atom body
+-- must equal GP0_CMD_SIZE[GP0_CMD_BY_SHAPE[shape]].
+M.GP0_MACRO_CONTRIB = {
+    ["mac_format_f3_color"]                         = 1,
+    ["mac_format_g3_color"]                         = 3,
+    ["mac_format_g4_color"]                         = 4,
+    ["mac_gte_store_f3_post_rtpt"]                  = 3,
+    ["mac_gte_store_g3_post_rtpt"]                  = 3,
+    ["mac_gte_store_g4_p012_post_rtpt_pre_rtps"]    = 3,
+    ["mac_gte_store_g4_p3_post_rtps"]               = 1,
+    ["mac_insert_ot_tag_f3"]                        = 1,
+    ["mac_insert_ot_tag_g4"]                        = 1,
+}
+
 -- Expose the lpeg_ok flag so callers can detect the LPeg-back path.
 -- True when LPeg was successfully required and the patterns above were
 -- compiled at module load time. False when running in fallback mode.

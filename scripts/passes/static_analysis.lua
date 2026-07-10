@@ -52,6 +52,11 @@ local basename_no_ext    = duffle.basename_no_ext
 -- per-atom cycle-budget pass). Lazily read on first use.
 local GTE_PIPELINE_LATENCY = duffle.GTE_PIPELINE_LATENCY
 
+-- GP0 domain tables (Phase 2 check #4). Same source as GTE_PIPELINE_LATENCY.
+local GP0_CMD_SIZE       = duffle.GP0_CMD_SIZE
+local GP0_CMD_BY_SHAPE   = duffle.GP0_CMD_BY_SHAPE
+local GP0_MACRO_CONTRIB  = duffle.GP0_MACRO_CONTRIB
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Source walkers
 -- ════════════════════════════════════════════════════════════════════════════
@@ -502,6 +507,376 @@ local function check_mac_yield_uniformity(atoms, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Source walkers: Binds_* structs + per-atom atom_info
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- Walk source-as-written, return a list of `{line, name, fields, bytes}`
+--- for every `typedef Struct_(Binds_X) { ... };` declaration. Only U4
+--- fields are tracked (Binds_* are always word arrays in this codebase --
+--- pointers stored as U4, indices as U4, etc.). Mirrors annotation.lua ::
+--- find_binds_structs but is independent (no shared cross-pass state for
+--- static-analysis; each pass re-walks source).
+local function find_binds_structs(source_text)
+	local line_of = duffle.LineIndex(source_text)
+	local out = {}
+	local len = #source_text
+	local i   = 1
+	while i <= len do
+		i = skip_ws_and_cmt(source_text, i); if i > len then break end
+		if source_text:sub(i, i) == "#" then
+			local j = i
+			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
+			i = j + 1
+		else
+			local ident, after = read_ident(source_text, i)
+			if not ident then
+				i = i + 1
+			elseif ident == "typedef" then
+				local j = skip_ws_and_cmt(source_text, after)
+				local id2, after2 = read_ident(source_text, j)
+				if id2 ~= "Struct_" then
+					i = after2 or (j + 1)
+				else
+					local open = skip_ws_and_cmt(source_text, after2)
+					if source_text:sub(open, open) ~= "(" then
+						i = open + 1
+					else
+						local inner, after_paren = read_parens(source_text, open)
+						local name = trim(inner)
+						local brace = scan_to_char(source_text, "{", after_paren)
+						if not brace then
+							i = open + 1
+						else
+							local body, after_brace = read_braces(source_text, brace)
+							local fields = {}
+							local byte_off = 0
+							local k = 1
+							while k <= #body do
+								k = skip_ws_and_cmt(body, k); if k > #body then break end
+								local tid, tafter = read_ident(body, k)
+								if not tid then
+									k = k + 1
+								elseif tid == "U4" then
+									local fid, fafter = read_ident(body, skip_ws_and_cmt(body, tafter))
+									if fid then
+										fields[#fields + 1] = { name = fid, offset = byte_off }
+										byte_off = byte_off + 4
+									end
+									k = fafter or (tafter + 1)
+								else
+									k = tafter + 1
+								end
+							end
+							if name:sub(1, 6) == "Binds_" then
+								out[#out + 1] = { line = line_of(i), name = name, fields = fields, bytes = byte_off }
+							end
+							i = after_brace
+						end
+					end
+				end
+			else
+				i = after
+			end
+		end
+	end
+	return out
+end
+
+--- For every `MipsAtom_(name)` followed by `atom_info(...)`, parse the
+--- atom_info's `atom_bind(Binds_X)`, `atom_reads(...)`, and
+--- `atom_writes(...)` sub-calls. Returns a list of
+--- `{atom_name, binds, reads, writes, info_line}` for use by
+--- check_abi_handoff.
+local function find_atom_info(source_text)
+	local line_of = duffle.LineIndex(source_text)
+	local out = {}
+	local len = #source_text
+	local i   = 1
+	while i <= len do
+		i = skip_ws_and_cmt(source_text, i); if i > len then break end
+		if source_text:sub(i, i) == "#" then
+			local j = i
+			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
+			i = j + 1
+		else
+			local ident, after = read_ident(source_text, i)
+			if not ident then
+				i = i + 1
+			elseif ident == "MipsAtom_" then
+				local open = skip_ws_and_cmt(source_text, after)
+				if source_text:sub(open, open) ~= "(" then
+					i = open + 1
+				else
+					local inner, after_paren = read_parens(source_text, open)
+					local a = 1
+					while a <= #inner and inner:sub(a, a):match("[%s]") do a = a + 1 end
+					local b = a
+					while b <= #inner and inner:sub(b, b):match("[%w_]") do b = b + 1 end
+					local atom_name = inner:sub(a, b - 1)
+					local lookahead = skip_ws_and_cmt(source_text, after_paren)
+					local look_ident, look_after = read_ident(source_text, lookahead)
+					if look_ident == "atom_info" then
+						local info_open = skip_ws_and_cmt(source_text, look_after)
+						if source_text:sub(info_open, info_open) == "(" then
+							local info_inner, info_after = read_parens(source_text, info_open)
+							local binds, reads, writes = nil, nil, nil
+							local j = 1
+							while j <= #info_inner do
+								j = skip_ws_and_cmt(info_inner, j); if j > #info_inner then break end
+								local sub_ident, sub_after = read_ident(info_inner, j)
+								if not sub_ident then
+									j = j + 1
+								elseif sub_ident == "atom_bind" then
+									local sub_open = skip_ws_and_cmt(info_inner, sub_after)
+									if info_inner:sub(sub_open, sub_open) == "(" then
+										local sub_inner, sub_after2 = read_parens(info_inner, sub_open)
+										binds = trim(sub_inner)
+										j = sub_after2
+									else
+										j = sub_open + 1
+									end
+								elseif sub_ident == "atom_reads" or sub_ident == "atom_writes" then
+									local kind = sub_ident
+									local sub_open = skip_ws_and_cmt(info_inner, sub_after)
+									if info_inner:sub(sub_open, sub_open) == "(" then
+										local sub_inner, sub_after2 = read_parens(info_inner, sub_open)
+										local regs = {}
+										local p = 1
+										while p <= #sub_inner do
+											p = skip_ws_and_cmt(sub_inner, p); if p > #sub_inner then break end
+											local pid, pa = read_ident(sub_inner, p)
+											if pid then
+												regs[#regs + 1] = trim(pid)
+												p = pa
+											else
+												p = p + 1
+											end
+											if p > #sub_inner then break end
+											if sub_inner:sub(p, p) == "," then p = p + 1 end
+										end
+										if kind == "atom_reads" then reads = regs else writes = regs end
+										j = sub_after2
+									else
+										j = sub_open + 1
+									end
+								else
+									j = sub_after
+								end
+							end
+							out[#out + 1] = {
+								atom_name = atom_name, binds = binds,
+								reads = reads or {}, writes = writes or {},
+								info_line = line_of(lookahead),
+							}
+							i = info_after
+						else
+							i = info_open + 1
+						end
+					else
+						i = after_paren
+					end
+				end
+			else
+				i = after
+			end
+		end
+	end
+	return out
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Check #3: ABI handoff discipline
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- For every atom with `atom_bind(Binds_X)`, verify the atom body loads
+--- every field of `Binds_X` from R_TapePtr (in declaration order) and
+--- advances R_TapePtr by S_(Binds_X) at the end. Mismatches are errors.
+--- Rules:
+---   1. Body MUST contain one `load_word(R_*, R_TapePtr, O_(Binds_X, field))`
+---      per field of Binds_X. Missing field = error.
+---   2. Body's load_words to R_TapePtr at O_(Binds_X, field) MUST appear
+---      in the same order as the fields are declared in Binds_X.
+---      Out-of-order load = error.
+---   3. Body MUST contain an `add_ui_self(R_TapePtr, S_(Binds_X))` (or
+---      equivalent advance by the struct's byte count). Missing = error.
+---   4. atom_bind(Binds_X) where Binds_X doesn't exist = error.
+local function check_abi_handoff(atoms, atom_infos, binds_index, findings)
+	local info_by_atom = {}
+	for _, info in ipairs(atom_infos) do
+		info_by_atom[info.atom_name] = info
+	end
+
+	for _, a in ipairs(atoms) do
+		local info = info_by_atom[a.name]
+		if info and info.binds then
+			local binds_name = info.binds
+			local binds = binds_index[binds_name]
+			if not binds then
+				findings[#findings + 1] = {
+					atom = a.name, line = a.line,
+					check = "abi_handoff", kind = "error",
+					msg = string.format("%s at line %d has `atom_bind(%s)` but no `typedef Struct_(%s)` declaration found in source",
+						a.name, a.line, binds_name, binds_name),
+				}
+			else
+				local tokens = tokenize_body(a.body)
+				local line_in_body = build_body_line_index(a.body)
+				local expected_field_seq = {}
+				for _, f in ipairs(binds.fields) do expected_field_seq[#expected_field_seq + 1] = f.name end
+				local found_field_seq = {}
+				local found_field_set = {}
+				local found_advance = false
+				local bind_re = "O_%(" .. binds_name .. ",%s*([%w_]+)%s*%)"
+				for _, t in ipairs(tokens) do
+					local tok = t.tok
+					if tok:match("^load_word%s*%(") then
+						if tok:find("R_TapePtr", 1, true) and tok:find("O_(" .. binds_name .. ",", 1, true) then
+							local field = tok:match(bind_re)
+							if field then
+								found_field_seq[#found_field_seq + 1] = field
+								found_field_set[field] = true
+							else
+								local body_line = a.line + line_in_body[t.rel]
+								findings[#findings + 1] = {
+									atom = a.name, line = body_line,
+									check = "abi_handoff", kind = "error",
+									msg = string.format("%s at line %d has load_word(R_TapePtr, O_(%s, <non-ident>)); expected O_(%s, <field>)",
+										a.name, body_line, binds_name, binds_name),
+								}
+							end
+						end
+					end
+					if tok:find("R_TapePtr", 1, true)
+					   and tok:find("S_(" .. binds_name .. ")", 1, true) then
+						found_advance = true
+					end
+				end
+
+				for _, fname in ipairs(expected_field_seq) do
+					if not found_field_set[fname] then
+						findings[#findings + 1] = {
+							atom = a.name, line = a.line,
+							check = "abi_handoff", kind = "error",
+							msg = string.format("%s at line %d binds %s but never loads field `%s` from R_TapePtr (expected O_(%s, %s))",
+								a.name, a.line, binds_name, fname, binds_name, fname),
+						}
+					end
+				end
+
+				if #found_field_seq == #expected_field_seq then
+					for k = 1, #expected_field_seq do
+						if found_field_seq[k] ~= expected_field_seq[k] then
+							findings[#findings + 1] = {
+								atom = a.name, line = a.line,
+								check = "abi_handoff", kind = "error",
+								msg = string.format("%s at line %d loads fields in wrong order: got [%s], expected [%s]",
+									a.name, a.line,
+									table.concat(found_field_seq, ", "),
+									table.concat(expected_field_seq, ", ")),
+							}
+							break
+						end
+					end
+				end
+
+				if not found_advance then
+					findings[#findings + 1] = {
+						atom = a.name, line = a.line,
+						check = "abi_handoff", kind = "error",
+						msg = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)",
+							a.name, a.line, binds_name, binds_name, binds.bytes, binds.bytes / 4),
+					}
+				end
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Check #4: GPU port-store shape
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- For every baked atom body, detect which GP0 primitive it's emitting
+--- (first `mac_format_<shape>_color` call). Sum contributions from
+--- `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.
+--- Compare to GP0_CMD_SIZE[cmd_byte]. Mismatch = error.
+---
+--- Soft behavior (warnings):
+---   - Atoms emitting a primitive via raw `store_word(R_PrimCursor, ...)`
+---     (no `mac_format_X_color` call) emit a "manual packet assembly"
+---     advisory. Cannot auto-validate.
+---   - Atoms containing a `mac_<name>(...)` call whose name is not in
+---     GP0_MACRO_CONTRIB emit a "new macro; update GP0_MACRO_CONTRIB"
+---     advisory.
+---
+--- Applies only to `kind = "atom"` (baked atoms). Components don't
+--- emit full primitives.
+local function check_gpu_portstore_shape(atoms, findings)
+	for _, a in ipairs(atoms) do
+		if a.kind == "atom" then
+			local tokens = tokenize_body(a.body)
+			local line_in_body = build_body_line_index(a.body)
+			local cmd_byte = nil
+			local cmd_line = nil
+			local contrib = 0
+			local saw_format = false
+			local saw_prim_write = false
+			for _, t in ipairs(tokens) do
+				local tok = t.tok
+				-- Match `mac_format_<shape>_color(...)` and strip `_color`
+				-- to get the bare shape suffix (f3 / g4 / etc).
+				local shape = tok:match("^mac_format_([%w_]+)_color%s*%(")
+				            or tok:match("^mac_format_([%w_]+)_color%s*$")
+				if shape and GP0_CMD_BY_SHAPE[shape] then
+					if not cmd_byte then
+						cmd_byte = GP0_CMD_BY_SHAPE[shape]
+						cmd_line = a.line + line_in_body[t.rel]
+					end
+					saw_format = true
+					local contrib_key = "mac_format_" .. shape .. "_color"
+					local n = GP0_MACRO_CONTRIB[contrib_key]
+					if n then contrib = contrib + n end
+				end
+				local gte_store = tok:match("^mac_gte_store_[%w_]+")
+				if gte_store then
+					local n = GP0_MACRO_CONTRIB[gte_store]
+					if n then contrib = contrib + n end
+				end
+				local ot_tag = tok:match("^mac_insert_ot_tag_([%w_]+)")
+				if ot_tag then
+					local n = GP0_MACRO_CONTRIB["mac_insert_ot_tag_" .. ot_tag]
+					if n then contrib = contrib + n end
+				end
+				if tok:match("^store_word%s*%(") and tok:find("R_PrimCursor", 1, true) then
+					saw_prim_write = true
+				end
+			end
+
+			if not cmd_byte then
+				if saw_prim_write and not saw_format then
+					findings[#findings + 1] = {
+						atom = a.name, line = a.line,
+						check = "gpu_portstore_shape", kind = "warning",
+						msg = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...) but uses no `mac_format_*_color`; the cmd byte + word count cannot be auto-validated. Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.",
+							a.name, a.line),
+					}
+				end
+			else
+				local expected = GP0_CMD_SIZE[cmd_byte]
+				if contrib ~= expected then
+					findings[#findings + 1] = {
+						atom = a.name, line = cmd_line or a.line,
+						check = "gpu_portstore_shape", kind = "error",
+						msg = string.format("%s at line %d emits GP0 0x%02X with %d prim word(s); expected %d (cmd 0x%02X total = %d)",
+							a.name, cmd_line or a.line, cmd_byte, contrib, expected, cmd_byte, expected),
+					}
+				end
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Per-source validation
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -509,14 +884,22 @@ local function validate(ctx, src)
 	local source = src.text
 	local atoms  = find_atom_bodies(source)
 
+	-- Build per-source Binds_* index + per-atom atom_info lookup. These
+	-- are local to the validate() call; no cross-source sharing needed --
+	-- every .c / .h file is validated standalone.
+	local binds_index = {}
+	for _, b in ipairs(find_binds_structs(source)) do
+		binds_index[b.name] = b
+	end
+	local atom_infos = find_atom_info(source)
+
 	local findings = {}
 	check_gte_pipeline_fill(atoms, findings)
 	check_mac_yield_uniformity(atoms, findings)
+	check_abi_handoff(atoms, atom_infos, binds_index, findings)
+	check_gpu_portstore_shape(atoms, findings)
 
-	-- Phase 2 (ABI handoff / GPU port-store shape) and Phase 3 (cycle
-	-- budget) hooks go here when those tracks are reactivated.
-	-- check_abi_handoff(atoms, findings)
-	-- check_gpu_portstore_shape(atoms, findings)
+	-- Phase 3 (per-atom cycle budget) hooks go here when reactivated.
 	-- emit per-atom cycle counts via INSTRUCTION_LATENCY table
 
 	local errors   = {}
