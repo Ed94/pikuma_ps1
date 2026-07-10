@@ -184,11 +184,24 @@ function M.write_file(path, content)
     f:close()
 end
 
+-- Cache of directories already verified to exist in this process. Each
+-- ensure_dir() call may otherwise spawn a `cmd.exe mkdir` (50-100ms
+-- per call on Windows) — calling it inside per-source loops added 1.5+
+-- seconds to the report pass. Cache makes ensure_dir idempotent within
+-- the process lifetime (safe across passes; the dir state doesn't change).
+local _ensured_dirs = {}
+
 function M.ensure_dir(path)
+    if _ensured_dirs[path] then return end
+    _ensured_dirs[path] = true
     local is_win = package.config:sub(1, 1) == "\\"
     os.execute(is_win and ('if not exist "' .. path .. '" mkdir "' .. path .. '"')
                   or ('mkdir -p "' .. path .. '" 2>/dev/null'))
 end
+
+-- Test helper: clear the cache (used by tests + between process runs).
+-- Not normally needed since Lua state is per-process.
+function M._reset_ensured_dirs() _ensured_dirs = {} end
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 4: C-language scanner primitives

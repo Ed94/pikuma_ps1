@@ -317,36 +317,14 @@ function build-graphis_hello {
 }
 # build-graphis_hello
 
-# ps1-meta orchestrator. Replaces generate-TapeAtomOffsets +
-# generate-TapeAtomAnnotations with a single invocation. Dispatches
-# the 6 passes (word-counts / components / annotation / offsets /
-# static-analysis / report) in dependency-topological order.
-
-function any-stale {
-	param([Parameter(Mandatory=$true)][string[]]$sources,
-	      [Parameter(Mandatory=$true)][string]$metadata,
-	      [Parameter(Mandatory=$true)][string]$out_root)
-	# Always return true. ps1-meta writes to TWO locations:
-	#   1. <out_root>          (annotation + offsets passes — build/gen/)
-	#   2. <src.dir>/gen/      (component pass — code/duffle/gen/, etc.)
-	# Tracking only <out_root>'s mtime is fragile — if the in-source
-	# gen dir was wiped but <out_root> still exists with a newer mtime,
-	# we'd skip the regen and the compile would fail with a missing
-	# duffle.macs.h. ps1-meta is fast enough (~100ms) that always
-	# running it is the safe default.
-	return $true
-}
-
-function ps1-meta {
-	param(
+function ps1-meta { param(
 		[Parameter(Mandatory=$true)][string[]]$sources,
 		[Parameter(Mandatory=$true)][string]$metadata,
 		[string]$out_root = (join-path $path_build 'gen'),
-		[string[]]$passes  = @('--all')
+		[string[]]$passes = @('--all')
 	)
 	$script = join-path $path_scripts 'ps1_meta.lua'
-	write-host "ps1-meta  $($sources.Count) source(s), passes=$($passes -join ',')" `
-		-ForegroundColor Magenta
+	write-host "ps1-meta  $($sources.Count) source(s), passes=$($passes -join ',')" ` -ForegroundColor Magenta
 	$arg_list = @($passes) + @('--metadata', $metadata) + @('--out-root', $out_root)
 	foreach ($s in $sources) { $arg_list += @('--source', $s) }
 	& luajit $script @arg_list
@@ -365,13 +343,7 @@ function build-gte_hello {
 
 	$source_dirs  = @($path_duffle, $path_module)
 	$atom_sources = Get-SourceFiles -paths $source_dirs -extensions @('.h', '.c')
-
-	if (any-stale -sources $atom_sources -metadata $path_atom_metadata -out_root (join-path $path_build 'gen')) {
-		ps1-meta -sources $atom_sources -metadata $path_atom_metadata -out_root (join-path $path_build 'gen')
-	} else {
-		write-host "ps1-meta  all $($atom_sources.Count) source(s) up-to-date" `
-			-ForegroundColor DarkGray
-	}
+	ps1-meta -sources $atom_sources -metadata $path_atom_metadata -out_root (join-path $path_build 'gen')
 
 	$assemble_args = @()
 	$assemble_args += $f_debug
@@ -416,18 +388,14 @@ build-gte_hello
 
 
 # NO idea if this works yet...
-function Send-ToEmulator { param(
-    [string]$exePath
-)
+function Send-ToEmulator { param( [string]$exePath )
     $uri = "http://localhost:8080/api/v1/load-exec"
 
     # Absolute path is safest for the emulator web server
     $absolutePath = [System.IO.Path]::GetFullPath($exePath)
 
     # Create JSON payload pointing to your compiled .ps-exe
-    $body = @{
-        filename = $absolutePath
-    } | ConvertTo-Json
+    $body = @{ filename = $absolutePath } | ConvertTo-Json
 
     Write-Host "Pushing hot-reload to PCSX-Redux..." -ForegroundColor Magenta
     try {

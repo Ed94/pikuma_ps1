@@ -162,12 +162,13 @@ function M.run(ctx)
 	local annot_results = (ctx.flags and ctx.flags._annot_results) or {}
 
 	-- Render per-source reports.
+	-- Hoist ensure_dir out of the loop (cache + hoisting = single mkdir).
+	if not ctx.dry_run then ensure_dir(ctx.out_root) end
 	for _, entry in ipairs(annot_results) do
 		local src = entry.source
 		local result = entry.result
 		local out_path = ctx.out_root .. "/" .. src.basename .. ".annotations.txt"
 		if not ctx.dry_run then
-			ensure_dir(ctx.out_root)
 			write_file(out_path, render_source_report(src.path, result))
 		end
 		table.insert(outputs, { annotations_txt = out_path })
@@ -177,12 +178,12 @@ function M.run(ctx)
 	if not ctx.dry_run then
 		-- The project report references each source by its absolute path.
 		-- Augment the entries with a .source field for the per-source error counts.
+		-- ensure_dir was already hoisted above; cache makes this a no-op.
 		local all_results = {}
 		for _, entry in ipairs(annot_results) do
 			entry.result.source = entry.source.path
 			table.insert(all_results, entry.result)
 		end
-		ensure_dir(ctx.out_root)
 		local summary_path = ctx.out_root .. "/annotation_validation.txt"
 		write_file(summary_path, render_project_report(all_results))
 		table.insert(outputs, { summary_txt = summary_path })
