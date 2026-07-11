@@ -10,12 +10,13 @@
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible
 
--- ════════════════════════════════════════════════════════════════════════════
--- Module-scope requires + package.path setup
--- ════════════════════════════════════════════════════════════════════════════
-
 -- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
-dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
+-- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
+-- Uses `debug.getinfo` to find this file's own directory, so it works
+-- both standalone and when require'd from the orchestrator.
+local _src = debug.getinfo(1, "S").source:sub(2)
+local _dir = _src:match("(.*[/\\])") or "./"
+dofile(_dir .. "../duffle_paths.lua")
 local duffle = require("duffle")
 local is_space            = duffle.is_space
 local is_alpha            = duffle.is_alpha
@@ -151,7 +152,7 @@ local BYTE_COMMA        = 44
 --- @field pragmas  table  -- reserved (currently always nil; legacy compat)
 
 --- ════════════════════════════════════════════════════════════════════════════
--- Hand-rolled split helpers (no regex patterns used)
+-- split helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Split a string at top-level commas. Used inside TAPE_ATOM_* macro
@@ -212,10 +213,10 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Recognize a `atom_bind(...)`, `atom_reads(...)`, or `atom_writes(...)`
--- sub-call embedded inside an atom_info arg list. Returns the kind
--- ("atom_bind" / "atom_reads" / "atom_writes") and the inner content,
--- or nil if the token isn't a recognized sub-call form. Flattened via
--- a prefix lookup instead of a nested if/elseif chain.
+-- sub-call embedded inside an atom_info arg list. 
+-- Returns the kind ("atom_bind" / "atom_reads" / "atom_writes") and the inner content,
+-- or nil if the token isn't a recognized sub-call form. 
+-- Flattened via a prefix lookup instead of a nested if/elseif chain.
 local REGS_CALL_PREFIX = {
 	["atom_writes("] = { kind = "atom_writes", inner_offset = 13 },
 	["atom_reads("]  = { kind = "atom_reads",  inner_offset = 12 },
@@ -224,18 +225,14 @@ local REGS_CALL_PREFIX = {
 
 local function parse_regs_call(s)
 	if s:sub(-1) ~= ")" then return nil end
-	-- Try longest prefix first so "atom_writes(" wins over "atom_reads("
-	-- when both 12-char prefixes would otherwise match. Lengths:
+	-- Try longest prefix first so "atom_writes(" wins over "atom_reads(" when both 12-char prefixes would otherwise match.
+	-- Lengths:
 	--   atom_writes(  = 12 chars, offset 13
 	--   atom_reads(   = 11 chars, offset 12
 	--   atom_bind(    = 10 chars, offset 11
 	local spec = REGS_CALL_PREFIX[s:sub(1, 12)]
-	if not spec then
-		spec = REGS_CALL_PREFIX[s:sub(1, 11)]
-	end
-	if not spec then
-		spec = REGS_CALL_PREFIX[s:sub(1, 10)]
-	end
+	if not spec then spec = REGS_CALL_PREFIX[s:sub(1, 11)] end
+	if not spec then spec = REGS_CALL_PREFIX[s:sub(1, 10)] end
 	if not spec then return nil end
 	local inner = s:sub(spec.inner_offset, -2)
 	if spec.single_ident then
@@ -246,12 +243,10 @@ local function parse_regs_call(s)
 end
 
 -- Resolve any phase_* / R_* alias macros in a register list.
--- (Phase / region / cadence aliases have been dropped. Kept as an
--- identity function so callers can stay uniform.)
+-- (Phase / region / cadence aliases have been dropped. Kept as an identity function so callers can stay uniform.)
 local function resolve_reg_aliases(regs) return regs end
 
--- Parse a comma-separated inner content (e.g. inside atom_reads(...))
--- into a list of trimmed identifiers with aliases resolved.
+-- Parse a comma-separated inner content (e.g. inside atom_reads(...)) into a list of trimmed identifiers with aliases resolved.
 local function parse_regs_list(inner)
 	local out = {}
 	for _, r in ipairs(split_csv_top(inner)) do
@@ -262,8 +257,7 @@ local function parse_regs_list(inner)
 end
 
 -- Parse a single token (from split_csv_top) into an arg entry.
--- Three forms: register-list call, bare identifier,
--- "other" (preserved as text).
+-- Three forms: register-list call, bare identifier, "other" (preserved as text).
 local function parse_arg_token(s)
 	local kind, inner = parse_regs_call(s)
 	if kind then
@@ -279,8 +273,8 @@ local function parse_arg_token(s)
 	return { kind = "other", value = s }
 end
 
---- Extract identifier args from a parenthesized group. Returns a list
---- of {kind, value} pairs where kind is one of:
+--- Extract identifier args from a parenthesized group. 
+--- Returns a list of {kind, value} pairs where kind is one of:
 ---   "ident"        -- a bare identifier (e.g. phase_work)
 ---   "atom_reads"   -- an atom_reads(...) call: value is the register list
 ---   "atom_writes"  -- an atom_writes(...) call: value is the register list
@@ -741,8 +735,8 @@ local function validate(ctx, src)
 		end
 	end
 
-	-- 2. Every atom may have AT MOST ONE annotation (no duplicates).
-	--    (Atoms with ZERO annotations are valid in the new minimal shape.)
+	-- 2. Every atom may have AT MOST ONE annotation (no duplicates). 
+	-- (Atoms with ZERO annotations are valid in the new minimal shape.)
 	local count_per_atom = {}
 	for _, a in ipairs(annots) do
 		if a.name and not a.error then
@@ -758,21 +752,17 @@ local function validate(ctx, src)
 		end
 	end
 
-	-- 3. (Phase validity check DROPPED. Phases were removed from the
-	--    annotation DSL. They may be reintroduced later as sub-calls of
-	--    atom_info, at which point ordering checks will go here.)
+	-- 3. (Phase validity check DROPPED. Phases were removed from the annotation DSL. 
+	-- They may be reintroduced later as sub-calls of atom_info, at which point ordering checks will go here.)
 
 	-- 4. BIND atoms must reference a real Binds_* struct.
 	for _, a in ipairs(annots) do
 		if a.binds then
 			if not binds_index[a.binds] then
-				-- Demoted from error to warning (2026-07-10): the same
-				-- condition is now caught by passes/static_analysis.lua's
-				-- check_abi_handoff() as an error. Emitting a warning
-				-- here keeps the annotation pass from being stop-on-error
-				-- for the common test-fixture case, while still surfacing
-				-- the issue in the report. The static-analysis report
-				-- remains the source of truth for build-stopping errors.
+				-- Demoted from error to warning (2026-07-10): the same condition is now caught by passes/static_analysis.lua's
+				-- check_abi_handoff() as an error. Emitting a warning here keeps the annotation pass from being stop-on-error
+				-- for the common test-fixture case, while still surfacing the issue in the report. 
+				-- The static-analysis report remains the source of truth for build-stopping errors.
 				warnings[#warnings + 1] = {
 					line = a.line,
 					msg  = string.format("'%s' binds '%s' but no Struct_(%s) { ... } declaration found (also flagged as an error by check_abi_handoff in the static-analysis pass)", a.name, a.binds, a.binds),
@@ -848,15 +838,7 @@ local function validate(ctx, src)
 		check_macro_drift(m, ctx.shared.word_counts[m.name])
 	end
 
-	-- 8. (atom_<...> _Pragma validation DROPPED. The pragma macros
-	--    atom_resource / atom_region / atom_group / atom_cadence /
-	--    atom_async were removed from atom_dsl.h. They may be
-	--    reintroduced later as sub-calls of atom_info.)
-
-	-- 9. (CADENCE_ONDEMAND requires async check DROPPED. Same reason
-	--    as #8.)
-
-	-- 10. Information summary.
+	-- 8. Information summary.
 	info[#info + 1] = {
 		line = 0,
 		msg  = string.format("scanned: %d atom(s), %d annotation(s), %d macro-word-decl(s), %d binds struct(s)",

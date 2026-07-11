@@ -12,7 +12,7 @@
 local M = {}
 
 -- Cache key for the repo root. Stored in `package.loaded` (process-global) so all 8 entry scripts + passes scripts share one git call.
--- Without this cache, `git rev-parse --show-toplevel` runs once per script load = 8 × ~150ms = 1.2s wasted per build on Windows.
+-- Without this cache, `git rev-parse --show-toplevel` runs once per script load.
 local CACHE_KEY = "__duffle_repo_root__"
 
 --- Resolve the repo root via git (cached after first call).
@@ -31,8 +31,13 @@ local function find_repo_root()
 	return root
 end
 
---- Set `package.path` (for `require("duffle")` + `require("passes.X")`) and `package.cpath` (for `lpeg.dll` on Windows).
---- Idempotent: safe to call multiple times (just re-sets the same paths).
+--- Set `package.path` (for `require("duffle")` + `require("passes.X")`) and
+--- `package.cpath` (for `lpeg.dll`).
+---
+--- This script does NOT touch the OS environment: no `os.setenv`, no `os.putenv`, no `$PATH` mods. 
+--- It just sets `package.path` and `package.cpath` (the standard Lua way to register module search dirs). 
+--- lpeg is built by `update_deps.ps1` to `toolchain/lpeg/`, 
+--- which we wire into `package.cpath` here (so `require("lpeg")` from `duffle.lua` resolves without any global state).
 function M.setup()
 	local repo_root = find_repo_root()
 	if not repo_root then
@@ -48,10 +53,11 @@ function M.setup()
 		.. passes_dir  .. "?/init.lua;"
 		.. package.path
 
-	if package.config:sub(1, 1) == "\\" then
-		package.cpath = repo_root .. "toolchain/luajit-2.1/lib/lua/5.1/?.dll;"
-			.. package.cpath
-	end
+	-- lpeg: built by `update_deps.ps1` to `toolchain/lpeg/lpeg.dll`.
+	-- Wire its directory into cpath so `require("lpeg")` resolves.
+	local lpeg_dir = repo_root .. "toolchain/lpeg/"
+	package.cpath = lpeg_dir .. "?.dll;"
+		.. package.cpath
 end
 
 -- Run the setup as a side effect.

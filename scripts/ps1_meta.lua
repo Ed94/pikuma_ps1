@@ -625,15 +625,8 @@ local function report_validation_errors(pass_name, pass, result)
 	return true
 end
 
--- (internal) Run each pass in `order` in topological sequence. Tracks
--- `had_errors` instead of os.exit()ing mid-loop so the report pass (and
--- any other downstream pass) still runs and writes its per-module files.
--- The legacy behavior was os.exit(1) on the first error, which left
--- downstream per-module reports un-emitted; the 2026-07-10 change to
--- per-module aggregation made that visible to the user (build/gen had
--- only the partial reports from the failing pass), so we now complete
--- all passes and set the exit code at the end.
----
+-- (internal) Run each pass in `order` in topological sequence.
+--
 -- @param ctx PassCtx
 -- @param order string[]
 -- @return boolean  -- true if any validation errors were reported

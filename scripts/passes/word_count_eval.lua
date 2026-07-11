@@ -24,7 +24,12 @@
 -- Note: this boilerplate is duplicated in 6 other entry scripts; a
 -- Phase-6 extraction target (`duffle.setup_package_path()`).
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
-dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
+-- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
+-- Uses `debug.getinfo` to find this file's own directory, so it works
+-- both standalone and when require'd from the orchestrator.
+local _src = debug.getinfo(1, "S").source:sub(2)
+local _dir = _src:match("(.*[/\\])") or "./"
+dofile(_dir .. "../duffle_paths.lua")
 local duffle = require("duffle")
 
 -- ════════════════════════════════════════════════════════════════════════════

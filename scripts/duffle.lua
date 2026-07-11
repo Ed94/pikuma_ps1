@@ -138,51 +138,54 @@ end
 -- Section 0: LPeg patterns (compiled once at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- LPeg is a PEG library (no regex). All patterns below are first-class pattern values; they're cheap to build and reuse.
+-- LPeg is a required dependency (PEG library, no regex). It's loaded
+-- via `package.cpath` (configured by `duffle_paths.lua` to find
+-- `toolchain/lpeg/lpeg.dll`). There's no hand-rolled fallback — the
+-- original two-tier design added complexity for a 5-10x speedup that's
+-- only relevant at the high-level scanner stage; the byte-by-byte
+-- helpers in Section 1 are sufficient for the classification primitives.
 --
--- Note: lpeg is required lazily because Lua 5.5 may not have it on its cpath at the same location as LuaJIT.
--- We attempt the require and fall back to the hand-rolled implementations if it fails.
-
+-- If the require fails, fail loud with an actionable message (per
+-- lua.md §9). The build script (`update_deps.ps1`) builds lpeg.dll
+-- into `toolchain/lpeg/`; if it's missing, run `update_deps.ps1`.
 local lpeg_ok, lpeg = pcall(require, "lpeg")
-local lpeg_lib = nil
-local lpeg_alpha_pat, lpeg_alnum_pat, lpeg_ident_pat
-local lpeg_str_or_cmt_pat, lpeg_ws_and_cmt_pat
-local lpeg_scan_to_target_pat  -- generic "anything but target or balanced group" matcher
-
-if lpeg_ok then
-	lpeg_lib      = lpeg
-	local P, S, R = lpeg.P, lpeg.S, lpeg.R
-
-	-- Character class patterns
-	local alpha_pat = R("AZ", "az") + P("_")
-	local digit_pat = R("09")
-	lpeg_alnum_pat  = alpha_pat + digit_pat
-
-	-- Identifier: alpha followed by zero+ alnum. Capture as a string.
-	lpeg_alpha_pat = alpha_pat
-	lpeg_ident_pat = lpeg.C(alpha_pat * lpeg_alnum_pat^0)
-
-	-- String literal: "..." with backslash escapes.
-	local lpeg_str_pat = P('"') * (P(1) - S('"\\') + P('\\') * P(1))^0 * P('"')
-	-- Char literal: '...' with backslash escapes.
-	local lpeg_chr_pat = P("'") * (P(1) - S("'\\") + P('\\') * P(1))^0 * P("'")
-	-- Line comment: // ... to end-of-line.
-	local lpeg_line_cmt_pat = P("//") * (P(1) - S("\n"))^0
-	-- Block comment: /* ... */ (no nesting per C standard).
-	local lpeg_block_cmt_pat = P("/*") * (P(1) - P("*/"))^0 * P("*/")
-	-- String or comment (any of the four forms).
-	lpeg_str_or_cmt_pat = lpeg_str_pat + lpeg_chr_pat + lpeg_line_cmt_pat + lpeg_block_cmt_pat
-
-	-- Whitespace + comment skipper: zero+ (whitespace run | string | comment).
-	local ws_pat = S(" \t\n\r\v\f")
-	lpeg_ws_and_cmt_pat = (ws_pat + lpeg_str_or_cmt_pat)^0
-
-	-- Generic "skip until target, but step over balanced groups" matcher.
-	-- Used by scan_to_char for non-ident / non-bracket chars.
-	-- We accept any single char except the target.
-	-- The balanced-group stepping is handled by the caller (via read_balanced).
-	lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  end
+if not lpeg_ok then
+	io.stderr:write("[duffle] require('lpeg') failed: ", lpeg, "\n")
+	io.stderr:write("[duffle] lpeg.dll not found on package.cpath.\n")
+	io.stderr:write("[duffle] Run 'scripts/update_deps.ps1' to build it into toolchain/lpeg/.\n")
+	os.exit(1)
 end
+local P, S, R = lpeg.P, lpeg.S, lpeg.R
+
+-- Character class patterns
+local alpha_pat  = R("AZ", "az") + P("_")
+local digit_pat  = R("09")
+local lpeg_alnum_pat  = alpha_pat + digit_pat
+
+-- Identifier: alpha followed by zero+ alnum. Capture as a string.
+local lpeg_alpha_pat = alpha_pat
+local lpeg_ident_pat = lpeg.C(alpha_pat * lpeg_alnum_pat^0)
+
+-- String literal: "..." with backslash escapes.
+local lpeg_str_pat = P('"') * (P(1) - S('"\\') + P('\\') * P(1))^0 * P('"')
+-- Char literal: '...' with backslash escapes.
+local lpeg_chr_pat = P("'") * (P(1) - S("'\\") + P('\\') * P(1))^0 * P("'")
+-- Line comment: // ... to end-of-line.
+local lpeg_line_cmt_pat = P("//") * (P(1) - S("\n"))^0
+-- Block comment: /* ... */ (no nesting per C standard).
+local lpeg_block_cmt_pat = P("/*") * (P(1) - P("*/"))^0 * P("*/")
+-- String or comment (any of the four forms).
+local lpeg_str_or_cmt_pat = lpeg_str_pat + lpeg_chr_pat + lpeg_line_cmt_pat + lpeg_block_cmt_pat
+
+-- Whitespace + comment skipper: zero+ (whitespace run | string | comment).
+local ws_pat = S(" \t\n\r\v\f")
+local lpeg_ws_and_cmt_pat = (ws_pat + lpeg_str_or_cmt_pat)^0
+
+-- Generic "skip until target, but step over balanced groups" matcher.
+-- Used by scan_to_char for non-ident / non-bracket chars.
+-- We accept any single char except the target.
+-- The balanced-group stepping is handled by the caller (via read_balanced).
+local lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  end
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 1: character classification (byte-based for hot loops)
@@ -320,81 +323,26 @@ function M._reset_ensured_dirs() _ensured_dirs = {} end
 -- Section 4: C-language scanner primitives
 -- ════════════════════════════════════════════════════════════════════════════
 
--- LPeg-backed skipper when LPeg is available, hand-rolled fallback otherwise.
--- Returns position just past the construct, or `pos` unchanged if no
--- string/comment starts at position `pos`.
+-- Skip a string or C-style comment starting at position `pos`.
+-- Returns the position just past the construct, or `pos` unchanged if
+-- no string/comment starts there. LPeg-backed.
 function M.skip_str_or_cmt(s, pos)
-	if lpeg_ok then
-		local new_pos = lpeg.match(lpeg_str_or_cmt_pat, s, pos)
-		if new_pos then return new_pos end
-		return pos
-	end
-	-- Hand-rolled fallback (kept for builds where LPeg isn't available).
-	local c = s:byte(pos)
-	if c == BYTE_DQUOTE or c == BYTE_SQUOTE then  -- '"' or '\''
-		pos = pos + 1
-		while pos <= #s do
-			local b = s:byte(pos)
-			if     b == BYTE_BACKSLASH then pos = pos + 2  -- '\\'
-			elseif b == c then return pos + 1
-			else pos = pos + 1 end
-		end
-		return #s + 1
-	elseif c == BYTE_SLASH then  -- '/'
-		local nx = s:byte(pos + 1)
-		if nx == BYTE_SLASH then  -- '//'
-			while pos <= #s and s:byte(pos) ~= BYTE_NEWLINE do pos = pos + 1 end
-			return pos
-		elseif nx == BYTE_STAR then  -- '/*'
-			pos = pos + 2
-			while pos <= #s - 1 do
-				if s:byte(pos) == BYTE_STAR and s:byte(pos + 1) == BYTE_SLASH then  -- '*/'
-					return pos + 2
-				end
-				pos = pos + 1
-			end
-			return #s + 1
-		end
-	end
-	return pos
+	return lpeg.match(lpeg_str_or_cmt_pat, s, pos) or pos
 end
 
 -- Skip whitespace AND C-style comments starting at position `pos`.
--- LPeg-backed when available; ~5-10x faster than the hand-rolled version.
+-- LPeg-backed; ~5-10x faster than a hand-rolled byte-by-byte walker.
 function M.skip_ws_and_cmt(s, pos)
-	if lpeg_ok then
-		local new_pos = lpeg.match(lpeg_ws_and_cmt_pat, s, pos)
-		if new_pos then return new_pos end
-		return pos
-	end
-	-- Hand-rolled fallback.
-	local len = #s
-	while pos <= len do
-		if M.is_space_byte(s:byte(pos)) then
-			pos = pos + 1
-		else
-			local nx = M.skip_str_or_cmt(s, pos)
-			if nx > pos then pos = nx else break end
-		end
-	end
-	return pos
+	return lpeg.match(lpeg_ws_and_cmt_pat, s, pos) or pos
 end
 
 -- Read a C-style identifier (alpha followed by zero+ alnum) starting at
 -- position `pos`. Returns the identifier string + the position just past
--- it, or nil + pos if no identifier starts here.
+-- it, or nil + pos if no identifier starts here. LPeg-backed.
 function M.read_ident(s, pos)
-	if lpeg_ok then
-		local result = lpeg.match(lpeg_ident_pat, s, pos)
-		if result then return result, pos + #result end
-		return nil, pos
-	end
-	-- Hand-rolled fallback.
-	if not M.is_alpha_byte(s:byte(pos)) then return nil, pos end
-	local a = pos
-	pos = pos + 1
-	while pos <= #s and M.is_alnum_byte(s:byte(pos)) do pos = pos + 1 end
-	return s:sub(a, pos - 1), pos
+	local result = lpeg.match(lpeg_ident_pat, s, pos)
+	if result then return result, pos + #result end
+	return nil, pos
 end
 
 -- Read a balanced-delimited group (parens, braces, or brackets) starting
@@ -903,10 +851,5 @@ M.INSTRUCTION_LATENCY = {
 -- cycle per unknown token and emits a "new macro; update INSTRUCTION_LATENCY"
 -- advisory so the cycle budget stays accurate as the codebase grows.
 M.UNKNOWN_INSTRUCTION_CYCLES = 1
-
--- Expose the lpeg_ok flag so callers can detect the LPeg-back path.
--- True when LPeg was successfully required and the patterns above were
--- compiled at module load time. False when running in fallback mode.
-M.lpeg_ok = lpeg_ok
 
 return M
