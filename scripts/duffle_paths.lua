@@ -28,10 +28,18 @@
 
 local M = {}
 
---- Resolve the repo root via git. Returns a normalized path with a
---- trailing forward-slash, or nil if not in a git repo.
+-- Cache key for the repo root. Stored in `package.loaded` (process-
+-- global) so all 8 entry scripts + passes scripts share one git call.
+-- Without this cache, `git rev-parse --show-toplevel` runs once per
+-- script load = 8 × ~150ms = 1.2s wasted per build on Windows.
+local CACHE_KEY = "__duffle_repo_root__"
+
+--- Resolve the repo root via git (cached after first call).
+--- Returns a normalized path with a trailing forward-slash, or nil
+--- if not in a git repo.
 --- @return string|nil
 local function find_repo_root()
+	if package.loaded[CACHE_KEY] then return package.loaded[CACHE_KEY] end
 	local p = io.popen("git rev-parse --show-toplevel 2>nul")
 	local root
 	if p then
@@ -43,11 +51,13 @@ local function find_repo_root()
 	-- `\` + `/` confuses LuaJIT's file APIs).
 	root = root:gsub("\\", "/")
 	if not root:match("/$") then root = root .. "/" end
+	package.loaded[CACHE_KEY] = root
 	return root
 end
 
 --- Set `package.path` (for `require("duffle")` + `require("passes.X")`)
 --- and `package.cpath` (for `lpeg.dll` on Windows).
+--- Idempotent: safe to call multiple times (just re-sets the same paths).
 function M.setup()
 	local repo_root = find_repo_root()
 	if not repo_root then

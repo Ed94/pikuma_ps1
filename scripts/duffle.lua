@@ -98,10 +98,14 @@ local BYTE_DIGIT_9 = 57       -- '9'
 -- `C:\\projects\\Pikuma\\ps1\\...` breaks portability. Git gives us
 -- the canonical repo root regardless of where it lives.
 
---- Resolve the repo root via `git rev-parse --show-toplevel`. Returns a
---- path with a trailing separator, or nil if not in a git repo.
+--- Resolve the repo root via `git rev-parse --show-toplevel` (cached).
+--- Returns a path with a trailing separator, or nil if not in a git repo.
 --- @return string|nil
 local function find_repo_root()
+	-- Cached in `package.loaded` (process-global) so all 8 entry scripts
+	-- + passes scripts share one git call. Without this, git rev-parse
+	-- runs once per script load = 8 × ~150ms = 1.2s wasted per build.
+	if package.loaded.__duffle_repo_root__ then return package.loaded.__duffle_repo_root__ end
 	local p = io.popen("git rev-parse --show-toplevel 2>nul")
 	local root
 	if p then
@@ -110,6 +114,7 @@ local function find_repo_root()
 	end
 	if not root or root == "" then return nil end
 	if not root:match("[/\\]$") then root = root .. "/" end
+	package.loaded.__duffle_repo_root__ = root
 	return root
 end
 
