@@ -21,10 +21,10 @@
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
 -- both standalone and when require'd from the orchestrator.
-local _src = debug.getinfo(1, "S").source:sub(2)
-local _dir = _src:match("(.*[/\\])") or "./"
-dofile(_dir .. "../duffle_paths.lua")
-local duffle = require("duffle")
+-- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
+-- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
+local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -346,18 +346,6 @@ end
 -- Orchestration helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Group source files by their `dir` field. Used to mirror the per-DIRECTORY partitioning the annotation pass uses.
--- @param sources SourceFile[]
--- @return table<string, SourceFile[]>  -- map of dir -> sources in that dir
-local function group_sources_by_dir(sources)
-	local by_dir = {}
-	for _, src in ipairs(sources) do
-		by_dir[src.dir] = by_dir[src.dir] or {}
-		table.insert(by_dir[src.dir], src)
-	end
-	return by_dir
-end
-
 -- (internal) Validate each source in `dir_sources` via the annotation pass, tagging each result with `result.source = src.path` for downstream rendering.
 -- Returns the list of module results + the flat list of all results (for the project-wide summary).
 -- @param ctx PassCtx
@@ -413,7 +401,7 @@ function M.run(ctx)
 	local warnings = {}
 
 	local module_entries = (ctx.flags and ctx.flags._annot_results) or {}
-	local by_dir         = group_sources_by_dir(ctx.sources)
+	local by_dir         = duffle.group_sources_by_dir(ctx.sources)
 
 	if not ctx.dry_run then duffle.ensure_dir(ctx.out_root) end
 

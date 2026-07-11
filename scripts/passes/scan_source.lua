@@ -21,10 +21,10 @@
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
 -- both standalone and when require'd from the orchestrator.
-local _src = debug.getinfo(1, "S").source:sub(2)
-local _dir = _src:match("(.*[/\\])") or "./"
-dofile(_dir .. "../duffle_paths.lua")
-local duffle = require("duffle")
+-- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
+-- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
+local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations

@@ -19,13 +19,10 @@
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; a
--- Phase-6 extraction target (`duffle.setup_package_path()`).
--- Bootstrap: load `duffle_paths.lua` (uses `git rev-parse` to find the repo root, then sets package.path + package.cpath).
--- After this line, `require("duffle")` and `require("passes.X")` both resolve.
-dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
-local duffle = require("duffle")
+-- Bootstrap: load `duffle_paths.lua` via `arg[0]` (this script's own path).
+-- That single statement: (a) sets `package.path` + `package.cpath` (via cached `git rev-parse`),
+-- (b) at the bottom returns `require("duffle")`. So the dofile's return value is the duffle module.
+local duffle = dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants

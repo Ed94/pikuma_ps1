@@ -342,6 +342,20 @@ end
 -- Not normally needed since Lua state is per-process.
 function M._reset_ensured_dirs() _ensured_dirs = {} end
 
+-- Group a list of `SourceFile`-shaped records by their `dir` field.
+-- Used by the annotation / static-analysis / report passes to partition sources into per-DIRECTORY (per-module) buckets
+-- before emitting per-module reports. Insertion order preserved within each bucket (matches source order in `ctx.sources`).
+-- @param sources table[]   -- list of source records (each having a `dir` string field)
+-- @return table<string, table[]>  -- map of `dir` -> sources in that dir
+function M.group_sources_by_dir(sources)
+	local by_dir = {}
+	for _, src in ipairs(sources) do
+		by_dir[src.dir] = by_dir[src.dir] or {}
+		table.insert(by_dir[src.dir], src)
+	end
+	return by_dir
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 4: C-language scanner primitives
 -- ════════════════════════════════════════════════════════════════════════════

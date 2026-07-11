@@ -28,10 +28,10 @@
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
 -- both standalone and when require'd from the orchestrator.
-local _src = debug.getinfo(1, "S").source:sub(2)
-local _dir = _src:match("(.*[/\\])") or "./"
-dofile(_dir .. "../duffle_paths.lua")
-local duffle          = require("duffle")
+-- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
+-- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
+local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 local word_count_eval = require("word_count_eval")
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -431,8 +431,8 @@ local function strip_mac_prefix(ident)
 	return ident
 end
 
--- (internal) Recursive word-count lookup. `cache` is the memoization table across all calls to `compute_component_word_count`;
--- the in-progress -1 sentinel detects cycles (A -> B -> A).
+-- (internal) Recursive word-count lookup. `cache` is the memoization table shared across all components
+-- in a single source's `count_all_components` pass; the in-progress -1 sentinel detects cycles (A -> B -> A).
 -- @param name string -- the component name (without `mac_`)
 -- @param comp_by_name table<string, Component>
 -- @param wc table<string, integer>
@@ -469,25 +469,25 @@ local function word_count_rec(name, comp_by_name, wc, cache)
 	return n
 end
 
---- Compute the word count of a component body, accounting for macro expansion.
---- Each comma-separated entry in the body is a "slot" that contributes its own word count.
---- For most entries (regular MIPS instructions) the count is 1.
---- For `mac_Y(...)` calls, the count is the word count of `mac_Y` (recursive lookup through `components`).
---- For encoding macros with a known multi-word count (e.g. `mask_upper` = 2),
---- the count is taken from `word_counts`.
+--- Compute word counts for every component in `components` in a single pass.
+--- The name-lookup table + memoization cache are built ONCE (per source) instead of per-component,
+--- so the cache survives across siblings and a component's recursive `mac_Y(...)` references hit memoized values
+--- instead of re-walking the body. Previously each call rebuilt both tables (O(N) tables per call → O(N^2)).
 ---
---- The lookup is memoized via `word_count_rec` to avoid infinite recursion (e.g. if two components referenced each other).
---- This is the same algorithm as the original `tape_atom_annotation_pass.lua` (commit 7d20a4d).
+--- Cycle detection (A -> B -> A) is preserved via the in-progress `-1` sentinel in `cache`.
 ---
---- @param c Component
 --- @param components Component[]
 --- @param wc table<string, integer>
---- @return integer
-local function compute_component_word_count(c, components, wc)
+--- @return table<string, integer>  -- map of component name (without `mac_`) -> word count
+local function count_all_components(components, wc)
 	local comp_by_name = {}
 	for _, cc in ipairs(components) do comp_by_name[cc.name] = cc end
-	local cache = {}
-	return word_count_rec(c.name, comp_by_name, wc, cache)
+	local cache        = {}
+	local counts       = {}
+	for _, c in ipairs(components) do
+		counts[c.name] = word_count_rec(c.name, comp_by_name, wc, cache)
+	end
+	return counts
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -566,7 +566,7 @@ end
 --- @param components Component[]
 --- @param wc table<string, integer>
 --- @return string[]  -- list of lines for this component
-local function build_component_lines(c, components, wc)
+local function build_component_lines(c, counts)
 	local lines = {}
 
 	if c.comment and c.comment ~= "" then
@@ -577,7 +577,8 @@ local function build_component_lines(c, components, wc)
 
 	local tokens = tokens_from_body(c.body)
 	local sig    = signature_from_args(c.args)
-	local n      = compute_component_word_count(c, components, wc)
+	-- Direct lookup against the per-source precomputed `counts` table (built once by count_all_components).
+	local n      = counts[c.name]
 
 	if n > 0 then
 		emit_macro_body(lines, c, sig, tokens)
@@ -640,16 +641,16 @@ end
 --- @param ctx PassCtx
 --- @param src SourceFile
 --- @param components Component[]
+--- @param counts table<string, integer>  -- precomputed word counts (from count_all_components)
 --- @return string|nil  -- path to the written file (nil if no components)
-local function emit_component_macros_h(ctx, src, components)
+local function emit_component_macros_h(ctx, src, components, counts)
 	if #components == 0 then return nil end
 
 	local out_dir, out_path = compute_macs_h_path(src)
 	local lines             = header_boilerplate(src)
 
-	local wc = ctx.shared.word_counts
 	for _, c in ipairs(components) do
-		for _, l in ipairs(build_component_lines(c, components, wc)) do
+		for _, l in ipairs(build_component_lines(c, counts)) do
 			lines[#lines + 1] = l
 		end
 	end
@@ -675,10 +676,11 @@ end
 -- so offsets sees them without re-reading the file.
 -- @param ctx PassCtx
 -- @param components Component[]
-local function update_shared_word_counts(ctx, components)
+-- @param counts table<string, integer>  -- precomputed word counts (from count_all_components)
+local function update_shared_word_counts(ctx, components, counts)
 	local wc = ctx.shared.word_counts
 	for _, c in ipairs(components) do
-		wc["mac_" .. c.name] = compute_component_word_count(c, components, wc)
+		wc["mac_" .. c.name] = counts[c.name]
 	end
 end
 
@@ -693,10 +695,12 @@ function M.run(ctx)
 		-- project_components reads from src.scan + does backward lookups on src.text
 		local components = project_components(src.text, src.scan)
 		if #components > 0 then
-			local macs_path = emit_component_macros_h(ctx, src, components)
+			-- Compute word counts for ALL components once (was: rebuilt per call inside the helpers).
+			local counts = count_all_components(components, ctx.shared.word_counts)
+			local macs_path = emit_component_macros_h(ctx, src, components, counts)
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }
-				update_shared_word_counts(ctx, components)
+				update_shared_word_counts(ctx, components, counts)
 			end
 		end
 	end

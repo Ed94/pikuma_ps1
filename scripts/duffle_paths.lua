@@ -1,13 +1,21 @@
 --- duffle_paths.lua — Single-line bootstrap helper for the tape-atom Lua scripts.
 ---
---- Each entry script (ps1_meta.lua, word_count_eval.lua, and the 5 passes/*.lua files) starts with:
+--- Each entry script (ps1_meta.lua + the 7 passes/*.lua files) starts with one of:
 ---   ```lua
+---   -- Entry script (ps1_meta.lua — `arg[0]` is set):
 ---   local duffle = dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
+---
+---   -- Pass module (debug.getinfo path resolution; works both standalone and when require'd):
+---   local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
+---   local duffle = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 ---   ```
---- That single line: (a) locates this helper via `arg[0]`, 
---- (b) loads it (which sets `package.path` + `package.cpath` via `git rev-parse`),
---- (c) returns the `M` table (a wrapper around the setup function). 
---- After this line, `require("duffle")` and `require("passes.X")` both resolve normally.
+---
+--- That small bootstrap: (a) locates this helper via `arg[0]` / `debug.getinfo`,
+--- (b) loads it (which sets `package.path` + `package.cpath` via cached `git rev-parse`),
+--- (c) at the bottom calls `require("duffle")` (now resolvable since `package.path` was just set) and returns the duffle M.
+--- Net effect: the caller gets the duffle module in one statement; no separate `dofile(...)` + `require("duffle")` dance.
+---
+--- Replaces the prior 2-line (entry) or 4-line (pass) pattern that had the call site do its own path resolution + duplicated setup.
 
 local M = {}
 
@@ -63,4 +71,6 @@ end
 -- Run the setup as a side effect.
 M.setup()
 
-return M
+-- Now that package.path includes scripts/, `require("duffle")` resolves. Return the duffle module
+-- so callers can do `local duffle = dofile(...duffle_paths.lua)` in one line.
+return require("duffle")
