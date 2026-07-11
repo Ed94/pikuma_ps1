@@ -346,20 +346,23 @@ end
 -- Orchestration helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Validate each source in `dir_sources` via the annotation pass, tagging each result with `result.source = src.path` for downstream rendering.
+-- (internal) Pull per-source validate() results from the annotation pass's stash.
+-- The annotation pass runs first in the dep chain and caches results in `ctx.flags._annot_source_results`; we read from there instead of re-validating each source.
 -- Returns the list of module results + the flat list of all results (for the project-wide summary).
 -- @param ctx PassCtx
 -- @param dir_sources SourceFile[]
 -- @return AnnotationResult[], AnnotationResult[]
-local function validate_module_sources(ctx, dir_sources)
-	local annotation     = require("passes.annotation")
+local function lookup_module_results(ctx, dir_sources)
+	local src_cache      = (ctx.flags and ctx.flags._annot_source_results) or {}
 	local module_results = {}
 	local all_results    = {}
 	for _, src in ipairs(dir_sources) do
-		local result  = annotation.validate(ctx, src)
-		result.source = src.path
-		module_results[#module_results + 1] = result
-		all_results[#all_results + 1] = result
+		local result = src_cache[src.path]
+		if result then
+			result.source = src.path                                    -- defensive (annotation tags it too; this guards against cache misses from earlier iterations)
+			module_results[#module_results + 1] = result
+			all_results[#all_results + 1] = result
+		end
 	end
 	return module_results, all_results
 end
@@ -411,7 +414,7 @@ function M.run(ctx)
 
 		if entry.atoms_count > 0 or #(by_dir[entry.dir] or {}) > 0 then
 			local dir_sources                 = by_dir[entry.dir] or {}
-			local module_results, all_results = validate_module_sources(ctx, dir_sources)
+			local module_results, all_results = lookup_module_results(ctx, dir_sources)
 			for _, r in ipairs(all_results) do
 				all_results_for_summary[#all_results_for_summary + 1] = r
 			end

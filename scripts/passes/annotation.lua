@@ -337,8 +337,13 @@ function M.run(ctx)
 		local dir_atoms    = 0
 		local dir_errors   = {}
 		local dir_warnings = {}
+		-- Per-source validate() results, cached for the report pass (it reads from this instead of re-validating each source).
+		ctx.flags                       = ctx.flags or {}
+		ctx.flags._annot_source_results = ctx.flags._annot_source_results or {}
 		for _, src in ipairs(dir_sources) do
 			local result = validate(ctx, src)
+			result.source = src.path                                  -- tag for downstream rendering
+			ctx.flags._annot_source_results[src.path] = result          -- stash so report.lua reads from cache instead of re-running validate()
 			dir_atoms = dir_atoms + #result.atoms
 			for _, e in ipairs(result.errors) do
 				dir_errors[#dir_errors + 1] = { line = e.line, msg = e.msg, source = src.path }
