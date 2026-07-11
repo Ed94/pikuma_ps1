@@ -335,9 +335,9 @@ local function find_atoms(source_text)
 
 		local ident, after = duffle.read_ident(source_text, pos)
 		-- scan: <ident>
-		if not ident then
-			pos = pos + 1
-		elseif ident == ATOM_PREFIX then
+		if not ident then pos = pos + 1; goto continue end
+
+		if ident == ATOM_PREFIX then
 			-- scan: MipsAtom_(<name>) { <body> }
 			local atom = try_wrapped_atom(source_text, after)
 			if atom then
@@ -358,6 +358,8 @@ local function find_atoms(source_text)
 		else
 			pos = after
 		end
+
+		::continue::
 	end
 	return atoms
 end

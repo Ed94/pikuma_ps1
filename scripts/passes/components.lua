@@ -455,40 +455,35 @@ local function find_component_atoms(source)
 		local ident, after_ident = duffle.read_ident(source, pos)
 		-- scan: <ident>
 		local is_comp = ident == ATOM_COMP or ident == ATOM_COMP_PROC
-		if not ident then
-			pos = pos + 1
-		elseif not is_comp then
-			pos = after_ident
+		if not ident then pos = pos + 1; goto continue end
+		if not is_comp then pos = after_ident; goto continue end
+
+		local open_paren = duffle.skip_ws_and_cmt(source, after_ident)
+		if source:sub(open_paren, open_paren) ~= "(" then pos = open_paren + 1; goto continue end
+
+		local inner, after_paren = duffle.read_parens(source, open_paren)
+		-- scan: <ident>(<args>)
+		local name, body = parse_atomcomp_inner(inner)
+		-- scan: <ident>(<name>)  OR  <ident>(<name>, { <body> })
+		if not name or name:sub(1, AC_PREFIX_LEN) ~= AC_PREFIX then pos = open_paren + 1; goto continue end
+
+		local args    = find_function_args_for(source, name, open_paren)
+		local comment = preceding_comment_block(source, pos)
+		if body == nil then
+			-- Bare form: body comes from the brace block after the parens.
+			-- scan: <ident>(<name>) {
+			local comp, new_pos = make_bare_component(source, name, pos, after_paren, line_of, args, comment)
+			-- scan: <ident>(<name>) { <body> }
+			if comp then out[#out + 1] = comp end
+			pos = new_pos
 		else
-			local open_paren = duffle.skip_ws_and_cmt(source, after_ident)
-			if source:sub(open_paren, open_paren) ~= "(" then
-				pos = open_paren + 1
-			else
-				local inner, after_paren = duffle.read_parens(source, open_paren)
-				-- scan: <ident>(<args>)
-				local name, body = parse_atomcomp_inner(inner)
-				-- scan: <ident>(<name>)  OR  <ident>(<name>, { <body> })
-				if not name or name:sub(1, AC_PREFIX_LEN) ~= AC_PREFIX then
-					pos = open_paren + 1
-				else
-					local args    = find_function_args_for(source, name, open_paren)
-					local comment = preceding_comment_block(source, pos)
-					if body == nil then
-						-- Bare form: body comes from the brace block after the parens.
-						-- scan: <ident>(<name>) {
-						local comp, new_pos = make_bare_component(source, name, pos, after_paren, line_of, args, comment)
-						-- scan: <ident>(<name>) { <body> }
-						if comp then out[#out + 1] = comp end
-						pos = new_pos
-					else
-						-- Function form: body was inside the parens.
-						-- scan: <ident>(<name>, { <body> })
-						out[#out + 1] = make_proc_component(name, body, pos, line_of, args, comment)
-						pos = after_paren
-					end
-				end
-			end
+			-- Function form: body was inside the parens.
+			-- scan: <ident>(<name>, { <body> })
+			out[#out + 1] = make_proc_component(name, body, pos, line_of, args, comment)
+			pos = after_paren
 		end
+
+		::continue::
 	end
 	return out
 end

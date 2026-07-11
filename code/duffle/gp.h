@@ -419,7 +419,7 @@ typedef Struct_(Poly_F4) {
     };
 };
 
-/* ---------- Poly_G3 (Gouraud Triangle; 6 words) ---------- */
+/* ---------- Poly_G3 (Gouraud Triangle; 7 words) ---------- */
 typedef Struct_(Poly_G3) {
     U4    tag; RGB8 c0; B1 code;
     V2_S2 p0;  RGB8 c1; B1 pad1;
@@ -427,7 +427,7 @@ typedef Struct_(Poly_G3) {
     V2_S2 p2;
 };
 
-/* ---------- Poly_G4 (Gouraud Quad; 5 words in the demo's interleaved layout) ---------- */
+/* ---------- Poly_G4 (Gouraud Quad; 9 words) ---------- */
 typedef Struct_(Poly_G4) {
     U4    tag; RGB8 c0; B1 code;
     V2_S2 p0;  RGB8 c1; B1 pad1;

@@ -291,15 +291,6 @@ end
 --- @param source string
 --- @param pos integer
 --- @return integer
-local function skip_preprocessor_line(source, pos)
-	local str_len = #source
-	local scan    = pos
-	while scan <= str_len and source:byte(scan) ~= BYTE_NEWLINE do
-		scan = scan + 1
-	end
-	return scan + 1
-end
-
 --- Parse `_Pragma("mac_X tape_atom words=N")` (operator form).
 --- @param source string
 --- @param ident_pos integer  -- position of the `_Pragma` ident
@@ -382,14 +373,17 @@ local function find_macro_word_annotations(source)
 		if pos > str_len then break end
 
 		-- Skip preprocessor directives (lines starting with #).
+		-- (_Pragma is an operator, not a directive — it doesn't start with #.)
 		if source:byte(pos) == 35 then  -- '#'
-			pos = skip_preprocessor_line(source, pos)
-		else
+			pos = duffle.skip_preprocessor_line(source, pos)
+			goto continue
+		end
+
 		local ident, after_ident = read_ident(source, pos)
 		-- scan: <ident>
-		if not ident then
-			pos = pos + 1
-		elseif ident == PRAGMA_OPERATOR then
+		if not ident then pos = pos + 1; goto continue end
+
+		if ident == PRAGMA_OPERATOR then
 			-- scan: _Pragma(...)
 			local entry, new_pos = parse_pragma_operator(source, pos, after_ident)
 			if entry then
@@ -406,7 +400,8 @@ local function find_macro_word_annotations(source)
 		else
 			pos = after_ident
 		end
-		end
+
+		::continue::
 	end
 	return out
 end
@@ -506,21 +501,21 @@ local function find_binds_structs(source)
 		if pos > str_len then break end
 
 		if source:byte(pos) == 35 then  -- '#'
-			pos = skip_preprocessor_line(source, pos)
-		else
+			pos = duffle.skip_preprocessor_line(source, pos)
+			goto continue
+		end
+
 		local ident, after_ident = read_ident(source, pos)
 		-- scan: <ident>
-		if not ident then
-			pos = pos + 1
-		elseif ident == "typedef" then
-			-- scan: typedef Struct_(<name>) { <fields> }
-			local binds_struct, new_pos = parse_typedef_binds(source, pos, after_ident, line_of)
-			if binds_struct then out[#out + 1] = binds_struct end
-			pos = new_pos
-		else
-			pos = after_ident
-		end
-		end
+		if not ident then pos = pos + 1; goto continue end
+		if ident ~= "typedef" then pos = after_ident; goto continue end
+
+		-- scan: typedef Struct_(<name>) { <fields> }
+		local binds_struct, new_pos = parse_typedef_binds(source, pos, after_ident, line_of)
+		if binds_struct then out[#out + 1] = binds_struct end
+		pos = new_pos
+
+		::continue::
 	end
 	return out
 end
@@ -557,32 +552,29 @@ local function find_atom_names(source)
 
 		local ident, after_ident = read_ident(source, pos)
 		-- scan: <ident>
-		if not ident then
-			pos = pos + 1
-		elseif ident ~= ATOM_DECL then
-			pos = after_ident
-		else
-			local open_paren = skip_ws_and_cmt(source, after_ident)
-			if source:byte(open_paren) ~= BYTE_OPEN_PAREN then
-				pos = open_paren + 1
-			else
-				local inner, after_paren = read_parens(source, open_paren)
-				-- scan: MipsAtom_(<name>)
-				local name, _            = read_alnum_ident(inner, 1)
-				if name and name ~= "" then
-					out[#out + 1] = { line = line_of(pos), name = name }
-				end
-				local brace = scan_to_char(source, "{", after_paren)
-				-- scan: MipsAtom_(<name>) {
-				if brace then
-					local _, after_brace = read_braces(source, brace)
-					-- scan: MipsAtom_(<name>) { <body> }
-					pos                  = after_brace
-				else
-					pos = open_paren + 1
-				end
-			end
+		if not ident then pos = pos + 1; goto continue end
+		if ident ~= ATOM_DECL then pos = after_ident; goto continue end
+
+		local open_paren = skip_ws_and_cmt(source, after_ident)
+		if source:byte(open_paren) ~= BYTE_OPEN_PAREN then pos = open_paren + 1; goto continue end
+
+		local inner, after_paren = read_parens(source, open_paren)
+		-- scan: MipsAtom_(<name>)
+		local name, _ = read_alnum_ident(inner, 1)
+		if name and name ~= "" then
+			out[#out + 1] = { line = line_of(pos), name = name }
 		end
+		local brace = scan_to_char(source, "{", after_paren)
+		-- scan: MipsAtom_(<name>) {
+		if brace then
+			local _, after_brace = read_braces(source, brace)
+			-- scan: MipsAtom_(<name>) { <body> }
+			pos = after_brace
+		else
+			pos = open_paren + 1
+		end
+
+		::continue::
 	end
 	return out
 end
@@ -668,39 +660,37 @@ local function find_atom_annotations(source)
 
 		-- Skip preprocessor directives (lines starting with #).
 		if source:byte(pos) == 35 then  -- '#'
-			pos = skip_preprocessor_line(source, pos)
-		else
-			local ident, after_ident = read_ident(source, pos)
-			-- scan: <ident>
-			if not ident then
-				pos = pos + 1
-			elseif ident == ATOM_DECL then
-				local open_paren = skip_ws_and_cmt(source, after_ident)
-				if source:byte(open_paren) ~= BYTE_OPEN_PAREN then
-					pos = open_paren + 1
-				else
-					local inner, after_paren = read_parens(source, open_paren)
-					-- scan: MipsAtom_(<name>)
-					local name, _ = read_alnum_ident(inner, 1)
-
-					local entry, new_pos = parse_atom_info_call(source, name, after_paren, line_of)
-					-- scan: MipsAtom_(<name>) atom_info(<binds>, <reads>, <writes>)
-					if entry then annots[#annots + 1] = entry end
-					pos = new_pos
-
-					-- Skip past the body { ... } if present.
-					local brace = scan_to_char(source, "{", pos)
-					-- scan: MipsAtom_(<name>) atom_info(...) {
-					if brace then
-						local _, after_brace = read_braces(source, brace)
-						-- scan: MipsAtom_(<name>) atom_info(...) { <body> }
-						pos = after_brace
-					end
-				end
-			else
-				pos = after_ident
-			end
+			pos = duffle.skip_preprocessor_line(source, pos)
+			goto continue
 		end
+
+		local ident, after_ident = read_ident(source, pos)
+		-- scan: <ident>
+		if not ident then pos = pos + 1; goto continue end
+		if ident ~= ATOM_DECL then pos = after_ident; goto continue end
+
+		local open_paren = skip_ws_and_cmt(source, after_ident)
+		if source:byte(open_paren) ~= BYTE_OPEN_PAREN then pos = open_paren + 1; goto continue end
+
+		local inner, after_paren = read_parens(source, open_paren)
+		-- scan: MipsAtom_(<name>)
+		local name, _ = read_alnum_ident(inner, 1)
+
+		local entry, new_pos = parse_atom_info_call(source, name, after_paren, line_of)
+		-- scan: MipsAtom_(<name>) atom_info(<binds>, <reads>, <writes>)
+		if entry then annots[#annots + 1] = entry end
+		pos = new_pos
+
+		-- Skip past the body { ... } if present.
+		local brace = scan_to_char(source, "{", pos)
+		-- scan: MipsAtom_(<name>) atom_info(...) {
+		if brace then
+			local _, after_brace = read_braces(source, brace)
+			-- scan: MipsAtom_(<name>) atom_info(...) { <body> }
+			pos = after_brace
+		end
+
+		::continue::
 	end
 	return annots
 end

@@ -118,6 +118,68 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 -- Source walkers
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- Parse `MipsAtomComp_Proc_(name, { body })` — the body is inside the LAST `{ ... }` in the args.
+-- Returns (atom_entry, new_pos) or (nil, fallback_pos).
+local function parse_comp_proc_body(inner, line_of, pos, open_paren, after_paren)
+	-- Find the last `{` in `inner`, then the matching `}`.
+	local last_brace_pos
+	for search_pos = #inner, 1, -1 do
+		if inner:sub(search_pos, search_pos) == "{" then last_brace_pos = search_pos; break end
+	end
+	if not last_brace_pos then return nil, open_paren + 1 end
+	-- Walk forward to find matching `}` honoring balanced ()/[] and strings.
+	local depth = 1
+	local inner_pos = last_brace_pos + 1
+	while inner_pos <= #inner and depth > 0 do
+		local c = inner:byte(inner_pos)
+		if c == 123 then
+			depth = depth + 1; inner_pos = inner_pos + 1
+		elseif c == 125 then
+			depth = depth - 1
+			if depth == 0 then break end
+			inner_pos = inner_pos + 1
+		elseif c == 40 then
+			local _, a = duffle.read_parens(inner, inner_pos); inner_pos = a
+		elseif c == 91 then
+			local _, a = duffle.read_brackets(inner, inner_pos); inner_pos = a
+		elseif c == 34 or c == 39 then
+			inner_pos = duffle.skip_str_or_cmt(inner, inner_pos) + 1
+		else
+			inner_pos = inner_pos + 1
+		end
+	end
+	if depth ~= 0 then return nil, open_paren + 1 end
+	-- scan: <ident>(<name>, { <body> })
+	local name_match = inner:match("^%s*([%w_]+)")
+	local name = name_match or "?"
+	local body = inner:sub(last_brace_pos + 1, inner_pos - 1)
+	local body_off = open_paren + 1 + last_brace_pos
+	return {
+		line = line_of(pos), name = name, body = body, body_off = body_off + 1, kind = "comp_proc",
+	}, after_paren
+end
+
+-- Parse `MipsAtom_(name) { body }` or `MipsAtomComp_(name) { body }` — body is the FIRST `{ ... }` after the parens.
+-- Returns (atom_entry, new_pos) or (nil, fallback_pos).
+local function parse_atom_or_comp_bare_body(inner, source_text, line_of, pos, open_paren, after_paren, kind)
+	-- Extract the name from the first arg.
+	local name_start = 1
+	while name_start <= #inner and inner:sub(name_start, name_start):match("[%s]") do name_start = name_start + 1 end
+	local name_end = name_start
+	while name_end <= #inner and inner:sub(name_end, name_end):match("[%w_]") do name_end = name_end + 1 end
+	local name = inner:sub(name_start, name_end - 1)
+	-- scan: <ident>(<name>)
+	if name == "" then return nil, open_paren + 1 end
+	local brace = duffle.scan_to_char(source_text, "{", after_paren)
+	-- scan: <ident>(<name>) {
+	if not brace then return nil, open_paren + 1 end
+	local body, after_brace = duffle.read_braces(source_text, brace)
+	-- scan: <ident>(<name>) { <body> }
+	return {
+		line = line_of(pos), name = name, body = body, body_off = brace + 1, kind = kind,
+	}, after_brace
+end
+
 --- Walk source-as-written, return a list of `{line, name, body,
 --- body_off, kind}` for every:
 ---   `MipsAtom_(name) { body };`               -> kind = "atom"     (baked atom)
@@ -140,142 +202,50 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- `body[1]` in `source_text`, used to compute per-token line numbers
 --- later.
 local function find_atom_bodies(source_text)
-	local line_of  = duffle.LineIndex(source_text)
-	local out      = {}
+	local line_of = duffle.LineIndex(source_text)
+	local out     = {}
 	local src_len = #source_text
-	local pos      = 1
+	local pos     = 1
 	while pos <= src_len do
-		pos = duffle.skip_ws_and_cmt(source_text, pos); if pos > src_len then break end
-		-- Skip preprocessor directives (#define / #include / #pragma /
-		-- etc). Otherwise the `#define MipsAtom_(sym) ...` definition
-		-- in lottes_tape.h gets matched as an atom named "sym" and
-		-- its `body` swallows the next real atom declaration via
-		-- duffle.scan_to_char("{", ...).
-		if source_text:sub(pos, pos) == "#" then
-			local eol_pos = pos
-			while eol_pos <= src_len and source_text:byte(eol_pos) ~= 10 do eol_pos = eol_pos + 1 end
-			pos = eol_pos + 1
-		else
-			local ident, ident_end = duffle.read_ident(source_text, pos)
+		pos = duffle.skip_ws_and_cmt(source_text, pos)
+		if pos > src_len then break end
+
+		-- Skip preprocessor directives (#define / #include / #pragma / etc).
+		local pp_pos = duffle.skip_preprocessor_line(source_text, pos)
+		if pp_pos then pos = pp_pos; goto continue end
+
+		local ident, ident_end = duffle.read_ident(source_text, pos)
 		-- scan: <ident>
 		if not ident then
-			pos = pos + 1
-		elseif ident == "MipsAtom_"
-		    or ident == "MipsAtomComp_"
-		    or ident == "MipsAtomComp_Proc_" then
-			-- Determine the kind from the exact ident (3 distinct macros,
-			-- each with its own kind).
-			local kind
-			if     ident == "MipsAtom_"             then kind = "atom"
-			elseif ident == "MipsAtomComp_"         then kind = "comp_bare"
-			else                                         kind = "comp_proc"
-			end
-
-			local open_paren = duffle.skip_ws_and_cmt(source_text, ident_end)
-			if source_text:sub(open_paren, open_paren) ~= "(" then
-				pos = open_paren + 1
-			else
-				local inner, after_paren = duffle.read_parens(source_text, open_paren)
-				-- scan: <ident>(<args>)
-
-				if kind == "comp_proc" then
-					-- MipsAtomComp_Proc_(sym, { body })
-					-- The body is inside the LAST `{ ... }` in the args
-					-- (the macro takes 2 args: sym name, then body in {}).
-					-- Find the last `{` in `inner`, then the matching `}`.
-					local last_brace_pos
-					for search_pos = #inner, 1, -1 do
-						if inner:sub(search_pos, search_pos) == "{" then last_brace_pos = search_pos; break end
-					end
-					if not last_brace_pos then
-						pos = open_paren + 1
-					else
-						-- Walk forward to find matching `}` honoring balanced
-						-- ()/[] and strings. We could call duffle.read_braces
-						-- from last_brace_pos+1, but read_braces expects to start at
-						-- the brace itself. Inline the walk for clarity.
-						local depth = 1
-						local inner_pos = last_brace_pos + 1
-						while inner_pos <= #inner and depth > 0 do
-							local c = inner:byte(inner_pos)
-							if c == 123 then
-								depth = depth + 1; inner_pos = inner_pos + 1
-							elseif c == 125 then
-								depth = depth - 1
-								if depth == 0 then break end
-								inner_pos = inner_pos + 1
-							elseif c == 40 then
-								local _, a = duffle.read_parens(inner, inner_pos); inner_pos = a
-							elseif c == 91 then
-								local _, a = duffle.read_brackets(inner, inner_pos); inner_pos = a
-							elseif c == 34 or c == 39 then
-								inner_pos = duffle.skip_str_or_cmt(inner, inner_pos) + 1
-							else
-								inner_pos = inner_pos + 1
-							end
-						end
-						if depth ~= 0 then
-							-- unmatched; bail
-							pos = open_paren + 1
-						else
-							-- scan: <ident>(<name>, { <body> })
-							-- First ident in `inner` is the comp name.
-							local name_match = inner:match("^%s*([%w_]+)")
-							local name = name_match or "?"
-							local body     = inner:sub(last_brace_pos + 1, inner_pos - 1)
-							-- body_off in full source: position right after the
-							-- LAST `{` in `inner`, which sits at `open_paren+1+last_brace_pos`
-							-- (open_paren+1 = just inside the outer paren,
-							-- +last_brace_pos = at the `{`).
-							local body_off = open_paren + 1 + last_brace_pos
-							out[#out + 1] = {
-								line     = line_of(pos),
-								name     = name,
-								body     = body,
-								body_off = body_off + 1,
-								kind     = kind,
-							}
-							pos = after_paren
-						end
-					end
-				else
-					-- MipsAtom_(sym) { body };  OR
-					-- MipsAtomComp_(sym) { body };
-					-- name is the first arg, body is the FIRST { ... } after
-					-- the paren.
-					local name_start = 1
-					while name_start <= #inner and inner:sub(name_start, name_start):match("[%s]") do name_start = name_start + 1 end
-					local name_end = name_start
-					while name_end <= #inner and inner:sub(name_end, name_end):match("[%w_]") do name_end = name_end + 1 end
-					local name = inner:sub(name_start, name_end - 1)
-					-- scan: <ident>(<name>)
-					if name == "" then
-						pos = open_paren + 1
-					else
-						local brace = duffle.scan_to_char(source_text, "{", after_paren)
-						-- scan: <ident>(<name>) {
-						if brace then
-							local body, after_brace = duffle.read_braces(source_text, brace)
-							-- scan: <ident>(<name>) { <body> }
-							local body_off = brace + 1
-							out[#out + 1] = {
-								line     = line_of(pos),
-								name     = name,
-								body     = body,
-								body_off = body_off,
-								kind     = kind,
-							}
-							pos = after_brace
-						else
-							pos = open_paren + 1
-						end
-					end
-				end
-			end
-		else
-			pos = ident_end
+			pos = pos + 1; goto continue
 		end
-		end  -- close the new preprocessor-skip else
+
+		local is_atom = ident == "MipsAtom_"
+		local is_comp = ident == "MipsAtomComp_"
+		local is_proc = ident == "MipsAtomComp_Proc_"
+		if not is_atom and not is_comp and not is_proc then
+			pos = ident_end; goto continue
+		end
+
+		local kind = is_atom and "atom" or (is_comp and "comp_bare" or "comp_proc")
+		local open_paren = duffle.skip_ws_and_cmt(source_text, ident_end)
+		if source_text:sub(open_paren, open_paren) ~= "(" then
+			pos = open_paren + 1; goto continue
+		end
+
+		local inner, after_paren = duffle.read_parens(source_text, open_paren)
+		-- scan: <ident>(<args>)
+
+		local entry, new_pos
+		if is_proc then
+			entry, new_pos = parse_comp_proc_body(inner, line_of, pos, open_paren, after_paren)
+		else
+			entry, new_pos = parse_atom_or_comp_bare_body(inner, source_text, line_of, pos, open_paren, after_paren, kind)
+		end
+		if entry then out[#out + 1] = entry end
+		pos = new_pos
+
+		::continue::
 	end
 	return out
 end
@@ -388,82 +358,74 @@ end
 -- Check #1: GTE pipeline-fill
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- Count consecutive nop words immediately BEFORE token index `ti` in the token list.
+-- Walks backwards from ti-1, accumulating nop_word_count, stopping at the first non-nop.
+-- scan: nop, nop, <non-nop> -> have = count of nop words before ti
+local function count_preceding_nops(tokens, ti)
+	local have = 0
+	local where_ti = ti - 1
+	while where_ti >= 1 do
+		local n = nop_word_count(tokens[where_ti].tok)
+		if n == 0 then break end
+		have = have + n
+		where_ti = where_ti - 1
+	end
+	return have
+end
+
+-- Check a single gte_cmdw_* token for pipeline-fill compliance. Emits a finding if the
+-- preceding nops are insufficient (error) or the macro isn't in the latency table (warning).
+-- scan: <nop>... <gte_cmdw_X> -> validate nop count vs GTE_PIPELINE_LATENCY[X]
+local function check_one_gte_cmdw(a, tok, tokens, ti, line_in_body, findings)
+	local cmdw_full = tok:match("^(gte_cmdw_[%w_]+)%s*[,%)]") or tok:match("^(gte_cmdw_[%w_]+)%s*$")
+	if not cmdw_full then return end
+
+	local variant = cmdw_full:match("^gte_cmdw_(.+)$")
+	local need    = duffle.GTE_PIPELINE_LATENCY[cmdw_full]
+	local line    = a.line + line_in_body[tokens[ti].rel]
+
+	if need == nil then
+		-- alias or new gte_cmdw_<X> not yet in latency table
+		findings[#findings + 1] = {
+			atom  = a.name,
+			line  = line,
+			check = "gte_pipeline_fill",
+			kind  = "warning",
+			msg   = string.format(
+				"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
+				a.name, line, variant),
+		}
+	elseif need > 0 then
+		local have = count_preceding_nops(tokens, ti)
+		if have < need then
+			findings[#findings + 1] = {
+				atom  = a.name,
+				line  = line,
+				check = "gte_pipeline_fill",
+				kind  = "error",
+				msg   = string.format(
+					"%s at line %d needs %d nop word%s immediately BEFORE `gte_cmdw_%s`; only %d found",
+					a.name, line, need, need == 1 and "" or "s", variant, have),
+			}
+		end
+	end
+end
+
 --- Walk the token list. Whenever we hit a `gte_cmdw_<X>` token, count
---- consecutive nop words starting at the next token. If count < the
+--- consecutive nop words immediately preceding it. If count < the
 --- minimum declared in `duffle.GTE_PIPELINE_LATENCY[X]`, record a finding.
----
---- Aliases (`gte_cmdw_rotate_translate_perspective_single` etc.) are
---- resolved against the lookup table directly; if a macro name is not
+--- Aliases are resolved against the lookup table directly; if a macro name is not
 --- in the table, emit a soft warning (the user might have added a new
 --- gte_cmdw_* but not updated duffle.lua).
 local function check_gte_pipeline_fill(atoms, findings, line_of)
-	-- Walk the token list. Whenever we hit a `gte_cmdw_<X>` token,
-	-- count consecutive `nop` words IMMEDIATELY PRECEDING it (the
-	-- source-level `nop2, gte_cmdw_X` idiom provides the pre-pipeline
-	-- fill that gte.h's wrapper functions provide internally). If
-	-- count < `duffle.GTE_PIPELINE_LATENCY[X]`, record a finding.
-	--
-	-- We count nops going backwards from the cmdw token, stopping at
-	-- the first non-nop token. Tokens like `mem_share` or `port_write`
-	-- (any non-nop) break the count. `gte_mv_to_data_r` (writes to
-	-- C2_DR registers) are non-nops in this sense -- they count as
-	-- "previous GTE state" but don't themselves count as pipeline
-	-- fill.
 	for _, a in ipairs(atoms) do
 		local tokens       = tokenize_body(a.body)
 		local line_in_body = build_body_line_index(a.body)
 		local tn = #tokens
 		local ti = 1
 		while ti <= tn do
-			local tok = tokens[ti].tok
-			local cmdw_full = tok:match("^(gte_cmdw_[%w_]+)%s*[,%)]") or tok:match("^(gte_cmdw_[%w_]+)%s*$")
-			if cmdw_full then
-				local variant = cmdw_full:match("^gte_cmdw_(.+)$")
-				local need    = duffle.GTE_PIPELINE_LATENCY[cmdw_full]
-				if need == nil then
-					-- alias or new gte_cmdw_<X> not yet in latency table
-					local line = a.line + line_in_body[tokens[ti].rel]
-					findings[#findings + 1] = {
-						atom  = a.name,
-						line  = line,
-						check = "gte_pipeline_fill",
-						kind  = "warning",
-					msg   = string.format(
-						"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
-						a.name, line, variant),
-					}
-					ti = ti + 1
-				elseif need > 0 then
-					-- Count consecutive nops immediately BEFORE the cmdw
-					-- token. We walk tokens[ti - n] backwards, accumulating
-					-- nop_word_count, stopping at the first non-nop.
-					local have     = 0
-					local where_ti = ti - 1
-					while where_ti >= 1 do
-						local n = nop_word_count(tokens[where_ti].tok)
-						if n == 0 then break end
-						have     = have + n
-						where_ti = where_ti - 1
-					end
-					if have < need then
-						local line = a.line + line_in_body[tokens[ti].rel]
-						findings[#findings + 1] = {
-							atom  = a.name,
-							line  = line,
-							check = "gte_pipeline_fill",
-							kind  = "error",
-							msg   = string.format(
-								"%s at line %d needs %d nop word%s immediately BEFORE `gte_cmdw_%s`; only %d found",
-								a.name, line, need, need == 1 and "" or "s", variant, have),
-						}
-					end
-					ti = ti + 1
-				else
-					ti = ti + 1
-				end
-			else
-				ti = ti + 1
-			end
+			check_one_gte_cmdw(a, tokens[ti].tok, tokens, ti, line_in_body, findings)
+			ti = ti + 1
 		end
 	end
 end
@@ -583,6 +545,31 @@ end
 -- Source walkers: Binds_* structs + per-atom atom_info
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- Parse the U4 fields from a Binds_X body. Returns (fields, byte_count).
+local function parse_binds_fields(body)
+	local fields   = {}
+	local byte_off = 0
+	local body_pos = 1
+	while body_pos <= #body do
+		body_pos = duffle.skip_ws_and_cmt(body, body_pos)
+		if body_pos > #body then break end
+		local type_ident, type_end = duffle.read_ident(body, body_pos)
+		if not type_ident then
+			body_pos = body_pos + 1
+		elseif type_ident == "U4" then
+			local field_ident, field_end = duffle.read_ident(body, duffle.skip_ws_and_cmt(body, type_end))
+			if field_ident then
+				fields[#fields + 1] = { name = field_ident, offset = byte_off }
+				byte_off = byte_off + 4
+			end
+			body_pos = field_end or (type_end + 1)
+		else
+			body_pos = type_end + 1
+		end
+	end
+	return fields, byte_off
+end
+
 --- Walk source-as-written, return a list of `{line, name, fields, bytes}`
 --- for every `typedef Struct_(Binds_X) { ... };` declaration. Only U4
 --- fields are tracked (Binds_* are always word arrays in this codebase --
@@ -591,73 +578,107 @@ end
 --- static-analysis; each pass re-walks source).
 local function find_binds_structs(source_text)
 	local line_of = duffle.LineIndex(source_text)
-	local out = {}
+	local out     = {}
 	local src_len = #source_text
-	local pos      = 1
+	local pos     = 1
 	while pos <= src_len do
-		pos = duffle.skip_ws_and_cmt(source_text, pos); if pos > src_len then break end
-		if source_text:sub(pos, pos) == "#" then
-			local eol_pos = pos
-			while eol_pos <= src_len and source_text:byte(eol_pos) ~= 10 do eol_pos = eol_pos + 1 end
-			pos = eol_pos + 1
-		else
-			local ident, ident_end = duffle.read_ident(source_text, pos)
-			-- scan: <ident>
-			if not ident then
-				pos = pos + 1
-			elseif ident == "typedef" then
-				local after_typedef = duffle.skip_ws_and_cmt(source_text, ident_end)
-				local id2, id2_end  = duffle.read_ident(source_text, after_typedef)
-				-- scan: typedef <id2>
-				if id2 ~= "Struct_" then
-					pos = id2_end or (after_typedef + 1)
-				else
-					local open_paren = duffle.skip_ws_and_cmt(source_text, id2_end)
-					if source_text:sub(open_paren, open_paren) ~= "(" then
-						pos = open_paren + 1
-					else
-						local inner, after_paren = duffle.read_parens(source_text, open_paren)
-						-- scan: typedef Struct_(<name>)
-						local name = duffle.trim(inner)
-						local brace = duffle.scan_to_char(source_text, "{", after_paren)
-						-- scan: typedef Struct_(<name>) {
-						if not brace then
-							pos = open_paren + 1
-						else
-							local body, after_brace = duffle.read_braces(source_text, brace)
-							-- scan: typedef Struct_(<name>) { <fields> }
-							local fields   = {}
-							local byte_off = 0
-							local body_pos = 1
-							while body_pos <= #body do
-								body_pos = duffle.skip_ws_and_cmt(body, body_pos); if body_pos > #body then break end
-								local type_ident, type_end = duffle.read_ident(body, body_pos)
-								if not type_ident then
-									body_pos = body_pos + 1
-								elseif type_ident == "U4" then
-									local field_ident, field_end = duffle.read_ident(body, duffle.skip_ws_and_cmt(body, type_end))
-									if field_ident then
-										fields[#fields + 1] = { name = field_ident, offset = byte_off }
-										byte_off = byte_off + 4
-									end
-									body_pos = field_end or (type_end + 1)
-								else
-									body_pos = type_end + 1
-								end
-							end
-							if name:sub(1, 6) == "Binds_" then
-								out[#out + 1] = { line = line_of(pos), name = name, fields = fields, bytes = byte_off }
-							end
-							pos = after_brace
-						end
-					end
-				end
-			else
-				pos = ident_end
-			end
+		pos = duffle.skip_ws_and_cmt(source_text, pos)
+		if pos > src_len then break end
+
+		local pp_pos = duffle.skip_preprocessor_line(source_text, pos)
+		if pp_pos then pos = pp_pos; goto continue end
+
+		local ident, ident_end = duffle.read_ident(source_text, pos)
+		-- scan: <ident>
+		if not ident then pos = pos + 1; goto continue end
+		if ident ~= "typedef" then pos = ident_end; goto continue end
+
+		local after_typedef = duffle.skip_ws_and_cmt(source_text, ident_end)
+		local id2, id2_end  = duffle.read_ident(source_text, after_typedef)
+		-- scan: typedef <id2>
+		if id2 ~= "Struct_" then pos = id2_end or (after_typedef + 1); goto continue end
+
+		local open_paren = duffle.skip_ws_and_cmt(source_text, id2_end)
+		if source_text:sub(open_paren, open_paren) ~= "(" then pos = open_paren + 1; goto continue end
+
+		local inner, after_paren = duffle.read_parens(source_text, open_paren)
+		-- scan: typedef Struct_(<name>)
+		local name = duffle.trim(inner)
+		local brace = duffle.scan_to_char(source_text, "{", after_paren)
+		-- scan: typedef Struct_(<name>) {
+		if not brace then pos = open_paren + 1; goto continue end
+
+		local body, after_brace = duffle.read_braces(source_text, brace)
+		-- scan: typedef Struct_(<name>) { <fields> }
+		local fields, byte_off = parse_binds_fields(body)
+		if name:sub(1, 6) == "Binds_" then
+			out[#out + 1] = { line = line_of(pos), name = name, fields = fields, bytes = byte_off }
 		end
+		pos = after_brace
+
+		::continue::
 	end
 	return out
+end
+
+-- Parse the register list from inside `atom_reads(...)` or `atom_writes(...)`.
+local function parse_reg_list(sub_inner)
+	local regs = {}
+	local sub_inner_pos = 1
+	while sub_inner_pos <= #sub_inner do
+		sub_inner_pos = duffle.skip_ws_and_cmt(sub_inner, sub_inner_pos)
+		if sub_inner_pos > #sub_inner then break end
+		local reg_ident, reg_end = duffle.read_ident(sub_inner, sub_inner_pos)
+		if reg_ident then
+			regs[#regs + 1] = duffle.trim(reg_ident)
+			sub_inner_pos = reg_end
+		else
+			sub_inner_pos = sub_inner_pos + 1
+		end
+		if sub_inner_pos > #sub_inner then break end
+		if sub_inner:sub(sub_inner_pos, sub_inner_pos) == "," then sub_inner_pos = sub_inner_pos + 1 end
+	end
+	return regs
+end
+
+-- Parse the sub-calls inside `atom_info(atom_bind(...), atom_reads(...), atom_writes(...))`.
+-- Returns (binds, reads, writes).
+local function parse_atom_info_subcalls(info_inner)
+	local binds, reads, writes = nil, nil, nil
+	local sub_pos = 1
+	while sub_pos <= #info_inner do
+		sub_pos = duffle.skip_ws_and_cmt(info_inner, sub_pos)
+		if sub_pos > #info_inner then break end
+		local sub_ident, sub_end = duffle.read_ident(info_inner, sub_pos)
+		if not sub_ident then
+			sub_pos = sub_pos + 1
+		elseif sub_ident == "atom_bind" then
+			local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
+			if info_inner:sub(sub_open, sub_open) == "(" then
+				local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
+				-- scan: atom_bind(<Binds_X>)
+				binds = duffle.trim(sub_inner)
+				sub_pos = sub_after2
+			else
+				sub_pos = sub_open + 1
+			end
+		elseif sub_ident == "atom_reads" or sub_ident == "atom_writes" then
+			local kind = sub_ident
+			local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
+			if info_inner:sub(sub_open, sub_open) == "(" then
+				local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
+				-- scan: atom_reads(<regs>)  OR  atom_writes(<regs>)
+				local regs = parse_reg_list(sub_inner)
+				if kind == "atom_reads" then reads = regs else writes = regs end
+				sub_pos = sub_after2
+			else
+				sub_pos = sub_open + 1
+			end
+		else
+			sub_pos = sub_end
+		end
+	end
+	return binds, reads, writes
 end
 
 --- For every `MipsAtom_(name)` followed by `atom_info(...)`, parse the
@@ -667,103 +688,51 @@ end
 --- check_abi_handoff.
 local function find_atom_info(source_text)
 	local line_of = duffle.LineIndex(source_text)
-	local out = {}
+	local out     = {}
 	local src_len = #source_text
-	local pos      = 1
+	local pos     = 1
 	while pos <= src_len do
-		pos = duffle.skip_ws_and_cmt(source_text, pos); if pos > src_len then break end
-		if source_text:sub(pos, pos) == "#" then
-			local eol_pos = pos
-			while eol_pos <= src_len and source_text:byte(eol_pos) ~= 10 do eol_pos = eol_pos + 1 end
-			pos = eol_pos + 1
-		else
-			local ident, ident_end = duffle.read_ident(source_text, pos)
-			-- scan: <ident>
-			if not ident then
-				pos = pos + 1
-			elseif ident == "MipsAtom_" then
-				local open_paren = duffle.skip_ws_and_cmt(source_text, ident_end)
-				if source_text:sub(open_paren, open_paren) ~= "(" then
-					pos = open_paren + 1
-				else
-					local inner, after_paren = duffle.read_parens(source_text, open_paren)
-					-- scan: MipsAtom_(<name>)
-					local name_start = 1
-					while name_start <= #inner and inner:sub(name_start, name_start):match("[%s]") do name_start = name_start + 1 end
-					local name_end = name_start
-					while name_end <= #inner and inner:sub(name_end, name_end):match("[%w_]") do name_end = name_end + 1 end
-					local atom_name = inner:sub(name_start, name_end - 1)
-					local lookahead = duffle.skip_ws_and_cmt(source_text, after_paren)
-					local look_ident, look_end = duffle.read_ident(source_text, lookahead)
-					-- scan: MipsAtom_(<name>) <look_ident>
-					if look_ident == "atom_info" then
-						local info_open = duffle.skip_ws_and_cmt(source_text, look_end)
-						if source_text:sub(info_open, info_open) == "(" then
-							local info_inner, info_after = duffle.read_parens(source_text, info_open)
-							-- scan: MipsAtom_(<name>) atom_info(<binds>, <reads>, <writes>)
-							local binds, reads, writes = nil, nil, nil
-							local sub_pos = 1
-							while sub_pos <= #info_inner do
-								sub_pos = duffle.skip_ws_and_cmt(info_inner, sub_pos); if sub_pos > #info_inner then break end
-								local sub_ident, sub_end = duffle.read_ident(info_inner, sub_pos)
-								if not sub_ident then
-									sub_pos = sub_pos + 1
-								elseif sub_ident == "atom_bind" then
-									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
-									if info_inner:sub(sub_open, sub_open) == "(" then
-										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
-										-- scan: atom_bind(<Binds_X>)
-										binds = duffle.trim(sub_inner)
-										sub_pos = sub_after2
-									else
-										sub_pos = sub_open + 1
-									end
-								elseif sub_ident == "atom_reads" or sub_ident == "atom_writes" then
-									local kind = sub_ident
-									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
-									if info_inner:sub(sub_open, sub_open) == "(" then
-										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
-										-- scan: atom_reads(<regs>)  OR  atom_writes(<regs>)
-										local regs = {}
-										local sub_inner_pos = 1
-										while sub_inner_pos <= #sub_inner do
-											sub_inner_pos = duffle.skip_ws_and_cmt(sub_inner, sub_inner_pos); if sub_inner_pos > #sub_inner then break end
-											local reg_ident, reg_end = duffle.read_ident(sub_inner, sub_inner_pos)
-											if reg_ident then
-												regs[#regs + 1] = duffle.trim(reg_ident)
-												sub_inner_pos = reg_end
-											else
-												sub_inner_pos = sub_inner_pos + 1
-											end
-											if sub_inner_pos > #sub_inner then break end
-											if sub_inner:sub(sub_inner_pos, sub_inner_pos) == "," then sub_inner_pos = sub_inner_pos + 1 end
-										end
-										if kind == "atom_reads" then reads = regs else writes = regs end
-										sub_pos = sub_after2
-									else
-										sub_pos = sub_open + 1
-									end
-								else
-									sub_pos = sub_end
-								end
-							end
-							out[#out + 1] = {
-								atom_name = atom_name, binds = binds,
-								reads = reads or {}, writes = writes or {},
-								info_line = line_of(lookahead),
-							}
-							pos = info_after
-						else
-							pos = info_open + 1
-						end
-					else
-						pos = after_paren
-					end
-				end
-			else
-				pos = ident_end
-			end
-		end
+		pos = duffle.skip_ws_and_cmt(source_text, pos)
+		if pos > src_len then break end
+
+		local pp_pos = duffle.skip_preprocessor_line(source_text, pos)
+		if pp_pos then pos = pp_pos; goto continue end
+
+		local ident, ident_end = duffle.read_ident(source_text, pos)
+		-- scan: <ident>
+		if not ident then pos = pos + 1; goto continue end
+		if ident ~= "MipsAtom_" then pos = ident_end; goto continue end
+
+		local open_paren = duffle.skip_ws_and_cmt(source_text, ident_end)
+		if source_text:sub(open_paren, open_paren) ~= "(" then pos = open_paren + 1; goto continue end
+
+		local inner, after_paren = duffle.read_parens(source_text, open_paren)
+		-- scan: MipsAtom_(<name>)
+		local name_start = 1
+		while name_start <= #inner and inner:sub(name_start, name_start):match("[%s]") do name_start = name_start + 1 end
+		local name_end = name_start
+		while name_end <= #inner and inner:sub(name_end, name_end):match("[%w_]") do name_end = name_end + 1 end
+		local atom_name = inner:sub(name_start, name_end - 1)
+
+		local lookahead = duffle.skip_ws_and_cmt(source_text, after_paren)
+		local look_ident, look_end = duffle.read_ident(source_text, lookahead)
+		-- scan: MipsAtom_(<name>) <look_ident>
+		if look_ident ~= "atom_info" then pos = after_paren; goto continue end
+
+		local info_open = duffle.skip_ws_and_cmt(source_text, look_end)
+		if source_text:sub(info_open, info_open) ~= "(" then pos = info_open + 1; goto continue end
+
+		local info_inner, info_after = duffle.read_parens(source_text, info_open)
+		-- scan: MipsAtom_(<name>) atom_info(<binds>, <reads>, <writes>)
+		local binds, reads, writes = parse_atom_info_subcalls(info_inner)
+		out[#out + 1] = {
+			atom_name = atom_name, binds = binds,
+			reads = reads or {}, writes = writes or {},
+			info_line = line_of(lookahead),
+		}
+		pos = info_after
+
+		::continue::
 	end
 	return out
 end

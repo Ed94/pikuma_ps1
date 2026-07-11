@@ -399,6 +399,19 @@ function M.scan_to_char(s, target, start)
 	return nil
 end
 
+-- If `s[pos]` is `#`, skip to the end of the preprocessor directive line (past the newline).
+-- Returns the position past the newline, or nil if `s[pos]` is not `#`.
+-- scan: #<directive>\n -> past the newline
+function M.skip_preprocessor_line(s, pos)
+	if s:byte(pos) ~= 35 then return nil end  -- '#'
+	local scan = pos
+	local len = #s
+	while scan <= len and s:byte(scan) ~= BYTE_NEWLINE do
+		scan = scan + 1
+	end
+	return scan + 1
+end
+
 -- Split a brace-body into top-level comma-separated tokens. Honors nested
 -- parens/braces/brackets and skips strings/comments.
 --
@@ -568,53 +581,59 @@ M.TAPE_ATOM_MACROS = {
 	["atom_info"] = { kind = "info", binds = false },
 }
 
--- GTE pipeline-fill latency table (static-analysis Phase 1).
+-- GTE pipeline-fill latency table.
 --
--- For each `gte_cmdw_*` macro in code/duffle/gte.h, the minimum number of consecutive COP2 "nop" words that MUST appear 
--- before any other COP2 read or non-nop instruction (so the GTE pipeline latency is fully retired). 
--- Latencies are sourced from the doxygen comments in gte.h 
--- (e.g. `* @brief Rotate, Translate and Perspective Triple (23 cycles)` with body `Two nop words fill the COP2 pipeline latency`).
+-- For each `gte_cmdw_*` macro in code/duffle/gte.h, the minimum number of consecutive COP2 "nop" words that MUST appear
+-- before the command issues so that any preceding `lwc2`/`swc2`/C2 state writes have retired before the GTE starts
+-- reading its input registers.
 --
--- The check (`scripts/passes/static_analysis.lua :: check_gte_pipeline_fill`) walks each atom body, 
--- counts the consecutive nop words after every `gte_cmdw_*` invocation, and reports a finding if the count is below this minimum.  
--- Aliases are dereferenced before lookup (gté_cmdw_rtps_alias -> gte_cmdw_rtps -> 2).
--- 
--- Values verified against PSX-SPX gte.txt (rtpt 23cy / 8cy per divide => 2 nops; nclip 8cy => 2 nops; avsz3/avsz4 14cy => 2 nops; 
--- op single-cycle atomic => 0 nops; mvmva 8cy matrix-vector => 2 nops).
+-- The check (`scripts/passes/static_analysis.lua :: check_gte_pipeline_fill`) walks each atom body,
+-- counts the consecutive nop words before every `gte_cmdw_*` invocation, and reports a finding if the count is below this minimum.
+--
+-- PRE-FILL vs POST-FILL: this table models PRE-cmdw nops (retiring preceding C2 writes), NOT the post-cmdw input-latch
+-- window. The PSX-SPX pipeline timings doc (`docs/psx-spx/docs/gtepipelinetimings.md`) measures a DIFFERENT number:
+-- the smallest N nops between `cop2` and `mtc2` to a specific input register at which the write no longer affects
+-- the output. For nearly all instructions, inputs latch in the first 0-4 cycles — the GTE snapshots its input
+-- register file early and works from internal pipeline storage afterward. The documented total cycle count is
+-- NOT the "do not touch inputs" window; the actual read window is much shorter.
+--
+-- The `gte_rtpt()` / `gte_nclip()` wrapper macros in gte.h emit the pre-cmd nops internally (asm_words(nop, nop, ...)),
+-- but THOSE WRAPPERS ARE NOT USED INSIDE ATOM BODIES in this codebase.
+-- Every MipsAtom_(name) body uses raw `nop2, gte_cmdw_<X>, ...` form instead — that `nop2,` is the pre-fill this check validates.
+-- So values here reflect the source-level convention, NOT the wrapper-internal pre-fill.
+--
+-- Cycle counts from PSX-SPX `docs/psx-spx/docs/geometrytransformationenginegte.md`:
+--   cmd      PSX-SPX cycles  min pre-nops  rationale
+--   rtps         15              2         8c per perspective divide + 6c for IR1..4 + mac write
+--   rtpt         23              2         3x rtps worth of pipeline depth (per-vertex pipeline fill)
+--   nclip         8              2         MAC0 write + 5c for sign computation
+--   avsz3         5              2         5c to compute average + write OTZ (all inputs latch at N=0)
+--   avsz4         6              2         avsz3 + 1c extra for 4th vertex
+--   mvmva         8              2         IR1..4 write + matrix work (8c regardless of mx/v/cv selection)
+--   op            6              0         cross product; output to IR1..3 only (atomic 6c calc, no pre-fill needed)
+--
+-- The pre-nop values (2 for most commands) are conservative: PSX-SPX pipeline timings show most inputs latch at N=0-1
+-- relative to a preceding mtc2, but 2 nops is the gte.h convention for retiring preceding lwc2/swc2 + C2 state.
+-- OP is set to 0 because it's a short atomic op with no input that needs a long retire window.
+--
+-- Aliases are listed separately because source code may use either the alias or the canonical name.
 M.GTE_PIPELINE_LATENCY = {
-	-- Minimum number of consecutive `nop` words that must appear IMMEDIATELY BEFORE a `gte_cmdw_<X>` invocation 
-	-- to retire any preceding `lwc2` / `swc2` / pre-existing C2 state writes before the GTE pipeline starts reading 
+	-- Minimum number of consecutive `nop` words that must appear IMMEDIATELY BEFORE a `gte_cmdw_<X>` invocation
+	-- to retire any preceding `lwc2` / `swc2` / pre-existing C2 state writes before the GTE pipeline starts reading
 	-- from V0/V1/V2 or MAC0..3 / OTZ / IR0..3 at the command's issue cycle.
 	--
-	-- Values are from the doxygen comments in code/duffle/gte.h and cross-checked against PSX-SPX `geometrytransformationenginegte.md`:
-	--   cmd      cycles  min pre-nops  rationale
-	--   rtps        14      2         8c per perspective divide + 6c for IR1..4 + mac write
-	--   rptt        22      2         3x rtps worth of pipeline depth
-	--   nclip        7      2         MAC0 write + 5c for sign
-	--   avsz3       14      2         14c to compute average + write OTZ
-	--   avsz4       16      2         avsz3 + 2c extra for avg over 4
-	--   mvmva        8      2         IR1..4 write + matrix work
-	--   op           5      0         output to MAC0 only (atomic 5c calc)
-	--
-	-- The `gte_rtpt()` / `gte_nclip()` / `gte_avsz3()` wrapper macros in gte.h emit the pre-cmd nops internally (asm_words(nop, nop, ...)), 
-	-- but THOSE WRAPPERS ARE NOT USED INSIDE ATOM BODIES in this codebase. 
-	-- Every MipsAtom_(name) body uses raw `nop2, gte_cmdw_<X>, ...` form instead -- that `nop2,` is the pre-fill this check validates. 
-	-- So values here must reflect the source-level convention, NOT the wrapper-internal pre-fill (which is invisible at the source level).
-	--
-	-- Existing clean-atom bodies (cube_g4_face, floor_f3_face, diag_gte) all emit `nop2,` before every `gte_cmdw_<X>` (which matches values >= 2).
-	-- The check passes them all.
-	--
-	-- Aliases are listed separately because source code may use either the alias or the canonical name.
-	-- The check looks up the EXACT macro text, so both forms must be in the table.
+	-- Values are from the doxygen comments in code/duffle/gte.h and cross-checked against
+	-- PSX-SPX `docs/psx-spx/docs/geometrytransformationenginegte.md` (cycle counts) and
+	-- `docs/psx-spx/docs/gtepipelinetimings.md` (input-latch boundaries).
 
 	-- Canonical macros (from code/duffle/gte.h)
-	["gte_cmdw_rtps"]   = 2,
-	["gte_cmdw_rtpt"]   = 2,
-	["gte_cmdw_nclip"]  = 2,
-	["gte_cmdw_op"]     = 0,
-	["gte_cmdw_mvmva"]  = 2,
-	["gte_cmdw_avsz3"]  = 2,
-	["gte_cmdw_avsz4"]  = 2,
+	["gte_cmdw_rtps"]   = 2,  -- RTPS: 15 cycles (PSX-SPX)
+	["gte_cmdw_rtpt"]   = 2,  -- RTPT: 23 cycles (PSX-SPX)
+	["gte_cmdw_nclip"]  = 2,  -- NCLIP: 8 cycles (PSX-SPX)
+	["gte_cmdw_op"]     = 0,  -- OP: 6 cycles, atomic (PSX-SPX)
+	["gte_cmdw_mvmva"]  = 2,  -- MVMVA: 8 cycles (PSX-SPX)
+	["gte_cmdw_avsz3"]  = 2,  -- AVSZ3: 5 cycles (PSX-SPX)
+	["gte_cmdw_avsz4"]  = 2,  -- AVSZ4: 6 cycles (PSX-SPX)
 
 	-- Aliases (must have the same value as their canonical target)
 	["gte_cmdw_rotate_translate_perspective_single"] = 2,
@@ -630,7 +649,18 @@ M.GTE_PIPELINE_LATENCY = {
 }
 
 -- GP0 packet sizes (total words including the 1-word tag) per GP0 cmd byte.
--- Verified against code/duffle/gp.h struct sizes + the set_poly_* macros
+-- Per PSX-SPX `docs/psx-spx/docs/graphicsprocessingunitgpu.md` §"GPU Render Polygon Commands":
+--   Each polygon command's word count = 1 (tag/cmd) + per-vertex (vertex + optional color + optional UV).
+--   F3:  cmd + 3 vertices = 4 words; +1 tag = 5
+--   F4:  cmd + 4 vertices = 5 words; +1 tag = 6
+--   G3:  cmd + 3×(color + vertex) = 6 words; +1 tag = 7
+--   G4:  cmd + 4×(color + vertex) = 8 words; +1 tag = 9
+--   FT3: cmd + tpage + clut + 3×(vertex + UV) = 7 words; +1 tag = 8
+--   FT4: cmd + tpage + clut + 4×(vertex + UV) = 9 words; +1 tag = 10
+--   GT3: cmd + tpage + clut + 3×(color + vertex + UV) = 9 words; +1 tag = 10
+--   GT4: cmd + tpage + clut + 4×(color + vertex + UV) = 12 words; +1 tag = 13
+--
+-- Cross-checked against code/duffle/gp.h struct sizes + the set_poly_* macros
 -- (which encode "len" = "words after tag"):
 --   set_poly_f3(p)   -> set_len(p, 4)   ->  5 total GP0 0x20
 --   set_poly_ft3(p)  -> set_len(p, 7)   ->  8 total GP0 0x24
@@ -677,26 +707,33 @@ M.GP0_MACRO_CONTRIB = {
 
 -- Per-macro cycle cost (best-case, no stalls). Used by the static-analysis pass to emit per-atom cycle budgets.
 -- The counts cover the EXPANDED instruction sequence the macro emits (NOT just the token it appears as in source).
--- For example: 
+-- For example:
 --   mac_pack_color_word(off, cmd, r, g, b) emits:
 --     load_upper_i(R_AT, (cmd << 8) | b)        -- 1 cycle
 --     or_i_self(R_AT, (g << 8) | r)             -- 1 cycle
 --     store_word(R_AT, R_PrimCursor, off)       -- 1 cycle
 --                                              = 3 cycles total
 --
---   mac_yield emits a control-transfer sequence (load_word, add_ui_self, jump_reg, nop) 
---   which "yields control" the atom body's cycle budget doesn't include the yield's cost (we model it as 0; 
+--   mac_yield emits a control-transfer sequence (load_word, add_ui_self, jump_reg, nop)
+--   which "yields control" the atom body's cycle budget doesn't include the yield's cost (we model it as 0;
 --   runtime cost becomes part of the NEXT atom's prologue).
 --
 -- GTE command values are the GTE instruction's intrinsic cycles (the latency AFTER any pre-cmd `nop2` has retired).
 -- When the source emits `nop2, gte_cmdw_X` the nops' cycles are added separately (1+1) plus the gte_cmdw_X value here:
---   rtpt  = 21 + 2 nops = 23 total cycles  (matches PSX-SPX)
---   rtps  = 12 + 2 nops = 14 total
---   nclip =  6 + 2 nops = 8 total
---   avsz3 = 12 + 2 nops = 14 total
---   avsz4 = 14 + 2 nops = 16 total
---   mvmva =  6 + 2 nops = 8 total
---   op    =  5 (no pre-cmd nops required; single-cycle atomic)
+--   rtpt  = 23 + 2 nops = 25 total cycles  (PSX-SPX says 23 cycles for the cmd itself; the nops are pre-fill)
+--   rtps  = 15 + 2 nops = 17 total
+--   nclip =  8 + 2 nops = 10 total
+--   avsz3 =  5 + 2 nops =  7 total
+--   avsz4 =  6 + 2 nops =  8 total
+--   mvmva =  8 + 2 nops = 10 total
+--   op    =  6 (no pre-cmd nops required; atomic)
+--
+-- Note: the "total" above is the pre-fill nops + the GTE intrinsic cycles. PSX-SPX documents the GTE
+-- intrinsic cycles as the total execution time of the command itself (rtpt=23, rtps=15, nclip=8, etc.).
+-- The pre-fill nops are a codebase convention for retiring preceding C2 writes, not part of the GTE's
+-- own execution time. See `docs/psx-spx/docs/geometrytransformationenginegte.md` for the canonical
+-- per-command cycle counts and `docs/psx-spx/docs/gtepipelinetimings.md` for the hardware-verified
+-- input-latch boundaries (which show most inputs are safe to clobber after just 0-4 cycles).
 M.INSTRUCTION_LATENCY = {
 	-- CPU ALU (single-cycle R3000A ops)
 	["nop"]                 = 1,
@@ -759,30 +796,30 @@ M.INSTRUCTION_LATENCY = {
 	["gte_mv_from_ctrl_r"]  = 1,
 	["gte_lw"]              = 1,  ["gte_lwc2"]           = 1,
 	["gte_sw"]              = 1,  ["gte_swc2"]           = 1,
-	-- COP2 commands (intrinsic cycles, EXCLUDING the 2 pre-cmd nops that
-	-- the source typically emits as `nop2, gte_cmdw_X`; those nops are
-	-- counted separately via the `nop2` entry above)
-	["gte_cmdw_rtpt"]          = 21,
-	["gte_cmdw_rtps"]          = 12,
-	["gte_cmdw_nclip"]         = 6,
-	["gte_cmdw_avsz3"]         = 12,
-	["gte_cmdw_avsz4"]         = 14,
-	["gte_cmdw_mvmva"]         = 6,
-	["gte_cmdw_op"]            = 5,
-	["gte_cmdw_outer_product"] = 5,
-	["gte_cmdw_wedge"]         = 5,
+	-- COP2 commands (intrinsic cycles per PSX-SPX, EXCLUDING the 2 pre-cmd nops that
+	-- the source typically emits as `nop2, gte_cmdw_X`; those nops are counted
+	-- separately via the `nop2` entry above)
+	["gte_cmdw_rtpt"]          = 23,  -- RTPT: 23 cycles (PSX-SPX)
+	["gte_cmdw_rtps"]          = 15,  -- RTPS: 15 cycles (PSX-SPX)
+	["gte_cmdw_nclip"]         = 8,   -- NCLIP: 8 cycles (PSX-SPX)
+	["gte_cmdw_avsz3"]         = 5,   -- AVSZ3: 5 cycles (PSX-SPX)
+	["gte_cmdw_avsz4"]         = 6,   -- AVSZ4: 6 cycles (PSX-SPX)
+	["gte_cmdw_mvmva"]         = 8,   -- MVMVA: 8 cycles (PSX-SPX)
+	["gte_cmdw_op"]            = 6,   -- OP: 6 cycles (PSX-SPX)
+	["gte_cmdw_outer_product"] = 6,   -- alias for OP
+	["gte_cmdw_wedge"]         = 6,   -- alias for OP
 	-- Long-form aliases (same cost as canonical)
-	["gte_cmdw_rotate_translate_perspective_single"] = 12,  -- alias for rtps
-	["gte_cmdw_rotate_translate_perspective_triple"] = 21,  -- alias for rtpt
-	["gte_cmdw_avg_sort_z4"]                         = 14,  -- alias for avsz4
+	["gte_cmdw_rotate_translate_perspective_single"] = 15,  -- alias for rtps
+	["gte_cmdw_rotate_translate_perspective_triple"] = 23,  -- alias for rtpt
+	["gte_cmdw_avg_sort_z4"]                         = 6,   -- alias for avsz4
 	-- Non-cmdw aliases from gte.h (these are `#define gte_X gte_cmdw_Y`):
-	["gte_avg_sort_z3"]                              = 12,  -- alias for avsz3
-	["gte_avg_sort_z4"]                              = 14,  -- alias for avsz4
-	["gte_rtps"]                                     = 12,  -- alias for rtps
-	["gte_rtpt"]                                     = 21,  -- alias for rtpt
-	["gte_nclip"]                                    = 6,   -- alias for nclip
-	["gte_avsz3"]                                    = 12,
-	["gte_avsz4"]                                    = 14,
+	["gte_avg_sort_z3"]                              = 5,   -- alias for avsz3
+	["gte_avg_sort_z4"]                              = 6,   -- alias for avsz4
+	["gte_rtps"]                                     = 15,  -- alias for rtps
+	["gte_rtpt"]                                     = 23,  -- alias for rtpt
+	["gte_nclip"]                                    = 8,   -- alias for nclip
+	["gte_avsz3"]                                    = 5,
+	["gte_avsz4"]                                    = 6,
 	-- Legacy single-cycle store helpers (gte_stotz, gte_stsxy3 are 1 cycle)
 	["gte_stotz"]           = 1,
 	["gte_stsxy3"]          = 1,
