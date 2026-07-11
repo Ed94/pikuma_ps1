@@ -132,6 +132,14 @@ local function record_offset_marker(branches, args, at_pos)
 	end
 end
 
+-- MARKER_TO_HANDLER — data-driven marker dispatch (the plex pattern).
+-- Maps the marker ident to its recorder function. Each handler takes (out_table, args, at_pos).
+-- Adding a new marker type = 1 row + 1 recorder function.
+local MARKER_TO_HANDLER = {
+	[LABEL_MARKER]  = record_label_marker,
+	[OFFSET_MARKER] = record_offset_marker,
+}
+
 --- Scan a single token for atom_label/atom_offset markers, walking through balanced groups transparently (so nested calls are found).
 --- @param token string
 --- @param at_pos integer    -- the branch-free word position of this token in the body
@@ -146,13 +154,13 @@ local function scan_for_atom_markers(token, at_pos, labels, branches)
 		local ch = token:sub(pos, pos)
 		if duffle.is_alpha(ch) then
 			local ident, after = duffle.read_ident(token, pos)
-			if ident == LABEL_MARKER then
+			local handler = MARKER_TO_HANDLER[ident]
+			if handler then
 				local args, after_paren = extract_ident_args(token, after)
-				record_label_marker(labels, args, at_pos)
-				pos = after_paren or after
-			elseif ident == OFFSET_MARKER then
-				local args, after_paren = extract_ident_args(token, after)
-				record_offset_marker(branches, args, at_pos)
+				-- Marker found — dispatch to its recorder. markers share labels and branches as
+				-- out-tables; the recorder picks which one(s) to write to based on its semantics.
+				-- (record_label_marker writes to labels; record_offset_marker writes to branches.)
+				handler(ident == LABEL_MARKER and labels or branches, args, at_pos)
 				pos = after_paren or after
 			else
 				pos = after

@@ -12,19 +12,13 @@
 ---   - **Process-bootstrap helper** (`setup_package_path`replaces the 8-line `arg[0]`-resolution boilerplate duplicated across 7 entry scripts)
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex.
---- Lua 5.3 compatible; no `<close>`/`<toclose>`, no `continue`, no
---- 5.4 string.dump improvements. LuaJIT 5.1+extensions model is the primary target.
----
---- **No `:match` / `:gmatch` regex use anywhere**; 
---- all delimiter-splitting is hand-rolled or via LPeg (the regex-free PEG library).
 
 local M = {}
 
--- Optional native extension: lfs (LuaFileSystem). When present, ensure_dir uses
--- lfs.attributes + lfs.mkdir instead of spawning `cmd.exe mkdir` — saves ~55ms per
--- unique directory on Windows. Built by `update_deps.ps1` to `toolchain/lfs/lfs.dll`
--- and wired into package.cpath by `scripts/duffle_paths.lua`.
-local lfs = pcall(require, "lfs") and require("lfs") or nil
+-- Required native extension: lfs (LuaFileSystem). Built by `update_deps.ps1` to
+-- `toolchain/lfs/lfs.dll` and wired into package.cpath by `scripts/duffle_paths.lua`.
+-- If lfs is missing, `require` throws — fail loud per the build-tool convention.
+local lfs = require("lfs")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Cross-file type aliases
@@ -315,7 +309,7 @@ end
 -- Normalizes forward slashes to backslashes on Windows.
 -- Used for byte-identical emit: the // Source: comment line uses the absolute path.
 --
--- The CWD is memoized (one `io.popen("cd")` per process — ~50ms on Windows).
+-- The CWD is memoized on first call (one lfs.currentdir() per process — ~0ms).
 -- Without the cache, calling this per-source in the components pass added ~1.5s to a 30-source build.
 -- @param path string
 -- @return string
@@ -329,16 +323,8 @@ function M.to_absolute_path(path)
 		_absolute_path_cache[path] = result
 		return result
 	end
-	-- Native: lfs.currentdir() is ~0ms vs io.popen("cd") at ~50ms per call.
-	local cwd
-	if lfs then
-		cwd = lfs.currentdir()
-	else
-		local p = io.popen("cd")
-		if not p then _absolute_path_cache[path] = path; return path end
-		cwd = p:read("*l")
-		p:close()
-	end
+	-- lfs.currentdir() is ~0ms vs io.popen("cd") at ~50ms per call on Windows.
+	local cwd = lfs.currentdir()
 	if not cwd then _absolute_path_cache[path] = path; return path end
 	cwd = cwd:gsub("/", "\\")
 	local tail = (path:gsub("/", "\\"))
@@ -356,15 +342,9 @@ local _ensured_dirs = {}
 function M.ensure_dir(path)
 	if _ensured_dirs[path] then return end
 	_ensured_dirs[path] = true
-	if lfs then
-		-- Native: ~0ms when dir exists (the common case). lfs.mkdir on a new dir is ~2ms (no shell spawn).
-		-- Falls through silently if lfs.mkdir fails (e.g. permission denied); the subsequent write_file will surface the error.
-		if lfs.attributes(path, "mode") ~= "directory" then lfs.mkdir(path) end
-	else
-		-- Fallback: shell mkdir. Slow (~55ms per call on Windows due to cmd.exe spawn) but works without lfs.
-		local is_win = package.config:sub(1, 1) == "\\"
-		os.execute(is_win and ('if not exist "' .. path .. '" mkdir "' .. path .. '"') or ('mkdir -p "' .. path .. '" 2>/dev/null'))
-	end
+	-- lfs.attributes + lfs.mkdir: ~0ms when dir exists, ~2ms when creating. No shell spawn.
+	-- Falls through silently if lfs.mkdir fails (e.g. permission denied); the subsequent write_file will surface the error.
+	if lfs.attributes(path, "mode") ~= "directory" then lfs.mkdir(path) end
 end
 
 -- Test helper: clear the cache (used by tests + between process runs).
@@ -585,8 +565,9 @@ end
 -- Moved here from passes/static_analysis.lua so all passes can share the memoized
 -- per-body tokenization. The memoization key is the body string (immutable per pass).
 
-local _tokenize_body_cache    = {}
-local _body_line_index_cache  = {}
+local _tokenize_body_cache        = {}
+local _tokenize_body_simple_cache = {}
+local _body_line_index_cache      = {}
 
 --- Tokenize the body inner-text into a flat list of `{tok, rel}` pairs.
 --- `tok` is the trimmed token string; `rel` is the byte offset within `body`.
@@ -633,12 +614,15 @@ end
 --- Tokenize the body into a flat list of trimmed string tokens (preserves comments).
 --- Uses `split_top_level_commas` (which appends trailing comments to the previous token)
 --- so the components pass can emit `/* Words: ... */` comments in the .macs.h output.
+--- Memoized on body string (R7 lift; mirror of M.tokenize_body's memoization).
 --- @param body string
 --- @return string[]
 function M.tokenize_body_simple(body)
+	if _tokenize_body_simple_cache[body] ~= nil then return _tokenize_body_simple_cache[body] end
 	local tokens = M.split_top_level_commas(body)
 	local out = {}
 	for i = 1, #tokens do out[i] = M.trim(tokens[i]) end
+	_tokenize_body_simple_cache[body] = out
 	return out
 end
 

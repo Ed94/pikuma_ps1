@@ -30,47 +30,25 @@ local CACHE_KEY = "__duffle_repo_root__"
 --- Replaces the prior `io.popen("git rev-parse --show-toplevel")` approach, which cost ~100-180ms per
 --- LuaJIT process on Windows due to git's CLI startup. The path-derive approach costs <1ms.
 ---
---- If this script's path can't be parsed (shouldn't happen — dofile/debug.getinfo always populates source),
---- fall back to a defensive walk: starting from this script's directory, walk UP until we find a parent that
---- contains a `scripts/` directory. The first match is the repo root.
+--- If `debug.getinfo` can't parse this script's path (shouldn't happen — dofile always populates source),
+--- return nil and let `M.setup()` fail loud.
 --- @return string|nil
 local function find_repo_root()
 	if package.loaded[CACHE_KEY] then return package.loaded[CACHE_KEY] end
 
 	local source = debug.getinfo(1, "S").source
 	-- Strip the leading `@` (Lua's dofile marker) and the trailing `/duffle_paths.lua` filename.
-	-- What remains is the directory containing this script, i.e. `<repo>/scripts/` (with trailing slash or not).
+	-- What remains is the directory containing this script, i.e. `<repo>/scripts/`.
 	local scripts_dir = source and source:match("^@?(.*)[/\\]duffle_paths%.lua$")
-	if scripts_dir then
-		-- The repo root is the parent of `scripts/`. Strip the trailing `scripts/` (with or without trailing slash).
-		local root = scripts_dir:gsub("scripts[\\/]?$", "")
-		root = root:gsub("\\", "/")
-		if root == "" then root = "./" end
-		if not root:match("/$") then root = root .. "/" end
-		package.loaded[CACHE_KEY] = root
-		return root
-	end
+	if not scripts_dir then return nil end
 
-	-- Defensive fallback: walk UP from this script's directory until we find a parent that contains `scripts/`.
-	-- In practice this branch never fires — debug.getinfo always returns a source for dofile()'d chunks.
-	local lfs = pcall(require, "lfs") and require("lfs") or nil
-	if lfs then
-		local dir = source and source:match("^@?(.*[/\\])") or "./"
-		dir = dir:gsub("\\", "/")
-		while dir and dir ~= "" do
-			local candidate_scripts = dir .. "scripts"
-			if lfs.attributes(candidate_scripts, "mode") == "directory" then
-				dir = dir:gsub("/$", "")
-				package.loaded[CACHE_KEY] = dir .. "/"
-				return dir .. "/"
-			end
-			local parent = dir:match("^(.*)/[^/]+/$")
-			if not parent then break end
-			dir = parent .. "/"
-		end
-	end
-
-	return nil
+	-- The repo root is the parent of `scripts/`. Strip the trailing `scripts/` (with or without trailing slash).
+	local root = scripts_dir:gsub("scripts[\\/]?$", "")
+	root = root:gsub("\\", "/")
+	if root == "" then root = "./" end
+	if not root:match("/$") then root = root .. "/" end
+	package.loaded[CACHE_KEY] = root
+	return root
 end
 
 --- Set `package.path` (for `require("duffle")` + `require("passes.X")`) and

@@ -28,17 +28,13 @@ local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Windows separator chars — used to convert `dir` output (which uses `\`) into POSIX paths (which our scripts expect).
+-- Windows separator char — used by `fname:match` to recognize `.macs.h` files.
 local PATH_SEP_BACKSLASH = "\\"
-local PATH_SEP_FORWARD   = "/"
 
--- Fallback glob command (subprocess). Used when `lfs` (LuaFileSystem) is not available.
--- Scoped to `code\` to avoid walking `.git/`, `toolchain/`, `build/`, etc.
-local DIR_GLOB_CMD = 'dir /b /s "%s\\code\\%s" 2>nul'
-
--- Try to load lfs (LuaFileSystem). If available, scan_dir uses native directory enumeration (~2ms)
--- instead of spawning `dir /b /s` as a subprocess (~56ms). Built by update_deps.ps1 into toolchain/lfs/lfs.dll.
-local lfs = pcall(require, "lfs") and require("lfs") or nil
+-- Required native extension: lfs (LuaFileSystem). Built by `update_deps.ps1` to
+-- `toolchain/lfs/lfs.dll` and wired into package.cpath by `scripts/duffle_paths.lua`.
+-- If lfs is missing, `require` throws — fail loud per the build-tool convention.
+local lfs = require("lfs")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
@@ -106,26 +102,20 @@ end
 -- └────────────────────────────────────────────────────────────────────┘
 
 --- Recursively scan a directory for files matching a glob suffix.
---- No regex per the no_regex constraint — uses plain byte matching via `dir /b /s` on Windows.
 ---
 --- The `.macs.h` files produced by the components pass always live at `<project_root>/<module>/gen/`.
---- We can shortcut the `dir /b /s` walk by listing modules first (one `dir /b /ad`), then walking each `<module>/gen/`
---- (one `dir /b` per module, no recursion). 
---- For projects with 2 modules and 0 .macs.h files, this drops the cost from ~52ms 
---- (full recursive walk of the entire project tree) to ~5ms.
+--- Native walk via lfs.attributes + lfs.dir: ~2ms vs ~56ms for the prior `dir /b /s` subprocess.
 ---
 --- @param dir string        -- directory to scan (absolute or relative)
 --- @param suffix string     -- file pattern, e.g. "*.macs.h"
 --- @return string[]
--- Cache the scan_dir result per (dir, suffix) in package.loaded. 
--- Each `io.popen` call on Windows is ~50-100ms of subprocess overhead, so caching the result saves a fixed cost on every build.
+-- Cache the scan_dir result per (dir, suffix) in package.loaded.
 -- The cache persists for the lifetime of the Lua process (cleared when ps1_meta.lua exits).
 -- If a build removes/creates .macs.h files mid-process, the caller can invalidate by calling `M._invalidate_scan_cache()`.
 local SCAN_CACHE_KEY = "__word_count_eval_scan_cache__"
 
 --- Scan `code/` for files matching `suffix` (e.g. `*.macs.h`).
---- Uses `lfs` (LuaFileSystem) when available — native directory enumeration at ~2ms.
---- Falls back to `dir /b /s` subprocess (~56ms) when `lfs` is not compiled.
+--- Native directory enumeration via lfs (~2ms). Zero subprocess spawns.
 ---
 --- @param dir string        -- project root directory
 --- @param suffix string     -- file pattern, e.g. "*.macs.h"
@@ -137,32 +127,19 @@ function M.scan_dir(dir, suffix)
 	if    cache and cache[key] then return cache[key] end
 
 	local results = {}
-
-	if lfs then
-		-- Native walk: list code/<module>/gen/ for matching files. Zero subprocess spawns.
-		local code_dir = dir .. "/code"
-		if lfs.attributes(code_dir, "mode") == "directory" then
-			for mod_name in lfs.dir(code_dir) do
-				if mod_name ~= "." and mod_name ~= ".." then
-					local gen_path = code_dir .. "/" .. mod_name .. "/gen"
-					if lfs.attributes(gen_path, "mode") == "directory" then
-						for fname in lfs.dir(gen_path) do
-							if fname:match("%.macs%.h$") then
-								results[#results + 1] = gen_path .. "/" .. fname
-							end
+	local code_dir = dir .. "/code"
+	if lfs.attributes(code_dir, "mode") == "directory" then
+		for mod_name in lfs.dir(code_dir) do
+			if mod_name ~= "." and mod_name ~= ".." then
+				local gen_path = code_dir .. "/" .. mod_name .. "/gen"
+				if lfs.attributes(gen_path, "mode") == "directory" then
+					for fname in lfs.dir(gen_path) do
+						if fname:match("%.macs%.h$") then
+							results[#results + 1] = gen_path .. "/" .. fname
 						end
 					end
 				end
 			end
-		end
-	else
-		-- Fallback: single `dir /b /s` subprocess scoped to code\.
-		local pipe = io.popen(DIR_GLOB_CMD:format(dir, suffix))
-		if pipe then
-			for raw_line in pipe:lines() do
-				results[#results + 1] = raw_line:gsub(PATH_SEP_BACKSLASH, PATH_SEP_FORWARD)
-			end
-			pipe:close()
 		end
 	end
 

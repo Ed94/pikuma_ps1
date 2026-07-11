@@ -14,7 +14,7 @@
 ---   `["static-analysis"] = { module = "passes.static_analysis", kind = "validation", deps = {"word-counts", "components"},
 ---     out = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } } }`
 ---
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible. See `lua.md` in the ps1-ai styleguides.
+--- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -115,25 +115,6 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field total_cycles integer   -- sum of token cycle costs
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Source scanning — delegated to duffle.scan_source (ps1_meta.lua pre-scans)
--- ════════════════════════════════════════════════════════════════════════════
---
--- The orchestrator calls duffle.scan_source once per source and stashes the fat SourceScan in src.scan.
--- validate() below reads from src.scan — no source walking in this pass.
-
--- ════════════════════════════════════════════════════════════════════════════
--- Body tokenizer (top-level comma splitter + per-token classification)
--- ════════════════════════════════════════════════════════════════════════════
-
---- Build a map: `body_relative_char_offset` -> `body_relative_line`.
---- Used by the checks to convert per-token offsets in the body to lina numbers relative to the start of `body`. 
---- The atom's source-line of the body-start is added by the caller.
----
--- NOTE: `tokenize_body` and `build_body_line_index` moved to `duffle.lua` as shared
--- memoized utilities (`duffle.tokenize_body`, `duffle.build_body_line_index`).
--- The local copies were deleted; all callers now use the duffle versions.
-
--- ════════════════════════════════════════════════════════════════════════════
 -- classify_tokens — per-token classification (the plex's pre-computed data layer)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -156,16 +137,30 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 -- Checks that need "how many nops before token i" use `tok_class.nop_prefix` instead of walking backwards.
 
 --- @class TokClass
---- @field ident        string          -- leading identifier
---- @field nop_words    integer         -- 0/1/2
---- @field nop_prefix   integer         -- consecutive nop words before this token
---- @field is_yield     boolean
---- @field is_atom_label boolean
---- @field label_name   string|nil      -- for atom_label(name)
---- @field is_branch    boolean
---- @field branch_label string|false|nil -- for branch_*(..., atom_offset(F, label))
---- @field is_load_word boolean
---- @field is_store_word boolean
+--- @field ident              string          -- leading identifier
+--- @field nop_words          integer         -- 0/1/2
+--- @field nop_prefix         integer         -- consecutive nop words before this token
+--- @field is_yield           boolean
+--- @field is_atom_label      boolean
+--- @field label_name         string|nil      -- for atom_label(name)
+--- @field is_branch          boolean
+--- @field branch_label       string|false|nil -- for branch_*(..., atom_offset(F, label))
+--- @field is_load_word       boolean
+--- @field is_store_word      boolean
+--- @field mac_format_shape   string|nil      -- "f3" / "g4" etc. for mac_format_X_color; nil otherwise
+--- @field is_gte_store       boolean         -- ident matches `mac_gte_store_<shape>`
+--- @field is_ot_tag          boolean         -- ident matches `mac_insert_ot_tag_<shape>`
+--- @field writes_r_prim_cursor boolean       -- store_word targeting R_PrimCursor
+--- @field reads_r_tape_ptr   boolean         -- any token referencing R_TapePtr
+--- @field o_arg1             string|nil      -- first arg of O_(<a>, <b>) captures; nil for non-O_ tokens
+--- @field o_arg2             string|nil      -- second arg of O_(<a>, <b>) captures
+--- @field s_arg1             string|nil      -- arg of S_(<a>) captures; nil for non-S_ tokens
+
+-- Patterns for O_(<arg1>, <arg2>) and S_(<arg>) captures. UNANCHORED — the substring can appear
+-- anywhere in the token (e.g., `load_word(R_T0, R_TapePtr, O_(Binds_X, field))` matches at position ~24).
+-- The binds_name match is deferred to check_abi_handoff (which compares tc.o_arg1 == atom.info.binds).
+local O_PATTERN = "O_%(([%w_]+),%s*([%w_]+)%s*%)"
+local S_PATTERN = "S_%(([%w_]+)%s*%)"
 
 local function classify_tokens(tokens)
 	local n       = #tokens
@@ -186,6 +181,16 @@ local function classify_tokens(tokens)
 		local is_load_word  = ident == "load_word"
 		local is_store_word = ident == "store_word"
 
+		-- Per-check pre-computes (R3 lift). Each pre-compute eliminates one per-token regex/string-find
+		-- call from check_abi_handoff / check_gpu_portstore_shape.
+		local mac_format_shape   = nil
+		local is_gte_store        = false
+		local is_ot_tag           = false
+		local writes_r_prim_cursor = false
+		local reads_r_tape_ptr   = false
+		local o_arg1, o_arg2      = nil, nil
+		local s_arg1              = nil
+
 		if ident == "atom_label" then
 			is_atom_label = true
 			label_name    = tok:match("^atom_label%s*%(%s*([%w_]+)%s*%)")
@@ -194,17 +199,40 @@ local function classify_tokens(tokens)
 			branch_label = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
 		end
 
+		-- mac_format_X_color / mac_gte_store_<shape> / mac_insert_ot_tag_<shape> (used by check_gpu_portstore_shape).
+		local shape = ident:match("^mac_format_([%w_]+)_color$")
+		if shape then mac_format_shape = shape end
+		if ident:match("^mac_gte_store_[%w_]+$")  then is_gte_store = true end
+		if ident:match("^mac_insert_ot_tag_[%w_]+$") then is_ot_tag    = true end
+
+		-- O_(<arg1>, <arg2>) / S_(<arg>) captures (used by check_abi_handoff).
+		-- Cheap pattern match — anchored, fails fast on non-matching tokens.
+		o_arg1, o_arg2 = tok:match(O_PATTERN)
+		if not o_arg1 then s_arg1 = tok:match(S_PATTERN) end
+
+		-- R_TapePtr + R_PrimCursor references (used by check_abi_handoff / check_gpu_portstore_shape).
+		if tok:find("R_TapePtr", 1, true) then reads_r_tape_ptr = true end
+		if is_store_word and tok:find("R_PrimCursor", 1, true) then writes_r_prim_cursor = true end
+
 		tc[tok_idx] = {
-			ident         = ident,
-			nop_words     = nop_words,
-			nop_prefix    = nop_run,
-			is_yield      = is_yield,
-			is_atom_label = is_atom_label,
-			label_name    = label_name,
-			is_branch     = is_branch,
-			branch_label  = branch_label,
-			is_load_word  = is_load_word,
-			is_store_word = is_store_word,
+			ident                = ident,
+			nop_words            = nop_words,
+			nop_prefix           = nop_run,
+			is_yield             = is_yield,
+			is_atom_label        = is_atom_label,
+			label_name           = label_name,
+			is_branch            = is_branch,
+			branch_label         = branch_label,
+			is_load_word         = is_load_word,
+			is_store_word        = is_store_word,
+			mac_format_shape     = mac_format_shape,
+			is_gte_store         = is_gte_store,
+			is_ot_tag            = is_ot_tag,
+			writes_r_prim_cursor = writes_r_prim_cursor,
+			reads_r_tape_ptr     = reads_r_tape_ptr,
+			o_arg1               = o_arg1,
+			o_arg2               = o_arg2,
+			s_arg1               = s_arg1,
 		}
 		-- Advance the nop run for the NEXT token.
 		if nop_words > 0 then
@@ -406,29 +434,28 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 	local tc             = atom.paths.tok_class
 	local found_field_set = {}
 	local found_advance   = false
-	local bind_re         = "O_%(" .. binds_name .. ",%s*([%w_]+)%s*%)"
-	for tok_idx, t in ipairs(tokens) do
-		local tok = t.tok
-		if tc[tok_idx].is_load_word then
-			if tok:find("R_TapePtr", 1, true) and tok:find("O_(" .. binds_name .. ",", 1, true) then
-				local field = tok:match(bind_re)
-				-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
-				if field then
-					found_field_set[field] = true
-				else
-					local body_line = atom.line + line_in_body[t.rel]
-					findings[#findings + 1] = {
-						atom  = atom.name, line = body_line,
-						check = "abi_handoff", kind = "error",
-						msg   = string.format("%s at line %d has load_word(R_TapePtr, O_(%s, <non-ident>)); expected O_(%s, <field>)",
-							atom.name, body_line, binds_name, binds_name),
-					}
-				end
+
+	-- Reads from tc_entry fields pre-computed by classify_tokens (R3 lift). Eliminates 3 per-token
+	-- string-find/match calls (R_TapePtr + O_(binds_name,...) + bind_re) → 3 O(1) field reads.
+	for tok_idx = 1, #tokens do
+		local tc_entry = tc[tok_idx]
+		-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
+		if tc_entry.is_load_word and tc_entry.reads_r_tape_ptr and tc_entry.o_arg1 == binds_name then
+			local field = tc_entry.o_arg2
+			if field then
+				found_field_set[field] = true
+			else
+				local body_line = atom.line + line_in_body[tokens[tok_idx].rel]
+				findings[#findings + 1] = {
+					atom  = atom.name, line = body_line,
+					check = "abi_handoff", kind = "error",
+					msg   = string.format("%s at line %d has load_word(R_TapePtr, O_(%s, <non-ident>)); expected O_(%s, <field>)",
+						atom.name, body_line, binds_name, binds_name),
+				}
 			end
 		end
-		if tok:find("R_TapePtr", 1, true)
-		   and tok:find("S_(" .. binds_name .. ")", 1, true) then
-			-- scan: add_ui_self(R_TapePtr, S_(<Binds_X>))
+		-- scan: add_ui_self(R_TapePtr, S_(<Binds_X>))
+		if tc_entry.reads_r_tape_ptr and tc_entry.s_arg1 == binds_name then
 			found_advance = true
 		end
 	end
@@ -468,7 +495,6 @@ end
 ---   - Atoms containing a `mac_<name>(...)` call whose name is not in duffle.GP0_MACRO_CONTRIB emit a "new macro; update duffle.GP0_MACRO_CONTRIB" advisory.
 ---
 --- Applies only to `kind = "atom"` (baked atoms). Components don't emit full primitives.
---- Stage 2: signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here.
 local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" then return end
 	local tokens = atom.paths.tokens
@@ -479,31 +505,30 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	local contrib = 0
 	local saw_format = false
 	local saw_prim_write = false
-	for tok_idx, t in ipairs(tokens) do
-		local tok = t.tok
-		local ident = tc[tok_idx].ident
-		-- Match `mac_format_<shape>_color(...)` and strip `_color`
-		-- to get the bare shape suffix (f3 / g4 / etc).
-		local shape = ident:match("^mac_format_([%w_]+)_color$")
+
+	-- Reads from tc_entry fields pre-computed by classify_tokens (R3 lift). Eliminates 4 per-token
+	-- string matches (mac_format_X_color + mac_gte_store_<shape> + mac_insert_ot_tag_<shape> + R_PrimCursor)
+	for tok_idx = 1, #tokens do
+		local tc_entry = tc[tok_idx]
+		local shape = tc_entry.mac_format_shape
 		if shape and duffle.GP0_CMD_BY_SHAPE[shape] then
 			if not cmd_byte then
 				cmd_byte = duffle.GP0_CMD_BY_SHAPE[shape]
-				cmd_line = atom.line + line_in_body[t.rel]
+				cmd_line = atom.line + line_in_body[tokens[tok_idx].rel]
 			end
 			saw_format = true
-			local contrib_key = "mac_format_" .. shape .. "_color"
-			local n = duffle.GP0_MACRO_CONTRIB[contrib_key]
+			local n = duffle.GP0_MACRO_CONTRIB["mac_format_" .. shape .. "_color"]
 			if    n then contrib = contrib + n end
 		end
-		if ident:match("^mac_gte_store_[%w_]+$") then
-			local n = duffle.GP0_MACRO_CONTRIB[ident]
+		if tc_entry.is_gte_store then
+			local n = duffle.GP0_MACRO_CONTRIB[tc_entry.ident]
 			if    n then contrib = contrib + n end
 		end
-		if ident:match("^mac_insert_ot_tag_[%w_]+$") then
-			local n = duffle.GP0_MACRO_CONTRIB[ident]
+		if tc_entry.is_ot_tag then
+			local n = duffle.GP0_MACRO_CONTRIB[tc_entry.ident]
 			if    n then contrib = contrib + n end
 		end
-		if tc[tok_idx].is_store_word and tok:find("R_PrimCursor", 1, true) then
+		if tc_entry.writes_r_prim_cursor then
 			saw_prim_write = true
 		end
 	end
@@ -535,10 +560,6 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 -- Check #5: per-atom cycle budget (uses analyze_atom_paths's unknown_macros)
 -- ════════════════════════════════════════════════════════════════════════════
-
--- NOTE: `token_cycles`, `find_atom_labels`, `find_branch_targets` were removed
--- when `classify_tokens` (the pre-computed per-token classification) replaced them.
--- The classification lives on `atom.paths.tok_class`; analyze_atom_paths reads it.
 
 --- Walk all paths through an atom body and return per-path cycle sums.
 --- Builds a tiny CFG: each token has a "next" pointer; branches have two (fall-through + taken).

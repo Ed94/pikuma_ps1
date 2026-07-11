@@ -261,6 +261,28 @@ local function render_module_warnings_section(add, results, total_warnings)
 	add("")
 end
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- SECTION_RENDERERS — data-driven section dispatch (the plex pattern)
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Each entry maps a section to its (header, render_fn). The render_fn signature:
+--   render_fn(add, results, totals)
+--     add    -- the `add(line)` closure from the surrounding report renderer
+--     results -- AnnotationResult[] (per-source results)
+--     totals -- {atoms, annots, binds, macros, errors, warnings} counts
+--
+-- Sections that need to render "(none)" vs iterate use totals.errors / totals.warnings;
+-- other sections ignore the totals arg.
+-- Adding a new section = 1 row here + 1 render_<thing>_section function.
+local SECTION_RENDERERS = {
+	{ header = SECTION_HEADER_ATOMS,    render = render_module_atoms_section     },
+	{ header = SECTION_HEADER_ANNOTS,   render = render_module_annots_section    },
+	{ header = SECTION_HEADER_BINDS,    render = render_module_binds_section     },
+	{ header = SECTION_HEADER_MACROS,   render = render_module_macros_section    },
+	{ header = SECTION_HEADER_ERRORS,   render = function(add, results, totals) return render_module_errors_section(add, results, totals.errors)   end },
+	{ header = SECTION_HEADER_WARNINGS, render = function(add, results, totals) return render_module_warnings_section(add, results, totals.warnings) end },
+}
+
 --- Render the per-MODULE annotation report (one `<dir_basename>.annotations.txt`).
 --- @param dir string                  -- module directory path
 --- @param sources SourceFile[]        -- sources in this module
@@ -282,12 +304,22 @@ local function render_module_report(dir, sources, results)
 		total_atoms, total_annots, total_binds, total_macros))
 	add("")
 
-	render_module_atoms_section(add, results)
-	render_module_annots_section(add, results)
-	render_module_binds_section(add, results)
-	render_module_macros_section(add, results)
-	render_module_errors_section(add, results, total_errors)
-	render_module_warnings_section(add, results, total_warnings)
+	-- Bundle the totals so the section renderers don't need separate parameter lists.
+	-- Errors/warnings sections need their total count to decide "(none)" vs iterate.
+	-- Sections without totals (atoms/annots/binds/macros) ignore this arg.
+	local totals = {
+		atoms    = total_atoms,  annots = total_annots,  binds  = total_binds,
+		macros   = total_macros, errors = total_errors,  warnings = total_warnings,
+	}
+
+	-- THE per-section dispatch. ONE loop over SECTION_RENDERERS. Each renderer writes its
+	-- header + content via the `add` closure (pre-bound above).
+	-- Adding a new section = 1 row here + 1 render_<thing>_section function.
+	for _, section in ipairs(SECTION_RENDERERS) do
+		add(section.header)
+		section.render(add, results, totals)
+		add("")
+	end
 
 	return table.concat(lines, "\n") .. "\n"
 end
@@ -347,7 +379,8 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- (internal) Pull per-source validate() results from the annotation pass's stash.
--- The annotation pass runs first in the dep chain and caches results in `ctx.flags._annot_source_results`; we read from there instead of re-validating each source.
+-- The annotation pass runs first in the dep chain and caches results in `ctx.flags._annot_source_results`;
+-- we read from there instead of re-validating each source.
 -- Returns the list of module results + the flat list of all results (for the project-wide summary).
 -- @param ctx PassCtx
 -- @param dir_sources SourceFile[]

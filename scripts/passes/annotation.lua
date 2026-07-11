@@ -3,16 +3,13 @@
 --- Validates `MipsAtom_(name) atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...)) { ... }` declarations in source files.
 --- Also reads: `Binds_*` struct declarations (`typedef Struct_(Binds_X) { ... };`)
 ---
---- Source scanning: done ONCE upstream by `duffle.scan_source()` (ps1_meta.lua pre-scans each
---- source and stashes the result in `src.scan`). This pass is pure: read from the scan, run
---- checks, emit findings. No source re-walking.
+--- Source scanning: done ONCE upstream by `duffle.scan_source()` (ps1_meta.lua pre-scans each source and stashes the result in `src.scan`). 
 ---
 --- Writes:
 ---   - `<ctx.out_root>/<dir_basename>.errors.h` — one per module, with `#error` directives on findings (the C compile will surface the error)
 ---   - The annotations.txt report is rendered by `passes/report.lua` from the per-module results stashed in `ctx.flags._annot_results`
 ---
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible
+--- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible
 
 -- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
@@ -21,13 +18,12 @@
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
-local write_file          = duffle.write_file
-local ensure_dir          = duffle.ensure_dir
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local write_file     = duffle.write_file
+local ensure_dir     = duffle.ensure_dir
 
 -- Domain tables (single source of truth in duffle.lua).
 local WAVE_CONTEXT_REGS = duffle.WAVE_CONTEXT_REGS
-local TAPE_ATOM_MACROS  = duffle.TAPE_ATOM_MACROS
 
 local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 
@@ -68,10 +64,21 @@ local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 --- @field binds   string|nil    -- Binds_X name if any
 --- @field reads   string[]      -- R_* names (read targets)
 --- @field writes  string[]      -- R_* names (write targets)
+--- @field errors  string[]|nil  -- parse-time errors from scan_source (atom_info body malformed)
 
 --- @class Finding
 --- @field line integer  -- source line (or 0 for pass-level)
 --- @field msg  string   -- finding message
+
+--- @class Findings
+--- @field errors   Finding[]
+--- @field warnings Finding[]
+--- @field info     Finding[]
+
+--- @class PipeCtx
+--- @field atom_index   table<string, AtomAnnotation>  -- name -> AtomAnnotation (only kind=="atom")
+--- @field binds_index  table<string, BindsStruct>     -- name -> BindsStruct
+--- @field annot_counts table<string, integer>          -- name -> annotation count (for unique_annotation check)
 
 --- @class AnnotatedResult
 --- @field atoms    AtomEntry[]
@@ -81,6 +88,154 @@ local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 --- @field errors   Finding[]
 --- @field warnings Finding[]
 --- @field info     Finding[]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Per-check functions (the CHECK_RULES table's payload)
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Each check has a uniform `append_to_findings` shape (errors[] / warnings[] / info[]).
+-- The dispatcher in `validate()` decides which findings list each check writes to — by convention,
+-- "existence" checks (declaration must exist, struct must exist) write errors[]; "shape" checks
+-- (writes/reads must be wave-context) write warnings[]. The `macro_word_drift` check writes
+-- both errors[] (missing/mismatch) and info[] (match).
+
+--- Check: every annotated atom must have a matching MipsAtom_(name) declaration.
+--- @param a AtomAnnotation
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_atom_decl_exists(a, pipe_ctx, findings)
+	if not pipe_ctx.atom_index[a.name] then
+		findings.errors[#findings.errors + 1] = {
+			line = a.line,
+			msg  = string.format("annotation for '%s' has no matching MipsAtom_(%s) { ... }", a.name, a.name),
+		}
+	end
+end
+
+--- Check: every atom may have AT MOST ONE annotation.
+--- Post-loop: needs full-corpus `annot_counts` from pipe_ctx.
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_unique_annotation(pipe_ctx, findings)
+	for name, n in pairs(pipe_ctx.annot_counts) do
+		if n > 1 then
+			findings.errors[#findings.errors + 1] = {
+				line = pipe_ctx.atom_index[name] and pipe_ctx.atom_index[name].line or 0,
+				msg  = string.format("MipsAtom_(%s) has %d annotations (expected at most 1)", name, n),
+			}
+		end
+	end
+end
+
+--- Check: BIND atoms must reference a real Binds_* struct.
+--- Demoted from error to warning (2026-07-10): the same condition is now caught by passes/static_analysis.lua's
+--- check_abi_handoff() as an error. Emitting a warning here keeps the annotation pass from being stop-on-error
+--- for the common test-fixture case, while still surfacing the issue in the report.
+--- The static-analysis report remains the source of truth for build-stopping errors.
+--- @param a AtomAnnotation
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_binds_struct_exists(a, pipe_ctx, findings)
+	if not a.binds then return end
+	if pipe_ctx.binds_index[a.binds] then return end
+	findings.warnings[#findings.warnings + 1] = {
+		line = a.line,
+		msg  = string.format("'%s' binds '%s' but no Struct_(%s) { ... } " 
+			.. "declaration found (also flagged as an error by check_abi_handoff in the static-analysis pass)"
+			, a.name, a.binds, a.binds),
+	}
+end
+
+--- Check: Binds_* struct fields must correspond to known wave-context registers.
+--- Also checks that all `atom_writes(...)` entries are wave-context registers.
+--- @param a AtomAnnotation
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_binds_field_wave_context(a, pipe_ctx, findings)
+	if not (a.binds and pipe_ctx.binds_index[a.binds]) then return end
+	local bs = pipe_ctx.binds_index[a.binds]
+
+	for _, f in ipairs(bs.fields) do
+		local candidate = "R_" .. f.name
+		if not is_wave_context_reg(candidate) then
+			findings.warnings[#findings.warnings + 1] = {
+				line = bs.line,
+				msg  = string.format("%s field '%s' doesn't match a known wave-context register (candidate '%s')", a.binds, f.name, candidate),
+			}
+		end
+	end
+
+	for _, w in ipairs(a.writes) do
+		if not is_wave_context_reg(w) then
+			findings.warnings[#findings.warnings + 1] = {
+				line = a.line,
+				msg  = string.format("%s writes '%s' which is not a known wave-context register", a.name, w),
+			}
+		end
+	end
+end
+
+--- Check: atom_reads(...) entries should be wave-context registers (or R_TapePtr for rbind).
+--- @param a AtomAnnotation
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_reads_wave_context(a, pipe_ctx, findings)
+	for _, r in ipairs(a.reads) do
+		if not is_wave_context_reg(r) and r ~= "R_TapePtr" then
+			findings.warnings[#findings.warnings + 1] = {
+				line = a.line,
+				msg  = string.format("atom '%s' reads '%s' which is not a known wave-context register", a.name, r),
+			}
+		end
+	end
+end
+
+--- Check: TAPE_WORDS(mac_X, N) ↔ WORD_COUNT(mac_X, N) drift.
+--- Three outcomes: missing (error), mismatch (error), match (info).
+--- @param m MacroEntry
+--- @param wc table<string, integer>  -- the shared word-count table (from ctx.shared.word_counts)
+--- @param findings Findings
+local function check_macro_word_drift(m, wc, findings)
+	local declared = wc[m.name]
+	if not declared then
+		findings.errors[#findings.errors + 1] = {
+			line = m.line,
+			msg  = string.format("TAPE_WORDS(%s, %d) but '%s' is not in metadata.h", m.name, m.words, m.name),
+		}
+		return
+	end
+	if declared ~= m.words then
+		findings.errors[#findings.errors + 1] = {
+			line = m.line,
+			msg  = string.format("DRIFT: TAPE_WORDS(%s, %d) but metadata.h declares WORD_COUNT(%s, %d)", m.name, m.words, m.name, declared),
+		}
+		return
+	end
+	findings.info[#findings.info + 1] = {
+		line = m.line,
+		msg  = string.format("OK: %s = %d words", m.name, m.words),
+	}
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CHECK_RULES — data-driven check dispatch (the plex pattern)
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Each rule entry picks one of three "shapes" of dispatch:
+--   per_annot(annot, pipe_ctx, findings) — runs once per AtomAnnotation
+--   post(pipe_ctx, findings)             — runs once after all per_annot calls complete (full-corpus aggregation)
+--   per_macro(macro, wc, findings)       — runs once per TAPE_WORDS / _Pragma macro declaration
+--
+-- Adding a new check = 1 row here + 1 function above. The `validate()` dispatch loop never needs editing.
+
+local CHECK_RULES = {
+	{ name = "atom_decl_exists",         per_annot = check_atom_decl_exists         },
+	{ name = "binds_struct_exists",      per_annot = check_binds_struct_exists      },
+	{ name = "binds_field_wave_context", per_annot = check_binds_field_wave_context },
+	{ name = "reads_wave_context",       per_annot = check_reads_wave_context       },
+	{ name = "unique_annotation",        post      = check_unique_annotation        },
+	{ name = "macro_word_drift",         per_macro = check_macro_word_drift         },
+}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Validation
@@ -115,138 +270,65 @@ local function validate(ctx, src)
 			binds  = info.binds,
 			reads  = info.reads or {},
 			writes = info.writes or {},
-			errors = {},
+			errors = info.errors,
 		}
 	end
 
-	-- Index atoms by name for lookup.
-	local atom_index = {}
-	for _, a in ipairs(atoms) do atom_index[a.name] = a end
-
-	-- Index binds by name for lookup.
-	local binds_index = {}
-	for _, b in ipairs(scan.binds) do binds_index[b.name] = b end
-
-	local errors   = {}
-	local warnings = {}
-	local info     = {}
-
-	-- 1. Every annotated atom must exist as a real MipsAtom_ declaration.
-	for _, a in ipairs(annots) do
-		if not atom_index[a.name] then
-			errors[#errors + 1] = {
-				line = a.line,
-				msg  = string.format("annotation for '%s' has no matching MipsAtom_(%s) { ... }", a.name, a.name),
-			}
+	-- Build pipe_ctx (Fleury: expose structure). Pre-compute everything the per-check functions need.
+	-- Single source of truth for atom / binds / annotation-count lookups.
+	local pipe_ctx = {
+		atom_index   = {},
+		binds_index  = {},
+		annot_counts = {},
+	}
+	for _, a in ipairs(atoms)      do pipe_ctx.atom_index [a.name] = a end
+	for _, b in ipairs(scan.binds) do pipe_ctx.binds_index[b.name] = b end
+	for _, a in ipairs(annots)     do
+		if a.name then
+			pipe_ctx.annot_counts[a.name] = (pipe_ctx.annot_counts[a.name] or 0) + 1
 		end
+	end
+
+	-- Findings live in a single struct with three lists (errors / warnings / info).
+	-- Each check writes to the list appropriate for its severity.
+	local findings = { errors = {}, warnings = {}, info = {} }
+
+	-- Propagate parse-time errors from scan_source's atom_info parsing.
+	-- These are errors found in the atom_info(...) body itself (e.g., malformed args).
+	-- They are pre-existing in the scan payload — we just lift them into our findings list.
+	for _, a in ipairs(annots) do
 		if a.errors then
 			for _, msg in ipairs(a.errors) do
-				errors[#errors + 1] = {line = a.line, msg = string.format("'%s': %s", a.name, msg)}
-			end
-		end
-	end
-
-	-- 2. Every atom may have AT MOST ONE annotation (no duplicates).
-	-- (Atoms with ZERO annotations are valid in the new minimal shape.)
-	local count_per_atom = {}
-	for _, a in ipairs(annots) do
-		if a.name then
-			count_per_atom[a.name] = (count_per_atom[a.name] or 0) + 1
-		end
-	end
-	for name, n in pairs(count_per_atom) do
-		if n > 1 then
-			errors[#errors + 1] = {
-				line = atom_index[name] and atom_index[name].line or 0,
-				msg  = string.format("MipsAtom_(%s) has %d annotations (expected at most 1)", name, n),
-			}
-		end
-	end
-
-	-- 3. (Phase validity check DROPPED. Phases were removed from the annotation DSL.)
-
-	-- 4. BIND atoms must reference a real Binds_* struct.
-	for _, a in ipairs(annots) do
-		if a.binds then
-			if not binds_index[a.binds] then
-				-- Demoted from error to warning (2026-07-10): the same condition is now caught by passes/static_analysis.lua's
-				-- check_abi_handoff() as an error. Emitting a warning here keeps the annotation pass from being stop-on-error
-				-- for the common test-fixture case, while still surfacing the issue in the report.
-				-- The static-analysis report remains the source of truth for build-stopping errors.
-				warnings[#warnings + 1] = {
+				findings.errors[#findings.errors + 1] = {
 					line = a.line,
-					msg  = string.format("'%s' binds '%s' but no Struct_(%s) { ... } declaration found (also flagged as an error by check_abi_handoff in the static-analysis pass)", a.name, a.binds, a.binds),
+					msg  = string.format("'%s': %s", a.name, msg),
 				}
 			end
 		end
 	end
 
-	-- 5. BIND writes must be wave-context registers that match Binds_ fields.
+	-- THE per-annotation pipeline. ONE loop. CHECK_RULES dispatches per_annot rules.
 	for _, a in ipairs(annots) do
-		if a.binds and binds_index[a.binds] then
-			local bs = binds_index[a.binds]
-
-			for _, f in ipairs(bs.fields) do
-				local candidate = "R_" .. f.name
-				if not is_wave_context_reg(candidate) then
-					warnings[#warnings + 1] = {
-						line = bs.line,
-						msg  = string.format("%s field '%s' doesn't match a known wave-context register (candidate '%s')", a.binds, f.name, candidate),
-					}
-				end
-			end
-
-			for _, w in ipairs(a.writes) do
-				if not is_wave_context_reg(w) then
-					warnings[#warnings + 1] = {
-						line = a.line,
-						msg  = string.format("%s writes '%s' which is not a known wave-context register", a.name, w),
-					}
-				end
-			end
+		for _, rule in ipairs(CHECK_RULES) do
+			if rule.per_annot then rule.per_annot(a, pipe_ctx, findings) end
 		end
 	end
 
-	-- 6. INFO reads should be wave-context registers (or R_TapePtr for rbind).
-	for _, a in ipairs(annots) do
-		for _, r in ipairs(a.reads) do
-			if not is_wave_context_reg(r) and r ~= "R_TapePtr" then
-				warnings[#warnings + 1] = {
-					line = a.line,
-					msg  = string.format("atom '%s' reads '%s' which is not a known wave-context register", a.name, r),
-				}
-			end
-		end
+	-- Post-loop rules (one-shot checks that need full-corpus aggregation in pipe_ctx).
+	for _, rule in ipairs(CHECK_RULES) do
+		if rule.post then rule.post(pipe_ctx, findings) end
 	end
 
-	-- 7. TAPE_WORDS(mac_X, N) ↔ WORD_COUNT(mac_X, N) drift.
-	--    Three outcomes: missing (error), mismatch (error), match (info).
-	local function check_macro_drift(m, declared)
-		if not declared then
-			errors[#errors + 1] = {
-				line = m.line,
-				msg  = string.format("TAPE_WORDS(%s, %d) but '%s' is not in metadata.h", m.name, m.words, m.name),
-			}
-			return
-		end
-		if declared ~= m.words then
-			errors[#errors + 1] = {
-				line = m.line,
-				msg  = string.format("DRIFT: TAPE_WORDS(%s, %d) but metadata.h declares WORD_COUNT(%s, %d)", m.name, m.words, m.name, declared),
-			}
-			return
-		end
-		info[#info + 1] = {
-			line = m.line,
-			msg  = string.format("OK: %s = %d words", m.name, m.words),
-		}
-	end
+	-- Per-macro rules (TAPE_WORDS vs WORD_COUNT drift).
+	local wc = ctx.shared.word_counts
 	for _, m in ipairs(scan.macros) do
-		check_macro_drift(m, ctx.shared.word_counts[m.name])
+		for _, rule in ipairs(CHECK_RULES) do
+			if rule.per_macro then rule.per_macro(m, wc, findings) end
+		end
 	end
 
-	-- 8. Information summary.
-	info[#info + 1] = {
+	-- Information summary (always emitted).
+	findings.info[#findings.info + 1] = {
 		line = 0,
 		msg  = string.format("scanned: %d atom(s), %d annotation(s), %d macro-word-decl(s), %d binds struct(s)",
 			#atoms, #annots, #scan.macros, #scan.binds),
@@ -257,9 +339,9 @@ local function validate(ctx, src)
 		annots   = annots,
 		macros   = scan.macros,
 		binds    = scan.binds,
-		errors   = errors,
-		warnings = warnings,
-		info     = info,
+		errors   = findings.errors,
+		warnings = findings.warnings,
+		info     = findings.info,
 	}
 end
 
@@ -300,7 +382,7 @@ end
 
 --- Stash aggregated per-module results for the report pass to consume.
 local function emit_module_annotations_stub(ctx, dir, dir_basename, atoms_count)
-	ctx.flags         = ctx.flags or {}
+	ctx.flags                = ctx.flags                or {}
 	ctx.flags._annot_results = ctx.flags._annot_results or {}
 	ctx.flags._annot_results[#ctx.flags._annot_results + 1] = {
 		dir          = dir,
@@ -339,20 +421,20 @@ function M.run(ctx)
 		local dir_errors   = {}
 		local dir_warnings = {}
 		-- Per-source validate() results, cached for the report pass (it reads from this instead of re-validating each source).
-		ctx.flags                       = ctx.flags or {}
+		ctx.flags                       = ctx.flags                       or {}
 		ctx.flags._annot_source_results = ctx.flags._annot_source_results or {}
 		for _, src in ipairs(dir_sources) do
-			local result = validate(ctx, src)
+			local result  = validate(ctx, src)
 			result.source = src.path                                  -- tag for downstream rendering
 			ctx.flags._annot_source_results[src.path] = result          -- stash so report.lua reads from cache instead of re-running validate()
 			dir_atoms = dir_atoms + #result.atoms
 			for _, e in ipairs(result.errors) do
 				dir_errors[#dir_errors + 1] = { line = e.line, msg = e.msg, source = src.path }
-				errors[#errors + 1] = { line = e.line, msg = e.msg }
+				errors    [#errors     + 1] = { line = e.line, msg = e.msg }
 			end
 			for _, w in ipairs(result.warnings) do
 				dir_warnings[#dir_warnings + 1] = { line = w.line, msg = w.msg }
-				warnings[#warnings + 1] = { line = w.line, msg = w.msg }
+				warnings    [#warnings     + 1] = { line = w.line, msg = w.msg }
 			end
 		end
 

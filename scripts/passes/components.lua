@@ -30,8 +30,8 @@
 -- both standalone and when require'd from the orchestrator.
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
-local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local _bootstrap_dir  = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
+local duffle          = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 local word_count_eval = require("word_count_eval")
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -107,13 +107,14 @@ local M = {}
 -- @param before_pos integer
 -- @return integer|nil
 local function find_last_name_open_paren(source, name, before_pos)
-	local search     = source:sub(1, before_pos)
 	local name_open  = name .. "("
 	local last_idx   = nil
 	local scan_pos   = 1
 	while true do
-		local found = search:find(name_open, scan_pos, true)  -- plain (no regex)
-		if not found then break end
+		-- Pass `before_pos + 1` so string.find only returns positions < before_pos + 1
+		-- (string.find's 4th arg `plain` is true; we use the 3rd arg `init` for the upper bound).
+		local found = source:find(name_open, scan_pos, true)
+		if not found or found >= before_pos then break end
 		last_idx = found
 		scan_pos = found + #name_open
 	end
@@ -126,15 +127,15 @@ end
 --- Convention: function form is
 ---   `FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })`
 --- We find the LAST occurrence of `"ac_X("` before `before_pos` and extract the args from inside the parens.
---- We then verify the preceding context ends with `MipsAtom` (the function-decl keyword
---- with possible qualifiers between).
+--- We then verify the preceding context ends with `MipsAtom` 
+--- (the function-decl keyword with possible qualifiers between).
 ---
 --- @param source string
 --- @param name string
 --- @param before_pos integer
 --- @return string|nil
 local function find_function_args_for(source, name, before_pos)
-	local last_idx = find_last_name_open_paren(source, name, before_pos)
+	local  last_idx = find_last_name_open_paren(source, name, before_pos)
 	if not last_idx then return nil end
 
 	-- Verify the preceding context ends with "MipsAtom" (with possible qualifiers between).
@@ -224,7 +225,7 @@ end
 -- ends at `close_end_pos`. Returns (block_text, new_scan_pos) where `new_scan_pos`
 -- is where to continue scanning for more comments, or nil if no block comment was found.
 local function capture_block_comment(source, close_end_pos)
-	local open_at = find_block_comment_open(source, close_end_pos)
+	local  open_at = find_block_comment_open(source, close_end_pos)
 	if not open_at then return nil end
 	local block_start = extend_left_over_indent(source, open_at)
 	return source:sub(block_start, close_end_pos), block_start
@@ -255,18 +256,18 @@ local function preceding_comment_block(source, pos)
 	local pieces   = {}
 	while true do
 		local non_ws = skip_ws_backward(source, scan_pos)
-		if non_ws == 0 then break end
+		if    non_ws == 0 then break end
 
 		local is_block_close = non_ws >= 2 and source:sub(non_ws - 1, non_ws) == "*/"
 		local is_line_end    = source:sub(non_ws, non_ws) == "\n" or source:sub(non_ws, non_ws) == "\r"
 
 		if is_block_close then
-			local block_text, new_scan_pos = capture_block_comment(source, non_ws)
+			local  block_text, new_scan_pos = capture_block_comment(source, non_ws)
 			if not block_text then break end
 			table.insert(pieces, 1, block_text)
 			scan_pos = new_scan_pos
 		elseif is_line_end then
-			local line_text, new_scan_pos = capture_line_comment(source, non_ws)
+			local  line_text, new_scan_pos = capture_line_comment(source, non_ws)
 			if not line_text then break end
 			table.insert(pieces, 1, line_text)
 			scan_pos = new_scan_pos
@@ -282,8 +283,8 @@ end
 -- Argument-name extraction
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Walk `trimmed` backward from `pos` over trailing whitespace / asterisks / brackets, returning the position of the first
--- non-trailer character (i.e. the end of the identifier).
+-- Walk `trimmed` backward from `pos` over trailing whitespace / asterisks / brackets, 
+-- returning the position of the first non-trailer character (i.e. the end of the identifier).
 -- @param trimmed string
 -- @param pos integer
 -- @return integer
@@ -322,9 +323,6 @@ end
 ---   `"U4 off, U4 code, U1 r, U1 g, U1 b"`  ->  `{"off", "code", "r", "g", "b"}`
 ---   `"U4 *ptr"`                            ->  `{"ptr"}`
 ---   `""`                                   ->  nil
----
---- No regex — uses `duffle.is_alnum` + plain string ops.
----
 --- @param args_str string|nil
 --- @return string[]|nil
 local function extract_arg_names(args_str)
@@ -334,9 +332,9 @@ local function extract_arg_names(args_str)
 	for _, tok in ipairs(tokens) do
 		local trimmed = duffle.trim(tok)
 		if trimmed ~= "" then
-			local ident_end = trim_trailer_back(trimmed, #trimmed)
+			local ident_end   = trim_trailer_back(trimmed, #trimmed)
 			local ident_start = trim_ident_back(trimmed, ident_end) + 1
-			local name = trimmed:sub(ident_start, ident_end)
+			local name        = trimmed:sub(ident_start, ident_end)
 			if name ~= "" then names[#names + 1] = name end
 		end
 	end
@@ -379,7 +377,6 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Convert `//` line comments to `/* */` block comments in a token.
---
 -- C macros use `\` line-continuations; a `//` comment before `\` would consume the continuation,
 -- breaking the macro. We convert `//` to `/* */` so the multi-line macro structure is preserved.
 --
@@ -403,8 +400,8 @@ local function convert_line_comments_to_block(s)
 			while eol <= len and result:byte(eol) ~= BYTE_NEWLINE do
 				eol = eol + 1
 			end
-			local before   = result:sub(1, pos - 1)
-			local comment  = result:sub(pos + 2, eol - 1)  -- skip the `//`
+			local before  = result:sub(1, pos - 1)
+			local comment = result:sub(pos + 2, eol - 1)  -- skip the `//`
 			local after
 			if eol <= len and result:byte(eol) == BYTE_NEWLINE then
 				after = " */" .. result:sub(eol)  -- keep the newline
@@ -422,8 +419,9 @@ end
 -- Word-count computation (memoized recursive lookup)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Strip the `mac_` prefix from a component-call ident so we can look it up against the components-by-name table. Returns the ident unchanged
--- if it doesn't start with the prefix (so a non-component ident like `mask_upper` falls through to the wc-table branch).
+-- Strip the `mac_` prefix from a component-call ident so we can look it up against the components-by-name table. 
+-- Returns the ident unchanged if it doesn't start with the prefix 
+-- (so a non-component ident like `mask_upper` falls through to the wc-table branch).
 -- @param ident string|nil
 -- @return string|nil
 local function strip_mac_prefix(ident)
@@ -476,8 +474,7 @@ end
 --- Compute word counts for every component in `components` in a single pass.
 --- The name-lookup table + memoization cache are built ONCE (per source) instead of per-component,
 --- so the cache survives across siblings and a component's recursive `mac_Y(...)` references hit memoized values
---- instead of re-walking the body. Previously each call rebuilt both tables (O(N) tables per call → O(N^2)).
----
+--- instead of re-walking the body.
 --- Cycle detection (A -> B -> A) is preserved via the in-progress `-1` sentinel in `cache`.
 ---
 --- @param components Component[]
@@ -530,7 +527,7 @@ end
 --- @return string
 local function signature_from_args(args_str)
 	local arg_names = extract_arg_names(args_str)
-	if arg_names and #arg_names > 0 then
+	if    arg_names and #arg_names > 0 then
 		return table.concat(arg_names, ", ")
 	end
 	return "..."
@@ -540,7 +537,7 @@ end
 --- The last 2 chars are always that pair.
 local function strip_trailing_continuation(lines)
 	local last = lines[#lines]
-	if last:sub(-2) == " \\" then
+	if    last:sub(-2) == " \\" then
 		lines[#lines] = last:sub(1, -3)
 	end
 end
@@ -627,14 +624,13 @@ end
 -- @return string  -- the output directory
 -- @return string  -- the full output path
 local function compute_macs_h_path(src)
-	local out_dir  = src.dir .. "/" .. GEN_SUBDIR
-	local out_path = out_dir .. "/" .. duffle.basename_no_ext(src.dir) .. ".macs.h"
+	local  out_dir  = src.dir .. "/" .. GEN_SUBDIR
+	local  out_path = out_dir .. "/" .. duffle.basename_no_ext(src.dir) .. ".macs.h"
 	return out_dir, out_path
 end
 
---- Emit a per-source `.macs.h` header with the `mac_X` macros + `WORD_COUNT` entries. Writes in BINARY mode so LF line endings are
---- preserved (the git blob is LF; Windows text-mode would emit CRLF and break the byte-identical diff).
----
+--- Emit a per-source `.macs.h` header with the `mac_X` macros + `WORD_COUNT` entries. 
+--- Writes in BINARY mode so LF line endings are preserved (the git blob is LF; Windows text-mode would emit CRLF and break the byte-identical diff).
 --- Honors `ctx.dry_run`: prints the intended path but does not write the file.
 ---
 --- @param ctx PassCtx
@@ -644,7 +640,6 @@ end
 --- @return string|nil  -- path to the written file (nil if no components)
 local function emit_component_macros_h(ctx, src, components, counts)
 	if #components == 0 then return nil end
-
 	local out_dir, out_path = compute_macs_h_path(src)
 	local lines             = header_boilerplate(src)
 
@@ -655,7 +650,6 @@ local function emit_component_macros_h(ctx, src, components, counts)
 	end
 
 	local content = table.concat(lines, "\n") .. "\n"
-
 	if ctx.dry_run then
 		print(string.format("  -> %s (dry-run)", out_path))
 		return out_path
