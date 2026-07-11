@@ -160,24 +160,8 @@ local function build_body_line_index(body)
 	return index
 end
 
---- Count of COP2-nop words contributed by a single top-level token.
---   `nop`            -> 1
---   `nop2`           -> 2 (i.e. `nop, nop` baked into one asm word)
---   `nop,` / `nop2,` -> same as above; strip trailing comma defensively
---   anything else    -> 0
---
--- (Branch-delay-slot nops like `branch_*(..., nop)` are tokenized separately by split_top_level_commas: 
--- The branch arg ends before the trailing comma, and `nop` becomes its own token. 
--- So no special handling is needed here.)
-local function nop_word_count(token)
-	local s = duffle.trim(token)
-	-- Strip trailing comma(s) (defensive against raw text via, but our tokenize_body already strips them; this is a safety net)
-	s = s:gsub(",$", "")
-	s = duffle.trim(s)
-	if s == "nop"  then return 1 end
-	if s == "nop2" then return 2 end
-	return 0
-end
+-- NOTE: `nop_word_count` was removed when `classify_tokens` (nop_words field) replaced it.
+-- `count_preceding_nops` (backward walk) was replaced by `tok_class.nop_prefix` (forward-pass pre-compute).
 
 --- Tokenize the body inner-text into a flat list of `(token, body_rel_offset)`
 --- pairs (nested parens/braces/brackets are honored; comments and strings are skipped). 
@@ -232,78 +216,137 @@ local function tokenize_body(body)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- classify_tokens — per-token classification (the plex's pre-computed data layer)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- ONE forward pass over the token list produces a flat table of per-token classifications. 
+-- Every check + analyze_atom_paths reads from this table instead of re-scanning the token strings. 
+--
+-- The classification is stored on `atom.paths.tok_class` as an array indexed by token index (1..#tokens). 
+-- Each entry has:
+--   ident         — the leading identifier (e.g. "load_word", "gte_cmdw_rtpt", "nop", "mac_yield")
+--   nop_words     — 0 / 1 / 2 (for "nop" / "nop2" / anything else)
+--   nop_prefix    — consecutive nop words ending just BEFORE this token (forward-pass pre-compute;
+--                   replaces the backward walk in count_preceding_nops — O(N) instead of O(N²))
+--   is_yield      — true if this token is `mac_yield` or `mac_yield(...)`
+--   is_atom_label — true if this token is `atom_label(name)`; label_name has the name
+--   is_branch     — true if this token is `branch_*(...)`; branch_label has the label or false
+--   is_load_word  — true if this token starts with `load_word(`
+--   is_store_word — true if this token starts with `store_word(`
+--
+-- Checks that need the leading ident use `tok_class.ident` instead of re-matching the token string.
+-- Checks that need "how many nops before token i" use `tok_class.nop_prefix` instead of walking backwards.
+
+--- @class TokClass
+--- @field ident        string          -- leading identifier
+--- @field nop_words    integer         -- 0/1/2
+--- @field nop_prefix   integer         -- consecutive nop words before this token
+--- @field is_yield     boolean
+--- @field is_atom_label boolean
+--- @field label_name   string|nil      -- for atom_label(name)
+--- @field is_branch    boolean
+--- @field branch_label string|false|nil -- for branch_*(..., atom_offset(F, label))
+--- @field is_load_word boolean
+--- @field is_store_word boolean
+
+local function classify_tokens(tokens)
+	local n       = #tokens
+	local tc      = {}
+	local nop_run = 0  -- running count of consecutive nop words (forward pass)
+	for tok_idx, t in ipairs(tokens) do
+		local tok   = t.tok
+		local ident = tok:match("^([%w_]+)") or "?"
+		local nop_words = 0
+		if     ident == "nop"  then nop_words = 1
+		elseif ident == "nop2" then nop_words = 2 end
+
+		local is_yield      = ident == "mac_yield"
+		local is_atom_label = false
+		local label_name    = nil
+		local is_branch     = false
+		local branch_label  = nil
+		local is_load_word  = ident == "load_word"
+		local is_store_word = ident == "store_word"
+
+		if ident == "atom_label" then
+			is_atom_label = true
+			label_name    = tok:match("^atom_label%s*%(%s*([%w_]+)%s*%)")
+		elseif tok:match("^branch_[%w_]+%s*%(") then
+			is_branch    = true
+			branch_label = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
+		end
+
+		tc[tok_idx] = {
+			ident         = ident,
+			nop_words     = nop_words,
+			nop_prefix    = nop_run,
+			is_yield      = is_yield,
+			is_atom_label = is_atom_label,
+			label_name    = label_name,
+			is_branch     = is_branch,
+			branch_label  = branch_label,
+			is_load_word  = is_load_word,
+			is_store_word = is_store_word,
+		}
+		-- Advance the nop run for the NEXT token.
+		if nop_words > 0 then
+			nop_run = nop_run + nop_words
+		else
+			nop_run = 0
+		end
+	end
+	return tc
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Check #1: GTE pipeline-fill
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Count consecutive nop words immediately BEFORE token index `ti` in the token list.
--- Walks backwards from ti-1, accumulating nop_word_count, stopping at the first non-nop.
--- scan: nop, nop, <non-nop> -> have = count of nop words before ti
-local function count_preceding_nops(tokens, ti)
-	local have = 0
-	local where_ti = ti - 1
-	while where_ti >= 1 do
-		local n = nop_word_count(tokens[where_ti].tok)
-		if n == 0 then break end
-		have = have + n
-		where_ti = where_ti - 1
-	end
-	return have
-end
+-- Check a single gte_cmdw_* token for pipeline-fill compliance.
+-- Uses the pre-computed `tok_class` entry (nop_prefix replaces the backward walk; ident replaces the per-token match).
+local function check_one_gte_cmdw(atom, tc_entry, ti, line_in_body, findings)
+	local ident = tc_entry.ident
+	if not ident:match("^gte_cmdw_") then return end
 
--- Check a single gte_cmdw_* token for pipeline-fill compliance. 
--- Emits a finding if the preceding nops are insufficient (error) or the macro isn't in the latency table (warning).
--- scan: <nop>... <gte_cmdw_X> -> validate nop count vs GTE_PIPELINE_LATENCY[X]
-local function check_one_gte_cmdw(a, tok, tokens, ti, line_in_body, findings)
-	local cmdw_full = tok:match("^(gte_cmdw_[%w_]+)%s*[,%)]") or tok:match("^(gte_cmdw_[%w_]+)%s*$")
-	if not cmdw_full then return end
-
-	local variant = cmdw_full:match("^gte_cmdw_(.+)$")
-	local need    = duffle.GTE_PIPELINE_LATENCY[cmdw_full]
-	local line    = a.line + line_in_body[tokens[ti].rel]
+	local variant = ident:match("^gte_cmdw_(.+)$")
+	local need    = duffle.GTE_PIPELINE_LATENCY[ident]
+	local line    = atom.line + line_in_body[atom.paths.tokens[ti].rel]
 
 	if need == nil then
-		-- alias or new gte_cmdw_<X> not yet in latency table
 		findings[#findings + 1] = {
-			atom  = a.name,
+			atom  = atom.name,
 			line  = line,
 			check = "gte_pipeline_fill",
 			kind  = "warning",
 			msg   = string.format(
 				"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
-				a.name, line, variant),
+				atom.name, line, variant),
 		}
 	elseif need > 0 then
-		local have = count_preceding_nops(tokens, ti)
+		local have = tc_entry.nop_prefix
 		if have < need then
 			findings[#findings + 1] = {
-				atom  = a.name,
+				atom  = atom.name,
 				line  = line,
 				check = "gte_pipeline_fill",
 				kind  = "error",
 				msg   = string.format(
 					"%s at line %d needs %d nop word%s immediately BEFORE `gte_cmdw_%s`; only %d found",
-					a.name, line, need, need == 1 and "" or "s", variant, have),
+					atom.name, line, need, need == 1 and "" or "s", variant, have),
 			}
 		end
 	end
 end
 
---- Walk the token list. Whenever we hit a `gte_cmdw_<X>` token, count consecutive nop words immediately preceding it.
---- If count < the minimum declared in `duffle.GTE_PIPELINE_LATENCY[X]`, record a finding.
---- Aliases are resolved against the lookup table directly; if a macro name is not in the table, emit a soft warning 
---- (the user might have added a new gte_cmdw_* but not updated duffle.lua).
---- Per-atom: walk this atom's tokens, check every `gte_cmdw_*` for pipeline-fill compliance.
---- Stage 1B: signature changed from `(atoms, findings)` to `(atom, findings)`.
---- Stage 2:   signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here
----             (pre-emptive scatter: every check gets the full context, no argument gathering).
+--- Per-atom: check every `gte_cmdw_*` for pipeline-fill compliance.
+--- Uses the pre-computed `atom.paths.tok_class` — nop_prefix (forward-pass pre-compute)
+--- replaces the old backward walk; ident replaces the per-token `tok:match` classification.
 local function check_gte_pipeline_fill(atom, pipe_ctx, findings)
-	local tokens       = tokenize_body(atom.body)
-	local line_in_body = build_body_line_index(atom.body)
-	local tn = #tokens
-	local ti = 1
-	while ti <= tn do
-		check_one_gte_cmdw(atom, tokens[ti].tok, tokens, ti, line_in_body, findings)
-		ti = ti + 1
+	local tc           = atom.paths.tok_class
+	local line_in_body = atom.paths.line_in_body
+	local tn           = #atom.paths.tokens
+	for ti = 1, tn do
+		check_one_gte_cmdw(atom, tc[ti], ti, line_in_body, findings)
 	end
 end
 
@@ -326,16 +369,15 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	--                      Same reasoning -- it's a function returning a MipsAtom slice, invoked from a parent atom.
 	--
 	-- The GTE pipeline-fill check applies to all 3 kinds (see check_gte_pipeline_fill). Only the mac_yield rule branches on kind.
-	local tokens = tokenize_body(atom.body)
-	local line_in_body = build_body_line_index(atom.body)
+	local tokens       = atom.paths.tokens
+	local line_in_body = atom.paths.line_in_body
+	local tc           = atom.paths.tok_class
+	local n            = #tokens
 
 	local count    = 0
 	local last_idx = 0
-	for tok_idx, t in ipairs(tokens) do
-		local tok = t.tok
-		-- Match `mac_yield(...)` or just `mac_yield`. The bareword
-		-- variant is rare in modern style but tolerated.
-		if tok:match("^mac_yield%s*%(") or tok == "mac_yield" then
+	for tok_idx = 1, n do
+		if tc[tok_idx].is_yield then
 			count    = count + 1
 			last_idx = tok_idx
 		end
@@ -366,14 +408,13 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 					"%s at line %d has %d `mac_yield()` calls; exactly 1 is allowed",
 					atom.name, line_for(last_idx), count),
 			}
-		elseif last_idx < #tokens then
+		elseif last_idx < n then
 			-- 1 call, but not the last token. We DON'T fail if the post-token is just `nop` or `nop2` or a branch with `, nop` delay slot.
 			-- It's the standard "yield, then BD nop" idiom.
 			local post_non_nop = false
-			for search_idx = last_idx + 1, #tokens do
-				local t = tokens[search_idx].tok
-				if    t ~= "" and t ~= "nop" and t ~= "nop2"
-				   and not t:match("%,%s*nop%)%s*$") then
+			for search_idx = last_idx + 1, n do
+				if tc[search_idx].nop_words == 0
+				   and tokens[search_idx].tok ~= "" then
 					post_non_nop = true
 					break
 				end
@@ -408,6 +449,7 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 		end
 	end
 end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Check #3: ABI handoff discipline
 -- ════════════════════════════════════════════════════════════════════════════
@@ -441,14 +483,15 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 		}
 		return
 	end
-	local tokens             = tokenize_body(atom.body)
-	local line_in_body       = build_body_line_index(atom.body)
+	local tokens         = atom.paths.tokens
+	local line_in_body   = atom.paths.line_in_body
+	local tc             = atom.paths.tok_class
 	local found_field_set = {}
 	local found_advance   = false
 	local bind_re         = "O_%(" .. binds_name .. ",%s*([%w_]+)%s*%)"
-	for _, t in ipairs(tokens) do
+	for tok_idx, t in ipairs(tokens) do
 		local tok = t.tok
-		if tok:match("^load_word%s*%(") then
+		if tc[tok_idx].is_load_word then
 			if tok:find("R_TapePtr", 1, true) and tok:find("O_(" .. binds_name .. ",", 1, true) then
 				local field = tok:match(bind_re)
 				-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
@@ -510,18 +553,20 @@ end
 --- Stage 2: signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here.
 local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" then return end
-	local tokens = tokenize_body(atom.body)
-	local line_in_body = build_body_line_index(atom.body)
+	local tokens = atom.paths.tokens
+	local line_in_body = atom.paths.line_in_body
+	local tc = atom.paths.tok_class
 	local cmd_byte = nil
 	local cmd_line = nil
 	local contrib = 0
 	local saw_format = false
 	local saw_prim_write = false
-	for _, t in ipairs(tokens) do
+	for tok_idx, t in ipairs(tokens) do
 		local tok = t.tok
+		local ident = tc[tok_idx].ident
 		-- Match `mac_format_<shape>_color(...)` and strip `_color`
 		-- to get the bare shape suffix (f3 / g4 / etc).
-		local shape = tok:match("^mac_format_([%w_]+)_color%s*%(") or tok:match("^mac_format_([%w_]+)_color%s*$")
+		local shape = ident:match("^mac_format_([%w_]+)_color$")
 		if shape and duffle.GP0_CMD_BY_SHAPE[shape] then
 			if not cmd_byte then
 				cmd_byte = duffle.GP0_CMD_BY_SHAPE[shape]
@@ -532,17 +577,15 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 			local n = duffle.GP0_MACRO_CONTRIB[contrib_key]
 			if    n then contrib = contrib + n end
 		end
-		local gte_store = tok:match("^mac_gte_store_[%w_]+")
-		if gte_store then
-			local n = duffle.GP0_MACRO_CONTRIB[gte_store]
+		if ident:match("^mac_gte_store_[%w_]+$") then
+			local n = duffle.GP0_MACRO_CONTRIB[ident]
 			if    n then contrib = contrib + n end
 		end
-		local ot_tag = tok:match("^mac_insert_ot_tag_([%w_]+)")
-		if ot_tag then
-			local n = duffle.GP0_MACRO_CONTRIB["mac_insert_ot_tag_" .. ot_tag]
+		if ident:match("^mac_insert_ot_tag_[%w_]+$") then
+			local n = duffle.GP0_MACRO_CONTRIB[ident]
 			if    n then contrib = contrib + n end
 		end
-		if tok:match("^store_word%s*%(") and tok:find("R_PrimCursor", 1, true) then
+		if tc[tok_idx].is_store_word and tok:find("R_PrimCursor", 1, true) then
 			saw_prim_write = true
 		end
 	end
@@ -572,57 +615,12 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #5: per-atom cycle budget
+-- Check #5: per-atom cycle budget (uses analyze_atom_paths's unknown_macros)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Compute the cycle cost of one token. The token is a string like
---- `add_ui(R_T0, R_T1, 4)` or `nop2` or `gte_cmdw_rtpt`. Returns:
----   cycles       - integer cycle cost (from duffle.INSTRUCTION_LATENCY, or duffle.UNKNOWN_INSTRUCTION_CYCLES if not in the table)
----   macro_name   - the bare ident (e.g. `add_ui`, `gte_cmdw_rtpt`, `nop2`, `mac_yield`)
----   unknown      - true iff the macro wasn't in duffle.INSTRUCTION_LATENCY. 
---- The function strips trailing `()` from function-call style macros so `mac_yield()` and `mac_yield` resolve identically.
-local function token_cycles(tok)
-	-- Extract the leading ident. Tolerate `(...)` args.
-	local ident = tok:match("^([%w_]+)")
-	if not ident then return duffle.UNKNOWN_INSTRUCTION_CYCLES, "?", true end
-	local cost = duffle.INSTRUCTION_LATENCY[ident]
-	if    cost == nil then
-		return duffle.UNKNOWN_INSTRUCTION_CYCLES, ident, true
-	end
-	return cost, ident, false
-end
-
---- Find every `atom_label(name)` token in the token list and return a map `label_name -> token_idx`. Labels are 0-cost markers; 
---- the path walker uses them as branch targets.
-local function find_atom_labels(tokens)
-	local labels = {}
-	for tok_idx, t in ipairs(tokens) do
-		local name = t.tok:match("^atom_label%s*%(%s*([%w_]+)%s*%)")
-		if name then labels[name] = tok_idx end
-	end
-	return labels
-end
-
---- Find every `branch_*(...)` token in the token list and return a map `token_idx -> label_name|false`. 
---- If the branch's args contain an `atom_offset(F, label)` call, the label name is recorded; otherwise the branch's target is unknown
---- (likely a literal offset) and we record `false` as a sentinel. 
---- The CFG walker checks KEY PRESENCE (via `is_branch(tok_idx)`) to decide whether a token is a branch; it checks the value
---- to decide whether the taken-path target is known. 
---- (We can't use `nil` for the unknown-target case because `targets[tok_idx] = nil` REMOVES the key from the Lua table, 
---- which would make `is_branch(tok_idx)` return false for both "not a branch" and "branch with unknown target".)
-local function find_branch_targets(tokens)
-	local targets = {}
-	for tok_idx, t in ipairs(tokens) do
-		if t.tok:match("^branch_[%w_]+%s*%(") then
-			-- branch_<cond>(rs, atom_offset(F, label))   or
-			-- branch_<cond>(rs, rt, atom_offset(F, label))
-			-- atom_offset's arg list is (flag, name); we want the name.
-			local label      = t.tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)")
-			targets[tok_idx] = label or false  -- `false` = known branch, unknown target
-		end
-	end
-	return targets
-end
+-- NOTE: `token_cycles`, `find_atom_labels`, `find_branch_targets` were removed
+-- when `classify_tokens` (the pre-computed per-token classification) replaced them.
+-- The classification lives on `atom.paths.tok_class`; analyze_atom_paths reads it.
 
 --- Walk all paths through an atom body and return per-path cycle sums.
 --- Builds a tiny CFG: each token has a "next" pointer; branches have two (fall-through + taken).
@@ -639,43 +637,44 @@ end
 ---                    (warning; loop bodies aren't supported)
 ---   unknown_macros - list of unique macro names not in duffle.INSTRUCTION_LATENCY
 local function analyze_atom_paths(atom)
-	local tokens   = tokenize_body(atom.body)
-	local labels   = find_atom_labels(tokens)
-	local branches = find_branch_targets(tokens)
+	local tokens   = atom.paths.tokens or tokenize_body(atom.body)
+	local tc       = atom.paths.tok_class or classify_tokens(tokens)
+	local n        = #tokens
 
-	-- Pre-compute per-token cycle costs and identify terminators.
-	local n           = #tokens
-	local costs       = {}
-	local unknown_set = {}
-	for tok_idx, t in ipairs(tokens) do
-		local c, _, unknown = token_cycles(t.tok)
-		costs[tok_idx] = c
-		if unknown then
-			unknown_set[t.tok:match("^([%w_]+)") or "?"] = true
+	-- Build label + branch maps from the pre-computed classification (no re-scan).
+	local labels   = {}
+	local branches = {}
+	for tok_idx = 1, n do
+		local c = tc[tok_idx]
+		if c.is_atom_label and c.label_name then
+			labels[c.label_name] = tok_idx
+		end
+		if c.is_branch then
+			branches[tok_idx] = c.branch_label
 		end
 	end
 
-	-- A token is a terminator if it's `mac_yield` or `mac_yield(...)`. 
-	-- The yield transfers control; we don't count its cost (the next atom's prologue absorbs it).
-	local function is_terminator(tok_idx)
-		local  tok = tokens[tok_idx].tok
-		return tok == "mac_yield" or tok:match("^mac_yield%s*%(")
+	-- Pre-compute per-token cycle costs from the pre-computed ident (no re-match).
+	local costs       = {}
+	local unknown_set = {}
+	for tok_idx = 1, n do
+		local c      = tc[tok_idx]
+		local cost   = duffle.INSTRUCTION_LATENCY[c.ident]
+		if cost == nil then
+			cost = duffle.UNKNOWN_INSTRUCTION_CYCLES
+			unknown_set[c.ident] = true
+		end
+		costs[tok_idx] = cost
 	end
 
-	-- CFG successor function. Returns a list of next token indices for the given position. 
-	-- Branch tokens produce 2 successors (fall-through + taken); normal tokens produce 1 (next); terminators produce 0.
-	-- BD-slot absorption: a branch at tok_idx skips tok_idx+1 (the BD slot) in its fall-through path; 
-	-- the BD slot's cost is added to the branch's own cost instead (so it's counted once).
-	--
--- A token is a "branch" if its index is a KEY in the `branches` map 
--- (regardless of whether the value is nil — a branch with nil target means "literal offset, taken path is unknown").
--- We check key-presence via `branches[tok_idx] ~= nil` because `branches[tok_idx]` returns nil for both "absent" AND "present with nil value".
--- Distinguishing them requires the key check.
+	-- A token is a terminator if it's `mac_yield`.
+	local function is_terminator(tok_idx)
+		return tc[tok_idx].is_yield
+	end
+
+	-- A token is a "branch" if the classification says so.
 	local function is_branch(tok_idx)
-		local v = branches[tok_idx]
-		if    v == nil then return false end
-		-- v is non-nil: either a string (atom_offset target) or false (literal offset, no target). Both indicate a branch.
-		return true
+		return tc[tok_idx].is_branch
 	end
 	local function successors(tok_idx)
 		local tok = tokens[tok_idx].tok
@@ -869,6 +868,7 @@ local function validate(ctx, src)
 		a.paths                  = a.paths or {}
 		a.paths.tokens           = tokenize_body(a.body)
 		a.paths.line_in_body     = build_body_line_index(a.body)
+		a.paths.tok_class        = classify_tokens(a.paths.tokens)
 
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a)
