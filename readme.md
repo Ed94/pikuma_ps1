@@ -27,6 +27,13 @@ scoop install luajit
 
 * Lua is slow (even jitted) so this helps.
 
+[lfs (LuaFileSystem)](https://github.com/lunarmodules/luafilesystem)
+
+* Native directory enumeration + `mkdir` for the build scripts.
+* Used by `passes/word_count_eval.lua :: scan_dir` (native walk vs. `dir /b /s` subprocess,
+  ~2ms vs. ~56ms) and by `duffle.lua :: ensure_dir` + `to_absolute_path` (avoids
+  `cmd.exe mkdir` + `cd` shell spawns, ~50ms each).
+
 [pscx-redux](https://github.com/grumpycoders/pcsx-redux/): A collection of tools, research, hardware design, and libraries aiming at development and reverse engineering on the PlayStation 1.
 
 * Used as the runtime sandbox emulated the ps1
