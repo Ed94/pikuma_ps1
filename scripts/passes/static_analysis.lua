@@ -157,6 +157,7 @@ local function find_atom_bodies(source_text)
 			pos = eol_pos + 1
 		else
 			local ident, ident_end = duffle.read_ident(source_text, pos)
+		-- scan: <ident>
 		if not ident then
 			pos = pos + 1
 		elseif ident == "MipsAtom_"
@@ -175,6 +176,7 @@ local function find_atom_bodies(source_text)
 				pos = open_paren + 1
 			else
 				local inner, after_paren = duffle.read_parens(source_text, open_paren)
+				-- scan: <ident>(<args>)
 
 				if kind == "comp_proc" then
 					-- MipsAtomComp_Proc_(sym, { body })
@@ -216,6 +218,7 @@ local function find_atom_bodies(source_text)
 							-- unmatched; bail
 							pos = open_paren + 1
 						else
+							-- scan: <ident>(<name>, { <body> })
 							-- First ident in `inner` is the comp name.
 							local name_match = inner:match("^%s*([%w_]+)")
 							local name = name_match or "?"
@@ -245,12 +248,15 @@ local function find_atom_bodies(source_text)
 					local name_end = name_start
 					while name_end <= #inner and inner:sub(name_end, name_end):match("[%w_]") do name_end = name_end + 1 end
 					local name = inner:sub(name_start, name_end - 1)
+					-- scan: <ident>(<name>)
 					if name == "" then
 						pos = open_paren + 1
 					else
 						local brace = duffle.scan_to_char(source_text, "{", after_paren)
+						-- scan: <ident>(<name>) {
 						if brace then
 							local body, after_brace = duffle.read_braces(source_text, brace)
+							-- scan: <ident>(<name>) { <body> }
 							local body_off = brace + 1
 							out[#out + 1] = {
 								line     = line_of(pos),
@@ -363,15 +369,15 @@ local function tokenize_body(body)
 		end
 		-- Extract token [rel .. scan-1]
 		local tok = duffle.trim(body:sub(rel, scan - 1))
-		if tok ~= "" then
+		if    tok ~= "" then
 			out[#out + 1] = { tok = tok, rel = rel }
 		end
 		-- Move past the separator
 		if scan <= len then
-			scan = scan + 1
+			 scan = scan + 1
 			-- Also skip whitespace before next token
 			local w = duffle.skip_ws_and_cmt(body, scan)
-			if w > scan then scan = w end
+			if    w > scan then scan = w end
 		end
 		rel = scan
 	end
@@ -404,17 +410,16 @@ local function check_gte_pipeline_fill(atoms, findings, line_of)
 	-- "previous GTE state" but don't themselves count as pipeline
 	-- fill.
 	for _, a in ipairs(atoms) do
-		local tokens = tokenize_body(a.body)
+		local tokens       = tokenize_body(a.body)
 		local line_in_body = build_body_line_index(a.body)
 		local tn = #tokens
 		local ti = 1
 		while ti <= tn do
 			local tok = tokens[ti].tok
-			local cmdw_full = tok:match("^(gte_cmdw_[%w_]+)%s*[,%)]")
-			              or tok:match("^(gte_cmdw_[%w_]+)%s*$")
+			local cmdw_full = tok:match("^(gte_cmdw_[%w_]+)%s*[,%)]") or tok:match("^(gte_cmdw_[%w_]+)%s*$")
 			if cmdw_full then
 				local variant = cmdw_full:match("^gte_cmdw_(.+)$")
-				local need = duffle.GTE_PIPELINE_LATENCY[cmdw_full]
+				local need    = duffle.GTE_PIPELINE_LATENCY[cmdw_full]
 				if need == nil then
 					-- alias or new gte_cmdw_<X> not yet in latency table
 					local line = a.line + line_in_body[tokens[ti].rel]
@@ -432,12 +437,12 @@ local function check_gte_pipeline_fill(atoms, findings, line_of)
 					-- Count consecutive nops immediately BEFORE the cmdw
 					-- token. We walk tokens[ti - n] backwards, accumulating
 					-- nop_word_count, stopping at the first non-nop.
-					local have = 0
+					local have     = 0
 					local where_ti = ti - 1
 					while where_ti >= 1 do
 						local n = nop_word_count(tokens[where_ti].tok)
 						if n == 0 then break end
-						have = have + n
+						have     = have + n
 						where_ti = where_ti - 1
 					end
 					if have < need then
@@ -492,14 +497,14 @@ local function check_mac_yield_uniformity(atoms, findings)
 		local tokens = tokenize_body(a.body)
 		local line_in_body = build_body_line_index(a.body)
 
-		local count = 0
+		local count    = 0
 		local last_idx = 0
 		for tok_idx, t in ipairs(tokens) do
 			local tok = t.tok
 			-- Match `mac_yield(...)` or just `mac_yield`. The bareword
 			-- variant is rare in modern style but tolerated.
 			if tok:match("^mac_yield%s*%(") or tok == "mac_yield" then
-				count = count + 1
+				count    = count + 1
 				last_idx = tok_idx
 			end
 		end
@@ -536,7 +541,7 @@ local function check_mac_yield_uniformity(atoms, findings)
 				local post_non_nop = false
 				for search_idx = last_idx + 1, #tokens do
 					local t = tokens[search_idx].tok
-					if t ~= "" and t ~= "nop" and t ~= "nop2"
+					if    t ~= "" and t ~= "nop" and t ~= "nop2"
 					   and not t:match("%,%s*nop%)%s*$") then
 						post_non_nop = true
 						break
@@ -597,11 +602,13 @@ local function find_binds_structs(source_text)
 			pos = eol_pos + 1
 		else
 			local ident, ident_end = duffle.read_ident(source_text, pos)
+			-- scan: <ident>
 			if not ident then
 				pos = pos + 1
 			elseif ident == "typedef" then
 				local after_typedef = duffle.skip_ws_and_cmt(source_text, ident_end)
-				local id2, id2_end = duffle.read_ident(source_text, after_typedef)
+				local id2, id2_end  = duffle.read_ident(source_text, after_typedef)
+				-- scan: typedef <id2>
 				if id2 ~= "Struct_" then
 					pos = id2_end or (after_typedef + 1)
 				else
@@ -610,13 +617,16 @@ local function find_binds_structs(source_text)
 						pos = open_paren + 1
 					else
 						local inner, after_paren = duffle.read_parens(source_text, open_paren)
+						-- scan: typedef Struct_(<name>)
 						local name = duffle.trim(inner)
 						local brace = duffle.scan_to_char(source_text, "{", after_paren)
+						-- scan: typedef Struct_(<name>) {
 						if not brace then
 							pos = open_paren + 1
 						else
 							local body, after_brace = duffle.read_braces(source_text, brace)
-							local fields = {}
+							-- scan: typedef Struct_(<name>) { <fields> }
+							local fields   = {}
 							local byte_off = 0
 							local body_pos = 1
 							while body_pos <= #body do
@@ -668,6 +678,7 @@ local function find_atom_info(source_text)
 			pos = eol_pos + 1
 		else
 			local ident, ident_end = duffle.read_ident(source_text, pos)
+			-- scan: <ident>
 			if not ident then
 				pos = pos + 1
 			elseif ident == "MipsAtom_" then
@@ -676,6 +687,7 @@ local function find_atom_info(source_text)
 					pos = open_paren + 1
 				else
 					local inner, after_paren = duffle.read_parens(source_text, open_paren)
+					-- scan: MipsAtom_(<name>)
 					local name_start = 1
 					while name_start <= #inner and inner:sub(name_start, name_start):match("[%s]") do name_start = name_start + 1 end
 					local name_end = name_start
@@ -683,10 +695,12 @@ local function find_atom_info(source_text)
 					local atom_name = inner:sub(name_start, name_end - 1)
 					local lookahead = duffle.skip_ws_and_cmt(source_text, after_paren)
 					local look_ident, look_end = duffle.read_ident(source_text, lookahead)
+					-- scan: MipsAtom_(<name>) <look_ident>
 					if look_ident == "atom_info" then
 						local info_open = duffle.skip_ws_and_cmt(source_text, look_end)
 						if source_text:sub(info_open, info_open) == "(" then
 							local info_inner, info_after = duffle.read_parens(source_text, info_open)
+							-- scan: MipsAtom_(<name>) atom_info(<binds>, <reads>, <writes>)
 							local binds, reads, writes = nil, nil, nil
 							local sub_pos = 1
 							while sub_pos <= #info_inner do
@@ -698,6 +712,7 @@ local function find_atom_info(source_text)
 									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
 									if info_inner:sub(sub_open, sub_open) == "(" then
 										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
+										-- scan: atom_bind(<Binds_X>)
 										binds = duffle.trim(sub_inner)
 										sub_pos = sub_after2
 									else
@@ -708,6 +723,7 @@ local function find_atom_info(source_text)
 									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
 									if info_inner:sub(sub_open, sub_open) == "(" then
 										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
+										-- scan: atom_reads(<regs>)  OR  atom_writes(<regs>)
 										local regs = {}
 										local sub_inner_pos = 1
 										while sub_inner_pos <= #sub_inner do
@@ -778,54 +794,56 @@ local function check_abi_handoff(atoms, atom_infos, binds_index, findings)
 		local info = info_by_atom[a.name]
 		if info and info.binds then
 			local binds_name = info.binds
-			local binds = binds_index[binds_name]
+			local binds      = binds_index[binds_name]
 			if not binds then
 				findings[#findings + 1] = {
-					atom = a.name, line = a.line,
+					atom  = a.name, line = a.line,
 					check = "abi_handoff", kind = "error",
-					msg = string.format("%s at line %d has `atom_bind(%s)` but no `typedef Struct_(%s)` declaration found in source",
+					msg   = string.format("%s at line %d has `atom_bind(%s)` but no `typedef Struct_(%s)` declaration found in source",
 						a.name, a.line, binds_name, binds_name),
 				}
 			else
-				local tokens = tokenize_body(a.body)
-				local line_in_body = build_body_line_index(a.body)
+				local tokens             = tokenize_body(a.body)
+				local line_in_body       = build_body_line_index(a.body)
 				local expected_field_seq = {}
 				for _, f in ipairs(binds.fields) do expected_field_seq[#expected_field_seq + 1] = f.name end
 				local found_field_seq = {}
 				local found_field_set = {}
-				local found_advance = false
-				local bind_re = "O_%(" .. binds_name .. ",%s*([%w_]+)%s*%)"
+				local found_advance   = false
+				local bind_re         = "O_%(" .. binds_name .. ",%s*([%w_]+)%s*%)"
 				for _, t in ipairs(tokens) do
 					local tok = t.tok
 					if tok:match("^load_word%s*%(") then
 						if tok:find("R_TapePtr", 1, true) and tok:find("O_(" .. binds_name .. ",", 1, true) then
 							local field = tok:match(bind_re)
+							-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
 							if field then
 								found_field_seq[#found_field_seq + 1] = field
-								found_field_set[field] = true
+								found_field_set[field]                = true
 							else
 								local body_line = a.line + line_in_body[t.rel]
 								findings[#findings + 1] = {
-									atom = a.name, line = body_line,
+									atom  = a.name, line = body_line,
 									check = "abi_handoff", kind = "error",
-									msg = string.format("%s at line %d has load_word(R_TapePtr, O_(%s, <non-ident>)); expected O_(%s, <field>)",
+									msg   = string.format("%s at line %d has load_word(R_TapePtr, O_(%s, <non-ident>)); expected O_(%s, <field>)",
 										a.name, body_line, binds_name, binds_name),
 								}
 							end
 						end
 					end
-					if tok:find("R_TapePtr", 1, true)
-					   and tok:find("S_(" .. binds_name .. ")", 1, true) then
-						found_advance = true
-					end
+				if tok:find("R_TapePtr", 1, true)
+				   and tok:find("S_(" .. binds_name .. ")", 1, true) then
+					-- scan: add_ui_self(R_TapePtr, S_(<Binds_X>))
+					found_advance = true
+				end
 				end
 
 				for _, fname in ipairs(expected_field_seq) do
 					if not found_field_set[fname] then
 						findings[#findings + 1] = {
-							atom = a.name, line = a.line,
+							atom  = a.name, line = a.line,
 							check = "abi_handoff", kind = "error",
-							msg = string.format("%s at line %d binds %s but never loads field `%s` from R_TapePtr (expected O_(%s, %s))",
+							msg   = string.format("%s at line %d binds %s but never loads field `%s` from R_TapePtr (expected O_(%s, %s))",
 								a.name, a.line, binds_name, fname, binds_name, fname),
 						}
 					end
@@ -835,11 +853,11 @@ local function check_abi_handoff(atoms, atom_infos, binds_index, findings)
 					for field_idx = 1, #expected_field_seq do
 						if found_field_seq[field_idx] ~= expected_field_seq[field_idx] then
 							findings[#findings + 1] = {
-								atom = a.name, line = a.line,
+								atom  = a.name, line = a.line,
 								check = "abi_handoff", kind = "error",
-								msg = string.format("%s at line %d loads fields in wrong order: got [%s], expected [%s]",
+								msg   = string.format("%s at line %d loads fields in wrong order: got [%s], expected [%s]",
 									a.name, a.line,
-									table.concat(found_field_seq, ", "),
+									table.concat(found_field_seq,    ", "),
 									table.concat(expected_field_seq, ", ")),
 							}
 							break
@@ -849,9 +867,9 @@ local function check_abi_handoff(atoms, atom_infos, binds_index, findings)
 
 				if not found_advance then
 					findings[#findings + 1] = {
-						atom = a.name, line = a.line,
+						atom  = a.name, line = a.line,
 						check = "abi_handoff", kind = "error",
-						msg = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)",
+						msg   = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)",
 							a.name, a.line, binds_name, binds_name, binds.bytes, binds.bytes / 4),
 					}
 				end
@@ -893,8 +911,7 @@ local function check_gpu_portstore_shape(atoms, findings)
 				local tok = t.tok
 				-- Match `mac_format_<shape>_color(...)` and strip `_color`
 				-- to get the bare shape suffix (f3 / g4 / etc).
-				local shape = tok:match("^mac_format_([%w_]+)_color%s*%(")
-				            or tok:match("^mac_format_([%w_]+)_color%s*$")
+				local shape = tok:match("^mac_format_([%w_]+)_color%s*%(") or tok:match("^mac_format_([%w_]+)_color%s*$")
 				if shape and duffle.GP0_CMD_BY_SHAPE[shape] then
 					if not cmd_byte then
 						cmd_byte = duffle.GP0_CMD_BY_SHAPE[shape]
@@ -903,17 +920,17 @@ local function check_gpu_portstore_shape(atoms, findings)
 					saw_format = true
 					local contrib_key = "mac_format_" .. shape .. "_color"
 					local n = duffle.GP0_MACRO_CONTRIB[contrib_key]
-					if n then contrib = contrib + n end
+					if    n then contrib = contrib + n end
 				end
 				local gte_store = tok:match("^mac_gte_store_[%w_]+")
 				if gte_store then
 					local n = duffle.GP0_MACRO_CONTRIB[gte_store]
-					if n then contrib = contrib + n end
+					if    n then contrib = contrib + n end
 				end
 				local ot_tag = tok:match("^mac_insert_ot_tag_([%w_]+)")
 				if ot_tag then
 					local n = duffle.GP0_MACRO_CONTRIB["mac_insert_ot_tag_" .. ot_tag]
-					if n then contrib = contrib + n end
+					if    n then contrib = contrib + n end
 				end
 				if tok:match("^store_word%s*%(") and tok:find("R_PrimCursor", 1, true) then
 					saw_prim_write = true
@@ -923,9 +940,9 @@ local function check_gpu_portstore_shape(atoms, findings)
 			if not cmd_byte then
 				if saw_prim_write and not saw_format then
 					findings[#findings + 1] = {
-						atom = a.name, line = a.line,
+						atom  = a.name, line = a.line,
 						check = "gpu_portstore_shape", kind = "warning",
-						msg = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...)" 
+						msg   = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...)" 
 							.. " but uses no `mac_format_*_color`; the cmd byte + word count cannot be auto-validated." 
 							.. " Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.",
 							a.name, a.line),
@@ -935,9 +952,9 @@ local function check_gpu_portstore_shape(atoms, findings)
 				local expected = duffle.GP0_CMD_SIZE[cmd_byte]
 				if contrib ~= expected then
 					findings[#findings + 1] = {
-						atom = a.name, line = cmd_line or a.line,
+						atom  = a.name, line = cmd_line or a.line,
 						check = "gpu_portstore_shape", kind = "error",
-						msg = string.format("%s at line %d emits GP0 0x%02X with %d prim word(s); expected %d (cmd 0x%02X total = %d)",
+						msg   = string.format("%s at line %d emits GP0 0x%02X with %d prim word(s); expected %d (cmd 0x%02X total = %d)",
 							a.name, cmd_line or a.line, cmd_byte, contrib, expected, cmd_byte, expected),
 					}
 				end
@@ -964,7 +981,7 @@ local function token_cycles(tok)
 	local ident = tok:match("^([%w_]+)")
 	if not ident then return duffle.UNKNOWN_INSTRUCTION_CYCLES, "?", true end
 	local cost = duffle.INSTRUCTION_LATENCY[ident]
-	if cost == nil then
+	if    cost == nil then
 		return duffle.UNKNOWN_INSTRUCTION_CYCLES, ident, true
 	end
 	return cost, ident, false
@@ -999,7 +1016,7 @@ local function find_branch_targets(tokens)
 			-- branch_<cond>(rs, atom_offset(F, label))   or
 			-- branch_<cond>(rs, rt, atom_offset(F, label))
 			-- atom_offset's arg list is (flag, name); we want the name.
-			local label = t.tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)")
+			local label      = t.tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)")
 			targets[tok_idx] = label or false  -- `false` = known branch, unknown target
 		end
 	end
@@ -1026,13 +1043,13 @@ end
 ---                    value; included for backward-compat; double-counts
 ---                    the BD-slot nop relative to cycles_min/max)
 local function analyze_atom_paths(atom)
-	local tokens = tokenize_body(atom.body)
+	local tokens   = tokenize_body(atom.body)
 	local labels   = find_atom_labels(tokens)
 	local branches = find_branch_targets(tokens)
 
 	-- Pre-compute per-token cycle costs and identify terminators.
-	local n        = #tokens
-	local costs    = {}
+	local n           = #tokens
+	local costs       = {}
 	local unknown_set = {}
 	for tok_idx, t in ipairs(tokens) do
 		local c, _, unknown = token_cycles(t.tok)
@@ -1046,7 +1063,7 @@ local function analyze_atom_paths(atom)
 	-- The yield transfers control; we don't count its cost (the next
 	-- atom's prologue absorbs it).
 	local function is_terminator(tok_idx)
-		local tok = tokens[tok_idx].tok
+		local  tok = tokens[tok_idx].tok
 		return tok == "mac_yield" or tok:match("^mac_yield%s*%(")
 	end
 
@@ -1065,7 +1082,7 @@ local function analyze_atom_paths(atom)
 -- nil value" — distinguishing them requires the key check.
 	local function is_branch(tok_idx)
 		local v = branches[tok_idx]
-		if v == nil then return false end
+		if    v == nil then return false end
 		-- v is non-nil: either a string (atom_offset target) or false
 		-- (literal offset, no target). Both indicate a branch.
 		return true
@@ -1106,11 +1123,11 @@ local function analyze_atom_paths(atom)
 	-- scoped to the current path (to detect loops), and a count of paths.
 	-- Cap recursion at MAX_PATHS to prevent runaway exploration on
 	-- pathological bodies.
-	local MAX_PATHS = 64
+	local MAX_PATHS  = 64
 	local cycles_min = math.huge
 	local cycles_max = -1
 	local path_count = 0
-	local has_loops = false
+	local has_loops  = false
 	local function dfs(tok_idx, acc, visited)
 		if path_count >= MAX_PATHS then return end
 		if _G._DEBUG_DFS then
@@ -1217,9 +1234,9 @@ local function check_per_atom_cycle_budget(atoms, findings)
 			if not unknown_seen[name] then
 				unknown_seen[name] = a.line
 				findings[#findings + 1] = {
-					atom = a.name, line = a.line,
+					atom  = a.name, line = a.line,
 					check = "per_atom_cycle_budget", kind = "warning",
-					msg = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; "
+					msg   = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; "
 						.. "cycle count will be +%d per call (best-case). Add an entry to duffle.INSTRUCTION_LATENCY.",
 						a.name, a.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
 				}
@@ -1259,14 +1276,14 @@ local function validate(ctx, src)
 	local cycles_by_atom = {}
 	for _, a in ipairs(atoms) do
 		local p = analyze_atom_paths(a)
-		a.paths = p
-		a.cycles = p.cycles_max     -- default for any code that reads .cycles
-		a.cycles_min = p.cycles_min
-		a.cycles_max = p.cycles_max
-		a.cycles_full = p.cycles_full
-		a.branch_count = p.branches
+		a.paths          = p
+		a.cycles         = p.cycles_max     -- default for any code that reads .cycles
+		a.cycles_min     = p.cycles_min
+		a.cycles_max     = p.cycles_max
+		a.cycles_full    = p.cycles_full
+		a.branch_count   = p.branches
 		a.unknown_macros = p.unknown_macros
-		a.has_loops = p.has_loops
+		a.has_loops      = p.has_loops
 		cycles_by_atom[a.name] = p
 	end
 
@@ -1279,10 +1296,8 @@ local function validate(ctx, src)
 		-- either severity (errors for missing nops; warnings for unknown
 		-- cmdw macros not in the latency table). Bin by `kind`, not by
 		-- check name.
-		if f.kind == "error" then
-			errors[#errors + 1] = { line = f.line, msg = f.msg }
-		else
-			warnings[#warnings + 1] = { line = f.line, msg = f.msg }
+		if f.kind == "error" then errors  [#errors   + 1] = { line = f.line, msg = f.msg }
+		else                      warnings[#warnings + 1] = { line = f.line, msg = f.msg }
 		end
 	end
 	-- Per-source "scanned:" summary line. Includes the source basename
@@ -1351,7 +1366,7 @@ local function emit_static_analysis_txt(ctx, src, result)
 	local n_atoms, n_bare, n_proc = 0, 0, 0
 	for _, a in ipairs(result.atoms) do
 		n_atoms = n_atoms + 1
-		if a.kind == "comp_bare" then n_bare = n_bare + 1
+		if     a.kind == "comp_bare" then n_bare = n_bare + 1
 		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
 		end
 	end
@@ -1410,9 +1425,8 @@ local function emit_static_analysis_txt(ctx, src, result)
 	return out_path
 end
 
--- (Old per-source emit function above; kept for backward compat but no
--- longer called from M.run. Replaced by `emit_module_static_analysis_txt`
--- which aggregates by directory.)
+-- (Old per-source emit function above; kept for backward compat but no longer called from M.run. 
+-- Replaced by `emit_module_static_analysis_txt` which aggregates by directory.)
 
 --- Per-directory emit. Aggregates atoms + findings across every source
 --- in `dir_sources` and writes a single report to
@@ -1421,7 +1435,7 @@ end
 local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, findings, errors, warnings, info)
 	-- Module basename = last component of `dir` ("code/duffle" -> "duffle").
 	local dir_basename = dir:match("([^/\\]+)$") or dir
-	local out_path = ctx.out_root .. "/" .. dir_basename .. ".static_analysis.txt"
+	local out_path     = ctx.out_root .. "/" .. dir_basename .. ".static_analysis.txt"
 	if ctx.dry_run then return out_path end
 	duffle.ensure_dir(ctx.out_root)
 
@@ -1441,7 +1455,7 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	local n_atoms, n_bare, n_proc = 0, 0, 0
 	for _, a in ipairs(atoms) do
 		n_atoms = n_atoms + 1
-		if a.kind == "comp_bare" then n_bare = n_bare + 1
+		if     a.kind == "comp_bare" then n_bare = n_bare + 1
 		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
 		end
 	end
@@ -1512,10 +1526,10 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 		for _, a in ipairs(atoms) do sorted[#sorted + 1] = a end
 		table.sort(sorted, function(x, y) return (x.cycles_max or 0) > (y.cycles_max or 0) end)
 		for _, a in ipairs(sorted) do
-			local p = a.paths or {}
-			local br_count = p.branches or 0
-			local path_count = p.paths or 0
-			local loops_tag = p.has_loops and "  [loop!]" or ""
+			local p           = a.paths or {}
+			local br_count    = p.branches or 0
+			local path_count  = p.paths or 0
+			local loops_tag   = p.has_loops and "  [loop!]" or ""
 			local unknown_tag = ""
 			if a.unknown_macros and #a.unknown_macros > 0 then
 				unknown_tag = string.format("  [unknown: %s]",
@@ -1555,7 +1569,7 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 			goto continue
 		end
 		local atom_count = #src_atoms
-		local mn, mx = math.huge, -1
+		local mn, mx     = math.huge, -1
 		for _, a in ipairs(src_atoms) do
 			local p = a.paths or {}
 			if (p.cycles_min or 0) < mn then mn = p.cycles_min or 0 end
@@ -1575,7 +1589,7 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	end
 
 	-- Module-level findings summary (across all sources).
-	local total_errs = #errors
+	local total_errs  = #errors
 	local total_warns = #warnings
 	add("")
 	add(string.format("Module findings:  %d error(s), %d warning(s)", total_errs, total_warns))

@@ -147,6 +147,7 @@ local function extract_ident_args(token, after_ident)
 	local arg_start = duffle.skip_ws_and_cmt(token, after_ident)
 	if token:sub(arg_start, arg_start) ~= "(" then return {}, nil end
 	local inner, after_paren = duffle.read_parens(token, arg_start)
+	-- scan: <marker>(<args>)
 
 	local args      = {}
 	local pos       = 1
@@ -236,7 +237,9 @@ local function find_marker_call_end(tok)
 			pos = (nx > pos) and nx or (pos + 1)
 		else
 			local ident, after_ident = duffle.read_ident(tok, pos)
+			-- scan: <ident>
 			if ident == LABEL_MARKER or ident == OFFSET_MARKER then
+				-- scan: atom_label(<name>)  OR  atom_offset(<tag>, <target>)
 				local open_paren = duffle.skip_ws_and_cmt(tok, after_ident)
 				if tok:sub(open_paren, open_paren) == "(" then
 					local _, end_paren = duffle.read_parens(tok, open_paren)
@@ -276,6 +279,7 @@ local function try_wrapped_atom(source_text, after_pos)
 	local paren_pos = duffle.skip_ws_and_cmt(source_text, after_pos)
 	if source_text:sub(paren_pos, paren_pos) ~= "(" then return nil end
 	local inner, after_paren = duffle.read_parens(source_text, paren_pos)
+	-- scan: MipsAtom_(<name>)
 
 	local name_start = 1
 	while name_start <= #inner and duffle.is_space(inner:sub(name_start, name_start)) do
@@ -289,8 +293,10 @@ local function try_wrapped_atom(source_text, after_pos)
 	if    name == "" then return nil end
 
 	local  brace_pos = duffle.scan_to_char(source_text, "{", after_paren)
+	-- scan: MipsAtom_(<name>) {
 	if not brace_pos then return nil end
 	local body, after_brace = duffle.read_braces(source_text, brace_pos)
+	-- scan: MipsAtom_(<name>) { <body> }
 	return { name = name, body = body, after_brace = after_brace }
 end
 
@@ -301,13 +307,17 @@ end
 local function try_raw_atom(source_text, after_pos)
 	local next_pos = duffle.skip_ws_and_cmt(source_text, after_pos)
 	local next_ident, next_after = duffle.read_ident(source_text, next_pos)
+	-- scan: MipsCode <next_ident>
 	if not next_ident then return nil end
 	if not starts_with(next_ident, CODE_RAW_PREFIX) then return nil end
 	if #next_ident <= CODE_RAW_PREFIX_LEN then return nil end
 	local atom_name = next_ident:sub(CODE_RAW_PREFIX_LEN + 1)
+	-- scan: MipsCode code_<name>
 	local brace_pos = duffle.scan_to_char(source_text, "{", next_after)
+	-- scan: MipsCode code_<name> {
 	if not brace_pos then return nil end
 	local body, after_brace = duffle.read_braces(source_text, brace_pos)
+	-- scan: MipsCode code_<name> { <body> }
 	return { name = atom_name, body = body, after_brace = after_brace }
 end
 
@@ -324,9 +334,11 @@ local function find_atoms(source_text)
 		pos = skip_qualifiers(source_text, pos);        if pos > src_len then break end
 
 		local ident, after = duffle.read_ident(source_text, pos)
+		-- scan: <ident>
 		if not ident then
 			pos = pos + 1
 		elseif ident == ATOM_PREFIX then
+			-- scan: MipsAtom_(<name>) { <body> }
 			local atom = try_wrapped_atom(source_text, after)
 			if atom then
 				atoms[#atoms + 1] = { name = atom.name, body = atom.body }
@@ -335,6 +347,7 @@ local function find_atoms(source_text)
 				pos = pos + 1
 			end
 		elseif ident == CODE_DECL then
+			-- scan: MipsCode code_<name> { <body> }
 			local atom = try_raw_atom(source_text, after)
 			if atom then
 				atoms[#atoms + 1] = { name = atom.name, body = atom.body }
