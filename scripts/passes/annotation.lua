@@ -187,7 +187,6 @@ local function split_csv_top(s)
 end
 
 --- Split a string into whitespace-separated tokens.
---- Hand-rolled (no regex patterns).
 --- @param s string
 --- @return string[]
 local function split_ws(s)
@@ -212,10 +211,8 @@ end
 -- Parse TAPE_ATOM_ANNOT(...) calls
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Recognize a `atom_bind(...)`, `atom_reads(...)`, or `atom_writes(...)`
--- sub-call embedded inside an atom_info arg list. 
--- Returns the kind ("atom_bind" / "atom_reads" / "atom_writes") and the inner content,
--- or nil if the token isn't a recognized sub-call form. 
+-- Recognize a `atom_bind(...)`, `atom_reads(...)`, or `atom_writes(...)` sub-call embedded inside an atom_info arg list. 
+-- Returns the kind ("atom_bind" / "atom_reads" / "atom_writes") and the inner content, or nil if the token isn't a recognized sub-call form. 
 -- Flattened via a prefix lookup instead of a nested if/elseif chain.
 local REGS_CALL_PREFIX = {
 	["atom_writes("] = { kind = "atom_writes", inner_offset = 13 },
@@ -451,9 +448,8 @@ local function parse_binds_body(body)
 end
 
 --- Try to parse a `typedef Struct_(Binds_X) { ... };` declaration.
---- Returns the parsed BindsStruct (if the form matched) and the new
---- source position. If the form didn't match, returns nil + a position
---- to continue scanning from.
+--- Returns the parsed BindsStruct (if the form matched) and the new source position.
+--- If the form didn't match, returns nil + a position to continue scanning from.
 --- @param source string
 --- @param ident_pos integer  -- position of the `typedef` ident start
 --- @param after_typedef integer -- position just past `typedef`
@@ -527,10 +523,9 @@ end
 -- Find every MipsAtom_(name) { ... } declaration in source
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Read the next identifier token from `s` starting at `pos`, where the
---- identifier is a contiguous run of `[a-zA-Z0-9_]` characters (no
---- underscore-starting alpha-only constraint). Returns the ident + the
---- position just past it, or nil + pos if no identifier starts there.
+--- Read the next identifier token from `s` starting at `pos`, where the identifier is a contiguous run of `[a-zA-Z0-9_]` 
+--- characters (no underscore-starting alpha-only constraint). 
+--- Returns the ident + the position just past it, or nil + pos if no identifier starts there.
 --- @param s string
 --- @param pos integer
 --- @return string|nil, integer
@@ -541,8 +536,8 @@ local function read_alnum_ident(s, pos)
 	return s:sub(start, pos - 1), pos
 end
 
---- Find every `MipsAtom_(name)` declaration in source. (Just the name +
---- source line; the body is parsed separately by `parse_mips_atom`.)
+--- Find every `MipsAtom_(name)` declaration in source. 
+--- (Just the name + source line; the body is parsed separately by `parse_mips_atom`.)
 --- @param source string
 --- @return Atom[]
 local function find_atom_names(source)
@@ -648,9 +643,8 @@ local function parse_atom_info_call(source, atom_name, after_mipsatom_paren, lin
 end
 
 --- Find every `MipsAtom_(name) atom_info(...) { ... };` annotation in source.
---- Returns a list of annotation entries. Atoms without a following
---- `atom_info(...)` call produce NO entry (atoms without annotations are
---- valid in the new minimal shape).
+--- Returns a list of annotation entries. Atoms without a following `atom_info(...)` call produce NO entry
+--- (atoms without annotations are valid in the new minimal shape).
 --- @param source string
 --- @return AtomAnnotation[]
 local function find_atom_annotations(source)
@@ -861,16 +855,13 @@ end
 -- Per-DIRECTORY (per-module) output: errors.h + annotations.txt
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Per-source reports were the old behavior; each source in the same
--- directory produced its own <basename>.errors.h + <basename>.annotations.txt,
--- which flooded build/gen/ with one report per header. The new behavior
--- aggregates per-DIRECTORY (one errors.h + one annotations.txt per module
--- basename). Directories with zero atoms/annotations are skipped (no
--- file emitted).
+-- Per-source reports were the old behavior; each source in the same directory produced its own <basename>.errors.h + <basename>.annotations.txt,
+-- which flooded build/gen/ with one report per header. 
+-- Aggregates per-DIRECTORY (one errors.h + one annotations.txt per module basename). 
+-- Directories with zero atoms/annotations are skipped (no file emitted).
 
---- Render `<dir_basename>.errors.h` with `#error` directives for every
---- error found across all sources in the directory. Empty directories
---- (no errors, no atoms) produce no file.
+--- Render `<dir_basename>.errors.h` with `#error` directives for every error found across all sources in the directory. 
+--- Empty directories (no errors, no atoms) produce no file.
 local function emit_module_errors_h(ctx, dir_basename, atoms_count, errors, sources)
 	if ctx.dry_run then return nil end
 	if atoms_count == 0 and #errors == 0 then
@@ -878,7 +869,7 @@ local function emit_module_errors_h(ctx, dir_basename, atoms_count, errors, sour
 		return nil
 	end
 	local out_path = ctx.out_root .. "/" .. dir_basename .. ".errors.h"
-	local lines = {
+	local lines    = {
 		"// Auto-generated by ps1_meta.lua (passes/annotation.lua) — DO NOT EDIT",
 		string.format("// Module: %s   Sources: %d", dir_basename, #sources),
 		"#pragma once",
@@ -923,10 +914,8 @@ end
 
 local M = {}
 
--- Expose `validate` for downstream passes (e.g. report.lua) that need
--- to re-render the per-source results into a per-MODULE report. Keeping
--- it as a single shared function avoids the duplication that an
--- earlier version of report.lua had.
+-- Expose `validate` for downstream passes (e.g. report.lua) that need to re-render the per-source results into a per-MODULE report.
+-- Keeping it as a single shared function avoids the duplication that an earlier version of report.lua had.
 M.validate = validate
 
 --- @param ctx PassCtx
@@ -936,11 +925,9 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Per-DIRECTORY (per-module) aggregation. Group sources by `src.dir`,
-	-- validate every source in the dir, then emit ONE errors.h per dir
-	-- (skipping dirs with no atoms AND no errors). The actual
-	-- annotations.txt is rendered by passes/report.lua from the stashed
-	-- per-module results below.
+	-- Per-DIRECTORY (per-module) aggregation. Group sources by `src.dir`, validate every source in the dir, then emit ONE errors.h per dir 
+	-- (skipping dirs with no atoms AND no errors). 
+	-- The actual annotations.txt is rendered by passes/report.lua from the stashed per-module results below.
 	local by_dir = {}
 	for _, src in ipairs(ctx.sources) do
 		by_dir[src.dir] = by_dir[src.dir] or {}

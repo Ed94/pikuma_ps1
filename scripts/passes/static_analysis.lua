@@ -1,56 +1,31 @@
 --- passes/static_analysis.lua — Per-atom static-analysis checks.
 ---
 --- The 5 checks currently shipped:
----   1. **GTE pipeline-fill** — every `gte_cmdw_*` invocation must be
----      preceded by the minimum number of `nop` words (per
----      `duffle.duffle.GTE_PIPELINE_LATENCY`) so the COP2 pipeline latency is
----      fully retired before the command issues.
----   2. **mac_yield uniformity** — every atom body must contain exactly
----      one `mac_yield()` call (control transfer pattern).
----   3. **ABI handoff** — every `atom_bind(Binds_X)` must reference a
----      `typedef Struct_(Binds_X) { ... }` declaration.
----   4. **GPU port-store shape** — per-shape (`f3`/`f4`/`g4`/etc.) the
----      sum of `mac_format_X_color` + `mac_gte_store_X_*` +
----      `mac_insert_ot_tag_X` words must equal the GP0 cmd's expected
----      packet size.
----   5. **per-atom cycle budget** — sum each atom body's instruction
----      latencies (per `duffle.duffle.INSTRUCTION_LATENCY`); report total.
+---   1. **GTE pipeline-fill** — every `gte_cmdw_*` invocation must be preceded by the minimum number of `nop` words
+---      (per `duffle.GTE_PIPELINE_LATENCY`) so the COP2 pipeline latency is fully retired before the command issues.
+---   2. **mac_yield uniformity** — every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
+---   3. **ABI handoff** — every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
+---   4. **GPU port-store shape** — per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` +
+---      `mac_insert_ot_tag_X` words must equal the GP0 cmd's expected packet size.
+---   5. **per-atom cycle budget** — sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
 ---
 --- The orchestrator (`ps1_meta.lua`) wires this module in via the
 --- PASSES table:
----   `["static-analysis"] = { module = "passes.static_analysis",
----                            kind   = "validation",
----                            deps   = {"word-counts", "components"},
----                            out    = { { kind = "report",
----                                         path_template = "<out_root>/<basename>.static_analysis.txt" } } }`
+---   `["static-analysis"] = { module = "passes.static_analysis", kind = "validation", deps = {"word-counts", "components"},
+---     out = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } } }`
 ---
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. See
---- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
+--- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible. See `lua.md` in the ps1-ai styleguides.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- `duffle.setup_package_path()` resolves `arg[0]` and prepends `scripts/`
--- (and `scripts/passes/`) to `package.path`, so `require("duffle")`
--- resolves regardless of CWD. See `duffle.lua` for the implementation.
-
--- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
--- Uses `debug.getinfo` to find this file's own directory, so it works
--- both standalone and when require'd from the orchestrator.
+-- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 local _src = debug.getinfo(1, "S").source:sub(2)
 local _dir = _src:match("(.*[/\\])") or "./"
 dofile(_dir .. "../duffle_paths.lua")
 local duffle = require("duffle")
-
--- Domain tables (single source of truth in duffle.lua).
-
-
-
-
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -137,7 +112,7 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field atom       AtomBody
 --- @field tokens     Token[]     -- the tokens in the atom body, annotated
 --- @field findings   Finding[]   -- findings for this atom
---- @field total_cycles integer   -- sum of token cycle costs (Phase 3)
+--- @field total_cycles integer   -- sum of token cycle costs
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Source walkers
@@ -232,7 +207,7 @@ local function find_atom_bodies(source_text)
 							elseif c == 91 then
 								local _, a = duffle.read_brackets(inner, inner_pos); inner_pos = a
 							elseif c == 34 or c == 39 then
-								inner_pos = duffle.duffle.skip_str_or_cmt(inner, inner_pos) + 1
+								inner_pos = duffle.skip_str_or_cmt(inner, inner_pos) + 1
 							else
 								inner_pos = inner_pos + 1
 							end
@@ -381,7 +356,7 @@ local function tokenize_body(body)
 			elseif c == 91 then                      -- '['
 				local _, a = duffle.read_brackets(body, scan); scan = a
 			elseif c == 34 or c == 39 then           -- '"' or '\''
-				scan = duffle.duffle.skip_str_or_cmt(body, scan) + 1
+				scan = duffle.skip_str_or_cmt(body, scan) + 1
 			else
 				scan = scan + 1
 			end
@@ -448,9 +423,9 @@ local function check_gte_pipeline_fill(atoms, findings, line_of)
 						line  = line,
 						check = "gte_pipeline_fill",
 						kind  = "warning",
-						msg   = string.format(
-							"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
-							a.name, line, variant),
+					msg   = string.format(
+						"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
+						a.name, line, variant),
 					}
 					ti = ti + 1
 				elseif need > 0 then
@@ -950,7 +925,9 @@ local function check_gpu_portstore_shape(atoms, findings)
 					findings[#findings + 1] = {
 						atom = a.name, line = a.line,
 						check = "gpu_portstore_shape", kind = "warning",
-						msg = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...) but uses no `mac_format_*_color`; the cmd byte + word count cannot be auto-validated. Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.",
+						msg = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...)" 
+							.. " but uses no `mac_format_*_color`; the cmd byte + word count cannot be auto-validated." 
+							.. " Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.",
 							a.name, a.line),
 					}
 				end
@@ -970,7 +947,7 @@ local function check_gpu_portstore_shape(atoms, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #5: per-atom cycle budget (Phase 3)
+-- Check #5: per-atom cycle budget
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Compute the cycle cost of one token. The token is a string like
@@ -1179,8 +1156,8 @@ local function analyze_atom_paths(atom)
 	end
 	if n >= 1 then dfs(1, 0, {}) end
 
-	-- cycles_full: sum of every token's cost (the previous model; useful
-	-- for comparing against the path-aware min/max).
+	-- cycles_full: sum of every token's cost (the legacy sum-of-all-tokens
+	-- value; over-counts BD-slot nops relative to the path-aware min/max).
 	local cycles_full = 0
 	for tok_idx = 1, n do cycles_full = cycles_full + costs[tok_idx] end
 
@@ -1210,9 +1187,9 @@ local function analyze_atom_paths(atom)
 	}
 end
 
---- Backward-compat wrapper: returns total cycle count (the previous
---- "best case" value, which over-counts BD-slot nops) + unknown macro
---- list. New code should call `analyze_atom_paths(atom)` instead.
+--- Returns total cycle count (the sum-of-all-tokens value, which over-counts
+--- BD-slot nops) + unknown macro list. New code should call
+--- `analyze_atom_paths(atom)` instead.
 local function count_atom_cycles(atom)
 	local tokens = tokenize_body(atom.body)
 	local total  = 0
@@ -1242,7 +1219,8 @@ local function check_per_atom_cycle_budget(atoms, findings)
 				findings[#findings + 1] = {
 					atom = a.name, line = a.line,
 					check = "per_atom_cycle_budget", kind = "warning",
-					msg = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; cycle count will be +%d per call (best-case). Add an entry to duffle.M.duffle.INSTRUCTION_LATENCY.",
+					msg = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; "
+						.. "cycle count will be +%d per call (best-case). Add an entry to duffle.INSTRUCTION_LATENCY.",
 						a.name, a.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
 				}
 			end
@@ -1274,7 +1252,7 @@ local function validate(ctx, src)
 	check_gpu_portstore_shape(atoms, findings)
 	check_per_atom_cycle_budget(atoms, findings)
 
-	-- Phase 3 cycle-budget output: attach per-path cycle data to each
+	-- Path-aware cycle-budget output: attach per-path cycle data to each
 	-- atom. Best-case (no-stall) cycle count with BD-slot absorbed; the
 	-- `cycles_full` field is the legacy sum-of-all-tokens value (kept
 	-- for backward compat; over-counts BD-slot nops).
@@ -1322,7 +1300,7 @@ local function validate(ctx, src)
 		}
 	end
 
-	-- Phase 3: cycle-budget summary line. Per-path min/max totals.
+	-- Path-aware cycle-budget summary line. Per-path min/max totals.
 	if #atoms > 0 then
 		local total_min     = 0
 		local total_max     = 0
@@ -1432,10 +1410,9 @@ local function emit_static_analysis_txt(ctx, src, result)
 	return out_path
 end
 
--- (Old per-source emit function above kept for backward compat but no
--- longer called from M.run; replaced by `emit_module_static_analysis_txt`
--- which aggregates by directory. Kept because some test harnesses may
--- still call it directly.)
+-- (Old per-source emit function above; kept for backward compat but no
+-- longer called from M.run. Replaced by `emit_module_static_analysis_txt`
+-- which aggregates by directory.)
 
 --- Per-directory emit. Aggregates atoms + findings across every source
 --- in `dir_sources` and writes a single report to
@@ -1518,15 +1495,13 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 		add(string.format("  ! line %d  %s", w.line, w.msg))
 	end
 
-	-- Per-atom cycle counts (Phase 3 path-aware). For each atom:
+	-- Per-atom cycle counts (path-aware). For each atom:
 	--   min   = shortest path through the body (earliest exit)
 	--   max   = longest path through the body (full fall-through)
 	--   br    = number of branch instructions
 	--   paths = number of distinct paths reached
 	-- Both min and max are best-case (no stalls); BD-slot nops are
-	-- absorbed into branch costs (MIPS semantics). The previous "best
-	-- case" model counted every token separately, which double-counted
-	-- BD-slot nops; the path-aware model is the MIPS-accurate value.
+	-- absorbed into branch costs (MIPS semantics).
 	add("")
 	add("── Per-atom cycle counts (path-aware, best case, no stalls) ─")
 	if #atoms == 0 then
@@ -1569,13 +1544,6 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	-- 0 atoms are skipped (they're just header files that declared
 	-- no MipsAtom_ — they're already listed in the module's
 	-- "Sources:" section above).
-	--
-	-- TODO: per-source finding attribution. Currently we can't tell
-	-- which source a given error/warning came from (errors/warnings
-	-- only carry atom-name + line, not source-path). The per-atom
-	-- cycle section already shows which atoms are in which source
-	-- via the `(file_basename)` suffix. Adding source attribution to
-	-- error/warning would be a future enhancement.
 	for _, src in ipairs(dir_sources) do
 		local src_atoms = {}
 		for _, a in ipairs(atoms) do
@@ -1640,10 +1608,10 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Phase 3.7+: aggregate per-DIRECTORY (per-module). One
-	-- static_analysis.txt per source-directory, emitted only if the
-	-- directory contains at least one atom. Empty-source directories
-	-- (e.g. duffle headers with no atoms) produce no report.
+	-- Aggregate per-DIRECTORY (per-module). One static_analysis.txt per
+	-- source-directory, emitted only if the directory contains at least
+	-- one atom. Empty-source directories (e.g. duffle headers with no
+	-- atoms) produce no report.
 	--
 	-- Group sources by `src.dir`. The first component of `dir` is the
 	-- module name (e.g. "code/duffle" -> "duffle", "code/gte_hello" ->
@@ -1689,10 +1657,8 @@ function M.run(ctx)
 			end
 		end
 
-		-- Skip directories with zero atoms. The previous behavior emitted
-		-- a "<no atoms>" report per source; the new behavior emits nothing
-		-- at all (a directory with only headers / no MipsAtom_ is
-		-- "nothing to report").
+		-- Skip directories with zero atoms — a directory with only
+		-- headers / no MipsAtom_ is "nothing to report".
 		if #all_atoms == 0 then
 			-- Still aggregate errors/warnings so orchestrator sees them,
 			-- but don't write a file.

@@ -20,10 +20,8 @@
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Resolve `arg[0]` to an absolute-ish script directory so that
--- `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; a
--- Phase-6 extraction target (`duffle.setup_package_path()`).
+-- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
+-- Note: this boilerplate is duplicated in 6 other entry scripts; a Phase-6 extraction target (`duffle.setup_package_path()`).
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
@@ -37,9 +35,8 @@ local duffle = require("duffle")
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Section separators used in the rendered text reports. The thin rules
--- are hand-tuned to align with the per-section content width; do not
--- change without also checking the section renderers below.
+-- Section separators used in the rendered text reports.
+-- The thin rules are hand-tuned to align with the per-section content width; do not change without also checking the section renderers below.
 local RULE_THICK = "========================================================"
 local SECTION_HEADER_ATOMS     = "── Atoms ────────────────────────────────────────────────"
 local SECTION_HEADER_ANNOTS    = "── Annotations ──────────────────────────────────────────"
@@ -147,8 +144,7 @@ local PASS_NAME = "report"
 -- Per-MODULE annotation report (aggregated across all sources in a dir)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Extract the basename (last path segment) of a forward- or back-slash
--- separated path. Returns the input unchanged if no separator is found.
+-- Extract the basename (last path segment) of a forward- or back-slash separated path. Returns the input unchanged if no separator is found.
 -- @param path string
 -- @return string
 local function source_basename(path)
@@ -306,8 +302,7 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Render the per-project summary (`build/gen/annotation_validation.txt`).
---- Aggregates totals across all sources; lists per-source error counts
---- if any source has errors.
+--- Aggregates totals across all sources; lists per-source error counts if any source has errors.
 --- @param all_results AnnotationResult[]
 --- @return string
 local function render_project_report(all_results)
@@ -356,8 +351,7 @@ end
 -- Orchestration helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Group source files by their `dir` field. Used to mirror the
--- per-DIRECTORY partitioning the annotation pass uses.
+-- Group source files by their `dir` field. Used to mirror the per-DIRECTORY partitioning the annotation pass uses.
 -- @param sources SourceFile[]
 -- @return table<string, SourceFile[]>  -- map of dir -> sources in that dir
 local function group_sources_by_dir(sources)
@@ -369,19 +363,17 @@ local function group_sources_by_dir(sources)
 	return by_dir
 end
 
--- (internal) Validate each source in `dir_sources` via the annotation pass,
--- tagging each result with `result.source = src.path` for downstream rendering.
--- Returns the list of module results + the flat list of all results (for the
--- project-wide summary).
+-- (internal) Validate each source in `dir_sources` via the annotation pass, tagging each result with `result.source = src.path` for downstream rendering.
+-- Returns the list of module results + the flat list of all results (for the project-wide summary).
 -- @param ctx PassCtx
 -- @param dir_sources SourceFile[]
 -- @return AnnotationResult[], AnnotationResult[]
 local function validate_module_sources(ctx, dir_sources)
-	local annotation = require("passes.annotation")
+	local annotation     = require("passes.annotation")
 	local module_results = {}
-	local all_results   = {}
+	local all_results    = {}
 	for _, src in ipairs(dir_sources) do
-		local result = annotation.validate(ctx, src)
+		local result  = annotation.validate(ctx, src)
 		result.source = src.path
 		module_results[#module_results + 1] = result
 		all_results[#all_results + 1] = result
@@ -394,7 +386,7 @@ end
 -- @return boolean
 local function module_has_content(module_results)
 	for _, r in ipairs(module_results) do
-		if #r.atoms > 0 or #r.annots > 0 or #r.binds > 0
+		if #r.atoms  > 0 or #r.annots > 0 or #r.binds    > 0
 		or #r.macros > 0 or #r.errors > 0 or #r.warnings > 0 then
 			return true
 		end
@@ -416,9 +408,8 @@ end
 
 local M = {}
 
---- Run the report pass. Renders one `<dir_basename>.annotations.txt`
---- per source-directory that has content, plus the project-wide
---- `annotation_validation.txt` summary.
+--- Run the report pass. 
+--- Renders one `<dir_basename>.annotations.txt` per source-directory that has content, plus the project-wide `annotation_validation.txt` summary.
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
@@ -433,11 +424,10 @@ function M.run(ctx)
 
 	local all_results_for_summary = {}
 	for _, entry in ipairs(module_entries) do
-		debug_log("entry: dir=%s basename=%s atoms_count=%d dir_sources=%d\n",
-			entry.dir, entry.dir_basename, entry.atoms_count, #(by_dir[entry.dir] or {}))
+		debug_log("entry: dir=%s basename=%s atoms_count=%d dir_sources=%d\n", entry.dir, entry.dir_basename, entry.atoms_count, #(by_dir[entry.dir] or {}))
 
 		if entry.atoms_count > 0 or #(by_dir[entry.dir] or {}) > 0 then
-			local dir_sources   = by_dir[entry.dir] or {}
+			local dir_sources                 = by_dir[entry.dir] or {}
 			local module_results, all_results = validate_module_sources(ctx, dir_sources)
 			for _, r in ipairs(all_results) do
 				all_results_for_summary[#all_results_for_summary + 1] = r

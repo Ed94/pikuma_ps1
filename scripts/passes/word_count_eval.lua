@@ -1,32 +1,25 @@
---- word_count_eval.lua — Word-counting logic for the tape-atom metaprogram
---- pipeline.
+--- word_count_eval.lua — Word-counting logic for the tape-atom metaprogram pipeline.
 ---
 --- Three responsibilities:
----   1. **Public utilities** (used by `passes/components.lua`,
----      `passes/offsets.lua`, `passes/annotation.lua`):
+---   1. **Public utilities** (used by `passes/components.lua`, `passes/offsets.lua`, `passes/annotation.lua`):
 ---        - `M.count_token_words(token, wc)` — words emitted by one token
 ---        - `M.scan_dir(dir, suffix)` — glob walk for *.macs.h
 ---        - `M.count_body_words(body, wc)` — words emitted by an atom body
----   2. **Pass entry** `M.run(ctx)` — loads metadata.h + *.macs.h into
----      `ctx.shared.word_counts` for downstream passes.
+---   2. **Pass entry** `M.run(ctx)` — loads metadata.h + *.macs.h into `ctx.shared.word_counts` for downstream passes.
 ---   3. **Internal helpers** for the body scanner.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. See
---- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
+--- Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Resolve `arg[0]` to an absolute-ish script directory so that
--- `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; a
--- Phase-6 extraction target (`duffle.setup_package_path()`).
+-- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
+-- Note: this boilerplate is duplicated in 6 other entry scripts; a Phase-6 extraction target (`duffle.setup_package_path()`).
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
--- Uses `debug.getinfo` to find this file's own directory, so it works
--- both standalone and when require'd from the orchestrator.
+-- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 local _src = debug.getinfo(1, "S").source:sub(2)
 local _dir = _src:match("(.*[/\\])") or "./"
 dofile(_dir .. "../duffle_paths.lua")
@@ -36,14 +29,12 @@ local duffle = require("duffle")
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Windows separator chars — used to convert `dir /b /s` output (which uses
--- `\`) into POSIX paths (which our scripts expect).
+-- Windows separator chars — used to convert `dir /b /s` output (which uses `\`) into POSIX paths (which our scripts expect).
 local PATH_SEP_BACKSLASH = "\\"
 local PATH_SEP_FORWARD   = "/"
 
--- Glob command for Windows directory walk. `dir /b /s` lists all matching
--- files recursively with bare paths (no headers); `2>nul` discards the
--- "file not found" stderr when nothing matches.
+-- Glob command for Windows directory walk. `dir /b /s` lists all matching files recursively with bare paths (no headers); 
+-- `2>nul` discards the "file not found" stderr when nothing matches.
 local DIR_GLOB_CMD = 'dir /b /s "%s\\%s" 2>nul'
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -88,8 +79,7 @@ local M = {}
 
 --- Count words emitted by a single comma-separated token inside an atom body.
 --- For most tokens (regular MIPS instructions) this returns 1.
---- For `mac_X(...)` calls, this returns the resolved word count from `wc`
---- (recursively if needed). For `nop2` etc., returns wc[name].
+--- For `mac_X(...)` calls, this returns the resolved word count from `wc` (recursively if needed). For `nop2` etc., returns wc[name].
 --- For unknown macros, returns 1 and (optionally) warns.
 ---
 --- @param token string        -- a single token from split_top_level_commas
@@ -97,7 +87,7 @@ local M = {}
 --- @return integer
 function M.count_token_words(token, wc)
 	local s = duffle.trim(token)
-	if s == "" then return 0 end
+	if    s == "" then return 0 end
 	local name, after = duffle.read_ident(s, 1)
 	if not name then return 1 end
 	if wc[name] then return wc[name] end
@@ -113,30 +103,25 @@ end
 -- └────────────────────────────────────────────────────────────────────┘
 
 --- Recursively scan a directory for files matching a glob suffix.
---- No regex per the no_regex constraint — uses plain byte matching
---- via `dir /b /s` on Windows.
+--- No regex per the no_regex constraint — uses plain byte matching via `dir /b /s` on Windows.
 ---
---- The `.macs.h` files produced by the components pass always live at
---- `<project_root>/<module>/gen/`. We can shortcut the `dir /b /s` walk by
---- listing modules first (one `dir /b /ad`), then walking each `<module>/gen/`
---- (one `dir /b` per module, no recursion). For projects with 2 modules and
---- 0 .macs.h files, this drops the cost from ~52ms (full recursive walk of
---- the entire project tree) to ~5ms.
+--- The `.macs.h` files produced by the components pass always live at `<project_root>/<module>/gen/`.
+--- We can shortcut the `dir /b /s` walk by listing modules first (one `dir /b /ad`), then walking each `<module>/gen/`
+--- (one `dir /b` per module, no recursion). 
+--- For projects with 2 modules and 0 .macs.h files, this drops the cost from ~52ms 
+--- (full recursive walk of the entire project tree) to ~5ms.
 ---
 --- @param dir string        -- directory to scan (absolute or relative)
 --- @param suffix string     -- file pattern, e.g. "*.macs.h"
 --- @return string[]
--- Cache the scan_dir result per (dir, suffix) in package.loaded. Each
--- `io.popen` call on Windows is ~50-100ms of subprocess overhead, so
--- caching the result saves a fixed cost on every build. The cache
--- persists for the lifetime of the Lua process (cleared when ps1_meta.lua
--- exits). If a build removes/creates .macs.h files mid-process, the
--- caller can invalidate by calling `M._invalidate_scan_cache()`.
+-- Cache the scan_dir result per (dir, suffix) in package.loaded. 
+-- Each `io.popen` call on Windows is ~50-100ms of subprocess overhead, so caching the result saves a fixed cost on every build.
+-- The cache persists for the lifetime of the Lua process (cleared when ps1_meta.lua exits).
+-- If a build removes/creates .macs.h files mid-process, the caller can invalidate by calling `M._invalidate_scan_cache()`.
 local SCAN_CACHE_KEY = "__word_count_eval_scan_cache__"
 
 --- Recursively scan a directory for files matching a glob suffix.
---- No regex per the no_regex constraint — uses plain byte matching
---- via `dir /b /s` on Windows.
+--- No regex per the no_regex constraint — uses plain byte matching via `dir /b /s` on Windows.
 ---
 --- @param dir string        -- directory to scan (absolute or relative)
 --- @param suffix string     -- file pattern, e.g. "*.macs.h"
@@ -144,22 +129,17 @@ local SCAN_CACHE_KEY = "__word_count_eval_scan_cache__"
 function M.scan_dir(dir, suffix)
 	local key = dir .. "\0" .. suffix
 
-	-- Check the in-process cache first. (Mostly helps when a build
-	-- triggers multiple `M.run` calls -- e.g. the audit_lua_nesting
-	-- script's stress tests -- but the cost is ~free either way.)
+	-- Check the in-process cache first. (Mostly helps when a build triggers multiple `M.run` calls -- e.g. 
+	-- the audit_lua_nesting script's stress tests but the cost is ~free either way.)
 	local cache = package.loaded[SCAN_CACHE_KEY]
-	if cache and cache[key] then
-		return cache[key]
-	end
+	if    cache and cache[key] then return cache[key] end
 
 	local results = {}
 	local pipe = io.popen(DIR_GLOB_CMD:format(dir, suffix))
 	if not pipe then
-		-- Cache the empty result too (avoids re-scan if the dir is
-		-- genuinely empty -- e.g. a clean build before components
-		-- has run yet).
-		cache                  = cache or {}
-		cache[key]             = results
+		-- Cache the empty result too (avoids re-scan if the dir is genuinely empty -- e.g. a clean build before components has run yet).
+		cache      = cache or {}
+		cache[key] = results
 		package.loaded[SCAN_CACHE_KEY] = cache
 		return results
 	end
@@ -170,18 +150,15 @@ function M.scan_dir(dir, suffix)
 	pipe:close()
 
 	-- Cache the result.
-	cache                  = cache or {}
-	cache[key]             = results
+	cache      = cache or {}
+	cache[key] = results
 	package.loaded[SCAN_CACHE_KEY] = cache
 
 	return results
 end
 
---- Invalidate the scan cache (call after creating new .macs.h files
---- in the same Lua process — usually not needed).
-function M._invalidate_scan_cache()
-	package.loaded[SCAN_CACHE_KEY] = nil
-end
+--- Invalidate the scan cache (call after creating new .macs.h files in the same Lua process — usually not needed).
+function M._invalidate_scan_cache() package.loaded[SCAN_CACHE_KEY] = nil end
 
 -- ┌────────────────────────────────────────────────────────────────────┐
 -- │ Shared utility: count_body_words                                   │
@@ -189,9 +166,8 @@ end
 
 --- Count words emitted by an entire atom body (a brace-delimited block).
 --- Splits by top-level commas; for each token, delegates to count_token_words.
---- Handles `atom_label(name)` / `atom_offset(tag, name)` markers (record at
---- current pos, do NOT advance pos; if the marker call bundles an instruction
---- after it, count that instruction too).
+--- Handles `atom_label(name)` / `atom_offset(tag, name)` markers 
+--- (record at current pos, do NOT advance pos; if the marker call bundles an instruction after it, count that instruction too).
 ---
 --- @param body string         -- brace-delimited atom body (without braces)
 --- @param wc WordCounts       -- the shared word-count table
@@ -208,10 +184,8 @@ function M.count_body_words(body, wc)
 		local is_marker = leading_ident == "atom_label" or leading_ident == "atom_offset"
 		if is_marker then
 			-- Marker call: record at current pos, do NOT advance pos.
-			-- But the source pattern may bundle the marker with the next
-			-- instruction on a new line (no top-level comma between them).
-			-- In that case, the rest of `tok` after the marker call is
-			-- a real instruction that must still be counted.
+			-- But the source pattern may bundle the marker with the next instruction on a new line (no top-level comma between them).
+			-- In that case, the rest of `tok` after the marker call is a real instruction that must still be counted.
 			local marker_end = M.find_marker_call_end(tok)
 			if marker_end > 0 and marker_end < #tok then
 				local rest = duffle.trim(tok:sub(marker_end + 1))
@@ -226,8 +200,7 @@ function M.count_body_words(body, wc)
 	return total
 end
 
---- Find the end position (just past the closing ')') of the first
---- atom_label/atom_offset call in `tok`. Returns 0 if no such call.
+--- Find the end position (just past the closing ')') of the first atom_label/atom_offset call in `tok`. Returns 0 if no such call.
 --- Internal helper for count_body_words.
 ---
 --- @param tok string
@@ -244,10 +217,10 @@ function M.find_marker_call_end(tok)
 		elseif ch == "/" then
 			-- comment — skip past it (delegated to duffle.skip_str_or_cmt)
 			local nx = duffle.skip_str_or_cmt(tok, pos)
-			pos = (nx > pos) and nx or (pos + 1)
+			pos      = (nx > pos) and nx or (pos + 1)
 		else
 			local ident, after_ident = duffle.read_ident(tok, pos)
-			local marker_end = find_marker_end(tok, ident, after_ident)
+			local marker_end         = find_marker_end(tok, ident, after_ident)
 			if marker_end > 0 then return marker_end end
 			pos = after_ident or (pos + 1)
 		end
@@ -255,8 +228,8 @@ function M.find_marker_call_end(tok)
 	return 0
 end
 
--- (internal) If `ident` is `atom_label`/`atom_offset` followed by `(...)`,
--- return the position just past the closing ')'. Otherwise 0.
+-- (internal) If `ident` is `atom_label`/`atom_offset` followed by `(...)`, return the position just past the closing ')'. 
+-- Otherwise 0.
 -- @param tok string
 -- @param ident string|nil
 -- @param after_ident integer
@@ -273,10 +246,8 @@ end
 -- │ Pass entry: M.run(ctx) — "word-counts" pass                        │
 -- └────────────────────────────────────────────────────────────────────┘
 
---- Load metadata.h + scan for existing *.macs.h files into
---- ctx.shared.word_counts. Loading the .macs.h files is idempotent:
---- entries from later (current-build) .macs.h files override
---- metadata.h entries of the same name.
+--- Load metadata.h + scan for existing *.macs.h files into ctx.shared.word_counts.
+--- Loading the .macs.h files is idempotent: entries from later (current-build) .macs.h files override metadata.h entries of the same name.
 ---
 --- @param ctx PassCtx
 --- @return PassResult
@@ -301,7 +272,6 @@ function M.run(ctx)
 	end
 
 	ctx.shared.word_counts = wc
-
 	return { outputs = {}, errors = {}, warnings = {} }
 end
 

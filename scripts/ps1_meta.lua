@@ -79,9 +79,7 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 
 --- @class PassOutputEntry
 --- @field [string] string  -- dynamic shape; key is the output kind
-	-- (e.g. "macs_h", "offsets_h", "errors_h",
-	-- "annotations_txt", "static_analysis_txt",
-	-- "summary_txt"), value is the path
+	-- (e.g. "macs_h", "offsets_h", "errors_h", "annotations_txt", "static_analysis_txt", "summary_txt"), value is the path
 
 --- @class Finding
 --- @field line integer  -- source line (or 0 for pass-level)
@@ -177,8 +175,7 @@ local ALL_PASS_NAMES = {
 	"offsets", "static-analysis", "report",
 }
 
---- Append every pass name to args.requested_set. Used by --all and
---- by the "default to --all if no pass flags were given" fallback.
+--- Append every pass name to args.requested_set. Used by --all and by the "default to --all if no pass flags were given" fallback.
 --- @param args ParsedArgs
 local function request_all_passes(args)
 	for _, n in ipairs(ALL_PASS_NAMES) do
@@ -186,11 +183,9 @@ local function request_all_passes(args)
 	end
 end
 
--- Per-flag handlers. Each handler takes (args, argv, arg_idx) and
--- returns the new arg_idx (so multi-arg flags like --source FILE
--- advance it). Returning nil + os.exit() handles termination flags
--- (--help). This replaces the 8-way `if/elseif/elseif...` chain
--- that nested 4 levels deep and made the dispatch logic hard to scan.
+-- Per-flag handlers. Each handler takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it). 
+-- Returning nil + os.exit() handles termination flags (--help). This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep 
+-- and made the dispatch logic hard to scan.
 local FLAG_HANDLERS = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -233,50 +228,25 @@ EXAMPLE:
 ]])
 end
 
--- Per-flag handlers. Each takes (args, argv, arg_idx) and returns
--- the new arg_idx (so multi-arg flags like --source FILE advance
--- it). Termination flags like --help call os.exit() instead. This
--- replaces the 8-way `if/elseif/elseif...` chain that nested 4
--- levels deep and made the dispatch logic hard to scan.
+-- Per-flag handlers. Each takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it).
+-- Termination flags like --help call os.exit() instead.
+-- This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep and made the dispatch logic hard to scan.
 --
--- Populated AFTER print_help so the --help handler can reference it
--- as an upvalue (Lua resolves locals at closure-call time, but if the
--- closure is defined before the local, it falls back to _G).
+-- Populated AFTER print_help so the --help handler can reference it as an upvalue (Lua resolves locals at closure-call time, 
+-- but if the closure is defined before the local, it falls back to _G). 
 FLAG_HANDLERS["--help"] = function(args)
 	print_help()
 	os.exit(0)
 end
 
-FLAG_HANDLERS["--dry-run"] = function(args)
-	args.dry_run = true
-end
+FLAG_HANDLERS["--dry-run"]      = function(args) args.dry_run = true end
+FLAG_HANDLERS["--verbose"]      = function(args) args.verbose = true end
+FLAG_HANDLERS["--source"]       = function(args, argv, arg_idx) args.sources[#args.sources + 1] = argv[arg_idx + 1]; return arg_idx + 1 end
+FLAG_HANDLERS["--metadata"]     = function(args, argv, arg_idx) args.metadata                   = argv[arg_idx + 1]; return arg_idx + 1 end
+FLAG_HANDLERS["--out-root"]     = function(args, argv, arg_idx) args.out_root                   = argv[arg_idx + 1]; return arg_idx + 1 end
+FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx) args.project_root               = argv[arg_idx + 1]; return arg_idx + 1 end
 
-FLAG_HANDLERS["--verbose"] = function(args)
-	args.verbose = true
-end
-
-FLAG_HANDLERS["--source"] = function(args, argv, arg_idx)
-	args.sources[#args.sources + 1] = argv[arg_idx + 1]
-	return arg_idx + 1
-end
-
-FLAG_HANDLERS["--metadata"] = function(args, argv, arg_idx)
-	args.metadata = argv[arg_idx + 1]
-	return arg_idx + 1
-end
-
-FLAG_HANDLERS["--out-root"] = function(args, argv, arg_idx)
-	args.out_root = argv[arg_idx + 1]
-	return arg_idx + 1
-end
-
-FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx)
-	args.project_root = argv[arg_idx + 1]
-	return arg_idx + 1
-end
-
--- Pass-flag handler. Reads the closed-set table, expands --all,
--- appends to requested_set. Single-statement, no nesting.
+-- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set. Single-statement, no nesting.
 FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
 	local name = PASS_FLAG_TO_NAME[a]
 	if name == ALL_PASSES_SENTINEL then
@@ -303,7 +273,7 @@ local function parse_args(argv)
 
 	local pos = 1
 	while pos <= #argv do
-		local a = argv[pos]
+		local a       = argv[pos]
 		local handler = FLAG_HANDLERS[a]
 		if handler then
 			pos = handler(args, argv, pos) or pos
@@ -318,14 +288,12 @@ local function parse_args(argv)
 	end
 
 	-- Default: --all if no explicit pass flags.
-	if #args.requested_set == 0 then
-		request_all_passes(args)
-	end
+	if #args.requested_set == 0 then request_all_passes(args) end
 
 	-- Defaults: project_root = dirname(metadata).
 	if args.metadata and not args.project_root then
 		local d = duffle.dirname(args.metadata)
-		if #d > 0 and (d:sub(-1) == "/" or d:sub(-1) == "\\") then
+		if   #d > 0 and (d:sub(-1) == "/" or d:sub(-1) == "\\") then
 			d = d:sub(1, -2)
 		end
 		args.project_root = duffle.dirname(d)
@@ -355,7 +323,7 @@ end
 local function build_ctx(args)
 	local sources = {}
 	for _, path in ipairs(args.sources) do
-		local f = io.open(path, "r")
+		local  f = io.open(path, "r")
 		if not f then
 			io.stderr:write("ps1_meta: cannot open --source " .. path .. "\n")
 			os.exit(EXIT_INTERNAL_ERROR)
@@ -394,8 +362,7 @@ end
 -- Topological sort (Kahn's algorithm + cycle detection)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Compute the dep-closure of `requested_set`: include every pass name
---- transitively required by the requested set.
+--- Compute the dep-closure of `requested_set`: include every pass name transitively required by the requested set.
 ---
 --- @param passes table<string, PassDescriptor>
 --- @param requested_set string[]
@@ -431,8 +398,7 @@ local function count_entries(t)
 	return n
 end
 
---- Compute in-degrees for the Kahn sort: for each pass in `needed`,
---- the number of its deps that are also in `needed`.
+--- Compute in-degrees for the Kahn sort: for each pass in `needed`, the number of its deps that are also in `needed`.
 ---
 --- @param passes table<string, PassDescriptor>
 --- @param needed table<string, boolean>
@@ -450,8 +416,7 @@ local function compute_in_degrees(passes, needed)
 	return in_degree
 end
 
---- Seed the Kahn ready queue with passes whose in-degree is 0, sorted
---- alphabetically for deterministic execution order.
+--- Seed the Kahn ready queue with passes whose in-degree is 0, sorted alphabetically for deterministic execution order.
 ---
 --- @param in_degree table<string, integer>
 --- @return string[]
@@ -464,9 +429,8 @@ local function seed_ready_queue(in_degree)
 	return ready
 end
 
--- (internal) Pop the next ready pass, decrement the in-degree of every
--- remaining pass that depended on it (inserting newly-zero-degree passes
--- back into the ready queue), and append to `order`. Keeps `ready` sorted.
+-- (internal) Pop the next ready pass, decrement the in-degree of every remaining pass that depended on it
+-- (inserting newly-zero-degree passes back into the ready queue), and append to `order`. Keeps `ready` sorted.
 -- @param passes table<string, PassDescriptor>
 -- @param needed table<string, boolean>
 -- @param in_degree table<string, integer>
@@ -506,11 +470,9 @@ local function topo_sort(passes, requested_set)
 		process_next_ready(passes, needed, in_degree, ready, order)
 	end
 
-	-- Cycle detection: if order doesn't include all needed passes,
-	-- some are stuck with in_degree > 0 (the cycle closed on itself
-	-- before Kahn could process them). Without this check, a fully-
-	-- closed cycle (e.g. A -> B -> A) would silently return an empty
-	-- order list, leaving the orchestrator to dispatch nothing.
+	-- Cycle detection: if order doesn't include all needed passes, some are stuck with in_degree > 0 (the cycle closed on itself
+	-- before Kahn could process them). Without this check, a fully-closed cycle (e.g. A -> B -> A) would silently return an emspty order list, 
+	-- leaving the orchestrator to dispatch nothing.
 	if #order ~= count_entries(needed) then
 		for name, deg in pairs(in_degree) do
 			if deg > 0 then
@@ -527,8 +489,7 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Render the dep graph as ASCII art. Output width capped at 78 columns.
---- Falls back to the simpler "Resolved dependency order" list only if
---- graph width exceeds terminal width.
+--- Falls back to the simpler "Resolved dependency order" list only if graph width exceeds terminal width.
 ---
 --- @param passes table<string, PassDescriptor>
 --- @param requested string[]  -- originally-requested passes (subset of closed)
@@ -591,8 +552,7 @@ end
 -- Main orchestrator
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Push a pass's outputs + warnings into `ctx.upstream[name]`
--- for downstream passes to consume.
+-- (internal) Push a pass's outputs + warnings into `ctx.upstream[name]` for downstream passes to consume.
 -- @param ctx PassCtx
 -- @param pass_name string
 -- @param result PassResult
@@ -606,9 +566,8 @@ local function accumulate_pass_result(ctx, pass_name, result)
 	end
 end
 
--- (internal) If the pass's kind is in PASS_KIND_STOP_ON_ERROR and it
--- reported errors, write each error to stderr. Returns true if any
--- validation errors were reported.
+-- (internal) If the pass's kind is in PASS_KIND_STOP_ON_ERROR and it reported errors, write each error to stderr.
+-- Returns true if any validation errors were reported.
 -- @param pass_name string
 -- @param pass PassDescriptor
 -- @param result PassResult

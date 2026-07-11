@@ -11,11 +11,17 @@ $misc = join-path $PSScriptRoot 'helpers/misc.ps1'
 . $misc
 
 # TODO(Ed): Review usage of these deps
-# I orgiinally cloned them when starting to get to the C runtime usage of the course
+# I originally cloned them when starting to get to the C runtime usage of the course
 # However, based on the heavy reliance of the PSX.Dev extension I might fallback; also
 # The gdb server doesn't need the full repo and were only using the src/mips
 # which has a standalone repo (nuggets)
 # armips may not be used at all but I'm not sure...
+#
+# PCSX-Redux: built via MSBuild (VS2022) — automated in the build section below.
+# Requires: VS2022 with C++ desktop workload + PlatformToolset=v143 retarget.
+# The .vcxproj files request v145; we pass /p:PlatformToolset=v143 to MSBuild.
+# NuGet packages are restored automatically on first build.
+# Output: toolchain\pcsx-redux\vsprojects\x64\Debug\pcsx-redux.exe
 
 $url_armips     = 'https://github.com/Kingcom/armips.git'
 $url_pcsx_redux = 'https://github.com/grumpycoders/pcsx-redux.git'
@@ -43,6 +49,33 @@ pop-location
 # $path_pcsx_redux_binaries   = join-path $path_pcsx_redux_vsprojects 'x64/Release'
 
 # $psyq_obj_parser = join-path $path_pcsx_redux_binaries 'psyq-obj-parser.exe'
+
+# ════════════════════════════════════════════════════════════════════════════
+# PCSX-Redux — built via MSBuild (VS2022)
+#
+# Requires: Visual Studio 2022 with the C++ desktop workload.
+# The .vcxproj files target platform toolset v145, but VS2022 ships v143;
+# we pass /p:PlatformToolset=v143 to retarget at build time (no file edits).
+# NuGet packages (glfw, luajit.native, libFFmpeg-lite, x64sentry) are
+# restored automatically by MSBuild on first build.
+#
+# Output: toolchain\pcsx-redux\vsprojects\x64\Debug\pcsx-redux.exe
+# ════════════════════════════════════════════════════════════════════════════
+
+# Locate MSBuild from the VS2022 install (no hardcoded path — uses vswhere).
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path $vswhere)) {
+	write-error "vswhere not found at '$vswhere'. Install Visual Studio 2022 with the C++ desktop workload."
+	exit 1
+}
+$msbuild_exe = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" 2>$null | Select-Object -First 1
+if (-not $msbuild_exe) {
+	write-error "MSBuild not found via vswhere. Install Visual Studio 2022 with the C++ desktop workload."
+	exit 1
+}
+
+$path_pcsx_sln = join-path $path_pcsx_redux 'vsprojects\pcsx-redux.sln'
+&	$msbuild_exe $path_pcsx_sln /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /m /v:minimal
 
 # Locate luajit via scoop. `luajit.exe` is on PATH via scoop's shim;
 # we use `scoop prefix` to find the install root for the include dir
@@ -79,4 +112,20 @@ $lpeg_compile_args = @(
 ) + $lpeg_sources + @('-lluajit-5.1')
 push-location $path_lpeg
 &	gcc @lpeg_compile_args
+pop-location
+
+# ════════════════════════════════════════════════════════════════════════════
+# OpenBIOS — built from the PCSX-Redux source tree via make + mipsel-none-elf
+#
+# OpenBIOS is an open-source PS1 BIOS implementation (no retail BIOS dump needed). 
+# It builds with the MIPS cross-toolchain (`mipsel-none-elf-gcc`, on PATH via the `mips` toolchain installer) 
+# + `make` (on PATH via scoop).
+#
+# Output: toolchain\pcsx-redux\src\mips\openbios\openbios.bin
+# ════════════════════════════════════════════════════════════════════════════
+
+$path_openbios = join-path $path_pcsx_redux 'src\mips\openbios'
+push-location $path_openbios
+&	make clean
+&	make
 pop-location

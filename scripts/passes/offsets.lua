@@ -1,26 +1,19 @@
 --- passes/offsets.lua — Branch-offset generator.
 ---
---- Scans every source for `MipsAtom_(name) { ... }` (and the raw
---- `MipsCode code_<name> { ... }` form) declarations, computes the
---- word offset from each `atom_offset(F, T)` marker to its target
---- `atom_label(T)` declaration, and emits `<dir_basename>.offsets.h`
---- with one `#define _atom_offset_F_T = N` per branch.
+--- Scans every source for `MipsAtom_(name) { ... }` (and the raw `MipsCode code_<name> { ... }` form) declarations, 
+--- computes the word offset from each `atom_offset(F, T)` marker to its target `atom_label(T)` declaration, 
+--- and emits `<dir_basename>.offsets.h` with one `#define _atom_offset_F_T = N` per branch.
 ---
---- The offset is `target_word - branch_word - 1` (the standard MIPS
---- branch-immediate encoding: branch_offset = relative_pc_in_words - 1).
+--- The offset is `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding: branch_offset = relative_pc_in_words - 1).
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. See
---- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
+--- Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Resolve `arg[0]` to an absolute-ish script directory so that
--- `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; a
--- Phase-6 extraction target (`duffle.setup_package_path()`).
+-- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
@@ -145,10 +138,8 @@ end
 -- Marker-call helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Extract comma-separated identifier args from a parenthesized group
--- after a function-like macro call. Returns (args, after_paren) where
--- `after_paren` is the position just past the closing `)`, or nil if
--- `token` did not start with `(`.
+-- Extract comma-separated identifier args from a parenthesized group after a function-like macro call.
+-- Returns (args, after_paren) where `after_paren` is the position just past the closing `)`, or nil if `token` did not start with `(`.
 -- @param token string
 -- @param after_ident integer
 -- @return string[], integer|nil
@@ -157,8 +148,8 @@ local function extract_ident_args(token, after_ident)
 	if token:sub(arg_start, arg_start) ~= "(" then return {}, nil end
 	local inner, after_paren = duffle.read_parens(token, arg_start)
 
-	local args = {}
-	local pos  = 1
+	local args      = {}
+	local pos       = 1
 	local inner_len = #inner
 	while pos <= inner_len do
 		pos = duffle.skip_ws_and_cmt(inner, pos)
@@ -177,8 +168,7 @@ local function extract_ident_args(token, after_ident)
 	return args, after_paren
 end
 
--- (internal) Record a `atom_label(name)` marker — `at_pos` is the
--- branch-free word position within the atom body.
+-- (internal) Record a `atom_label(name)` marker — `at_pos` is the branch-free word position within the atom body.
 -- @param labels table<string, integer>
 -- @param args string[]
 -- @param at_pos integer
@@ -196,8 +186,7 @@ local function record_offset_marker(branches, args, at_pos)
 	end
 end
 
---- Scan a single token for atom_label/atom_offset markers, walking through
---- balanced groups transparently (so nested calls are found).
+--- Scan a single token for atom_label/atom_offset markers, walking through balanced groups transparently (so nested calls are found).
 --- @param token string
 --- @param at_pos integer    -- the branch-free word position of this token in the body
 --- @param labels table<string, integer>
@@ -229,8 +218,7 @@ local function scan_for_atom_markers(token, at_pos, labels, branches)
 	end
 end
 
---- Find the end position (just past the closing ')') of the first
---- atom_label/atom_offset call in `tok`. Returns 0 if no such call.
+--- Find the end position (just past the closing ')') of the first atom_label/atom_offset call in `tok`. Returns 0 if no such call.
 --- @param tok string
 --- @return integer  -- 0 if no marker call found; otherwise end-1 (just past ')')
 local function find_marker_call_end(tok)
@@ -266,8 +254,7 @@ end
 -- Atom scanner
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Skip C qualifier keywords (`static`, `const`, etc.) and return the
---- position past the last qualifier.
+--- Skip C qualifier keywords (`static`, `const`, etc.) and return the position past the last qualifier.
 --- @param source string
 --- @param pos integer
 --- @return integer
@@ -281,8 +268,7 @@ local function skip_qualifiers(source, pos)
 end
 
 -- (internal) Try to parse the wrapped atom form: `MipsAtom_(<name>) { ... }`.
--- Returns the parsed Atom (name + body + position past body), or nil if
--- the form didn't match.
+-- Returns the parsed Atom (name + body + position past body), or nil if the form didn't match.
 -- @param source_text string
 -- @param after_pos integer   -- position just past `MipsAtom_`
 -- @return Atom|nil
@@ -300,9 +286,9 @@ local function try_wrapped_atom(source_text, after_pos)
 		name_end = name_end + 1
 	end
 	local name = inner:sub(name_start, name_end - 1)
-	if name == "" then return nil end
+	if    name == "" then return nil end
 
-	local brace_pos = duffle.scan_to_char(source_text, "{", after_paren)
+	local  brace_pos = duffle.scan_to_char(source_text, "{", after_paren)
 	if not brace_pos then return nil end
 	local body, after_brace = duffle.read_braces(source_text, brace_pos)
 	return { name = name, body = body, after_brace = after_brace }
@@ -325,8 +311,7 @@ local function try_raw_atom(source_text, after_pos)
 	return { name = atom_name, body = body, after_brace = after_brace }
 end
 
---- Find every `MipsAtom_(name) { ... }` (or raw `MipsCode code_<name> { ... }`)
---- declaration in a source.
+--- Find every `MipsAtom_(name) { ... }` (or raw `MipsCode code_<name> { ... }`) declaration in a source.
 --- @param source_text string
 --- @return Atom[]
 local function find_atoms(source_text)
@@ -368,10 +353,10 @@ end
 -- Per-atom body scan
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Count words emitted by the rest of `tok` after a marker call
--- (the marker call itself emits 0 words, but the source pattern may bundle
--- the marker with the next instruction on the same line, separated by no
--- top-level comma). Returns the word count contributed by that rest.
+-- (internal) Count words emitted by the rest of `tok` after a marker call 
+-- (the marker call itself emits 0 words, but the source pattern may bundle the marker with the next instruction on the same line, 
+-- separated by no top-level comma). 
+-- Returns the word count contributed by that rest.
 -- @param tok string
 -- @param word_counts table
 -- @return integer
@@ -418,8 +403,8 @@ end
 -- Offset computation + header generation
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Compute branch offsets as `target_word - branch_word - 1` (the
--- standard MIPS branch-immediate encoding).
+-- Compute branch offsets as `target_word - branch_word - 1`
+-- (the standard MIPS branch-immediate encoding).
 -- @param labels table<string, integer>
 -- @param branches table[]
 -- @return BranchOffset[]
@@ -528,9 +513,9 @@ local function process_source(ctx, src)
 	return out_path
 end
 
---- Run the offsets pass. For each source, emits a per-module
---- `<dir_basename>.offsets.h` containing `#define _atom_offset_F_T = N`
---- constants for every `atom_offset(F, T)` reference in the source's atoms.
+--- Run the offsets pass. 
+--- For each source, emits a per-module `<dir_basename>.offsets.h` containing `#define _atom_offset_F_T = N` constants for every `atom_offset(F, T)` reference
+--- in the source's atoms.
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
