@@ -293,9 +293,10 @@ end
 --- Aliases are resolved against the lookup table directly; if a macro name is not in the table, emit a soft warning 
 --- (the user might have added a new gte_cmdw_* but not updated duffle.lua).
 --- Per-atom: walk this atom's tokens, check every `gte_cmdw_*` for pipeline-fill compliance.
---- Signature changed from `(atoms, findings)` to `(atom, findings)` in Stage 1B of the plex move:
---- the per-atom iteration now lives in validate()'s single loop; each check is a per-atom predicate.
-local function check_gte_pipeline_fill(atom, findings)
+--- Stage 1B: signature changed from `(atoms, findings)` to `(atom, findings)`.
+--- Stage 2:   signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here
+---             (pre-emptive scatter: every check gets the full context, no argument gathering).
+local function check_gte_pipeline_fill(atom, pipe_ctx, findings)
 	local tokens       = tokenize_body(atom.body)
 	local line_in_body = build_body_line_index(atom.body)
 	local tn = #tokens
@@ -315,7 +316,8 @@ end
 ---
 --- Empty bodies are not currently flagged — runtime infrastructure atoms like `MipsAtom_(yield) { mac_yield() }` 
 --- and `MipsAtom_(tape_exit) { jump_reg(rret_addr), nop }` are valid as-is; mac_yield at the end is the contract.
-local function check_mac_yield_uniformity(atom, findings)
+--- Stage 2: signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here.
+local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	-- Per-kind semantics:
 	--   MipsAtom_          (baked atom): exactly 1 mac_yield at the end of the body. Control transfer is the atom's job.
 	--   MipsAtomComp_      (bare static-array component): ZERO mac_yield.
@@ -505,9 +507,8 @@ end
 ---   - Atoms containing a `mac_<name>(...)` call whose name is not in duffle.GP0_MACRO_CONTRIB emit a "new macro; update duffle.GP0_MACRO_CONTRIB" advisory.
 ---
 --- Applies only to `kind = "atom"` (baked atoms). Components don't emit full primitives.
---- Per-atom: detect which GP0 primitive the atom is emitting, sum the macro contributions,
---- compare to the expected packet size. Signature changed in Stage 1B: `(atom, findings)`.
-local function check_gpu_portstore_shape(atom, findings)
+--- Stage 2: signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here.
+local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" then return end
 	local tokens = tokenize_body(atom.body)
 	local line_in_body = build_body_line_index(atom.body)
@@ -808,6 +809,23 @@ local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- CHECK_RULES — data-driven check dispatch (Muratori: data over control flow)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Each rule is a table entry: { name, per_atom }.
+-- `per_atom(atom, pipe_ctx, findings)` runs once per atom inside validate()'s single loop.
+-- Adding a new check = 1 row here + 1 check_* function. No validate() edit required.
+-- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
+
+local CHECK_RULES = {
+	{ name = "gte_pipeline_fill",    per_atom = check_gte_pipeline_fill     },
+	{ name = "mac_yield_uniformity", per_atom = check_mac_yield_uniformity  },
+	{ name = "abi_handoff",          per_atom = check_abi_handoff           },
+	{ name = "gpu_portstore_shape",  per_atom = check_gpu_portstore_shape  },
+	{ name = "per_atom_cycle_budget", per_atom = check_per_atom_cycle_budget },
+}
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Per-source validation
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -855,12 +873,11 @@ local function validate(ctx, src)
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a)
 
-		-- Run all 5 checks on this one atom. Each is now a per-atom predicate.
-		check_gte_pipeline_fill(a, findings)
-		check_mac_yield_uniformity(a, findings)
-		check_abi_handoff(a, pipe_ctx, findings)
-		check_gpu_portstore_shape(a, findings)
-		check_per_atom_cycle_budget(a, pipe_ctx, findings)
+		-- Run all checks on this one atom via the CHECK_RULES data table (Muratori: data over control flow).
+		-- Adding a new check = 1 row in CHECK_RULES; this loop never needs editing.
+		for _, rule in ipairs(CHECK_RULES) do
+			rule.per_atom(a, pipe_ctx, findings)
+		end
 	end
 
 	local errors   = {}
