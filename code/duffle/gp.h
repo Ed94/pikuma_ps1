@@ -49,9 +49,8 @@
 /* IO base address (KSEG2 0x1F800000+ for the I/O register region).
  * The 16-bit upper half `IO_BASE_ADDR_HI16` is the form used by
  * tape-side macros that pin a register to hold the IO base and access
- * ports via offsets — `lui $reg, 0x1F80` (1 word) then `sw $data,
- * GPIO_PORT*_OFFSET($reg)` (1 word). Mirrors the `IO_BASE_ADDR equ
- * 0x1F80` + `gpio_port0 equ 0x1810` pattern from graphics_hello/gp.s. */
+ * ports via offsets — `lui $reg, 0x1F80` (1 word) then `sw $data, GPIO_PORT*_OFFSET($reg)` (1 word). 
+ * Mirrors the `IO_BASE_ADDR equ 0x1F80` + `gpio_port0 equ 0x1810` pattern from graphics_hello/gp.s. */
 enum {
     IO_BASE_ADDR      = 0x1F800000,  /* full 32-bit I/O region base */
     IO_BASE_ADDR_HI16 = 0x1F80,      /* fits in a single `lui $reg, 0x1F80` */
@@ -77,13 +76,12 @@ enum {
  *  GP0 command byte constants + Layer 1 (GPU bitfield shifts)
  *  ============================================================================
  *
- *  8-bit GP0 opcodes (the upper byte of a primitive's first word).
- *  These are the BYTE only; pre-baked 32-bit words are in §10.4.
+ *  8-bit GP0 opcodes (the upper byte of a primitive's first word). These are the BYTE only.
  *  The layer-1 bitfield-layout constants live in the same enum block
- *  so the encoder in §10.4 can reference them by name. NO macro body
- *  past this point uses a raw shift or raw mask — every shift/width/mask
- *  is named here, named once. Mirrors the OPCODE_SHIFT / RS_SHIFT /
- *  REG_MASK convention from mips.h.
+ *  so the encoder can reference them by name. 
+ *  NO macro body past this point uses a raw shift or raw mask. 
+ *  Every shift/width/mask is named here, named once. 
+ *  Mirrors the OPCODE_SHIFT / RS_SHIFT / REG_MASK convention from mips.h.
  * ============================================================================ */
 enum {
     gp0_cmd_Nop             = 0x00,
@@ -147,19 +145,19 @@ enum {
  *  ============================================================================
  *
  *  Layer 1.5 encoders take one field's value, mask it to its own width,
- *  and shift it to its own position. Mirrors `enc_op` / `enc_rs` /
- *  `enc_rt` in mips.h and `enc_gte_sf` / `enc_gte_mx` in gte.h. Layer-2 composite encoders 
- *  OR the per-field encoders together; layer-3 semantic macros delegate to the composites.
+ *  and shift it to its own position. 
+ *  Mirrors `enc_op` / `enc_rs` / `enc_rt` in mips.h and `enc_gte_sf` / `enc_gte_mx` in gte.h. 
+ *  Layer-2 composite encoders OR the per-field encoders together; layer-3 semantic macros delegate to the composites.
  *  No raw shifts or magic numbers in any macro body below this point.
  * ============================================================================ */
 
 /* ---- Layer 1.5: per-field encoders ---- */
-#define enc_gp0_cmd(cmd)       (((cmd) & gp0_cmd_mask)           << gp0_cmd_shift)
+#define enc_gp0_cmd(cmd)       (((cmd) & gp0_cmd_mask)         << gp0_cmd_shift)
 
-#define enc_gp0_color_cmd(cmd) (((cmd) & gp0_color_cmd_mask)     << gp0_color_cmd_shift)
-#define enc_gp0_color_r(r)     (((r)   & gp0_color_red_mask)     << gp0_color_red_shift)
-#define enc_gp0_color_g(g)     (((g)   & gp0_color_green_mask)   << gp0_color_green_shift)
-#define enc_gp0_color_b(b)     (((b)   & gp0_color_blue_mask)    << gp0_color_blue_shift)
+#define enc_gp0_color_cmd(cmd) (((cmd) & gp0_color_cmd_mask)   << gp0_color_cmd_shift)
+#define enc_gp0_color_r(r)     (((r)   & gp0_color_red_mask)   << gp0_color_red_shift)
+#define enc_gp0_color_g(g)     (((g)   & gp0_color_green_mask) << gp0_color_green_shift)
+#define enc_gp0_color_b(b)     (((b)   & gp0_color_blue_mask)  << gp0_color_blue_shift)
 
 /* ---- Layer 2: composite encoders ---- */
 #define enc_color_word(cmd, r, g, b) (enc_gp0_color_cmd(cmd) | enc_gp0_color_r(r) | enc_gp0_color_g(g) | enc_gp0_color_b(b))
@@ -285,9 +283,7 @@ enum {
  *  Pre-baked GPU state words
  *  ============================================================================
  *
- *  Common command words for boot-time GPU init and standard
- *  display configurations. Each one is a pure compile-time integer
- *  constant ready to drop into a `.word` directive.
+ *  Common command words for boot-time GPU init and standard display configurations.
  * ============================================================================ */
 
 /* ---- Display enable (1-bit payload on DisplayEnable cmd) ---- */
@@ -327,7 +323,7 @@ enum {
 #define gp1_word_vertical_range_pal    enc_gp1_vrange_word(gp1_vrange_PAL_y1,  gp1_vrange_PAL_y2)
 
 /* ---- Draw-mode setting (TPage / draw-area allowance) ---- */
-/* The pre-baked "drawing enabled" word is the standard post-init state. */
+/* The "drawing enabled" word is the standard post-init state. */
 enum {
     gp0_DrawMode_DrawToDispBit = 10,
 };
@@ -361,16 +357,14 @@ enum {
  *  Primitive structs (8 polygon variants + tag)
  *  ============================================================================
  *
- *  Each struct follows the GPU-documented memory layout for the corresponding
- *  primitive command. The PolyTag is the OT-link header; the rest of the
- *  struct is the primitive's body.
+ *  Each struct follows the GPU-documented memory layout for the corresponding primitive command. 
+ *  The PolyTag is the OT-link header; the rest of the struct is the primitive's body.
  *
- *  The current working layouts match the existing demo (floor_tri uses
- *  Poly_F3; cube_tri uses Poly_G4). They are NOT necessarily byte-identical
- *  to the PSX-SPX reference layout — the demo layout uses color+vertex
- *  interleaving that doesn't match the standard PSX SDK file format. For
- *  PSX-SDK file compatibility, the textured variants (FT*, GT*) would need
- *  layout adjustments; out of scope for this track.
+ *  The current working layouts match the existing demo 
+ *  (floor_tri uses Poly_F3; cube_tri uses Poly_G4). 
+ *  They are NOT necessarily byte-identical to the PSX-SPX reference layout. 
+ *  The demo layout uses color+vertex interleaving that doesn't match the standard PSX SDK file format. 
+ *  For PSX-SDK file compatibility, the textured variants (FT*, GT*) would need layout adjustments.
  * ============================================================================ */
 
 /* ---------- RGB8 (3-byte packed color) ---------- */
@@ -392,15 +386,14 @@ typedef Struct_(PolyTag) {
 	};
 };
 
-/* DSL cast convention: every cast uses `C_()`, every pointer qualifier
- * is `R_` (restrict) or `V_` (volatile). No raw C-style casts. RHS values
- * are assumed to be `U4` — caller passes a `U4` directly. */
+/* DSL cast convention: every cast uses `C_()`, every pointer qualifier is `R_` (restrict) or `V_` (volatile).
+ * No raw C-style casts. RHS values are assumed to be `U4` — caller passes a `U4` directly. */
 #define set_len(tag,v)  (C_(PolyTag_R,tag)->len  = u4_(v))
 #define set_addr(tag,v) (C_(PolyTag_R,tag)->addr = u4_(v))
 /* `set_code` is no longer in the new PolyTag design — the code byte lives
  *  in the primitive body (e.g. `((Poly_F3*)(p))->code`), not in the tag.
- *  Use the typed primitive structs (Poly_F3, Poly_G4, etc.) and the
- *  `set_poly_*` setters, which set both the tag's length and the code. */
+ *  Use the typed primitive structs (Poly_F3, Poly_G4, etc.) and the `set_poly_*` setters, 
+ *  which set both the tag's length and the code. */
 #define get_len(tag)  C_(U4,C_(PolyTag_R,tag)->len)
 #define get_addr(tag) C_(U4,C_(PolyTag_R,tag)->addr)
 

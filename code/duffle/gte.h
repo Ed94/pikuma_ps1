@@ -37,49 +37,6 @@
  *  Hand-rolled DSL for emitting GTE/MIPS instruction words as raw `.word`
  *  constants from C. No GCC inline-assembly string syntax in the code body.
  *
- *  PHILOSOPHY
- *  ----------
- *  1. A 32-bit instruction word is composed from per-field encoders. Each
- *     encoder knows only its own bit range; the composite ORs them together.
- *     No magic numbers inside any encoder body. Every shift and mask is a
- *     named constant from the bitfield-layout enum below.
- *
- *  2. Pure (compile-time) instructions. Every GTE *command* (RTPS, RTPT,
- *     NCLIP, MVMVA, …) and every COP2 *transfer* (ctc2/cfc2) with a constant
- *     rs/rt/rd — are emitted as a single integer constant via
- *     `asm_inline(...)` from gcc_asm.h. The C compiler constant-folds
- *     these into `.word` directives in .rodata.
- *
- *  3. Runtime-base-register instructions (lwc2, swc2, lw, sw, …) cannot be
- *     a pure compile-time word because the `rs` field is chosen by the
- *     compiler at codegen. For these we use a "placeholder-pun" pattern:
- *     a fixed register number (R_T4 = $12) is baked into the rs field of
- *     the `.word` constant, and the macro declares a `"r"(arg)` input
- *     constraint plus a clobber on the same register. The compiler is
- *     therefore *forced* to bind `arg` to that exact register, and the
- *     constant is correct.
- *
- *  USAGE
- *  -----
- *      // Pure command sequence — all bits compile-time:
- *      asm volatile(
- *          asm_inline( gte_cmd_rtpt , gte_cmd_nclip , gte_cmd_avsz3 )
- *          asm_clobber( clbr_volatile_gprs )
- *      );
- *
- *      // Runtime-base-register load — caller picks the base GPR:
- *      register V3_S2* p_in_12 __asm__("$12") = verts[0].ptr;
- *      gte_load_v0(p_in_12, R_T4);   // R_T4 = 12 = $t4 = $12
- *
- *      // Three independent bases for an RTPT pipeline:
- *      register V3_S2* p0 gcc_reg(R_T4) = verts[0].ptr;
- *      register V3_S2* p1 gcc_reg(R_T5) = verts[1].ptr;
- *      register V3_S2* p2 gcc_reg(R_T6) = verts[2].ptr;
- *      gte_load_v0(p0, R_T4);
- *      gte_load_v1(p1, R_T5);
- *      gte_load_v2(p2, R_T6);
- *      gte_rtpt();
- *
  *  STYLE NOTES
  *  -----------
  *  - Per-field encoders are named `enc_gte_<field>(value)` and each one
@@ -94,8 +51,7 @@
  *
  *  SEE ALSO
  *  --------
- *  - gcc_asm.h: the `.word` emitter (`asm_inline`, `asm_clobber`, clobbers)
- *  - mips.h:    the MIPS encoder layer this builds on
+ *  - mips.h: The MIPS encoder layer this builds on.
  */
 
 /* C2 data registers */
@@ -222,8 +178,8 @@ enum {
  *                                    \_____ GTE_PAYLOAD _____/       \__ GTE_CMD __/
  *
  * Shifts/masks below are the *bit positions* and *bit widths* of each
- * configurable field, used by the ENC_GTE_CMD encoder. Mirrors the
- * OPCODE_SHIFT / RS_SHIFT convention used in mips.h.
+ * configurable field, used by the ENC_GTE_CMD encoder. 
+ * Mirrors the OPCODE_SHIFT / RS_SHIFT convention used in mips.h.
  */
 
 	gte_shift_sf  = 19,  gte_width_sf  = 1,  gte_mask_sf  = 0x1,

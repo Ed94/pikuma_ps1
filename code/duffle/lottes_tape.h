@@ -17,8 +17,7 @@ typedef Slice_MipsCode MipsAtom;
 #define MipsAtom_(sym) MipsCode tmpl(code,sym) [] align_(4) =
 
 // Bare form: file-scope declaration with hardcoded body.
-// Used for components with no args (e.g., ac_load_tri_indices) or
-// identifier-args (hardcoded register names).
+// Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
 //   MipsAtomComp_(ac_X) { body }
 // expands to:
 //   MipsCode ac_X[] align_(4) = { body };
