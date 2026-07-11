@@ -102,6 +102,21 @@ push-location $path_lpeg
 pop-location
 
 # ════════════════════════════════════════════════════════════════════════════
+# lfs (LuaFileSystem) — compiled from pcsx-redux's vendored luafilesystem source.
+# Used by word_count_eval.lua :: scan_dir for native directory enumeration (~2ms)
+# instead of spawning `dir /b /s` as a subprocess (~56ms).
+# Source: toolchain/pcsx-redux/third_party/luafilesystem/src/lfs.c
+# Output: toolchain/lfs/lfs.dll
+# ════════════════════════════════════════════════════════════════════════════
+
+$path_lfs = join-path $path_toolchain 'lfs'
+verify-path $path_lfs
+$lfs_src = join-path $path_pcsx_redux 'third_party\luafilesystem\src\lfs.c'
+$lfs_dll = join-path $path_lfs 'lfs.dll'
+$lfs_dll_import = join-path $luajit_lib_dir 'libluajit-5.1.dll.a'
+& gcc -O2 -shared "-I$lua_inc_dir" -o $lfs_dll $lfs_src $lfs_dll_import
+
+# ════════════════════════════════════════════════════════════════════════════
 # OpenBIOS — built from the PCSX-Redux source tree via make + mipsel-none-elf
 #
 # OpenBIOS is an open-source PS1 BIOS implementation (no retail BIOS dump needed). 

@@ -129,91 +129,9 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- Used by the checks to convert per-token offsets in the body to lina numbers relative to the start of `body`. 
 --- The atom's source-line of the body-start is added by the caller.
 ---
--- Memoization cache for build_body_line_index / tokenize_body.
--- Atom bodies are immutable for the duration of a validate() pass (they come from src.scan which is set once by scan-source),
--- so the same body string is safe to use as a cache key. Each call site (5 check_* functions + analyze_atom_paths)
--- was re-running the full O(body_len) scan on the SAME body. After memoization, the first call pays the O(body_len) cost,
--- every subsequent call on the same body returns the cached table in O(1).
---
--- (Future-proofing: if a caller ever mutates the returned tokens / line-index tables, the cache aliasing means those
--- mutations would leak across atoms. Current callers all read-only; safe today.)
-local _body_line_index_cache = {}
-local _tokenize_body_cache    = {}
-
---- Simple line-counting: count `\n` chars from offset 1 up to the offset; that count + 1 is the line number (1-based).
-local function build_body_line_index(body)
-	if _body_line_index_cache[body] ~= nil then return _body_line_index_cache[body] end
-	local index = {}
-	local len = #body
-	local newline_count = 0
-	for pos = 1, len do
-		if pos > 1 then
-			index[pos] = newline_count + 1   -- line of `pos` relative to body
-		end
-		if body:byte(pos) == 10 then        -- '\n'
-			newline_count = newline_count + 1
-		end
-	end
-	-- Offsets beyond the body still resolve to the final line
-	index[len + 1] = newline_count + 1
-	_body_line_index_cache[body] = index
-	return index
-end
-
--- NOTE: `nop_word_count` was removed when `classify_tokens` (nop_words field) replaced it.
--- `count_preceding_nops` (backward walk) was replaced by `tok_class.nop_prefix` (forward-pass pre-compute).
-
---- Tokenize the body inner-text into a flat list of `(token, body_rel_offset)`
---- pairs (nested parens/braces/brackets are honored; comments and strings are skipped). 
---- `body_rel_offset` is the char offset within `body` of the start of the token. 
---- Callers add it to the atom's `body_off` to get an absolute source position for line tracking.
-local function tokenize_body(body)
-	if _tokenize_body_cache[body] ~= nil then return _tokenize_body_cache[body] end
-	local out = {}
-	local len     = #body
-	local rel     = 1
-	while rel <= len do
-		-- Find next non-whitespace, non-comment start
-		local ws_end = duffle.skip_ws_and_cmt(body, rel)
-		if ws_end > rel then
-			rel = ws_end
-		end
-		if rel > len then break end
-
-		-- Find comma/newline/semicolon after this token.
-		-- Read balanced groups so commas inside parens/braces/brackets aren't treated as separators.
-		-- Comments / strings are skipped.
-		local scan = rel
-		while scan <= len do
-			local c = body:byte(scan)
-			if     c == 44            then break end               -- ','
-			if     c == 10            then break end               -- '\n'
-			if     c == 59            then break end               -- ';'
-			if     c == 40            then local _, a = duffle.read_parens    (body, scan); scan = a -- '('
-			elseif c == 123           then local _, a = duffle.read_braces    (body, scan); scan = a -- '{'
-			elseif c == 91            then local _, a = duffle.read_brackets  (body, scan); scan = a -- '['
-			elseif c == 34 or c == 39 then scan       = duffle.skip_str_or_cmt(body, scan) + 1       -- '"' or '\''
-			else
-				scan = scan + 1
-			end
-		end
-		-- Extract token [rel .. scan-1]
-		local tok = duffle.trim(body:sub(rel, scan - 1))
-		if    tok ~= "" then
-			out[#out + 1] = { tok = tok, rel = rel }
-		end
-		-- Move past the separator
-		if scan <= len then
-			 scan = scan + 1
-			-- Also skip whitespace before next token
-			local w = duffle.skip_ws_and_cmt(body, scan)
-			if    w > scan then scan = w end
-		end
-		rel = scan
-	end
-	_tokenize_body_cache[body] = out
-	return out
-end
+-- NOTE: `tokenize_body` and `build_body_line_index` moved to `duffle.lua` as shared
+-- memoized utilities (`duffle.tokenize_body`, `duffle.build_body_line_index`).
+-- The local copies were deleted; all callers now use the duffle versions.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- classify_tokens — per-token classification (the plex's pre-computed data layer)
@@ -637,7 +555,7 @@ end
 ---                    (warning; loop bodies aren't supported)
 ---   unknown_macros - list of unique macro names not in duffle.INSTRUCTION_LATENCY
 local function analyze_atom_paths(atom)
-	local tokens   = atom.paths.tokens or tokenize_body(atom.body)
+	local tokens   = atom.paths.tokens or duffle.tokenize_body(atom.body)
 	local tc       = atom.paths.tok_class or classify_tokens(tokens)
 	local n        = #tokens
 
@@ -866,8 +784,8 @@ local function validate(ctx, src)
 	local findings = {}
 	for _, a in ipairs(atoms) do
 		a.paths                  = a.paths or {}
-		a.paths.tokens           = tokenize_body(a.body)
-		a.paths.line_in_body     = build_body_line_index(a.body)
+		a.paths.tokens           = duffle.tokenize_body(a.body)
+		a.paths.line_in_body     = duffle.build_body_line_index(a.body)
 		a.paths.tok_class        = classify_tokens(a.paths.tokens)
 
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
@@ -1132,7 +1050,7 @@ function M.run(ctx)
 	--
 	-- Group sources by `src.dir`. The first component of `dir` is the module name (e.g. "code/duffle" -> "duffle", "code/gte_hello" -> "gte_hello").
 	-- Output path is `<out_root>/<module_basename>.static_analysis.txt`.
-	local by_dir = duffle.group_sources_by_dir(ctx.sources)
+	local by_dir = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
 
 	for dir, dir_sources in pairs(by_dir) do
 		-- Run validate() against every source in this directory; accumulate atoms / findings / errors / warnings. 

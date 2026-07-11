@@ -467,6 +467,16 @@ local M = {}
 function M.run(ctx)
 	for _, src in ipairs(ctx.sources) do
 		src.scan = scan_source(src.text)
+		-- Pre-tokenize each atom body once (plex: single source of truth).
+		-- Downstream passes (offsets, word-counts, components, static-analysis) read from
+		-- `atom.body_tokens` instead of calling `split_top_level_commas` / `tokenize_body` independently.
+		-- The tokens are memoized in duffle.lua's cache, so re-access is O(1).
+		for _, atom in ipairs(src.scan.atoms) do
+			atom.body_tokens = duffle.tokenize_body(atom.body)
+		end
+		for _, atom in ipairs(src.scan.raw_atoms or {}) do
+			atom.body_tokens = duffle.tokenize_body(atom.body)
+		end
 	end
 	return { outputs = {}, errors = {}, warnings = {} }
 end

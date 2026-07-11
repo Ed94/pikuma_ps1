@@ -550,6 +550,106 @@ function M.split_top_level_commas(body)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Section 4b: tokenize_body + build_body_line_index (shared, memoized)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Moved here from passes/static_analysis.lua so all passes can share the memoized
+-- per-body tokenization. The memoization key is the body string (immutable per pass).
+
+local _tokenize_body_cache    = {}
+local _body_line_index_cache  = {}
+
+--- Tokenize the body inner-text into a flat list of `{tok, rel}` pairs.
+--- `tok` is the trimmed token string; `rel` is the byte offset within `body`.
+--- Memoized on the body string — first call pays O(body_len), subsequent calls return cached.
+--- @param body string
+--- @return table[]  -- {{tok=string, rel=integer}, ...}
+function M.tokenize_body(body)
+	if _tokenize_body_cache[body] ~= nil then return _tokenize_body_cache[body] end
+	local out = {}
+	local len     = #body
+	local rel     = 1
+	while rel <= len do
+		local ws_end = M.skip_ws_and_cmt(body, rel)
+		if ws_end > rel then rel = ws_end end
+		if rel > len then break end
+
+		local scan = rel
+		while scan <= len do
+			local c = body:byte(scan)
+			if     c == 44            then break end               -- ','
+			if     c == 10            then break end               -- '\n'
+			if     c == 59            then break end               -- ';'
+			if     c == 40            then local _, a = M.read_parens   (body, scan); scan = a -- '('
+			elseif c == 123           then local _, a = M.read_braces   (body, scan); scan = a -- '{'
+			elseif c == 91            then local _, a = M.read_brackets (body, scan); scan = a -- '['
+			elseif c == 34 or c == 39 then scan       = M.skip_str_or_cmt(body, scan) + 1     -- '"' or '\''
+			else
+				scan = scan + 1
+			end
+		end
+		local tok = M.trim(body:sub(rel, scan - 1))
+		if tok ~= "" then out[#out + 1] = { tok = tok, rel = rel } end
+		if scan <= len then
+			scan = scan + 1
+			local w = M.skip_ws_and_cmt(body, scan)
+			if w > scan then scan = w end
+		end
+		rel = scan
+	end
+	_tokenize_body_cache[body] = out
+	return out
+end
+
+--- Tokenize the body into a flat list of trimmed string tokens (preserves comments).
+--- Uses `split_top_level_commas` (which appends trailing comments to the previous token)
+--- so the components pass can emit `/* Words: ... */` comments in the .macs.h output.
+--- @param body string
+--- @return string[]
+function M.tokenize_body_simple(body)
+	local tokens = M.split_top_level_commas(body)
+	local out = {}
+	for i = 1, #tokens do out[i] = M.trim(tokens[i]) end
+	return out
+end
+
+--- Build a line-index: count `\n` chars from offset 1 up to the offset; that count + 1 is the line number (1-based).
+--- Memoized on the body string.
+--- @param body string
+--- @return table  -- index[pos] = line_number
+function M.build_body_line_index(body)
+	if _body_line_index_cache[body] ~= nil then return _body_line_index_cache[body] end
+	local index = {}
+	local len = #body
+	local newline_count = 0
+	for pos = 1, len do
+		if pos > 1 then
+			index[pos] = newline_count + 1
+		end
+		if body:byte(pos) == 10 then
+			newline_count = newline_count + 1
+		end
+	end
+	index[len + 1] = newline_count + 1
+	_body_line_index_cache[body] = index
+	return index
+end
+
+--- Find the end of a marker call (`atom_label(...)` or `atom_offset(...)`).
+--- Returns the position past the closing `)`, or nil if the token isn't a marker call.
+--- @param tok string
+--- @return integer|nil
+function M.find_marker_call_end(tok)
+	local ident, after = M.read_ident(tok, 1)
+	if not ident then return nil end
+	if ident ~= "atom_label" and ident ~= "atom_offset" then return nil end
+	local paren_pos = M.skip_ws_and_cmt(tok, after)
+	if tok:sub(paren_pos, paren_pos) ~= "(" then return nil end
+	local _, close = M.read_parens(tok, paren_pos)
+	return close
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Section 5: load_word_counts
 -- ════════════════════════════════════════════════════════════════════════════
 

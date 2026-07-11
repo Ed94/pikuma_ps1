@@ -15,3 +15,5 @@ toolchain/PSn00bSDK
 *.a
 .sentry-native
 .vscode/settings.json
+toolchain/lfs
+toolchain/lpeg

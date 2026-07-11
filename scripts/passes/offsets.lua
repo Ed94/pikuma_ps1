@@ -230,11 +230,17 @@ end
 --- @param body string
 --- @param word_counts table
 --- @return table<string, integer>, table[], integer
-local function scan_atom_body(body, word_counts)
+-- scan_atom_body: walk pre-tokenized body for atom_label/atom_offset markers + word counts.
+-- Uses `atom.body_tokens` from the SourceScan payload (pre-tokenized by scan-source pass).
+-- @param body_tokens table[]  -- {{tok=string, rel=integer}, ...} from duffle.tokenize_body
+-- @param word_counts table
+-- @return table, table, integer  -- labels, branches, total_words
+local function scan_atom_body(body_tokens, word_counts)
 	local pos      = 0
 	local labels   = {}
 	local branches = {}
-	for _, tok in ipairs(duffle.split_top_level_commas(body)) do
+	for _, t in ipairs(body_tokens) do
+		local tok = t.tok
 		if is_marker_token(tok) then
 			-- Marker call: record at the current pos, do NOT advance pos.
 			scan_for_atom_markers(tok, pos, labels, branches)
@@ -368,7 +374,7 @@ local function process_source(ctx, src)
 
 	local atoms_data = {}
 	for _, atom in ipairs(atoms) do
-		local labels, branches, total = scan_atom_body(atom.body, ctx.shared.word_counts)
+		local labels, branches, total = scan_atom_body(atom.body_tokens or duffle.tokenize_body(atom.body), ctx.shared.word_counts)
 		atoms_data[#atoms_data + 1] = {
 			name        = atom.name,
 			total_words = total,

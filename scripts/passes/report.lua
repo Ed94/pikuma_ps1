@@ -404,7 +404,7 @@ function M.run(ctx)
 	local warnings = {}
 
 	local module_entries = (ctx.flags and ctx.flags._annot_results) or {}
-	local by_dir         = duffle.group_sources_by_dir(ctx.sources)
+	local by_dir         = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
 
 	if not ctx.dry_run then duffle.ensure_dir(ctx.out_root) end
 

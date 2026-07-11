@@ -445,8 +445,9 @@ local function word_count_rec(name, comp_by_name, wc, cache)
 	local n
 	if cc then
 		n = 0
-		for _, t in ipairs(duffle.split_top_level_commas(cc.body)) do
-			local trimmed = duffle.trim(t)
+		local tokens = cc.body_tokens or duffle.tokenize_body(cc.body)
+		for _, t in ipairs(tokens) do
+			local trimmed = t.tok
 			if trimmed ~= "" then
 				local lookup = strip_mac_prefix(duffle.read_ident(trimmed, 1))
 				if lookup and comp_by_name[lookup] then
@@ -518,12 +519,7 @@ end
 --- @param body string
 --- @return string[]
 local function tokens_from_body(body)
-	local out = {}
-	for _, t in ipairs(duffle.split_top_level_commas(body)) do
-		local trimmed = duffle.trim(t)
-		if trimmed ~= "" then out[#out + 1] = trimmed end
-	end
-	return out
+	return duffle.tokenize_body_simple(body)
 end
 
 --- Determine the macro signature: function-args list (function form) or variadic-ignored (bare form).

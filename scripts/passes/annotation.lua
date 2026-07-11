@@ -329,7 +329,8 @@ function M.run(ctx)
 
 	-- Per-DIRECTORY (per-module) aggregation. Group sources by `src.dir`,
 	-- validate every source in the dir, then emit ONE errors.h per dir.
-	local by_dir = duffle.group_sources_by_dir(ctx.sources)
+	-- `ctx.by_dir` is pre-computed in build_ctx (shared across all passes).
+	local by_dir = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
 
 	for dir, dir_sources in pairs(by_dir) do
 		local dir_basename = dir:match("([^/\\]+)$") or dir

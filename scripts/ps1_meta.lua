@@ -355,8 +355,14 @@ local function build_ctx(args)
 		}
 	end
 
+	-- Pre-compute the per-directory grouping once (Fleury: expose structure).
+	-- Three passes (annotation, report, static-analysis) call group_sources_by_dir with the same ctx.sources;
+	-- computing it here and stashing on ctx.by_dir eliminates 2 redundant calls.
+	local by_dir = duffle.group_sources_by_dir(sources)
+
 	return {
 		sources       = sources,
+		by_dir        = by_dir,
 		metadata_path = args.metadata,
 		shared        = {},
 		upstream      = {},

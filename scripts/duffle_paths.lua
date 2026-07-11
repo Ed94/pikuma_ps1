@@ -62,9 +62,12 @@ function M.setup()
 		.. package.path
 
 	-- lpeg: built by `update_deps.ps1` to `toolchain/lpeg/lpeg.dll`.
-	-- Wire its directory into cpath so `require("lpeg")` resolves.
+	-- lfs: compiled from pcsx-redux's vendored luafilesystem source to `toolchain/lfs/lfs.dll`.
+	-- Wire both directories into cpath so `require("lpeg")` and `require("lfs")` resolve.
 	local lpeg_dir = repo_root .. "toolchain/lpeg/"
+	local lfs_dir  = repo_root .. "toolchain/lfs/"
 	package.cpath = lpeg_dir .. "?.dll;"
+		.. lfs_dir  .. "?.dll;"
 		.. package.cpath
 end
 
