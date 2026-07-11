@@ -1,8 +1,9 @@
 --- passes/offsets.lua — Branch-offset generator.
 ---
---- Scans every source for `MipsAtom_(name) { ... }` (and the raw `MipsCode code_<name> { ... }` form) declarations, 
---- computes the word offset from each `atom_offset(F, T)` marker to its target `atom_label(T)` declaration, 
---- and emits `<dir_basename>.offsets.h` with one `#define _atom_offset_F_T = N` per branch.
+--- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
+--- for `MipsAtom_(name)` and `MipsCode code_<name>` declarations, computes the word offset
+--- from each `atom_offset(F, T)` marker to its target `atom_label(T)` declaration, and emits
+--- `<dir_basename>.offsets.h` with one `#define _atom_offset_F_T = N` per branch.
 ---
 --- The offset is `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding: branch_offset = relative_pc_in_words - 1).
 ---
@@ -13,8 +14,7 @@
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Bootstrap: see `ps1_meta.lua` for the rationale.
+-- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
 -- both standalone and when require'd from the orchestrator.
@@ -28,21 +28,6 @@ local count_token_words = word_count_eval.count_token_words
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
-
--- C qualifier keywords that may precede a `MipsAtom_` declaration
--- (and should be skipped by `skip_qualifiers`).
-local QUALIFIER_KEYWORDS = {
-	["static"]   = true, ["const"]    = true, ["volatile"] = true,
-	["extern"]   = true, ["register"] = true, ["auto"]     = true,
-	["inline"]   = true, ["typedef"]  = true,
-	["internal"] = true, ["LP_"]      = true, ["global"]   = true, ["gkknown"] = true,
-}
-
--- Atom declaration identifiers.
-local ATOM_PREFIX       = "MipsAtom_"
-local CODE_DECL         = "MipsCode"
-local CODE_RAW_PREFIX   = "code_"   -- raw atom form: `MipsCode code_<name> { ... }`
-local CODE_RAW_PREFIX_LEN = 5       -- = #CODE_RAW_PREFIX
 
 -- Marker-call identifiers inside atom bodies.
 local LABEL_MARKER    = "atom_label"
@@ -64,6 +49,7 @@ local OFFSET_MACRO_COL = 44
 --- @field text     string  -- the full source text
 --- @field dir      string  -- the directory containing the source
 --- @field basename string  -- filename without extension
+--- @field scan     table   -- pre-scanned SourceScan payload (from duffle.scan_source)
 
 --- @class PassCtx
 --- @field sources            SourceFile[]           -- all source files in the build
@@ -75,16 +61,12 @@ local OFFSET_MACRO_COL = 44
 --- @field upstream           table<string, table>   -- per-pass upstream outputs
 --- @field flags              table                  -- CLI flags
 --- @field dry_run            boolean                -- if true, compute but don't write
---- @field verbose            boolean                -- if true, log diagnostic info
+--- @field verbose            boolean                -- log diagnostic info
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
 --- @field errors   table[]  -- {line=, msg=} entries; build-stops
 --- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
-
---- @class Atom
---- @field name string  -- atom name (e.g. "cube_g4_face")
---- @field body string  -- the brace-delimited body (without the braces)
 
 --- @class BranchOffset
 --- @field tag    string   -- the marker tag (e.g. "F" in `atom_offset(F, T)`)
@@ -98,44 +80,7 @@ local OFFSET_MACRO_COL = 44
 --- @field offsets     BranchOffset[] -- per-branch offset list
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Local helpers
--- ════════════════════════════════════════════════════════════════════════════
-
--- Returns true if `s` starts with `prefix`.
--- @param s string
--- @param prefix string
--- @return boolean
-local function starts_with(s, prefix)
-	if #s < #prefix then return false end
-	for pos = 1, #prefix do
-		if s:sub(pos, pos) ~= prefix:sub(pos, pos) then return false end
-	end
-	return true
-end
-
--- Replace every non-alphanumeric char in `s` with underscore.
--- @param s string
--- @return string
-local function to_alnum_underscore(s)
-	local out = ""
-	for pos = 1, #s do
-		local ch = s:sub(pos, pos)
-		if duffle.is_alnum(ch) then out = out .. ch else out = out .. "_" end
-	end
-	return out
-end
-
--- Right-pad `s` with spaces to width `w`. If `s` is already `w` or
--- wider, no padding is added.
--- @param s string
--- @param w integer
--- @return string
-local function pad_right(s, w)
-	return s .. string.rep(" ", math.max(0, w - #s))
-end
-
--- ════════════════════════════════════════════════════════════════════════════
--- Marker-call helpers
+-- Per-token marker-call helpers (atom_label / atom_offset inside bodies)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Extract comma-separated identifier args from a parenthesized group after a function-like macro call.
@@ -254,123 +199,12 @@ local function find_marker_call_end(tok)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Atom scanner
+-- Per-atom body scan (for atom_label / atom_offset markers)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Skip C qualifier keywords (`static`, `const`, etc.) and return the position past the last qualifier.
---- @param source string
---- @param pos integer
---- @return integer
-local function skip_qualifiers(source, pos)
-	while true do
-		pos = duffle.skip_ws_and_cmt(source, pos)
-		local ident, after = duffle.read_ident(source, pos)
-		if not ident           then return pos end
-		if QUALIFIER_KEYWORDS[ident] then pos = after else return pos end
-	end
-end
-
--- (internal) Try to parse the wrapped atom form: `MipsAtom_(<name>) { ... }`.
--- Returns the parsed Atom (name + body + position past body), or nil if the form didn't match.
--- @param source_text string
--- @param after_pos integer   -- position just past `MipsAtom_`
--- @return Atom|nil
-local function try_wrapped_atom(source_text, after_pos)
-	local paren_pos = duffle.skip_ws_and_cmt(source_text, after_pos)
-	if source_text:sub(paren_pos, paren_pos) ~= "(" then return nil end
-	local inner, after_paren = duffle.read_parens(source_text, paren_pos)
-	-- scan: MipsAtom_(<name>)
-
-	local name_start = 1
-	while name_start <= #inner and duffle.is_space(inner:sub(name_start, name_start)) do
-		name_start = name_start + 1
-	end
-	local name_end = name_start
-	while name_end <= #inner and duffle.is_alnum(inner:sub(name_end, name_end)) do
-		name_end = name_end + 1
-	end
-	local name = inner:sub(name_start, name_end - 1)
-	if    name == "" then return nil end
-
-	local  brace_pos = duffle.scan_to_char(source_text, "{", after_paren)
-	-- scan: MipsAtom_(<name>) {
-	if not brace_pos then return nil end
-	local body, after_brace = duffle.read_braces(source_text, brace_pos)
-	-- scan: MipsAtom_(<name>) { <body> }
-	return { name = name, body = body, after_brace = after_brace }
-end
-
--- (internal) Try to parse the raw atom form: `MipsCode code_<name> { ... }`.
--- @param source_text string
--- @param after_pos integer   -- position just past `MipsCode`
--- @return Atom|nil
-local function try_raw_atom(source_text, after_pos)
-	local next_pos = duffle.skip_ws_and_cmt(source_text, after_pos)
-	local next_ident, next_after = duffle.read_ident(source_text, next_pos)
-	-- scan: MipsCode <next_ident>
-	if not next_ident then return nil end
-	if not starts_with(next_ident, CODE_RAW_PREFIX) then return nil end
-	if #next_ident <= CODE_RAW_PREFIX_LEN then return nil end
-	local atom_name = next_ident:sub(CODE_RAW_PREFIX_LEN + 1)
-	-- scan: MipsCode code_<name>
-	local brace_pos = duffle.scan_to_char(source_text, "{", next_after)
-	-- scan: MipsCode code_<name> {
-	if not brace_pos then return nil end
-	local body, after_brace = duffle.read_braces(source_text, brace_pos)
-	-- scan: MipsCode code_<name> { <body> }
-	return { name = atom_name, body = body, after_brace = after_brace }
-end
-
---- Find every `MipsAtom_(name) { ... }` (or raw `MipsCode code_<name> { ... }`) declaration in a source.
---- @param source_text string
---- @return Atom[]
-local function find_atoms(source_text)
-	local atoms   = {}
-	local pos     = 1
-	local src_len = #source_text
-
-	while pos <= src_len do
-		pos = duffle.skip_ws_and_cmt(source_text, pos); if pos > src_len then break end
-		pos = skip_qualifiers(source_text, pos);        if pos > src_len then break end
-
-		local ident, after = duffle.read_ident(source_text, pos)
-		-- scan: <ident>
-		if not ident then pos = pos + 1; goto continue end
-
-		if ident == ATOM_PREFIX then
-			-- scan: MipsAtom_(<name>) { <body> }
-			local atom = try_wrapped_atom(source_text, after)
-			if atom then
-				atoms[#atoms + 1] = { name = atom.name, body = atom.body }
-				pos = atom.after_brace
-			else
-				pos = pos + 1
-			end
-		elseif ident == CODE_DECL then
-			-- scan: MipsCode code_<name> { <body> }
-			local atom = try_raw_atom(source_text, after)
-			if atom then
-				atoms[#atoms + 1] = { name = atom.name, body = atom.body }
-				pos = atom.after_brace
-			else
-				pos = after
-			end
-		else
-			pos = after
-		end
-
-		::continue::
-	end
-	return atoms
-end
-
--- ════════════════════════════════════════════════════════════════════════════
--- Per-atom body scan
--- ════════════════════════════════════════════════════════════════════════════
-
--- (internal) Count words emitted by the rest of `tok` after a marker call 
--- (the marker call itself emits 0 words, but the source pattern may bundle the marker with the next instruction on the same line, 
--- separated by no top-level comma). 
+-- (internal) Count words emitted by the rest of `tok` after a marker call
+-- (the marker call itself emits 0 words, but the source pattern may bundle the marker with the next instruction on the same line,
+-- separated by no top-level comma).
 -- Returns the word count contributed by that rest.
 -- @param tok string
 -- @param word_counts table
@@ -435,8 +269,15 @@ local function compute_offsets(labels, branches)
 	return results
 end
 
--- (internal) Build a constant-table entry `{macro_name, enum_name, value}`
--- from a BranchOffset.
+-- Right-pad `s` with spaces to width `w`. If `s` is already `w` or wider, no padding is added.
+-- @param s string
+-- @param w integer
+-- @return string
+local function pad_right(s, w)
+	return s .. string.rep(" ", math.max(0, w - #s))
+end
+
+-- (internal) Build a constant-table entry `{macro_name, enum_name, value}` from a BranchOffset.
 -- @param r BranchOffset
 -- @return table
 local function make_offset_const(r)
@@ -501,13 +342,28 @@ end
 
 local M = {}
 
--- (internal) Process one source: find atoms, scan bodies, write header.
+-- Project the pre-scanned SourceScan entries into the {name, body} shape this pass needs.
+-- MipsAtom_ entries have kind="atom"; MipsCode code_<name> entries have kind="raw_atom".
+-- @param scan table  -- SourceScan from duffle.scan_source
+-- @return table[]  -- list of {name=, body=}
+local function project_atoms(scan)
+	local out = {}
+	for _, a in ipairs(scan.atoms) do
+		out[#out + 1] = { name = a.raw_name, body = a.body }
+	end
+	for _, a in ipairs(scan.raw_atoms) do
+		out[#out + 1] = { name = a.name, body = a.body }
+	end
+	return out
+end
+
+-- (internal) Process one source: project atoms from scan, scan bodies, write header.
 -- Returns the offsets_h path if a header was written, or nil.
 -- @param ctx PassCtx
 -- @param src SourceFile
 -- @return string|nil  -- the offsets_h path
 local function process_source(ctx, src)
-	local atoms = find_atoms(src.text)
+	local atoms = project_atoms(src.scan)
 	if #atoms == 0 then return nil end
 
 	local atoms_data = {}
@@ -528,9 +384,9 @@ local function process_source(ctx, src)
 	return out_path
 end
 
---- Run the offsets pass. 
---- For each source, emits a per-module `<dir_basename>.offsets.h` containing `#define _atom_offset_F_T = N` constants for every `atom_offset(F, T)` reference
---- in the source's atoms.
+--- Run the offsets pass.
+--- For each source, emits a per-module `<dir_basename>.offsets.h` containing `#define _atom_offset_F_T = N` constants 
+--- for every `atom_offset(F, T)` reference in the source's atoms.
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)

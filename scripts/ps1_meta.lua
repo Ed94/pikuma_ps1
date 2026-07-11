@@ -6,13 +6,15 @@
 ---
 --- **Architecture**:
 ---   - **PASSES table** — declarative dep graph (data, not code).
----   - **FLAG_HANDLERS table** — per-flag CLI dispatchers (handler-map
----     pattern; replaces an 8-way if/elseif chain).
----   - **parse_args** → **build_ctx** → **topo_sort** → **dispatch_passes**.
+---   - **FLAG_HANDLERS table** — per-flag CLI dispatchers (handler-map pattern; replaces an 8-way if/elseif chain).
+---   - **parse_args** → **build_ctx** (just opens + reads source files; no inline scanning) → **topo_sort** → **dispatch_passes**.
+---   - The first pass in the dep graph is `scan-source` (see `passes/scan_source.lua`). 
+---     It calls `duffle.scan_source` once per source to produce the fat `SourceScan` payload, which is attached to each `src.scan`. 
+---     Every other pass that reads source structure depends on `scan-source` and consumes `src.scan` as a read-only payload. 
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. 
---- 
+--- Lua 5.3 compatible.
+---
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
@@ -104,6 +106,13 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 -- ════════════════════════════════════════════════════════════════════════════
 
 local PASSES = {
+	["scan-source"] = {
+		module = "passes.scan_source",
+		kind   = "shared",
+		deps   = {},
+		desc   = "Walk each source once; produce the fat SourceScan payload for downstream passes",
+		out    = {},
+	},
 	["word-counts"] = {
 		module = "passes.word_count_eval",
 		kind   = "shared",
@@ -114,14 +123,14 @@ local PASSES = {
 	components = {
 		module = "passes.components",
 		kind   = "header-output",
-		deps   = {"word-counts"},
+		deps   = {"scan-source", "word-counts"},
 		desc   = "Emit mac_X macros from MipsAtomComp_ declarations",
 		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.macs.h" } },
 	},
 	annotation = {
 		module = "passes.annotation",
 		kind   = "validation",
-		deps   = {"word-counts"},
+		deps   = {"scan-source", "word-counts"},
 		desc   = "Validate atom DSL usage; emit errors.h + annotations.txt",
 		out    = {
 			{ kind = "report", path_template = "<out_root>/<basename>.errors.h" },
@@ -131,14 +140,14 @@ local PASSES = {
 	offsets = {
 		module = "passes.offsets",
 		kind   = "header-output",
-		deps   = {"word-counts", "components"},
+		deps   = {"scan-source", "word-counts", "components"},
 		desc   = "Compute branch offsets for atom_label / atom_offset",
 		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.offsets.h" } },
 	},
 	["static-analysis"] = {
 		module = "passes.static_analysis",
 		kind   = "validation",
-		deps   = {"word-counts", "components"},
+		deps   = {"scan-source", "word-counts", "components"},
 		desc   = "[FUTURE] GTE pipeline-fill, mac_yield uniformity, etc.",
 		out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } },
 	},
@@ -167,11 +176,12 @@ local PASS_FLAG_TO_NAME = {
 	["--offsets"]         = "offsets",
 	["--static-analysis"] = "static-analysis",
 	["--report"]          = "report",
+	["--scan-source"]     = "scan-source",
 	["--all"]             = ALL_PASSES_SENTINEL,
 }
 
 local ALL_PASS_NAMES = {
-	"word-counts", "components", "annotation",
+	"scan-source", "word-counts", "components", "annotation",
 	"offsets", "static-analysis", "report",
 }
 
@@ -337,6 +347,9 @@ local function build_ctx(args)
 			dir = dir:sub(1, -2)
 		end
 
+		-- src.scan is populated by the "scan-source" pass (the first pass in the
+		-- dep graph). build_ctx just opens + reads the files; the scan itself
+		-- happens in the pass module, not inline in the orchestrator.
 		sources[#sources + 1] = {
 			path     = path,
 			text     = text,
@@ -509,41 +522,52 @@ local function render_dep_graph(passes, requested, closed)
 	end
 	add("")
 
-	add("[ps1_meta] Pass graph (read top-to-bottom):")
+	-- Data-driven ASCII graph built from the actual PASSES table.
+	-- Shows the source -> scan_source -> pass chain. Each pass is
+	-- shown once; edges are "feeds into" arrows based on deps.
+	add("[ps1_meta] Pass graph (read top-to-bottom; edges = 'feeds into'):")
 	add("")
-	add("                       metadata.h")
-	add("                           |")
-	add("                           v")
-	add("   +-----------+   +-----------------+   +-----------------+")
-	add("   |   word-   |-->|    components   |-->|     offsets     |")
-	add("   |   counts  |   +-----------------+   +-----------------+")
-	add("   |   (load)  |            |                        ^")
-	add("   +-----------+            |                        |")
-	add("        |                   v                        |")
-	add("        |  code/<module>/gen/<basename>.macs.h       |")
-	add("        |     (header - co-located for #include)     |")
-	add("        |                                            |")
-	add("        |           +-----------------+              |")
-	add("        +---------->|    annotation   |--------------+")
-	add("        |           +-----------------+              |")
-	add("        |                   |                        |")
-	add("        |                   v                        |")
-	add("        |       build/gen/<basename>.errors.h        |")
-	add("        |       build/gen/<basename>.annotations.txt |")
-	add("        |         (report - NOT #included)           |")
-	add("        |                                            |")
-	add("        |           +-----------------+              |")
-	add("        +---------->| static-analysis |--------------+")
-	add("                    +-----------------+")
-	add("                            |")
-	add("                            v")
-	add("                    +---------------+")
-	add("                    |    report     |")
-	add("                    +---------------+")
-	add("                            |")
-	add("                            v")
-	add("                    build/gen/annotation_validation.txt")
-	add("                      (project summary)")
+
+	-- Compute which passes feed which other passes (reverse of deps).
+	local feeds = {}  -- feeds[X] = list of passes that X feeds into
+	for _, name in ipairs(closed) do feeds[name] = {} end
+	for name, p in pairs(passes) do
+		for _, dep in ipairs(p.deps) do
+			if feeds[dep] then feeds[dep][#feeds[dep] + 1] = name end
+		end
+	end
+
+	-- Layout: source -> scan_source -> word-counts -> {components, annotation, offsets, static-analysis} -> report
+	-- Outputs are listed under each pass.
+	local outputs_for = function(name)
+		local p = passes[name]
+		if not p or not p.out or #p.out == 0 then return "" end
+		local outs = {}
+		for _, o in ipairs(p.out) do outs[#outs + 1] = o.path_template end
+		return table.concat(outs, ", ")
+	end
+
+	add("   +-----------+   +-------------------+    +-----------------+")
+	add("   |  source   |-->|  scan_source      |--->|   word-counts   |")
+	add("   |  files    |   | (scan_source.lua) |    |   (load)        |")
+	add("   +-----------+   +-------------------+    +-----------------+")
+	add("                          (single walk)         |")
+	add("                                                |")
+	add("        +-------------------+-------------------+-----------+")
+	add("        v                   v                   v           v")
+	add("   +--------------+   +--------------+   +--------------+   +---------------+")
+	add("   | components   |   | annotation   |   |   offsets    |   |static-analysis|")
+	add("   +--------------+   +--------------+   +--------------+   +---------------+")
+	add("   |<src>/gen/    |   |build/gen/    |   |<src>/gen/    |   |build/gen/     |")
+	add("   |<base>.macs.h |   |<base>.errors |   |<base>.offsets|   |<base>.static  |")
+	add("   |   (header)   |   |  .h          |   |  .h          |   |  _analysis    |")
+	add("   +------+-------+   |  +annot.txt  |   |  (header)    |   |  .txt         |")
+	add("          |           +------+-------+   +--------------+   +------+--------+")
+	add("          v                v                                       v")
+	add("   +------+----------------+  +------+-------+                     |")
+	add("   |offsets|static-analysis|  |report|       |<--------------------+")
+	add("   |       |               |  +------+-------+")
+	add("   +-------+---------------+")
 
 	return table.concat(lines, "\n") .. "\n"
 end

@@ -1,8 +1,12 @@
 --- passes/components.lua — Component-macro header generator.
 ---
---- Walks every source for `MipsAtomComp_(ac_X) { body }` (and the function-form `MipsAtomComp_Proc_(ac_X, { body })`) declarations and 
---- emits a per-directory `<dir_basename>.macs.h` containing one `#define mac_X(sig) \` macro per component + `WORD_COUNT(mac_X, N)` 
---- entries for downstream offset computation.
+--- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
+--- for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations, then does
+--- per-source backward lookups for the function-args string (from the preceding `FI_ MipsAtom ac_X(...)`
+--- function declaration) and the preceding comment block (for LSP/IntelliSense signature docs).
+---
+--- Emits a per-directory `<dir_basename>.macs.h` containing one `#define mac_X(sig) \` macro per component
+--- + `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -20,7 +24,7 @@
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
+-- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
 -- both standalone and when require'd from the orchestrator.
@@ -36,7 +40,6 @@ local word_count_eval = require("word_count_eval")
 
 -- Atom component declaration identifiers.
 local ATOM_COMP_PROC  = "MipsAtomComp_Proc_"
-local ATOM_COMP       = "MipsAtomComp_"
 local MIPS_ATOM       = "MipsAtom"  -- prefix on the function declaration that wraps an AtomComp_Proc_
 
 -- Component-name prefixes.
@@ -61,6 +64,7 @@ local GEN_SUBDIR      = "gen"
 --- @field text     string  -- the full source text
 --- @field dir      string  -- the directory containing the source
 --- @field basename string  -- filename without extension
+--- @field scan     table   -- pre-scanned SourceScan payload (from duffle.scan_source)
 
 --- @class PassCtx
 --- @field sources            SourceFile[]           -- all source files in the build
@@ -72,7 +76,7 @@ local GEN_SUBDIR      = "gen"
 --- @field upstream           table<string, table>   -- per-pass upstream outputs
 --- @field flags              table                  -- CLI flags
 --- @field dry_run            boolean                -- if true, compute but don't write
---- @field verbose            boolean                -- if true, log diagnostic info
+--- @field verbose            boolean                -- log diagnostic info
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
@@ -89,37 +93,6 @@ local GEN_SUBDIR      = "gen"
 -- ════════════════════════════════════════════════════════════════════════════
 -- Local helpers (file I/O + path normalization)
 -- ════════════════════════════════════════════════════════════════════════════
-
--- Write content to disk in binary mode so LF line endings are preserved on Windows 
--- (text mode would convert LF -> CRLF, breaking byte-identical diffs against git-tracked gen/*.macs.h files which are stored as LF).
--- @param path string
--- @param content string
-local function write_file_lf(path, content)
-	local f = io.open(path, "wb")
-	if not f then error("Cannot write " .. path) end
-	f:write(content); f:close()
-end
-
--- Convert a (possibly relative) path to an absolute Windows path. 
--- The pre-rework output's "// Source:" comment line used the absolute path (e.g. "C:\projects\Pikuma\ps1\code\duffle\lottes_tape.h"); 
--- If we want byte-identical output, we must normalize relative -> absolute before emitting that comment.
--- @param path string
--- @return string
-local function to_absolute_path(path)
-	if #path >= 2 and path:sub(2, 2) == ":" then
-		-- Already absolute; normalize slashes for consistency.
-		return (path:gsub("/", "\\"))
-	end
-	local p = io.popen("cd")
-	if not p then return path end
-	local cwd = p:read("*l")
-	p:close()
-	if not cwd then return path end
-	-- Normalize forward slashes to backslashes (Windows convention) on both the cwd AND the relative path tail, so the join is uniform.
-	cwd = cwd:gsub("/", "\\")
-	local tail = (path:gsub("/", "\\"))
-	return cwd .. "\\" .. tail
-end
 
 local M = {}
 
@@ -372,118 +345,28 @@ local function extract_arg_names(args_str)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Component scanner (bare + function forms)
+-- Component projection (read from pre-scanned SourceScan)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Parse the inner content of an `AtomComp_(name, ...)` call. 
--- Returns (name, body_or_nil) — `body_or_nil` is non-nil iff this is the function-form `MipsAtomComp_Proc_(name, { body })` invocation.
--- @param inner string  -- the content between ( and ) of the AtomComp_ call
---- @return string|nil, string|nil
-local function parse_atomcomp_inner(inner)
-	local tokens = duffle.split_top_level_commas(inner)
-	if #tokens == 1 then
-		return duffle.trim(tokens[1]), nil
-	elseif #tokens == 2 then
-		local name     = duffle.trim(tokens[1])
-		local body_raw = duffle.trim(tokens[2])
-		-- Strip leading { and trailing } if present.
-		local body
-		if #body_raw >= 2 and body_raw:sub(1, 1) == "{" and body_raw:sub(-1) == "}" then
-			body = duffle.trim(body_raw:sub(2, -2))
-		else
-			body = body_raw
+-- Project pre-scanned MipsAtomComp_ / MipsAtomComp_Proc_ entries into Component shape.
+-- Does per-source backward lookups for args (preceding function decl) and comment (preceding comment block).
+-- @param source string  -- the full source text (needed for backward lookups)
+-- @param scan  table   -- SourceScan from duffle.scan_source
+-- @return Component[]
+local function project_components(source, scan)
+	local out = {}
+	for _, a in ipairs(scan.atoms) do
+		if a.kind == "comp_bare" or a.kind == "comp_proc" then
+			local args    = find_function_args_for(source, a.raw_name, a.ident_pos)
+			local comment = preceding_comment_block(source, a.ident_pos)
+			out[#out + 1] = {
+				line    = a.line,
+				name    = a.name,
+				body    = a.body,
+				args    = args,
+				comment = comment,
+			}
 		end
-		return name, body
-	end
-	return nil, nil
-end
-
--- (internal) Try to extract a bare-form `MipsAtomComp_(ac_X)` declaration.
--- Bare form: `MipsAtomComp_(ac_X) { body }` — body comes from the brace block AFTER the parens.
--- @param source string
--- @param name string      -- the `ac_X` ident from the parens
---- @param ident_pos integer -- position of the `MipsAtomComp_` ident start
---- @param after_paren integer -- position just past the closing `)`
---- @param line_of fun(pos: integer): integer
---- @param args string|nil  -- function-args from preceding function decl
---- @param comment string   -- preceding comment block
---- @return Component|nil, integer  -- the component + new source position
-local function make_bare_component(source, name, ident_pos, after_paren, line_of, args, comment)
-	local brace = duffle.scan_to_char(source, "{", after_paren)
-	-- scan: <ident>(<name>) {
-	if not brace then return nil, after_paren + 1 end
-	local body, after_brace = duffle.read_braces(source, brace)
-	-- scan: <ident>(<name>) { <body> }
-	return {
-		line    = line_of(ident_pos),
-		name    = name:sub(AC_PREFIX_LEN + 1),  -- strip "ac_" prefix
-		body    = body,
-		args    = args,
-		comment = comment,
-	}, after_brace
-end
-
--- (internal) Build the function-form `MipsAtomComp_Proc_` component. Body
--- came from inside the parens; no following brace block.
-local function make_proc_component(name, body, ident_pos, line_of, args, comment)
-	return {
-		line    = line_of(ident_pos),
-		name    = name:sub(AC_PREFIX_LEN + 1),
-		body    = body,
-		args    = args,
-		comment = comment,
-	}
-end
-
---- Find every `MipsAtomComp_(ac_<X>) { body }` declaration in source.
---- Supports BOTH the bare form and the function form:
----   Bare:      `MipsAtomComp_(ac_X) { body }`
----   Function:  `MipsAtomComp_Proc_(ac_X, { body })`  (with a preceding
----              `"FI_ MipsAtom ac_X(args)"` function declaration)
----
---- @param source string
---- @return Component[]
-local function find_component_atoms(source)
-	local line_of = duffle.LineIndex(source)
-	local out     = {}
-	local pos     = 1
-	local src_len = #source
-	while pos <= src_len do
-		pos = duffle.skip_ws_and_cmt(source, pos)
-		if pos > src_len then break end
-
-		local ident, after_ident = duffle.read_ident(source, pos)
-		-- scan: <ident>
-		local is_comp = ident == ATOM_COMP or ident == ATOM_COMP_PROC
-		if not ident then pos = pos + 1; goto continue end
-		if not is_comp then pos = after_ident; goto continue end
-
-		local open_paren = duffle.skip_ws_and_cmt(source, after_ident)
-		if source:sub(open_paren, open_paren) ~= "(" then pos = open_paren + 1; goto continue end
-
-		local inner, after_paren = duffle.read_parens(source, open_paren)
-		-- scan: <ident>(<args>)
-		local name, body = parse_atomcomp_inner(inner)
-		-- scan: <ident>(<name>)  OR  <ident>(<name>, { <body> })
-		if not name or name:sub(1, AC_PREFIX_LEN) ~= AC_PREFIX then pos = open_paren + 1; goto continue end
-
-		local args    = find_function_args_for(source, name, open_paren)
-		local comment = preceding_comment_block(source, pos)
-		if body == nil then
-			-- Bare form: body comes from the brace block after the parens.
-			-- scan: <ident>(<name>) {
-			local comp, new_pos = make_bare_component(source, name, pos, after_paren, line_of, args, comment)
-			-- scan: <ident>(<name>) { <body> }
-			if comp then out[#out + 1] = comp end
-			pos = new_pos
-		else
-			-- Function form: body was inside the parens.
-			-- scan: <ident>(<name>, { <body> })
-			out[#out + 1] = make_proc_component(name, body, pos, line_of, args, comment)
-			pos = after_paren
-		end
-
-		::continue::
 	end
 	return out
 end
@@ -494,7 +377,7 @@ end
 
 -- Convert `//` line comments to `/* */` block comments in a token.
 --
--- C macros use `\` line-continuations; a `//` comment before `\` would consume the continuation, 
+-- C macros use `\` line-continuations; a `//` comment before `\` would consume the continuation,
 -- breaking the macro. We convert `//` to `/* */` so the multi-line macro structure is preserved.
 --
 -- Skips `//` sequences that are inside string or character literals
@@ -548,7 +431,7 @@ local function strip_mac_prefix(ident)
 	return ident
 end
 
--- (internal) Recursive word-count lookup. `cache` is the memoization table across all calls to `compute_component_word_count`; 
+-- (internal) Recursive word-count lookup. `cache` is the memoization table across all calls to `compute_component_word_count`;
 -- the in-progress -1 sentinel detects cycles (A -> B -> A).
 -- @param name string -- the component name (without `mac_`)
 -- @param comp_by_name table<string, Component>
@@ -588,7 +471,7 @@ end
 
 --- Compute the word count of a component body, accounting for macro expansion.
 --- Each comma-separated entry in the body is a "slot" that contributes its own word count.
---- For most entries (regular MIPS instructions) the count is 1. 
+--- For most entries (regular MIPS instructions) the count is 1.
 --- For `mac_Y(...)` calls, the count is the word count of `mac_Y` (recursive lookup through `components`).
 --- For encoding macros with a known multi-word count (e.g. `mask_upper` = 2),
 --- the count is taken from `word_counts`.
@@ -677,7 +560,7 @@ local function emit_macro_body(lines, c, sig, tokens)
 	strip_trailing_continuation(lines)
 end
 
---- Build the list of lines for one component 
+--- Build the list of lines for one component
 --- (signature comment, `#define mac_X(...)` line with backslash-continued tokens, then `WORD_COUNT(mac_X, N)` entry).
 --- @param c Component
 --- @param components Component[]
@@ -711,19 +594,19 @@ end
 -- Per-source emit logic
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Build the boilerplate header lines (the `#ifdef INTELLISENSE_DIRECTIVES` block, 
+-- Build the boilerplate header lines (the `#ifdef INTELLISENSE_DIRECTIVES` block,
 -- the `// Auto-generated` comment, the `// Source:` line, and the self-contained `WORD_COUNT` macro definition).
 -- @param src SourceFile
 -- @return string[]
 local function header_boilerplate(src)
 	return {
-		-- #pragma once wrapped in #ifdef INTELLISENSE_DIRECTIVES, matching the convention in lottes_tape.h.  
+		-- #pragma once wrapped in #ifdef INTELLISENSE_DIRECTIVES, matching the convention in lottes_tape.h.
 		-- The build does manual unity includes (the user controls include order), so the pragma is only active for IDE/tooling.
 		"#ifdef INTELLISENSE_DIRECTIVES",
 		"#pragma once",
 		"#endif",
 		"// Auto-generated by ps1_meta.lua — DO NOT EDIT",
-		"// Source: " .. to_absolute_path(src.path),
+		"// Source: " .. duffle.to_absolute_path(src.path),
 		"// Component atoms (MipsAtomComp_(ac_*)) -> macro variants (mac_*)",
 		"",
 		-- Self-contained: define WORD_COUNT if not already defined.
@@ -737,8 +620,8 @@ local function header_boilerplate(src)
 end
 
 -- Compute the output path for one source's `.macs.h` file.
--- The pre-rework convention uses the *directory* basename 
--- (not the source file basename) — e.g. `code/duffle/lottes_tape.h` produces `code/duffle/gen/duffle.macs.h`. 
+-- The pre-rework convention uses the *directory* basename
+-- (not the source file basename) — e.g. `code/duffle/lottes_tape.h` produces `code/duffle/gen/duffle.macs.h`.
 -- This matches what the C codebase #includes.
 -- @param src SourceFile
 -- @return string  -- the output directory
@@ -779,7 +662,7 @@ local function emit_component_macros_h(ctx, src, components)
 	end
 
 	duffle.ensure_dir(out_dir)
-	write_file_lf(out_path, content)
+	duffle.write_file_lf(out_path, content)
 	print(string.format("  -> %s", out_path))
 	return out_path
 end
@@ -788,7 +671,7 @@ end
 -- Pass entry
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Extend `ctx.shared.word_counts` with this source's component macros 
+-- (internal) Extend `ctx.shared.word_counts` with this source's component macros
 -- so offsets sees them without re-reading the file.
 -- @param ctx PassCtx
 -- @param components Component[]
@@ -807,8 +690,8 @@ function M.run(ctx)
 	local warnings = {}
 
 	for _, src in ipairs(ctx.sources) do
-		-- find_component_atoms operates on src.text
-		local components = find_component_atoms(src.text)
+		-- project_components reads from src.scan + does backward lookups on src.text
+		local components = project_components(src.text, src.scan)
 		if #components > 0 then
 			local macs_path = emit_component_macros_h(ctx, src, components)
 			if macs_path then

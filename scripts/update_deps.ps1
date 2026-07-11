@@ -10,19 +10,6 @@ $ErrorActionPreference = 'Stop'
 $misc = join-path $PSScriptRoot 'helpers/misc.ps1'
 . $misc
 
-# TODO(Ed): Review usage of these deps
-# I originally cloned them when starting to get to the C runtime usage of the course
-# However, based on the heavy reliance of the PSX.Dev extension I might fallback; also
-# The gdb server doesn't need the full repo and were only using the src/mips
-# which has a standalone repo (nuggets)
-# armips may not be used at all but I'm not sure...
-#
-# PCSX-Redux: built via MSBuild (VS2022) — automated in the build section below.
-# Requires: VS2022 with C++ desktop workload + PlatformToolset=v143 retarget.
-# The .vcxproj files request v145; we pass /p:PlatformToolset=v143 to MSBuild.
-# NuGet packages are restored automatically on first build.
-# Output: toolchain\pcsx-redux\vsprojects\x64\Debug\pcsx-redux.exe
-
 $url_armips     = 'https://github.com/Kingcom/armips.git'
 $url_pcsx_redux = 'https://github.com/grumpycoders/pcsx-redux.git'
 $url_psyq_iwyu  = 'https://github.com/johnbaumann/psyq_include_what_you_use.git'

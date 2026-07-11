@@ -2,19 +2,14 @@
 --- project-wide summary writer.
 ---
 --- Two output files per build:
----   - `build/gen/<dir_basename>.annotations.txt` — one per source-directory
----     containing atoms; aggregates across all sources in the directory.
+---   - `build/gen/<dir_basename>.annotations.txt` — one per source-directory containing atoms; aggregates across all sources in the directory.
 ---   - `build/gen/annotation_validation.txt` — the project summary.
 ---
---- The annotation pass stashes per-MODULE summary entries in
---- `ctx.flags._annot_results` (set by `passes/annotation.lua`). This
---- pass re-validates each source via `annotation.validate()` to get
---- the detailed per-source results needed for the report. The cost is
---- acceptable: `validate()` is fast (~5ms per source) and runs once.
+--- The annotation pass stashes per-MODULE summary entries in `ctx.flags._annot_results` (set by `passes/annotation.lua`). 
+--- This pass re-validates each source via `annotation.validate()` to get the detailed per-source results needed for the report. 
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. See
---- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
+--- Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -298,7 +293,7 @@ local function render_module_report(dir, sources, results)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Per-project summary (ported from tape_atom_annotation_pass.lua:1488-1528)
+-- Per-project summary
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Render the per-project summary (`build/gen/annotation_validation.txt`).

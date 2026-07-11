@@ -295,6 +295,36 @@ function M.write_file(path, content)
 	f:write(content); f:close()
 end
 
+-- Write content to disk in binary mode so LF line endings are preserved on Windows
+-- (text mode would convert LF -> CRLF, breaking byte-identical diffs against git-tracked gen/*.h files which are stored as LF).
+-- @param path string
+-- @param content string
+function M.write_file_lf(path, content)
+	local f = io.open(path, "wb")
+	if not f then error("Cannot write " .. path) end
+	f:write(content); f:close()
+end
+
+-- Convert a (possibly relative) path to an absolute path, using CWD if needed.
+-- Normalizes forward slashes to backslashes on Windows.
+-- Used for byte-identical emit: the // Source: comment line uses the absolute path.
+-- @param path string
+-- @return string
+function M.to_absolute_path(path)
+	if #path >= 2 and path:sub(2, 2) == ":" then
+		-- Already absolute; normalize slashes for consistency.
+		return (path:gsub("/", "\\"))
+	end
+	local p = io.popen("cd")
+	if not p then return path end
+	local cwd = p:read("*l")
+	p:close()
+	if not cwd then return path end
+	cwd = cwd:gsub("/", "\\")
+	local tail = (path:gsub("/", "\\"))
+	return cwd .. "\\" .. tail
+end
+
 -- Cache of directories already verified to exist in this process.
 -- Each ensure_dir() call may otherwise spawn a `cmd.exe mkdir` (50-100ms per call on Windows) — calling it inside per-source loops added 1.5+
 -- seconds to the report pass. Cache makes ensure_dir idempotent within the process lifetime.
@@ -534,9 +564,11 @@ function M.load_word_counts(metadata_path)
 	return counts
 end
 
+
 -- ════════════════════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════
 -- Section 6: LineIndex (perf fix — replaces the per-call rescan line_of)
--- ════════════════════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════════════════
 
 function M.LineIndex(source)
 	local positions = {}
@@ -547,7 +579,7 @@ function M.LineIndex(source)
 			positions[n] = pos
 		end
 	end
-	-- (internal) Binary-search for the line number containing `query_pos`.
+	-- (internal) Binary-search for the line number containing query_pos.
 	local function line_of(query_pos)
 		local lo,   hi = 1, n
 		while lo <= hi do
@@ -560,7 +592,6 @@ function M.LineIndex(source)
 	return line_of
 end
 
--- ════════════════════════════════════════════════════════════════════════════
 -- Section 7: domain tables
 -- ════════════════════════════════════════════════════════════════════════════
 
