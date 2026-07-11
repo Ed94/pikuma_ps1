@@ -16,10 +16,16 @@ I will be programming from a Windows 11 machine (may eventually try this on the 
 
 [luajit-2.1](https://github.com/LuaJIT/LuaJIT.git)
 
-```scoop install luajit```
+```
+scoop install luajit
+```
 
 * Used for lua scripts
 * Particularly, ps1_meta.lua which is a staged metaprogram pass for the custom C11 Assembly DSL used in this codebase.
+
+[lpeg](https://github.com/roberto-ieru/LPeg.git)
+
+* Lua is slow (even jitted) so this helps.
 
 [pscx-redux](https://github.com/grumpycoders/pcsx-redux/): A collection of tools, research, hardware design, and libraries aiming at development and reverse engineering on the PlayStation 1.
 
