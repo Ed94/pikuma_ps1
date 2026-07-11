@@ -5,20 +5,15 @@
 ---   - **Character classification** (`is_space`, `is_alpha`, `is_alnum`, `is_digit`, plus the byte-fast `_byte` variants).
 ---   - **String primitives** (`trim`, `dirname`, `basename_no_ext`, `find_byte`).
 ---   - **I/O primitives** (`read_file`, `write_file`, `ensure_dir`).
----   - **C-language scanner** (`skip_ws_and_cmt`, `skip_str_or_cmt`,
----     `read_ident`, `read_parens`, `read_braces`, `read_brackets`,
----     `read_balanced`, `scan_to_char`, `split_top_level_commas`).
+---   - **C-language scanner** (`skip_ws_and_cmt`, `skip_str_or_cmt`, `read_ident`, `read_parens`, `read_braces`, `read_brackets`, `read_balanced`, `scan_to_char`, `split_top_level_commas`).
 ---   - **Word-count loader** (`load_word_counts` for `WORD_COUNT(...)` metadata files).
 ---   - **Line lookup** (`LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping).
----   - **Domain tables** (`WAVE_CONTEXT_REGS`, `TAPE_ATOM_MACROS`,
----     `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`,
----     `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
----   - **Process-bootstrap helper** (`setup_package_path` — replaces the 8-line `arg[0]`-resolution boilerplate duplicated across 7 entry scripts)
+---   - **Domain tables** (`WAVE_CONTEXT_REGS`, `TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`, `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
+---   - **Process-bootstrap helper** (`setup_package_path`replaces the 8-line `arg[0]`-resolution boilerplate duplicated across 7 entry scripts)
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex.
 --- Lua 5.3 compatible; no `<close>`/`<toclose>`, no `continue`, no
---- 5.4 string.dump improvements. LuaJIT 5.1+extensions model is the
---- primary target.
+--- 5.4 string.dump improvements. LuaJIT 5.1+extensions model is the primary target.
 ---
 --- **No `:match` / `:gmatch` regex use anywhere**; all delimiter-
 --- splitting is hand-rolled or via LPeg (the regex-free PEG library).
@@ -81,30 +76,22 @@ local BYTE_DIGIT_9 = 57       -- '9'
 -- Section -1: Bootstrap (path-setup at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- When duffle.lua is first loaded (via `dofile` from an entry script
--- or via `require` from a passes script), the code below runs and sets
--- `package.path` + `package.cpath` so subsequent `require`s resolve.
+-- When duffle.lua is first loaded (via `dofile` from an entry script or via `require` from a passes script), 
+-- the code below sruns and sets `package.path` + `package.cpath` so subsequent `require`s resolve.
 -- Idempotent: re-loads just re-set the same paths.
 --
 -- **Entry scripts** trigger this with one line:
---   `local duffle = dofile(arg[0]:match("(.*[/\\])") .. "/../duffle.lua")`
--- which runs this top-level + returns `M`.
+-- `local duffle = dofile(arg[0]:match("(.*[/\\])") .. "/../duffle.lua")` which runs this top-level + returns `M`.
 --
--- **Passes scripts** are loaded via `require("passes.X")` from the
--- entry script; by the time they run, the entry script has already
--- triggered this bootstrap, so the paths are set.
---
--- **Why `git rev-parse`?** Hardcoding paths like
--- `C:\\projects\\Pikuma\\ps1\\...` breaks portability. Git gives us
--- the canonical repo root regardless of where it lives.
+-- **Passes scripts** are loaded via `require("passes.X")` from the entry script; by the time they run, 
+-- the entry script has already triggered this bootstrap, so the paths are set.
 
 --- Resolve the repo root via `git rev-parse --show-toplevel` (cached).
 --- Returns a path with a trailing separator, or nil if not in a git repo.
 --- @return string|nil
 local function find_repo_root()
-	-- Cached in `package.loaded` (process-global) so all 8 entry scripts
-	-- + passes scripts share one git call. Without this, git rev-parse
-	-- runs once per script load = 8 × ~150ms = 1.2s wasted per build.
+	-- Cached in `package.loaded` (process-global) so all 8 entry scripts + passes scripts share one git call.
+	-- Without this, git rev-parse runs once per script load.
 	if package.loaded.__duffle_repo_root__ then return package.loaded.__duffle_repo_root__ end
 	local p = io.popen("git rev-parse --show-toplevel 2>nul")
 	local root
@@ -118,7 +105,7 @@ local function find_repo_root()
 	return root
 end
 
---- Set `package.path` (for `require("duffle")` + `require("passes.X")`)
+--- Set `package.path`  (for `require("duffle")` + `require("passes.X")`)
 --- and `package.cpath` (for `lpeg.dll` on Windows).
 function M.setup_package_path()
 	local repo_root = find_repo_root()
@@ -127,8 +114,7 @@ function M.setup_package_path()
 		os.exit(2)
 	end
 
-	-- From the repo root, derive both `scripts/` and `scripts/passes/`
-	-- so `require("duffle")` AND `require("passes.annotation")` resolve.
+	-- From the repo root, derive both `scripts/` and `scripts/passes/` so `require("duffle")` AND `require("passes.annotation")` resolve.
 	local scripts_dir = repo_root .. "scripts/"
 	local passes_dir  = repo_root .. "scripts/passes/"
 	package.path = scripts_dir .. "?.lua;"
@@ -137,30 +123,25 @@ function M.setup_package_path()
 		.. passes_dir .. "?/init.lua;"
 		.. package.path
 
--- cpath: only needed on Windows for the bundled lpeg.dll. (LPeg
--- is optional -- duffle.lua's `pcall(require, "lpeg")` falls back
--- to hand-rolled scanners if the .dll isn't loadable.)
+-- cpath: only needed on Windows for the bundled lpeg.dll. 
+-- (LPeg is optional -- duffle.lua's `pcall(require, "lpeg")` falls back to hand-rolled scanners if the .dll isn't loadable.)
 	if package.config:sub(1, 1) == "\\" then
 		package.cpath = repo_root .. "toolchain/luajit-2.1/lib/lua/5.1/?.dll;"
 			.. package.cpath
 	end
 end
 
--- NOTE: `M.setup_package_path()` is NOT auto-called here. The entry
--- scripts explicitly `dofile("duffle_paths.lua")` first, which calls
--- `M.setup_package_path()`. The function exists for the helper to use
--- (so the path-setup logic is centralized in duffle.lua).
+-- NOTE: `M.setup_package_path()` is NOT auto-called here. The entry scripts explicitly `dofile("duffle_paths.lua")` first, which calls `M.setup_package_path()`. 
+-- The function exists for the helper to use (so the path-setup logic is centralized in duffle.lua).
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 0: LPeg patterns (compiled once at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- LPeg is a PEG library (no regex). All patterns below are first-class
--- pattern values; they're cheap to build and reuse.
+-- LPeg is a PEG library (no regex). All patterns below are first-class pattern values; they're cheap to build and reuse.
 --
--- Note: lpeg is required lazily because Lua 5.5 may not have it on its
--- cpath at the same location as LuaJIT. We attempt the require and fall
--- back to the hand-rolled implementations if it fails.
+-- Note: lpeg is required lazily because Lua 5.5 may not have it on its cpath at the same location as LuaJIT.
+-- We attempt the require and fall back to the hand-rolled implementations if it fails.
 
 local lpeg_ok, lpeg = pcall(require, "lpeg")
 local lpeg_lib = nil
@@ -169,13 +150,13 @@ local lpeg_str_or_cmt_pat, lpeg_ws_and_cmt_pat
 local lpeg_scan_to_target_pat  -- generic "anything but target or balanced group" matcher
 
 if lpeg_ok then
-	lpeg_lib = lpeg
+	lpeg_lib      = lpeg
 	local P, S, R = lpeg.P, lpeg.S, lpeg.R
 
 	-- Character class patterns
 	local alpha_pat = R("AZ", "az") + P("_")
 	local digit_pat = R("09")
-	lpeg_alnum_pat = alpha_pat + digit_pat
+	lpeg_alnum_pat  = alpha_pat + digit_pat
 
 	-- Identifier: alpha followed by zero+ alnum. Capture as a string.
 	lpeg_alpha_pat = alpha_pat
@@ -200,9 +181,7 @@ if lpeg_ok then
 	-- Used by scan_to_char for non-ident / non-bracket chars.
 	-- We accept any single char except the target.
 	-- The balanced-group stepping is handled by the caller (via read_balanced).
-	lpeg_scan_to_target_pat = function(target)
-		return (P(1) - P(target))^0
-	end
+	lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  end
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -214,19 +193,16 @@ end
 --   is_space_byte(b), is_alpha_byte(b), etc. — accept a single-byte INTEGER
 --
 -- The byte-based versions are 5-10x faster in tight loops because they
--- avoid the string allocation per s:sub(i, i) call.
+-- avoid the string allocation per s:sub(pos, pos) call.
 
 -- Whitespace characters per C locale.
-function M.is_space_byte(b)
-	return b == BYTE_SPACE or b == BYTE_TAB or b == BYTE_NEWLINE
-		or b == BYTE_CR or b == BYTE_VT  or b == BYTE_FF
-end
+function M.is_space_byte(b) return b == BYTE_SPACE or b == BYTE_TAB or b == BYTE_NEWLINE or b == BYTE_CR or b == BYTE_VT  or b == BYTE_FF end
 
 -- Letters (a-z, A-Z) and underscore.
 function M.is_alpha_byte(b)
 	if not b then return false end
-	if b >= BYTE_LOWER_A and b <= BYTE_LOWER_Z then return true end  -- 'a'..'z'
-	if b >= BYTE_UPPER_A and b <= BYTE_UPPER_Z then return true end  -- 'A'..'Z'
+	if     b >= BYTE_LOWER_A and b <= BYTE_LOWER_Z then return true end  -- 'a'..'z'
+	if     b >= BYTE_UPPER_A and b <= BYTE_UPPER_Z then return true end  -- 'A'..'Z'
 	return b == BYTE_UNDERSCORE
 end
 
@@ -245,8 +221,8 @@ end
 function M.is_alpha(c)
 	if type(c) == "number" then return M.is_alpha_byte(c) end
 	if not c or #c == 0 then return false end
-	if c >= "a" and c <= "z" then return true  end
-	if c >= "A" and c <= "Z" then return true  end
+	if     c >= "a" and c <= "z" then return true  end
+	if     c >= "A" and c <= "Z" then return true  end
 	return c == "_"
 end
 function M.is_digit(c)
@@ -261,10 +237,8 @@ function M.is_alnum(c) return M.is_alpha(c) or M.is_digit(c) end
 
 -- Trim leading and trailing whitespace from a string.
 function M.trim(s)
-	local a = 1
-	while a <= #s and M.is_space_byte(s:byte(a)) do a = a + 1 end
-	local b = #s
-	while b >= a and M.is_space_byte(s:byte(b)) do b = b - 1 end
+	local a = 1;  while a <= #s and M.is_space_byte(s:byte(a)) do a = a + 1 end
+	local b = #s; while b >= a  and M.is_space_byte(s:byte(b)) do b = b - 1 end
 	return s:sub(a, b)
 end
 
@@ -286,7 +260,7 @@ function M.dirname(path)
 	local last_sep = 0
 	for pos = 1, #path do
 		local b = path:byte(pos)
-		if b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
+		if    b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
 	end
 	if last_sep == 0 then return "." end
 	return path:sub(1, last_sep - 1)
@@ -297,7 +271,7 @@ function M.basename_no_ext(path)
 	local last_sep = 0
 	for pos = 1, #path do
 		local b = path:byte(pos)
-		if b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
+		if    b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
 	end
 	local a        = last_sep + 1
 	local last_dot = #path + 1
@@ -312,18 +286,16 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 function M.read_file(path)
-	local f = io.open(path, "r")
+	local  f = io.open(path, "r")
 	if not f then error("Cannot open " .. path) end
-	local content = f:read("*a")
-	f:close()
+	local content = f:read("*a"); f:close()
 	return content
 end
 
 function M.write_file(path, content)
-	local f = io.open(path, "w")
+	local  f = io.open(path, "w")
 	if not f then error("Cannot write " .. path) end
-	f:write(content)
-	f:close()
+	f:write(content); f:close()
 end
 
 -- Cache of directories already verified to exist in this process. Each
@@ -337,8 +309,7 @@ function M.ensure_dir(path)
 	if _ensured_dirs[path] then return end
 	_ensured_dirs[path] = true
 	local is_win = package.config:sub(1, 1) == "\\"
-	os.execute(is_win and ('if not exist "' .. path .. '" mkdir "' .. path .. '"')
-				  or ('mkdir -p "' .. path .. '" 2>/dev/null'))
+	os.execute(is_win and ('if not exist "' .. path .. '" mkdir "' .. path .. '"') or ('mkdir -p "' .. path .. '" 2>/dev/null'))
 end
 
 -- Test helper: clear the cache (used by tests + between process runs).
@@ -350,92 +321,92 @@ function M._reset_ensured_dirs() _ensured_dirs = {} end
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- LPeg-backed skipper when LPeg is available, hand-rolled fallback otherwise.
--- Returns position just past the construct, or `i` unchanged if no
--- string/comment starts at position i.
-function M.skip_str_or_cmt(s, i)
+-- Returns position just past the construct, or `pos` unchanged if no
+-- string/comment starts at position `pos`.
+function M.skip_str_or_cmt(s, pos)
 	if lpeg_ok then
-		local new_pos = lpeg.match(lpeg_str_or_cmt_pat, s, i)
+		local new_pos = lpeg.match(lpeg_str_or_cmt_pat, s, pos)
 		if new_pos then return new_pos end
-		return i
+		return pos
 	end
--- Hand-rolled fallback (kept for builds where LPeg isn't available).
-	local c = s:byte(i)
+	-- Hand-rolled fallback (kept for builds where LPeg isn't available).
+	local c = s:byte(pos)
 	if c == BYTE_DQUOTE or c == BYTE_SQUOTE then  -- '"' or '\''
-		i = i + 1
-		while i <= #s do
-			local b = s:byte(i)
-			if b == BYTE_BACKSLASH then i = i + 2  -- '\\'
-			elseif b == c then return i + 1
-			else i = i + 1 end
+		pos = pos + 1
+		while pos <= #s do
+			local b = s:byte(pos)
+			if     b == BYTE_BACKSLASH then pos = pos + 2  -- '\\'
+			elseif b == c then return pos + 1
+			else pos = pos + 1 end
 		end
 		return #s + 1
 	elseif c == BYTE_SLASH then  -- '/'
-		local nx = s:byte(i + 1)
+		local nx = s:byte(pos + 1)
 		if nx == BYTE_SLASH then  -- '//'
-			while i <= #s and s:byte(i) ~= BYTE_NEWLINE do i = i + 1 end
-			return i
+			while pos <= #s and s:byte(pos) ~= BYTE_NEWLINE do pos = pos + 1 end
+			return pos
 		elseif nx == BYTE_STAR then  -- '/*'
-			i = i + 2
-			while i <= #s - 1 do
-				if s:byte(i) == BYTE_STAR and s:byte(i + 1) == BYTE_SLASH then  -- '*/'
-					return i + 2
+			pos = pos + 2
+			while pos <= #s - 1 do
+				if s:byte(pos) == BYTE_STAR and s:byte(pos + 1) == BYTE_SLASH then  -- '*/'
+					return pos + 2
 				end
-				i = i + 1
+				pos = pos + 1
 			end
 			return #s + 1
 		end
 	end
-	return i
+	return pos
 end
 
--- Skip whitespace AND C-style comments starting at position i.
+-- Skip whitespace AND C-style comments starting at position `pos`.
 -- LPeg-backed when available; ~5-10x faster than the hand-rolled version.
-function M.skip_ws_and_cmt(s, i)
+function M.skip_ws_and_cmt(s, pos)
 	if lpeg_ok then
-		local new_pos = lpeg.match(lpeg_ws_and_cmt_pat, s, i)
+		local new_pos = lpeg.match(lpeg_ws_and_cmt_pat, s, pos)
 		if new_pos then return new_pos end
-		return i
+		return pos
 	end
 	-- Hand-rolled fallback.
 	local len = #s
-	while i <= len do
-		if M.is_space_byte(s:byte(i)) then
-			i = i + 1
+	while pos <= len do
+		if M.is_space_byte(s:byte(pos)) then
+			pos = pos + 1
 		else
-			local nx = M.skip_str_or_cmt(s, i)
-			if nx > i then i = nx else break end
+			local nx = M.skip_str_or_cmt(s, pos)
+			if nx > pos then pos = nx else break end
 		end
 	end
-	return i
+	return pos
 end
 
 -- Read a C-style identifier (alpha followed by zero+ alnum) starting at
--- position i. Returns the identifier string + the position just past it,
--- or nil + i if no identifier starts here.
-function M.read_ident(s, i)
+-- position `pos`. Returns the identifier string + the position just past
+-- it, or nil + pos if no identifier starts here.
+function M.read_ident(s, pos)
 	if lpeg_ok then
-		local result = lpeg.match(lpeg_ident_pat, s, i)
-		if result then return result, i + #result end
-		return nil, i
+		local result = lpeg.match(lpeg_ident_pat, s, pos)
+		if result then return result, pos + #result end
+		return nil, pos
 	end
 	-- Hand-rolled fallback.
-	if not M.is_alpha_byte(s:byte(i)) then return nil, i end
-	local a = i
-	i = i + 1
-	while i <= #s and M.is_alnum_byte(s:byte(i)) do i = i + 1 end
-	return s:sub(a, i - 1), i
+	if not M.is_alpha_byte(s:byte(pos)) then return nil, pos end
+	local a = pos
+	pos = pos + 1
+	while pos <= #s and M.is_alnum_byte(s:byte(pos)) do pos = pos + 1 end
+	return s:sub(a, pos - 1), pos
 end
 
 -- Read a balanced-delimited group (parens, braces, or brackets) starting
--- at position i. Returns the inner content (between the delimiters) +
--- the position just past the closing delimiter, or nil + i if `s[i]`
+-- at position `pos`. Returns the inner content (between the delimiters) +
+-- the position just past the closing delimiter, or nil + pos if `s[pos]`
 -- isn't `open_char`.
 --
 -- (Hand-rolled; the depth counting makes pure LPeg awkward here.)
-function M.read_balanced(s, open_char, close_char, i)
+function M.read_balanced(s, open_char, close_char, pos)
 	local open_byte = open_char:byte()
-	if s:byte(i) ~= open_byte then return nil, i end
-	local pos   = i + 1
+	if s:byte(pos) ~= open_byte then return nil, pos end
+	pos = pos + 1
 	local len   = #s
 	local depth = 1
 	local a     = pos
@@ -450,16 +421,16 @@ function M.read_balanced(s, open_char, close_char, i)
 			pos = pos + 1
 		else
 			local nx = M.skip_str_or_cmt(s, pos)
-			pos = (nx > pos) and nx or (pos + 1)
+			if nx > pos then pos = nx else pos = pos + 1 end
 		end
 	end
 	return s:sub(a, pos - 1), pos + 1
 end
 
 -- Convenience specializations of read_balanced.
-M.read_parens   = function(s, i) return M.read_balanced(s, "(", ")", i) end
-M.read_braces   = function(s, i) return M.read_balanced(s, "{", "}", i) end
-M.read_brackets = function(s, i) return M.read_balanced(s, "[", "]", i) end
+M.read_parens   = function(s, pos) return M.read_balanced(s, "(", ")", pos) end
+M.read_braces   = function(s, pos) return M.read_balanced(s, "{", "}", pos) end
+M.read_brackets = function(s, pos) return M.read_balanced(s, "[", "]", pos) end
 
 -- Scan forward from position `start` until we find a specific single byte
 -- `target`, transparently stepping over balanced parens/braces/brackets.
@@ -469,13 +440,13 @@ function M.scan_to_char(s, target, start)
 	local pos = start
 	while pos <= #s do
 		local c = s:byte(pos)
-		if c == target_byte then return pos end
+		if      c == target_byte then return pos end
 		if      c == BYTE_OPEN_PAREN  then local _, a = M.read_balanced(s, "(", ")", pos); pos = a
 		elseif  c == BYTE_OPEN_BRACE  then local _, a = M.read_balanced(s, "{", "}", pos); pos = a
 		elseif  c == BYTE_OPEN_BRACK  then local _, a = M.read_balanced(s, "[", "]", pos); pos = a
 		else
 			local nx = M.skip_str_or_cmt(s, pos)
-			pos = (nx > pos) and nx or (pos + 1)
+			pos      = (nx > pos) and nx or (pos + 1)
 		end
 	end
 	return nil
@@ -527,22 +498,15 @@ function M.split_top_level_commas(body)
 				if has_real_content(chunk) then
 					tokens[#tokens + 1] = chunk
 				elseif #tokens > 0 then
-					-- Pure comment/string chunk at top level (no
-					-- preceding instruction content within this chunk).
-					-- APPEND it to the LAST token so emit-context
-					-- callers (components.lua build_component_lines)
-					-- can convert `// trailing comment` to `/* */`
-					-- and emit it with the macro body. For word
-					-- counting, count_token_words only inspects the
-					-- leading ident, so a trailing comment doesn't
+					-- Pure comment/string chunk at top level (no preceding instruction content within this chunk).
+					-- APPEND it to the LAST token so emit-context callers (components.lua build_component_lines)
+					-- can convert `// trailing comment` to `/* */` and emit it with the macro body.
+					-- For word counting, count_token_words only inspects the leading ident, so a trailing comment doesn't
 					-- affect the count.
 					--
-					-- This is the second-half fix to commit 98e27c2:
-					-- the first fix correctly broke top-level comments
-					-- off from the NEXT statement (fixing macro-call
-					-- word counts); this fix preserves them on the
-					-- PREVIOUS statement (restoring the comments in
-					-- the emitted .macs.h output).
+					-- This is the second-half fix to commit 98e27c2: the first fix correctly broke top-level comments
+					-- off from the NEXT statement (fixing macro-call word counts); 
+					-- this fix preserves them on the PREVIOUS statement (restoring the comments in the emitted .macs.h output).
 					tokens[#tokens] = tokens[#tokens] .. chunk
 				end
 			end
@@ -560,15 +524,15 @@ function M.split_top_level_commas(body)
 			local _, a = M.read_brackets(body, pos); pos = a
 		elseif c == BYTE_COMMA then               -- ','
 			emit(pos - 1)
-			pos = pos + 1
+			pos         = pos + 1
 			token_start = pos
 		elseif c == BYTE_SEMI then                -- ';'
 			emit(pos - 1)
-			pos = pos + 1
+			pos         = pos + 1
 			token_start = pos
 		elseif c == BYTE_NEWLINE then             -- '\n'
 			emit(pos - 1)
-			pos = pos + 1
+			pos         = pos + 1
 			token_start = pos
 		else
 			local nx = M.skip_str_or_cmt(body, pos)
@@ -731,14 +695,14 @@ M.GTE_PIPELINE_LATENCY = {
 	-- Aliases (must have the same value as their canonical target)
 	["gte_cmdw_rotate_translate_perspective_single"] = 2,
 	["gte_cmdw_rotate_translate_perspective_triple"] = 2,
-	["gte_cmdw_avg_sort_z4"]                          = 2,
+	["gte_cmdw_avg_sort_z4"]                         = 2,
 
 	-- Outer product aliases (same canonical op, 0 pre-fill nops).
 	-- gte_cmdw_op          = canonical GTE-internal short form
 	-- gte_cmdw_outer_product = NOCASH / SDK-readable form
 	-- gte_cmdw_wedge         = geometric-algebra (exterior-product) form
 	["gte_cmdw_outer_product"] = 0,
-	["gte_cmdw_wedge"]        = 0,
+	["gte_cmdw_wedge"]         = 0,
 }
 
 -- GP0 packet sizes (total words including the 1-word tag) per GP0 cmd byte.
@@ -914,18 +878,18 @@ M.INSTRUCTION_LATENCY = {
 	-- mac_* helpers (cycle cost = sum of the expanded instructions)
 	-- mac_yield transfers control; cycle budget is 0 (the next atom
 	-- absorbs the cost).
-	["mac_yield"]           = 0,
-	["mac_pack_color_word"] = 3,  -- lui + ori + sw
-	["mac_format_f3_color"] = 3,  -- = mac_pack_color_word
-	["mac_format_g4_color"] = 12, -- 4 x mac_pack_color_word
-	["mac_load_tri_indices"] = 3, -- 3 x lhu
-	["mac_gte_load_tri_verts"] = 18, -- 3 x {sll, addu, lw, lw, mtc2, mtc2}
-	["mac_gte_store_f3_post_rtpt"] = 3,
-	["mac_gte_store_g3_post_rtpt"] = 3,
+	["mac_yield"]                                = 0,
+	["mac_pack_color_word"]                      = 3,  -- lui + ori + sw
+	["mac_format_f3_color"]                      = 3,  -- = mac_pack_color_word
+	["mac_format_g4_color"]                      = 12, -- 4 x mac_pack_color_word
+	["mac_load_tri_indices"]                     = 3, -- 3 x lhu
+	["mac_gte_load_tri_verts"]                   = 18, -- 3 x {sll, addu, lw, lw, mtc2, mtc2}
+	["mac_gte_store_f3_post_rtpt"]               = 3,
+	["mac_gte_store_g3_post_rtpt"]               = 3,
 	["mac_gte_store_g4_p012_post_rtpt_pre_rtps"] = 3,
-	["mac_gte_store_g4_p3_post_rtps"] = 1,
-	["mac_insert_ot_tag_f3"] = 11,  -- 11 .word slots in the macro body
-	["mac_insert_ot_tag_g4"] = 11,
+	["mac_gte_store_g4_p3_post_rtps"]            = 1,
+	["mac_insert_ot_tag_f3"]                     = 11,  -- 11 .word slots in the macro body
+	["mac_insert_ot_tag_g4"]                     = 11,
 	-- Annotation markers (emit no code; pure metaprogram hints)
 	["atom_label"]          = 0,
 	["atom_offset"]         = 0,

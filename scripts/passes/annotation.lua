@@ -1,25 +1,14 @@
 --- passes/annotation.lua — Atom-annotation DSL validator.
 ---
---- Validates `MipsAtom_(name) atom_info(atom_bind(Binds_X),
---- atom_reads(...), atom_writes(...)) { ... }` declarations in source files.
---- Also reads:
----   - `Binds_*` struct declarations (`typedef Struct_(Binds_X) { ... };`)
----   - `TAPE_WORDS(mac_X, N)` pragma directives (`#pragma` + `_Pragma`)
+--- Validates `MipsAtom_(name) atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...)) { ... }` declarations in source files.
+--- Also reads: `Binds_*` struct declarations (`typedef Struct_(Binds_X) { ... };`)
 ---
 --- Writes:
----   - `<ctx.out_root>/<dir_basename>.errors.h` — one per module, with
----     `#error` directives on findings (the C compile will surface the
----     error)
----   - The annotations.txt report is rendered by `passes/report.lua`
----     from the per-module results stashed in `ctx.flags._annot_results`
----
---- **Ported from** `scripts/tape_atom_annotation_pass.lua:78-545 +
---- 1081-1407` (validation only — NOT rendering, which goes to
---- `passes/report.lua`).
+---   - `<ctx.out_root>/<dir_basename>.errors.h` — one per module, with `#error` directives on findings (the C compile will surface the error)
+---   - The annotations.txt report is rendered by `passes/report.lua` from the per-module results stashed in `ctx.flags._annot_results`
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. See
---- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
+--- Lua 5.3 compatible
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -170,7 +159,7 @@ local BYTE_COMMA        = 44
 --- @param s string
 --- @return string[]
 local function split_csv_top(s)
-	local tokens    = {}
+	local tokens   = {}
 	local pos      = 1
 	local chunk_a  = 1
 	local depth    = 0
@@ -179,13 +168,13 @@ local function split_csv_top(s)
 		local ch = s:byte(pos)
 		if ch == BYTE_OPEN_PAREN or ch == BYTE_OPEN_BRACE or ch == BYTE_OPEN_BRACK then
 			depth = depth + 1
-			pos  = pos + 1
+			pos   = pos   + 1
 		elseif ch == BYTE_CLOSE_PAREN or ch == BYTE_CLOSE_BRACE or ch == BYTE_CLOSE_BRACK then
 			depth = depth - 1
-			pos  = pos + 1
+			pos   = pos   + 1
 		elseif ch == BYTE_COMMA and depth == 0 then
 			tokens[#tokens + 1] = s:sub(chunk_a, pos - 1)
-			pos     = pos + 1
+			pos     = pos  + 1
 			chunk_a = pos
 		else
 			pos = pos + 1
@@ -259,9 +248,7 @@ end
 -- Resolve any phase_* / R_* alias macros in a register list.
 -- (Phase / region / cadence aliases have been dropped. Kept as an
 -- identity function so callers can stay uniform.)
-local function resolve_reg_aliases(regs)
-	return regs
-end
+local function resolve_reg_aliases(regs) return regs end
 
 -- Parse a comma-separated inner content (e.g. inside atom_reads(...))
 -- into a list of trimmed identifiers with aliases resolved.
@@ -269,7 +256,7 @@ local function parse_regs_list(inner)
 	local out = {}
 	for _, r in ipairs(split_csv_top(inner)) do
 		local trimmed = trim(r)
-		if trimmed ~= "" then out[#out + 1] = trimmed end
+		if    trimmed ~= "" then out[#out + 1] = trimmed end
 	end
 	return resolve_reg_aliases(out)
 end
@@ -387,7 +374,7 @@ local function parse_pragma_directive(source, ident_pos, after_ident)
 	end
 	if entry then
 		local line_of = duffle.LineIndex(source)
-		entry.line = line_of(ident_pos)
+		entry.line    = line_of(ident_pos)
 	end
 	return entry, eol
 end
@@ -417,7 +404,7 @@ local function find_macro_word_annotations(source)
 				local entry, new_pos = parse_pragma_operator(source, pos, after_ident)
 				if entry then
 					local line_of = duffle.LineIndex(source)
-					entry.line = line_of(pos)
+					entry.line    = line_of(pos)
 					out[#out + 1] = entry
 				end
 				pos = new_pos
@@ -479,7 +466,7 @@ end
 --- @param line_of fun(pos: integer): integer
 --- @return BindsStruct|nil, integer
 local function parse_typedef_binds(source, ident_pos, after_typedef, line_of)
-	local after_type = skip_ws_and_cmt(source, after_typedef)
+	local after_type                   = skip_ws_and_cmt(source, after_typedef)
 	local type_ident, after_type_ident = read_ident(source, after_type)
 	if type_ident ~= STRUCT_TYPE then
 		return nil, after_type_ident or (after_type + 1)
@@ -491,13 +478,13 @@ local function parse_typedef_binds(source, ident_pos, after_typedef, line_of)
 	end
 
 	local inner, after_paren = read_parens(source, open_paren)
-	local name = trim(inner)
+	local name               = trim(inner)
 
 	local brace = scan_to_char(source, "{", after_paren)
 	if not brace then return nil, open_paren + 1 end
 
 	local body, after_brace = read_braces(source, brace)
-	local fields, bytes      = parse_binds_body(body)
+	local fields, bytes     = parse_binds_body(body)
 
 	-- Only emit Binds_* structs (other Struct_ typedefs are ignored).
 	if name:sub(1, BINDS_PREFIX_LEN) ~= BINDS_PREFIX then
@@ -554,10 +541,8 @@ end
 --- @param pos integer
 --- @return string|nil, integer
 local function read_alnum_ident(s, pos)
-	local str_len = #s
-	while pos <= str_len and is_space(s:sub(pos, pos)) do pos = pos + 1 end
-	local start = pos
-	while pos <= str_len and is_alnum(s:sub(pos, pos)) do pos = pos + 1 end
+	local str_len = #s; while pos <= str_len and is_space(s:sub(pos, pos)) do pos = pos + 1 end
+	local start = pos;  while pos <= str_len and is_alnum(s:sub(pos, pos)) do pos = pos + 1 end
 	if pos == start then return nil, pos end
 	return s:sub(start, pos - 1), pos
 end
@@ -586,14 +571,14 @@ local function find_atom_names(source)
 				pos = open_paren + 1
 			else
 				local inner, after_paren = read_parens(source, open_paren)
-				local name, _ = read_alnum_ident(inner, 1)
+				local name, _            = read_alnum_ident(inner, 1)
 				if name and name ~= "" then
 					out[#out + 1] = { line = line_of(pos), name = name }
 				end
 				local brace = scan_to_char(source, "{", after_paren)
 				if brace then
 					local _, after_brace = read_braces(source, brace)
-					pos = after_brace
+					pos                  = after_brace
 				else
 					pos = open_paren + 1
 				end
@@ -609,39 +594,24 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- True iff the parsed arg is a register-list call (any recognized form).
-local function is_regs_arg(a)
-	return a and (a.kind == "atom_reads" or a.kind == "atom_writes" or a.kind == "regs")
-end
+local function is_regs_arg(a) return a and (a.kind == "atom_reads" or a.kind == "atom_writes" or a.kind == "regs") end
 
---- Per-macro arg-shape handlers. Each takes (entry, args) and mutates
---- Per-atom_info sub-call dispatch. Each takes (entry, args) and mutates
---- entry.{reads, writes, binds, errors}. The new annotation shape is:
----
----   MipsAtom_(name) atom_info(
----        atom_bind(Binds_X)
----      , atom_reads(...)
----      , atom_writes(...)
----   ) { ... };
----
---- All sub-calls are order-independent; each is dispatched on its
---- `kind` (atom_bind / atom_reads / atom_writes) when parsed.
+--- Per-macro arg-shape handlers. Each takes (entry, args) and mutates Per-atom_info sub-call dispatch. 
+--- Each takes (entry, args) and mutates entry.{reads, writes, binds, errors}. 
+--- All sub-calls are order-independent; each is dispatched on its `kind` (atom_bind / atom_reads / atom_writes) when parsed.
 local ANNOT_ARG_HANDLERS = {}
 
 -- atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
 function ANNOT_ARG_HANDLERS.info(entry, args)
 	for _, arg in ipairs(args) do
-		if arg.kind == "atom_bind" then
-			entry.binds = arg.value
-		elseif arg.kind == "atom_reads" then
-			entry.reads = arg.value
-		elseif arg.kind == "atom_writes" then
-			entry.writes = arg.value
-		elseif arg.kind == "ident" then
+		if     arg.kind == "atom_bind"   then entry.binds  = arg.value
+		elseif arg.kind == "atom_reads"  then entry.reads  = arg.value
+		elseif arg.kind == "atom_writes" then entry.writes = arg.value
+		elseif arg.kind == "ident"       then
 			-- Reserved for future phase tokens. Currently ignored.
 			-- (Could be reintroduced as `phase_*` sub-calls of atom_info.)
 		else
-			entry.errors[#entry.errors + 1] = string.format(
-				"unexpected atom_info arg kind=%s value=%s", arg.kind, tostring(arg.value))
+			entry.errors[#entry.errors + 1] = string.format("unexpected atom_info arg kind=%s value=%s", arg.kind, tostring(arg.value))
 		end
 	end
 end
@@ -660,27 +630,25 @@ local function new_annot_entry(line, ident, name, kind)
 	}
 end
 
---- Try to parse an `atom_info(...)` call right after the `MipsAtom_(name)`
---- parens. Returns the annotation entry (if present) and the new source
---- position past the atom_info call. Returns nil if no atom_info follows.
+--- Try to parse an `atom_info(...)` call right after the `MipsAtom_(name)` parens.
+--- Returns the annotation entry (if present) and the new source position past the atom_info call.
+--- Returns nil if no atom_info follows.
 --- @param source string
 --- @param atom_name string
 --- @param after_mipsatom_paren integer  -- position past the MipsAtom_(...) close paren
 --- @param line_of fun(pos: integer): integer
 --- @return AtomAnnotation|nil, integer  -- (entry or nil, new source position)
 local function parse_atom_info_call(source, atom_name, after_mipsatom_paren, line_of)
-	local lookahead      = skip_ws_and_cmt(source, after_mipsatom_paren)
+	local lookahead              = skip_ws_and_cmt(source, after_mipsatom_paren)
 	local look_ident, look_after = read_ident(source, lookahead)
 	if look_ident ~= ATOM_INFO then return nil, after_mipsatom_paren end
 
 	local info_open = skip_ws_and_cmt(source, look_after)
-	if source:byte(info_open) ~= BYTE_OPEN_PAREN then
-		return nil, info_open + 1
-	end
+	if source:byte(info_open) ~= BYTE_OPEN_PAREN then return nil, info_open + 1 end
 
 	local info_inner, info_after = read_parens(source, info_open)
-	local args = parse_atom_annot_args(info_inner)
-	local entry = new_annot_entry(line_of(lookahead), ATOM_INFO, atom_name, "info")
+	local args                   = parse_atom_annot_args(info_inner)
+	local entry                  = new_annot_entry(line_of(lookahead), ATOM_INFO, atom_name, "info")
 	ANNOT_ARG_HANDLERS.info(entry, args)
 	return entry, info_after
 end
@@ -741,10 +709,10 @@ end
 local function validate(ctx, src)
 	local source = src.text
 
-	local annots      = find_atom_annotations(source)
-	local macros     = find_macro_word_annotations(source)
-	local binds      = find_binds_structs(source)
-	local atoms      = find_atom_names(source)
+	local annots = find_atom_annotations(source)
+	local macros = find_macro_word_annotations(source)
+	local binds  = find_binds_structs(source)
+	local atoms  = find_atom_names(source)
 
 	local atom_index = {}
 	for _, a in ipairs(atoms) do atom_index[a.name] = a end

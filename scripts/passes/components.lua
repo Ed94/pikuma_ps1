@@ -1,19 +1,12 @@
 --- passes/components.lua — Component-macro header generator.
 ---
---- Walks every source for `MipsAtomComp_(ac_X) { body }` (and the
---- function-form `MipsAtomComp_Proc_(ac_X, { body })`) declarations
---- and emits a per-directory `<dir_basename>.macs.h` containing one
---- `#define mac_X(sig) \` macro per component + `WORD_COUNT(mac_X, N)`
+--- Walks every source for `MipsAtomComp_(ac_X) { body }` 
+--- (and the function-form `MipsAtomComp_Proc_(ac_X, { body })`) declarations 
+--- and emits a per-directory `<dir_basename>.macs.h` containing one `#define mac_X(sig) \` macro per component + `WORD_COUNT(mac_X, N)` 
 --- entries for downstream offset computation.
 ---
---- **Ported from** `tape_atom_annotation_pass.lua:604-1079`
---- (`find_component_atoms`, `preceding_comment_block`,
---- `extract_arg_names`, `convert_line_comments_to_block`,
---- `compute_component_word_count`, `emit_component_macros_h`).
----
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. See
---- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
+--- Lua 5.3 compatible.
 
 --- @class Component
 --- @field name    string
@@ -28,13 +21,9 @@
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Resolve `arg[0]` to an absolute-ish script directory so that
--- `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; a
--- Phase-6 extraction target (`duffle.setup_package_path()`).
--- Bootstrap: see `ps1_meta.lua` for the rationale.
+-- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
 dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
-local duffle = require("duffle")
+local duffle          = require("duffle")
 local word_count_eval = require("word_count_eval")
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -97,23 +86,19 @@ local GEN_SUBDIR      = "gen"
 -- Local helpers (file I/O + path normalization)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Write content to disk in binary mode so LF line endings are preserved on
--- Windows (text mode would convert LF -> CRLF, breaking byte-identical diffs
--- against git-tracked gen/*.macs.h files which are stored as LF).
+-- Write content to disk in binary mode so LF line endings are preserved on Windows 
+-- (text mode would convert LF -> CRLF, breaking byte-identical diffs against git-tracked gen/*.macs.h files which are stored as LF).
 -- @param path string
 -- @param content string
 local function write_file_lf(path, content)
 	local f = io.open(path, "wb")
 	if not f then error("Cannot write " .. path) end
-	f:write(content)
-	f:close()
+	f:write(content); f:close()
 end
 
--- Convert a (possibly relative) path to an absolute Windows path. The
--- pre-rework output's "// Source:" comment line used the absolute path
--- (e.g. "C:\projects\Pikuma\ps1\code\duffle\lottes_tape.h"); if we want
--- byte-identical output, we must normalize relative -> absolute before
--- emitting that comment.
+-- Convert a (possibly relative) path to an absolute Windows path. 
+-- The pre-rework output's "// Source:" comment line used the absolute path (e.g. "C:\projects\Pikuma\ps1\code\duffle\lottes_tape.h"); 
+-- If we want byte-identical output, we must normalize relative -> absolute before emitting that comment.
 -- @param path string
 -- @return string
 local function to_absolute_path(path)
@@ -134,10 +119,6 @@ local function to_absolute_path(path)
 end
 
 local M = {}
-
--- ════════════════════════════════════════════════════════════════════════════
--- Ported helpers (verbatim from tape_atom_annotation_pass.lua:604-1079)
--- ════════════════════════════════════════════════════════════════════════════
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Function-args extraction (precedes MipsAtomComp_Proc_ invocations)

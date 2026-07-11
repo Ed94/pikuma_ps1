@@ -79,9 +79,9 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 
 --- @class PassOutputEntry
 --- @field [string] string  -- dynamic shape; key is the output kind
-							 -- (e.g. "macs_h", "offsets_h", "errors_h",
-							 -- "annotations_txt", "static_analysis_txt",
-							 -- "summary_txt"), value is the path
+	-- (e.g. "macs_h", "offsets_h", "errors_h",
+	-- "annotations_txt", "static_analysis_txt",
+	-- "summary_txt"), value is the path
 
 --- @class Finding
 --- @field line integer  -- source line (or 0 for pass-level)
@@ -186,11 +186,11 @@ local function request_all_passes(args)
 	end
 end
 
--- Per-flag handlers. Each handler takes (args, argv, i) and returns
--- the new i (so multi-arg flags like --source FILE advance it).
--- Returning nil + os.exit() handles termination flags (--help).
--- This replaces the 8-way `if/elseif/elseif...` chain that nested
--- 4 levels deep and made the dispatch logic hard to scan.
+-- Per-flag handlers. Each handler takes (args, argv, arg_idx) and
+-- returns the new arg_idx (so multi-arg flags like --source FILE
+-- advance it). Returning nil + os.exit() handles termination flags
+-- (--help). This replaces the 8-way `if/elseif/elseif...` chain
+-- that nested 4 levels deep and made the dispatch logic hard to scan.
 local FLAG_HANDLERS = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -233,11 +233,11 @@ EXAMPLE:
 ]])
 end
 
--- Per-flag handlers. Each takes (args, argv, i) and returns the new i
--- (so multi-arg flags like --source FILE advance it). Termination
--- flags like --help call os.exit() instead. This replaces the 8-way
--- `if/elseif/elseif...` chain that nested 4 levels deep and made the
--- dispatch logic hard to scan.
+-- Per-flag handlers. Each takes (args, argv, arg_idx) and returns
+-- the new arg_idx (so multi-arg flags like --source FILE advance
+-- it). Termination flags like --help call os.exit() instead. This
+-- replaces the 8-way `if/elseif/elseif...` chain that nested 4
+-- levels deep and made the dispatch logic hard to scan.
 --
 -- Populated AFTER print_help so the --help handler can reference it
 -- as an upvalue (Lua resolves locals at closure-call time, but if the
@@ -255,24 +255,24 @@ FLAG_HANDLERS["--verbose"] = function(args)
 	args.verbose = true
 end
 
-FLAG_HANDLERS["--source"] = function(args, argv, i)
-	args.sources[#args.sources + 1] = argv[i + 1]
-	return i + 1
+FLAG_HANDLERS["--source"] = function(args, argv, arg_idx)
+	args.sources[#args.sources + 1] = argv[arg_idx + 1]
+	return arg_idx + 1
 end
 
-FLAG_HANDLERS["--metadata"] = function(args, argv, i)
-	args.metadata = argv[i + 1]
-	return i + 1
+FLAG_HANDLERS["--metadata"] = function(args, argv, arg_idx)
+	args.metadata = argv[arg_idx + 1]
+	return arg_idx + 1
 end
 
-FLAG_HANDLERS["--out-root"] = function(args, argv, i)
-	args.out_root = argv[i + 1]
-	return i + 1
+FLAG_HANDLERS["--out-root"] = function(args, argv, arg_idx)
+	args.out_root = argv[arg_idx + 1]
+	return arg_idx + 1
 end
 
-FLAG_HANDLERS["--project-root"] = function(args, argv, i)
-	args.project_root = argv[i + 1]
-	return i + 1
+FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx)
+	args.project_root = argv[arg_idx + 1]
+	return arg_idx + 1
 end
 
 -- Pass-flag handler. Reads the closed-set table, expands --all,
@@ -539,12 +539,12 @@ local function render_dep_graph(passes, requested, closed)
 	local function add(s) lines[#lines + 1] = s end
 
 	add("[ps1_meta] Resolved dependency order (closed under deps):")
-	for i, name in ipairs(closed) do
+	for pass_idx, name in ipairs(closed) do
 		local p = passes[name]
 		local deps_str = (#p.deps == 0) and "(no deps)" or
 			"(deps: " .. table.concat(p.deps, ", ") .. ")"
 		add(string.format("  %d. %-22s %-45s [%s]",
-			i, name, deps_str, p.kind))
+			pass_idx, name, deps_str, p.kind))
 	end
 	add("")
 
@@ -556,11 +556,11 @@ local function render_dep_graph(passes, requested, closed)
 	add("   +-----------+   +-----------------+   +-----------------+")
 	add("   |   word-   |-->|    components   |-->|     offsets     |")
 	add("   |   counts  |   +-----------------+   +-----------------+")
-	add("   |   (load)  |            |                      ^")
-	add("   +-----------+            |                      |")
-	add("        |                   v                      |")
-	add("        |  code/<module>/gen/<basename>.macs.h     |")
-	add("        |     (header - co-located for #include)   |")
+	add("   |   (load)  |            |                        ^")
+	add("   +-----------+            |                        |")
+	add("        |                   v                        |")
+	add("        |  code/<module>/gen/<basename>.macs.h       |")
+	add("        |     (header - co-located for #include)     |")
 	add("        |                                            |")
 	add("        |           +-----------------+              |")
 	add("        +---------->|    annotation   |--------------+")
@@ -569,7 +569,7 @@ local function render_dep_graph(passes, requested, closed)
 	add("        |                   v                        |")
 	add("        |       build/gen/<basename>.errors.h        |")
 	add("        |       build/gen/<basename>.annotations.txt |")
-	add("        |         (report - NOT #included)            |")
+	add("        |         (report - NOT #included)           |")
 	add("        |                                            |")
 	add("        |           +-----------------+              |")
 	add("        +---------->| static-analysis |--------------+")

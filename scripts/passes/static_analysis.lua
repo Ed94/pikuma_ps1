@@ -162,23 +162,23 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 local function find_atom_bodies(source_text)
 	local line_of  = duffle.LineIndex(source_text)
 	local out      = {}
-	local len      = #source_text
-	local i        = 1
-	while i <= len do
-		i = duffle.skip_ws_and_cmt(source_text, i); if i > len then break end
+	local src_len = #source_text
+	local pos      = 1
+	while pos <= src_len do
+		pos = duffle.skip_ws_and_cmt(source_text, pos); if pos > src_len then break end
 		-- Skip preprocessor directives (#define / #include / #pragma /
 		-- etc). Otherwise the `#define MipsAtom_(sym) ...` definition
 		-- in lottes_tape.h gets matched as an atom named "sym" and
 		-- its `body` swallows the next real atom declaration via
 		-- duffle.scan_to_char("{", ...).
-		if source_text:sub(i, i) == "#" then
-			local j = i
-			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
-			i = j + 1
+		if source_text:sub(pos, pos) == "#" then
+			local eol_pos = pos
+			while eol_pos <= src_len and source_text:byte(eol_pos) ~= 10 do eol_pos = eol_pos + 1 end
+			pos = eol_pos + 1
 		else
-			local ident, after = duffle.read_ident(source_text, i)
+			local ident, ident_end = duffle.read_ident(source_text, pos)
 		if not ident then
-			i = i + 1
+			pos = pos + 1
 		elseif ident == "MipsAtom_"
 		    or ident == "MipsAtomComp_"
 		    or ident == "MipsAtomComp_Proc_" then
@@ -190,69 +190,69 @@ local function find_atom_bodies(source_text)
 			else                                         kind = "comp_proc"
 			end
 
-			local open = duffle.skip_ws_and_cmt(source_text, after)
-			if source_text:sub(open, open) ~= "(" then
-				i = open + 1
+			local open_paren = duffle.skip_ws_and_cmt(source_text, ident_end)
+			if source_text:sub(open_paren, open_paren) ~= "(" then
+				pos = open_paren + 1
 			else
-				local inner, after_paren = duffle.read_parens(source_text, open)
+				local inner, after_paren = duffle.read_parens(source_text, open_paren)
 
 				if kind == "comp_proc" then
 					-- MipsAtomComp_Proc_(sym, { body })
 					-- The body is inside the LAST `{ ... }` in the args
 					-- (the macro takes 2 args: sym name, then body in {}).
 					-- Find the last `{` in `inner`, then the matching `}`.
-					local last_open
-					for k = #inner, 1, -1 do
-						if inner:sub(k, k) == "{" then last_open = k; break end
+					local last_brace_pos
+					for search_pos = #inner, 1, -1 do
+						if inner:sub(search_pos, search_pos) == "{" then last_brace_pos = search_pos; break end
 					end
-					if not last_open then
-						i = open + 1
+					if not last_brace_pos then
+						pos = open_paren + 1
 					else
 						-- Walk forward to find matching `}` honoring balanced
 						-- ()/[] and strings. We could call duffle.read_braces
-						-- from last_open+1, but read_braces expects to start at
+						-- from last_brace_pos+1, but read_braces expects to start at
 						-- the brace itself. Inline the walk for clarity.
 						local depth = 1
-						local j = last_open + 1
-						while j <= #inner and depth > 0 do
-							local c = inner:byte(j)
+						local inner_pos = last_brace_pos + 1
+						while inner_pos <= #inner and depth > 0 do
+							local c = inner:byte(inner_pos)
 							if c == 123 then
-								depth = depth + 1; j = j + 1
+								depth = depth + 1; inner_pos = inner_pos + 1
 							elseif c == 125 then
 								depth = depth - 1
 								if depth == 0 then break end
-								j = j + 1
+								inner_pos = inner_pos + 1
 							elseif c == 40 then
-								local _, a = duffle.read_parens(inner, j); j = a
+								local _, a = duffle.read_parens(inner, inner_pos); inner_pos = a
 							elseif c == 91 then
-								local _, a = duffle.read_brackets(inner, j); j = a
+								local _, a = duffle.read_brackets(inner, inner_pos); inner_pos = a
 							elseif c == 34 or c == 39 then
-								j = duffle.duffle.skip_str_or_cmt(inner, j) + 1
+								inner_pos = duffle.duffle.skip_str_or_cmt(inner, inner_pos) + 1
 							else
-								j = j + 1
+								inner_pos = inner_pos + 1
 							end
 						end
 						if depth ~= 0 then
 							-- unmatched; bail
-							i = open + 1
+							pos = open_paren + 1
 						else
 							-- First ident in `inner` is the comp name.
 							local name_match = inner:match("^%s*([%w_]+)")
 							local name = name_match or "?"
-							local body     = inner:sub(last_open + 1, j - 1)
+							local body     = inner:sub(last_brace_pos + 1, inner_pos - 1)
 							-- body_off in full source: position right after the
-							-- LAST `{` in `inner`, which sits at `open+1+last_open`
-							-- (open+1 = just inside the outer paren, +last_open
-							-- = at the `{`).
-							local body_off = open + 1 + last_open
+							-- LAST `{` in `inner`, which sits at `open_paren+1+last_brace_pos`
+							-- (open_paren+1 = just inside the outer paren,
+							-- +last_brace_pos = at the `{`).
+							local body_off = open_paren + 1 + last_brace_pos
 							out[#out + 1] = {
-								line     = line_of(i),
+								line     = line_of(pos),
 								name     = name,
 								body     = body,
 								body_off = body_off + 1,
 								kind     = kind,
 							}
-							i = after_paren
+							pos = after_paren
 						end
 					end
 				else
@@ -260,34 +260,34 @@ local function find_atom_bodies(source_text)
 					-- MipsAtomComp_(sym) { body };
 					-- name is the first arg, body is the FIRST { ... } after
 					-- the paren.
-					local a = 1
-					while a <= #inner and inner:sub(a, a):match("[%s]") do a = a + 1 end
-					local b = a
-					while b <= #inner and inner:sub(b, b):match("[%w_]") do b = b + 1 end
-					local name = inner:sub(a, b - 1)
+					local name_start = 1
+					while name_start <= #inner and inner:sub(name_start, name_start):match("[%s]") do name_start = name_start + 1 end
+					local name_end = name_start
+					while name_end <= #inner and inner:sub(name_end, name_end):match("[%w_]") do name_end = name_end + 1 end
+					local name = inner:sub(name_start, name_end - 1)
 					if name == "" then
-						i = open + 1
+						pos = open_paren + 1
 					else
 						local brace = duffle.scan_to_char(source_text, "{", after_paren)
 						if brace then
 							local body, after_brace = duffle.read_braces(source_text, brace)
 							local body_off = brace + 1
 							out[#out + 1] = {
-								line     = line_of(i),
+								line     = line_of(pos),
 								name     = name,
 								body     = body,
 								body_off = body_off,
 								kind     = kind,
 							}
-							i = after_brace
+							pos = after_brace
 						else
-							i = open + 1
+							pos = open_paren + 1
 						end
 					end
 				end
 			end
 		else
-			i = after
+			pos = ident_end
 		end
 		end  -- close the new preprocessor-skip else
 	end
@@ -309,11 +309,11 @@ local function build_body_line_index(body)
 	local index = {}
 	local len = #body
 	local newline_count = 0
-	for i = 1, len do
-		if i > 1 then
-			index[i] = newline_count + 1   -- line of `i` relative to body
+	for pos = 1, len do
+		if pos > 1 then
+			index[pos] = newline_count + 1   -- line of `pos` relative to body
 		end
-		if body:byte(i) == 10 then        -- '\n'
+		if body:byte(pos) == 10 then        -- '\n'
 			newline_count = newline_count + 1
 		end
 	end
@@ -324,7 +324,7 @@ end
 
 --- Count of COP2-nop words contributed by a single top-level token.
 --   `nop`                  -> 1
---   `nop2`                 -> 2 (i.e. `nop, nop` baked into one asm arg)
+--   `nop2`                 -> 2 (i.e. `nop, nop` baked into one asm word)
 --   `nop,` / `nop2,`        -> same as above; strip trailing comma defensively
 --   anything else          -> 0
 --
@@ -363,37 +363,37 @@ local function tokenize_body(body)
 		-- Find comma/newline/semicolon after this token. Read balanced
 		-- groups so commas inside parens/braces/brackets aren't treated
 		-- as separators. Comments / strings are skipped.
-		local i = rel
-		while i <= len do
-			local c = body:byte(i)
+		local scan = rel
+		while scan <= len do
+			local c = body:byte(scan)
 			if c == 44 then break end               -- ','
 			if c == 10 then break end               -- '\n'
 			if c == 59 then break end               -- ';'
 			if c == 40 then                         -- '('
-				local _, a = duffle.read_parens(body, i); i = a
+				local _, a = duffle.read_parens(body, scan); scan = a
 			elseif c == 123 then                     -- '{'
-				local _, a = duffle.read_braces(body, i); i = a
+				local _, a = duffle.read_braces(body, scan); scan = a
 			elseif c == 91 then                      -- '['
-				local _, a = duffle.read_brackets(body, i); i = a
+				local _, a = duffle.read_brackets(body, scan); scan = a
 			elseif c == 34 or c == 39 then           -- '"' or '\''
-				i = duffle.duffle.skip_str_or_cmt(body, i) + 1
+				scan = duffle.duffle.skip_str_or_cmt(body, scan) + 1
 			else
-				i = i + 1
+				scan = scan + 1
 			end
 		end
-		-- Extract token [rel .. i-1]
-		local tok = duffle.trim(body:sub(rel, i - 1))
+		-- Extract token [rel .. scan-1]
+		local tok = duffle.trim(body:sub(rel, scan - 1))
 		if tok ~= "" then
 			out[#out + 1] = { tok = tok, rel = rel }
 		end
 		-- Move past the separator
-		if i <= len then
-			i = i + 1
+		if scan <= len then
+			scan = scan + 1
 			-- Also skip whitespace before next token
-			local w = duffle.skip_ws_and_cmt(body, i)
-			if w > i then i = w end
+			local w = duffle.skip_ws_and_cmt(body, scan)
+			if w > scan then scan = w end
 		end
-		rel = i
+		rel = scan
 	end
 	return out
 end
@@ -514,13 +514,13 @@ local function check_mac_yield_uniformity(atoms, findings)
 
 		local count = 0
 		local last_idx = 0
-		for i, t in ipairs(tokens) do
+		for tok_idx, t in ipairs(tokens) do
 			local tok = t.tok
 			-- Match `mac_yield(...)` or just `mac_yield`. The bareword
 			-- variant is rare in modern style but tolerated.
 			if tok:match("^mac_yield%s*%(") or tok == "mac_yield" then
 				count = count + 1
-				last_idx = i
+				last_idx = tok_idx
 			end
 		end
 		local function line_for(idx)
@@ -554,8 +554,8 @@ local function check_mac_yield_uniformity(atoms, findings)
 				-- post-token is just `nop` or `nop2` or a branch with `, nop`
 				-- delay slot -- it's the standard "yield, then BD nop" idiom.
 				local post_non_nop = false
-				for j = last_idx + 1, #tokens do
-					local t = tokens[j].tok
+				for search_idx = last_idx + 1, #tokens do
+					local t = tokens[search_idx].tok
 					if t ~= "" and t ~= "nop" and t ~= "nop2"
 					   and not t:match("%,%s*nop%)%s*$") then
 						post_non_nop = true
@@ -607,63 +607,63 @@ end
 local function find_binds_structs(source_text)
 	local line_of = duffle.LineIndex(source_text)
 	local out = {}
-	local len = #source_text
-	local i   = 1
-	while i <= len do
-		i = duffle.skip_ws_and_cmt(source_text, i); if i > len then break end
-		if source_text:sub(i, i) == "#" then
-			local j = i
-			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
-			i = j + 1
+	local src_len = #source_text
+	local pos      = 1
+	while pos <= src_len do
+		pos = duffle.skip_ws_and_cmt(source_text, pos); if pos > src_len then break end
+		if source_text:sub(pos, pos) == "#" then
+			local eol_pos = pos
+			while eol_pos <= src_len and source_text:byte(eol_pos) ~= 10 do eol_pos = eol_pos + 1 end
+			pos = eol_pos + 1
 		else
-			local ident, after = duffle.read_ident(source_text, i)
+			local ident, ident_end = duffle.read_ident(source_text, pos)
 			if not ident then
-				i = i + 1
+				pos = pos + 1
 			elseif ident == "typedef" then
-				local j = duffle.skip_ws_and_cmt(source_text, after)
-				local id2, after2 = duffle.read_ident(source_text, j)
+				local after_typedef = duffle.skip_ws_and_cmt(source_text, ident_end)
+				local id2, id2_end = duffle.read_ident(source_text, after_typedef)
 				if id2 ~= "Struct_" then
-					i = after2 or (j + 1)
+					pos = id2_end or (after_typedef + 1)
 				else
-					local open = duffle.skip_ws_and_cmt(source_text, after2)
-					if source_text:sub(open, open) ~= "(" then
-						i = open + 1
+					local open_paren = duffle.skip_ws_and_cmt(source_text, id2_end)
+					if source_text:sub(open_paren, open_paren) ~= "(" then
+						pos = open_paren + 1
 					else
-						local inner, after_paren = duffle.read_parens(source_text, open)
+						local inner, after_paren = duffle.read_parens(source_text, open_paren)
 						local name = duffle.trim(inner)
 						local brace = duffle.scan_to_char(source_text, "{", after_paren)
 						if not brace then
-							i = open + 1
+							pos = open_paren + 1
 						else
 							local body, after_brace = duffle.read_braces(source_text, brace)
 							local fields = {}
 							local byte_off = 0
-							local k = 1
-							while k <= #body do
-								k = duffle.skip_ws_and_cmt(body, k); if k > #body then break end
-								local tid, tafter = duffle.read_ident(body, k)
-								if not tid then
-									k = k + 1
-								elseif tid == "U4" then
-									local fid, fafter = duffle.read_ident(body, duffle.skip_ws_and_cmt(body, tafter))
-									if fid then
-										fields[#fields + 1] = { name = fid, offset = byte_off }
+							local body_pos = 1
+							while body_pos <= #body do
+								body_pos = duffle.skip_ws_and_cmt(body, body_pos); if body_pos > #body then break end
+								local type_ident, type_end = duffle.read_ident(body, body_pos)
+								if not type_ident then
+									body_pos = body_pos + 1
+								elseif type_ident == "U4" then
+									local field_ident, field_end = duffle.read_ident(body, duffle.skip_ws_and_cmt(body, type_end))
+									if field_ident then
+										fields[#fields + 1] = { name = field_ident, offset = byte_off }
 										byte_off = byte_off + 4
 									end
-									k = fafter or (tafter + 1)
+									body_pos = field_end or (type_end + 1)
 								else
-									k = tafter + 1
+									body_pos = type_end + 1
 								end
 							end
 							if name:sub(1, 6) == "Binds_" then
-								out[#out + 1] = { line = line_of(i), name = name, fields = fields, bytes = byte_off }
+								out[#out + 1] = { line = line_of(pos), name = name, fields = fields, bytes = byte_off }
 							end
-							i = after_brace
+							pos = after_brace
 						end
 					end
 				end
 			else
-				i = after
+				pos = ident_end
 			end
 		end
 	end
@@ -678,77 +678,77 @@ end
 local function find_atom_info(source_text)
 	local line_of = duffle.LineIndex(source_text)
 	local out = {}
-	local len = #source_text
-	local i   = 1
-	while i <= len do
-		i = duffle.skip_ws_and_cmt(source_text, i); if i > len then break end
-		if source_text:sub(i, i) == "#" then
-			local j = i
-			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
-			i = j + 1
+	local src_len = #source_text
+	local pos      = 1
+	while pos <= src_len do
+		pos = duffle.skip_ws_and_cmt(source_text, pos); if pos > src_len then break end
+		if source_text:sub(pos, pos) == "#" then
+			local eol_pos = pos
+			while eol_pos <= src_len and source_text:byte(eol_pos) ~= 10 do eol_pos = eol_pos + 1 end
+			pos = eol_pos + 1
 		else
-			local ident, after = duffle.read_ident(source_text, i)
+			local ident, ident_end = duffle.read_ident(source_text, pos)
 			if not ident then
-				i = i + 1
+				pos = pos + 1
 			elseif ident == "MipsAtom_" then
-				local open = duffle.skip_ws_and_cmt(source_text, after)
-				if source_text:sub(open, open) ~= "(" then
-					i = open + 1
+				local open_paren = duffle.skip_ws_and_cmt(source_text, ident_end)
+				if source_text:sub(open_paren, open_paren) ~= "(" then
+					pos = open_paren + 1
 				else
-					local inner, after_paren = duffle.read_parens(source_text, open)
-					local a = 1
-					while a <= #inner and inner:sub(a, a):match("[%s]") do a = a + 1 end
-					local b = a
-					while b <= #inner and inner:sub(b, b):match("[%w_]") do b = b + 1 end
-					local atom_name = inner:sub(a, b - 1)
+					local inner, after_paren = duffle.read_parens(source_text, open_paren)
+					local name_start = 1
+					while name_start <= #inner and inner:sub(name_start, name_start):match("[%s]") do name_start = name_start + 1 end
+					local name_end = name_start
+					while name_end <= #inner and inner:sub(name_end, name_end):match("[%w_]") do name_end = name_end + 1 end
+					local atom_name = inner:sub(name_start, name_end - 1)
 					local lookahead = duffle.skip_ws_and_cmt(source_text, after_paren)
-					local look_ident, look_after = duffle.read_ident(source_text, lookahead)
+					local look_ident, look_end = duffle.read_ident(source_text, lookahead)
 					if look_ident == "atom_info" then
-						local info_open = duffle.skip_ws_and_cmt(source_text, look_after)
+						local info_open = duffle.skip_ws_and_cmt(source_text, look_end)
 						if source_text:sub(info_open, info_open) == "(" then
 							local info_inner, info_after = duffle.read_parens(source_text, info_open)
 							local binds, reads, writes = nil, nil, nil
-							local j = 1
-							while j <= #info_inner do
-								j = duffle.skip_ws_and_cmt(info_inner, j); if j > #info_inner then break end
-								local sub_ident, sub_after = duffle.read_ident(info_inner, j)
+							local sub_pos = 1
+							while sub_pos <= #info_inner do
+								sub_pos = duffle.skip_ws_and_cmt(info_inner, sub_pos); if sub_pos > #info_inner then break end
+								local sub_ident, sub_end = duffle.read_ident(info_inner, sub_pos)
 								if not sub_ident then
-									j = j + 1
+									sub_pos = sub_pos + 1
 								elseif sub_ident == "atom_bind" then
-									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_after)
+									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
 									if info_inner:sub(sub_open, sub_open) == "(" then
 										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
 										binds = duffle.trim(sub_inner)
-										j = sub_after2
+										sub_pos = sub_after2
 									else
-										j = sub_open + 1
+										sub_pos = sub_open + 1
 									end
 								elseif sub_ident == "atom_reads" or sub_ident == "atom_writes" then
 									local kind = sub_ident
-									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_after)
+									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
 									if info_inner:sub(sub_open, sub_open) == "(" then
 										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
 										local regs = {}
-										local p = 1
-										while p <= #sub_inner do
-											p = duffle.skip_ws_and_cmt(sub_inner, p); if p > #sub_inner then break end
-											local pid, pa = duffle.read_ident(sub_inner, p)
-											if pid then
-												regs[#regs + 1] = duffle.trim(pid)
-												p = pa
+										local sub_inner_pos = 1
+										while sub_inner_pos <= #sub_inner do
+											sub_inner_pos = duffle.skip_ws_and_cmt(sub_inner, sub_inner_pos); if sub_inner_pos > #sub_inner then break end
+											local reg_ident, reg_end = duffle.read_ident(sub_inner, sub_inner_pos)
+											if reg_ident then
+												regs[#regs + 1] = duffle.trim(reg_ident)
+												sub_inner_pos = reg_end
 											else
-												p = p + 1
+												sub_inner_pos = sub_inner_pos + 1
 											end
-											if p > #sub_inner then break end
-											if sub_inner:sub(p, p) == "," then p = p + 1 end
+											if sub_inner_pos > #sub_inner then break end
+											if sub_inner:sub(sub_inner_pos, sub_inner_pos) == "," then sub_inner_pos = sub_inner_pos + 1 end
 										end
 										if kind == "atom_reads" then reads = regs else writes = regs end
-										j = sub_after2
+										sub_pos = sub_after2
 									else
-										j = sub_open + 1
+										sub_pos = sub_open + 1
 									end
 								else
-									j = sub_after
+									sub_pos = sub_end
 								end
 							end
 							out[#out + 1] = {
@@ -756,16 +756,16 @@ local function find_atom_info(source_text)
 								reads = reads or {}, writes = writes or {},
 								info_line = line_of(lookahead),
 							}
-							i = info_after
+							pos = info_after
 						else
-							i = info_open + 1
+							pos = info_open + 1
 						end
 					else
-						i = after_paren
+						pos = after_paren
 					end
 				end
 			else
-				i = after
+				pos = ident_end
 			end
 		end
 	end
@@ -852,8 +852,8 @@ local function check_abi_handoff(atoms, atom_infos, binds_index, findings)
 				end
 
 				if #found_field_seq == #expected_field_seq then
-					for k = 1, #expected_field_seq do
-						if found_field_seq[k] ~= expected_field_seq[k] then
+					for field_idx = 1, #expected_field_seq do
+						if found_field_seq[field_idx] ~= expected_field_seq[field_idx] then
 							findings[#findings + 1] = {
 								atom = a.name, line = a.line,
 								check = "abi_handoff", kind = "error",
@@ -993,9 +993,9 @@ end
 --- walker uses them as branch targets.
 local function find_atom_labels(tokens)
 	local labels = {}
-	for i, t in ipairs(tokens) do
+	for tok_idx, t in ipairs(tokens) do
 		local name = t.tok:match("^atom_label%s*%(%s*([%w_]+)%s*%)")
-		if name then labels[name] = i end
+		if name then labels[name] = tok_idx end
 	end
 	return labels
 end
@@ -1005,20 +1005,20 @@ end
 --- `atom_offset(F, label)` call, the label name is recorded; otherwise
 --- the branch's target is unknown (likely a literal offset) and we
 --- record `false` as a sentinel. The CFG walker checks KEY PRESENCE
---- (via `is_branch(i)`) to decide whether a token is a branch; it
+--- (via `is_branch(tok_idx)`) to decide whether a token is a branch; it
 --- checks the value to decide whether the taken-path target is known.
---- (We can't use `nil` for the unknown-target case because `targets[i] = nil`
---- REMOVES the key from the Lua table, which would make `is_branch(i)`
+--- (We can't use `nil` for the unknown-target case because `targets[tok_idx] = nil`
+--- REMOVES the key from the Lua table, which would make `is_branch(tok_idx)`
 --- return false for both "not a branch" and "branch with unknown target".)
 local function find_branch_targets(tokens)
 	local targets = {}
-	for i, t in ipairs(tokens) do
+	for tok_idx, t in ipairs(tokens) do
 		if t.tok:match("^branch_[%w_]+%s*%(") then
 			-- branch_<cond>(rs, atom_offset(F, label))   or
 			-- branch_<cond>(rs, rt, atom_offset(F, label))
 			-- atom_offset's arg list is (flag, name); we want the name.
 			local label = t.tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)")
-			targets[i] = label or false  -- `false` = known branch, unknown target
+			targets[tok_idx] = label or false  -- `false` = known branch, unknown target
 		end
 	end
 	return targets
@@ -1052,9 +1052,9 @@ local function analyze_atom_paths(atom)
 	local n        = #tokens
 	local costs    = {}
 	local unknown_set = {}
-	for i, t in ipairs(tokens) do
+	for tok_idx, t in ipairs(tokens) do
 		local c, _, unknown = token_cycles(t.tok)
-		costs[i] = c
+		costs[tok_idx] = c
 		if unknown then
 			unknown_set[t.tok:match("^([%w_]+)") or "?"] = true
 		end
@@ -1063,42 +1063,42 @@ local function analyze_atom_paths(atom)
 	-- A token is a terminator if it's `mac_yield` or `mac_yield(...)`.
 	-- The yield transfers control; we don't count its cost (the next
 	-- atom's prologue absorbs it).
-	local function is_terminator(i)
-		local tok = tokens[i].tok
+	local function is_terminator(tok_idx)
+		local tok = tokens[tok_idx].tok
 		return tok == "mac_yield" or tok:match("^mac_yield%s*%(")
 	end
 
 	-- CFG successor function. Returns a list of next token indices for
 	-- the given position. Branch tokens produce 2 successors (fall-through
 	-- + taken); normal tokens produce 1 (next); terminators produce 0.
-	-- BD-slot absorption: a branch at i skips i+1 (the BD slot) in its
+	-- BD-slot absorption: a branch at tok_idx skips tok_idx+1 (the BD slot) in its
 	-- fall-through path; the BD slot's cost is added to the branch's
 	-- own cost instead (so it's counted once).
 	--
-	-- A token is a "branch" if its index is a KEY in the `branches`
-	-- map (regardless of whether the value is nil — a branch with
-	-- nil target means "literal offset, taken path is unknown").
-	-- We check key-presence via `branches[i] ~= nil` because
-	-- `branches[i]` returns nil for both "absent" AND "present with
-	-- nil value" — distinguishing them requires the key check.
-	local function is_branch(i)
-		local v = branches[i]
+-- A token is a "branch" if its index is a KEY in the `branches`
+-- map (regardless of whether the value is nil — a branch with
+-- nil target means "literal offset, taken path is unknown").
+-- We check key-presence via `branches[tok_idx] ~= nil` because
+-- `branches[tok_idx]` returns nil for both "absent" AND "present with
+-- nil value" — distinguishing them requires the key check.
+	local function is_branch(tok_idx)
+		local v = branches[tok_idx]
 		if v == nil then return false end
 		-- v is non-nil: either a string (atom_offset target) or false
 		-- (literal offset, no target). Both indicate a branch.
 		return true
 	end
-	local function successors(i)
-		local tok = tokens[i].tok
-		if is_terminator(i) then
-			return {}, i  -- empty list; term = i signals "path ends here"
+	local function successors(tok_idx)
+		local tok = tokens[tok_idx].tok
+		if is_terminator(tok_idx) then
+			return {}, tok_idx  -- empty list; term = tok_idx signals "path ends here"
 		end
-		if is_branch(i) then
-			local label = branches[i]  -- may be false for literal-offset branches
+		if is_branch(tok_idx) then
+			local label = branches[tok_idx]  -- may be false for literal-offset branches
 			local succ  = {}
-			-- Fall-through: skip the BD slot (i+1). Use i+2.
-			if i + 2 <= n then
-				succ[#succ + 1] = i + 2
+			-- Fall-through: skip the BD slot (tok_idx+1). Use tok_idx+2.
+			if tok_idx + 2 <= n then
+				succ[#succ + 1] = tok_idx + 2
 			end
 			-- Taken: only if the branch has a known atom_offset target.
 			if label then
@@ -1114,8 +1114,8 @@ local function analyze_atom_paths(atom)
 			return succ, nil
 		end
 		-- Normal token: just the next one
-		if i + 1 <= n then
-			return { i + 1 }, nil
+		if tok_idx + 1 <= n then
+			return { tok_idx + 1 }, nil
 		end
 		return {}, nil
 	end
@@ -1129,16 +1129,16 @@ local function analyze_atom_paths(atom)
 	local cycles_max = -1
 	local path_count = 0
 	local has_loops = false
-	local function dfs(i, acc, visited)
+	local function dfs(tok_idx, acc, visited)
 		if path_count >= MAX_PATHS then return end
 		if _G._DEBUG_DFS then
-			io.stderr:write(string.format("dfs(i=%d, acc=%d)\n", i, acc))
+			io.stderr:write(string.format("dfs(tok_idx=%d, acc=%d)\n", tok_idx, acc))
 		end
-		if visited[i] then
+		if visited[tok_idx] then
 			has_loops = true
 			if _G._DEBUG_DFS_LOOP then
-				io.stderr:write(string.format("  -> LOOP at i=%d (tok=%s) acc=%d\n",
-					i, tokens[i].tok, acc))
+				io.stderr:write(string.format("  -> LOOP at tok_idx=%d (tok=%s) acc=%d\n",
+					tok_idx, tokens[tok_idx].tok, acc))
 			end
 			return
 		end
@@ -1146,14 +1146,14 @@ local function analyze_atom_paths(atom)
 		-- Add this token's cost. For a branch, ADD the BD-slot cost too
 		-- (and skip the BD slot in the successor list — already done in
 		-- `successors` above for fall-through; for taken path the BD
-		-- slot was at i+1 which is now skipped entirely).
-		local cost = costs[i]
-		if is_branch(i) and i + 1 <= n then
-			cost = cost + costs[i + 1]
+		-- slot was at tok_idx+1 which is now skipped entirely).
+		local cost = costs[tok_idx]
+		if is_branch(tok_idx) and tok_idx + 1 <= n then
+			cost = cost + costs[tok_idx + 1]
 		end
 		local new_acc = acc + cost
 
-		local succ, term = successors(i)
+		local succ, term = successors(tok_idx)
 		if term then
 			-- Terminator: record the path's cycle sum. We do NOT add
 			-- the terminator token to `visited` -- a path ends here, so
@@ -1166,18 +1166,18 @@ local function analyze_atom_paths(atom)
 			if new_acc > cycles_max then cycles_max = new_acc end
 			return
 		end
-		visited[i] = true
-		for _, next_i in ipairs(succ) do
-			dfs(next_i, new_acc, visited)
+		visited[tok_idx] = true
+		for _, next_tok_idx in ipairs(succ) do
+			dfs(next_tok_idx, new_acc, visited)
 		end
-		visited[i] = nil
+		visited[tok_idx] = nil
 	end
 	if n >= 1 then dfs(1, 0, {}) end
 
 	-- cycles_full: sum of every token's cost (the previous model; useful
 	-- for comparing against the path-aware min/max).
 	local cycles_full = 0
-	for i = 1, n do cycles_full = cycles_full + costs[i] end
+	for tok_idx = 1, n do cycles_full = cycles_full + costs[tok_idx] end
 
 	-- If no paths were recorded (e.g. atom body is empty), cycles_min/max
 	-- default to 0 (atom costs nothing). cycles_full is 0 too in that case.
@@ -1185,7 +1185,7 @@ local function analyze_atom_paths(atom)
 	if cycles_max == -1 then cycles_max = 0 end
 
 	local unknown_list = {}
-	for k in pairs(unknown_set) do unknown_list[#unknown_list + 1] = k end
+	for macro_name in pairs(unknown_set) do unknown_list[#unknown_list + 1] = macro_name end
 	table.sort(unknown_list)
 
 	-- branch_count: number of `branch_*(...)` tokens. (More useful than
@@ -1220,7 +1220,7 @@ local function count_atom_cycles(atom)
 		end
 	end
 	local unknown_list = {}
-	for k in pairs(unknown_set) do unknown_list[#unknown_list + 1] = k end
+	for macro_name in pairs(unknown_set) do unknown_list[#unknown_list + 1] = macro_name end
 	return total, unknown_list
 end
 

@@ -1,5 +1,4 @@
---- audit_lua_nesting.lua — Walk Lua source files and flag any block
---- nesting deeper than 5 levels.
+--- audit_lua_nesting.lua — Walk Lua source files and flag any block nesting deeper than 5 levels.
 ---
 --- Usage:
 ---   luajit scripts/audit_lua_nesting.lua scripts/duffle.lua scripts/ps1_meta.lua
@@ -11,11 +10,10 @@
 --- **Implementation**: a hand-rolled depth tracker that counts:
 ---   - `do`, `function`, `if`, `for`, `while`, `repeat`  -> depth +1
 ---   - `end`, `until`                                    -> depth -1
----   - `else`, `elseif`                                 -> depth unchanged
+---   - `else`, `elseif`                                  -> depth unchanged
 ---
---- **Caveats**: doesn't handle string/comment state (will miscount
---- braces inside strings). For our metaprogram files (no embedded
---- code generation), this is acceptable.
+--- **Caveats**: doesn't fully handle string/comment state (will miscount braces inside multi-line strings or block comments). 
+--- For our metaprogram files (no embedded code generation), this is acceptable.
 
 local M = {}
 
@@ -28,115 +26,107 @@ local BLOCK_OPEN = {
     ["repeat"]  = true,
 }
 
-local function is_block_close(token)
-    return token == "end" or token == "until"
-end
+local function is_block_close(token) return token == "end" or token == "until" end
 
 -- (internal) Walk one source file and return a list of
--- {line, depth, token} entries where depth > MAX_NESTING.
+-- {line, depth, token} entries where depth > max_nesting.
 local function audit_file(path, max_nesting)
     local f = io.open(path, "r")
-    if not f then
-        error("Cannot open " .. path)
-    end
+    if not f then error("Cannot open " .. path) end
     local content = f:read("*a")
     f:close()
 
     local violations = {}
-    local depth = 0
-    local line  = 1
-    local pos   = 1
-    local len   = #content
-    local token_start = 0
+    local depth      = 0
+    local line       = 1
+    local pos        = 1
+    local src_len    = #content
+    local token_idx  = 0
 
-    local function read_ident_at(p)
-        -- Lua ident: [a-zA-Z_][a-zA-Z0-9_]*
-        local start = p
-        if start > len then return nil end
-        local ch = content:sub(start, start)
-        if not (ch:match("[%a_]")) then return nil end
-        p = p + 1
-        while p <= len do
-            local c = content:sub(p, p)
-            if not (c:match("[%w_]")) then break end
-            p = p + 1
+    local function read_ident_at(start_pos)
+        local ident_start = start_pos
+        if ident_start > src_len then return nil end
+        local first_ch = content:sub(ident_start, ident_start)
+        if not (first_ch:match("[%a_]")) then return nil end
+        local scan = start_pos + 1
+        while scan <= src_len do
+            local ch = content:sub(scan, scan)
+            if not (ch:match("[%w_]")) then break end
+            scan = scan + 1
         end
-        return content:sub(start, p - 1), p
+        return content:sub(ident_start, scan - 1), scan
     end
 
-    local function skip_string_or_comment(p)
-        local ch = content:sub(p, p)
+    -- Skip past a string literal or comment starting at `start_pos`.
+    -- Returns the position just past the construct, or nil if `start_pos`
+    -- is not the start of a string/comment.
+    local function skip_string_or_comment(start_pos)
+        local ch = content:sub(start_pos, start_pos)
         if ch == '"' or ch == "'" then
-            -- String literal: skip to matching end-quote.
-            p = p + 1
-            while p <= len do
-                local c = content:sub(p, p)
+            local scan = start_pos + 1
+            while scan <= src_len do
+                local c = content:sub(scan, scan)
                 if c == "\\" then
-                    p = p + 2
+                    scan = scan + 2
                 elseif c == ch then
-                    p = p + 1
-                    break
+                    return scan + 1
                 else
-                    p = p + 1
+                    scan = scan + 1
                 end
             end
-            return p
-        elseif ch == "-" and content:sub(p + 1, p + 1) == "-" then
-            -- Lua comment: -- to end of line.
-            p = p + 2
-            if content:sub(p, p + 1) == "[[" and content:sub(p + 2, p + 3) == "[" then
+            return src_len + 1
+        elseif ch == "-" and content:sub(start_pos + 1, start_pos + 1) == "-" then
+            local scan = start_pos + 2
+            if content:sub(scan, scan + 1) == "[[" and content:sub(scan + 2, scan + 3) == "[" then
                 -- Long bracket comment [==[ ... ]==]
-                p = p + 2
+                scan = scan + 2
                 local eq = ""
-                while content:sub(p, p) == "=" do
+                while content:sub(scan, scan) == "=" do
                     eq = eq .. "="
-                    p = p + 1
+                    scan = scan + 1
                 end
                 local close_marker = "]" .. eq .. "]"
-                local close_pos = content:find(close_marker, p, true)
+                local close_pos = content:find(close_marker, scan, true)
                 if close_pos then
-                    p = close_pos + #close_marker
+                    return close_pos + #close_marker
                 else
-                    p = len + 1
+                    return src_len + 1
                 end
             else
-                while p <= len and content:sub(p, p) ~= "\n" do p = p + 1 end
+                while scan <= src_len and content:sub(scan, scan) ~= "\n" do scan = scan + 1 end
+                return scan + 1
             end
-            return p
-        elseif ch == "[" and content:sub(p + 1, p + 1) == "[" then
-            -- Long bracket string: [==[ ... ]==]
-            p = p + 2
+        elseif ch == "[" and content:sub(start_pos + 1, start_pos + 1) == "[" then
+            local scan = start_pos + 2
             local eq = ""
-            while content:sub(p, p) == "=" do
+            while content:sub(scan, scan) == "=" do
                 eq = eq .. "="
-                p = p + 1
+                scan = scan + 1
             end
             local close_marker = "]" .. eq .. "]"
-            local close_pos = content:find(close_marker, p, true)
+            local close_pos = content:find(close_marker, scan, true)
             if close_pos then
-                p = close_pos + #close_marker
+                return close_pos + #close_marker
             else
-                p = len + 1
+                return src_len + 1
             end
-            return p
         end
         return nil
     end
 
-    local token_count = 0
-    while pos <= len do
+    while pos <= src_len do
         local ch = content:sub(pos, pos)
         if ch == "\n" then line = line + 1 end
 
         local skip_to = skip_string_or_comment(pos)
         if skip_to then
-            for i = pos, skip_to - 1 do
-                if content:sub(i, i) == "\n" then line = line + 1 end
+            for scan = pos, skip_to - 1 do
+                if content:sub(scan, scan) == "\n" then line = line + 1 end
             end
             pos = skip_to
         elseif ch:match("[%a_]") then
             local tok, next_pos = read_ident_at(pos)
-            token_count = token_count + 1
+            token_idx = token_idx + 1
             if BLOCK_OPEN[tok] then
                 depth = depth + 1
                 if depth > max_nesting then
@@ -172,18 +162,17 @@ end
 if arg and arg[1] then
     local max_nesting = 5
     local files = {}
-    for i = 1, #arg do
-        if arg[i] == "--max" and arg[i + 1] then
-            max_nesting = tonumber(arg[i + 1]) or 5
+    for arg_idx = 1, #arg do
+        if arg[arg_idx] == "--max" and arg[arg_idx + 1] then
+            max_nesting = tonumber(arg[arg_idx + 1]) or 5
         else
-            files[#files + 1] = arg[i]
+            files[#files + 1] = arg[arg_idx]
         end
     end
 
     -- Accept either a directory or a file path. Directory args are
     -- expanded via `dir /b *.lua` (Windows) or `ls *.lua` (Unix).
     local function is_dir(p)
-        -- Try opening it as a file; if that succeeds, it's not a dir.
         local f = io.open(p, "r")
         if f then f:close() return false end
         return true
