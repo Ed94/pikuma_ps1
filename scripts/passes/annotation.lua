@@ -1,32 +1,33 @@
--- passes/annotation.lua
---
--- Validate atom annotation DSL usage in source files. Reads:
---   - atom_annot / atom_init / atom_setup / atom_commit / atom_bind
---     / atom_terminate / atom_label / atom_offset / TAPE_WORDS
---   - atom_resource / atom_region / atom_group / atom_cadence / atom_async
---   - Binds_* struct declarations
--- Writes:
---   - <ctx.out_root>/<basename>.errors.h         (with #error directives on findings)
---   - <ctx.out_root>/<basename>.annotations.txt  (human-readable summary)
--- Ported from scripts/tape_atom_annotation_pass.lua:78-545 + 1081-1407
--- (validation only — NOT rendering, which goes to passes/report.lua).
---
--- Coding standard: tabs (1/level), EmmyLua annotations, no regex.
+--- passes/annotation.lua — Atom-annotation DSL validator.
+---
+--- Validates `MipsAtom_(name) atom_info(atom_bind(Binds_X),
+--- atom_reads(...), atom_writes(...)) { ... }` declarations in source files.
+--- Also reads:
+---   - `Binds_*` struct declarations (`typedef Struct_(Binds_X) { ... };`)
+---   - `TAPE_WORDS(mac_X, N)` pragma directives (`#pragma` + `_Pragma`)
+---
+--- Writes:
+---   - `<ctx.out_root>/<dir_basename>.errors.h` — one per module, with
+---     `#error` directives on findings (the C compile will surface the
+---     error)
+---   - The annotations.txt report is rendered by `passes/report.lua`
+---     from the per-module results stashed in `ctx.flags._annot_results`
+---
+--- **Ported from** `scripts/tape_atom_annotation_pass.lua:78-545 +
+--- 1081-1407` (validation only — NOT rendering, which goes to
+--- `passes/report.lua`).
+---
+--- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
+--- Lua 5.3 compatible. See
+--- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
-local script_path = arg and arg[0] or "?"
-local last_sep = 0
-for i = 1, #script_path do
-	local c = script_path:sub(i, i)
-	if c == "/" or c == "\\" then last_sep = i end
-end
-local script_dir = last_sep == 0 and "./" or script_path:sub(1, last_sep)
-package.path   = script_dir .. "../?.lua;" .. script_dir .. "../?/init.lua;" .. script_dir .. "?.lua;" .. package.path
-
-local duffle              = require("duffle")
+-- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
+dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
+local duffle = require("duffle")
 local is_space            = duffle.is_space
 local is_alpha            = duffle.is_alpha
 local is_alnum            = duffle.is_alnum
@@ -52,50 +53,166 @@ local TAPE_ATOM_MACROS  = duffle.TAPE_ATOM_MACROS
 local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Constants
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Atom declaration + annotation identifiers.
+local ATOM_DECL        = "MipsAtom_"
+local ATOM_INFO        = "atom_info"
+local STRUCT_TYPE      = "Struct_"
+local PRAGMA_IDENT     = "pragma"
+local PRAGMA_OPERATOR  = "_Pragma"
+
+-- Struct-name prefix + byte size of U4 fields.
+local BINDS_PREFIX       = "Binds_"
+local BINDS_PREFIX_LEN   = 6    -- = #BINDS_PREFIX
+local U4_TYPE            = "U4"
+local U4_BYTES           = 4    -- sizeof(U4)
+local BINDS_FIELD_PREFIX = "R_"  -- wave-context register name prefix
+
+-- TAPE_WORDS pragma keys (the third token after #pragma).
+local WORDS_KEY             = "words"
+local WORDS_KEY_PREFIX      = "words="   -- the per-macro `words=N` form
+local WORDS_KEY_PREFIX_LEN  = 6          -- = #WORDS_KEY_PREFIX
+local TAPE_ATOM_WORDS_KEY   = "tape_atom words"  -- the _Pragma form
+
+-- ASCII byte values used in tokenization.
+local BYTE_NEWLINE      = 10
+local BYTE_SPACE        = 32
+local BYTE_DQUOTE       = 34
+local BYTE_EQUALS       = 61
+local BYTE_OPEN_PAREN   = 40
+local BYTE_OPEN_BRACE   = 123
+local BYTE_OPEN_BRACK   = 91
+local BYTE_CLOSE_PAREN  = 41
+local BYTE_CLOSE_BRACE  = 125
+local BYTE_CLOSE_BRACK  = 93
+local BYTE_COMMA        = 44
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Type declarations
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- @class SourceFile
+--- @field path     string  -- absolute path to the source file
+--- @field text     string  -- the full source text
+--- @field dir      string  -- the directory containing the source
+--- @field basename string  -- filename without extension
+
+--- @class PassCtx
+--- @field sources            SourceFile[]
+--- @field metadata_path      string
+--- @field shared             table
+--- @field shared.word_counts table<string, integer>
+--- @field out_root           string
+--- @field project_root       string
+--- @field upstream           table<string, table>
+--- @field flags              table
+--- @field flags._annot_results table[]   -- stashed by annotation pass; consumed by report.lua
+--- @field dry_run            boolean
+--- @field verbose            boolean
+
+--- @class PassResult
+--- @field outputs  table[]
+--- @field errors   table[]
+--- @field warnings table[]
+
+--- @class Atom
+--- @field line integer  -- source line of the MipsAtom_ declaration
+--- @field name string  -- atom name (e.g. "cube_g4_face")
+
+--- @class AtomAnnotation
+--- @field line    integer       -- source line of the atom_info call
+--- @field macro   string        -- the macro name (always "atom_info" in the new shape)
+--- @field name    string        -- the atom name
+--- @field kind    string        -- always "info"
+--- @field binds   string|nil    -- Binds_X name if any
+--- @field reads   string[]      -- R_* names (read targets)
+--- @field writes  string[]      -- R_* names (write targets)
+--- @field error   string|nil    -- error message if annotation was malformed
+--- @field errors  string[]      -- nested errors from per-arg validation
+
+--- @class BindsField
+--- @field name   string   -- field name
+--- @field offset integer  -- byte offset within the Binds_X struct
+
+--- @class BindsStruct
+--- @field name   string         -- struct name (e.g. "Binds_Floor")
+--- @field line   integer        -- source line of the typedef
+--- @field bytes  integer        -- total byte size
+--- @field fields BindsField[]   -- the field list
+
+--- @class MacroEntry
+--- @field name  string   -- macro name (e.g. "mac_format_f3_color")
+--- @field line  integer  -- source line of the TAPE_WORDS pragma
+--- @field words integer  -- declared word count
+
+--- @class Finding
+--- @field line integer  -- source line (or 0 for pass-level)
+--- @field msg  string   -- finding message
+
+--- @class AnnotatedResult
+--- @field atoms    Atom[]
+--- @field annots   AtomAnnotation[]
+--- @field macros   MacroEntry[]
+--- @field binds    BindsStruct[]
+--- @field errors   Finding[]
+--- @field warnings Finding[]
+--- @field info     Finding[]
+--- @field pragmas  table  -- reserved (currently always nil; legacy compat)
+
+--- ════════════════════════════════════════════════════════════════════════════
 -- Hand-rolled split helpers (no regex patterns used)
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Split a string at top-level commas. Used inside TAPE_ATOM_* macro
 --- bodies where nested parens/braces/brackets are possible.
+--- @param s string
+--- @return string[]
 local function split_csv_top(s)
-	local tokens = {}
-	local i, start = 1, 1
-	local depth = 0
-	while i <= #s do
-		local c = s:sub(i, i)
-		if c == "(" or c == "{" or c == "[" then
+	local tokens    = {}
+	local pos      = 1
+	local chunk_a  = 1
+	local depth    = 0
+	local str_len  = #s
+	while pos <= str_len do
+		local ch = s:byte(pos)
+		if ch == BYTE_OPEN_PAREN or ch == BYTE_OPEN_BRACE or ch == BYTE_OPEN_BRACK then
 			depth = depth + 1
-			i = i + 1
-		elseif c == ")" or c == "}" or c == "]" then
+			pos  = pos + 1
+		elseif ch == BYTE_CLOSE_PAREN or ch == BYTE_CLOSE_BRACE or ch == BYTE_CLOSE_BRACK then
 			depth = depth - 1
-			i = i + 1
-		elseif c == "," and depth == 0 then
-			tokens[#tokens + 1] = s:sub(start, i - 1)
-			i = i + 1
-			start = i
+			pos  = pos + 1
+		elseif ch == BYTE_COMMA and depth == 0 then
+			tokens[#tokens + 1] = s:sub(chunk_a, pos - 1)
+			pos     = pos + 1
+			chunk_a = pos
 		else
-			i = i + 1
+			pos = pos + 1
 		end
 	end
-	local last = s:sub(start)
+	local last = s:sub(chunk_a)
 	if trim(last) ~= "" then tokens[#tokens + 1] = last end
 	return tokens
 end
 
 --- Split a string into whitespace-separated tokens.
 --- Hand-rolled (no regex patterns).
+--- @param s string
+--- @return string[]
 local function split_ws(s)
 	local tokens = {}
-	local i, n = 1, 1
-	local len = #s
-	while i <= len do
+	local pos   = 1
+	local n     = 1
+	local len   = #s
+	while pos <= len do
 		-- Skip whitespace.
-		while i <= len and is_space(s:sub(i, i)) do i = i + 1 end
-		if i > len then break end
-		local start = i
+		while pos <= len and is_space(s:sub(pos, pos)) do pos = pos + 1 end
+		if pos > len then break end
+		local chunk_a = pos
 		-- Take non-whitespace run.
-		while i <= len and not is_space(s:sub(i, i)) do i = i + 1 end
-		tokens[n] = s:sub(start, i - 1)
+		while pos <= len and not is_space(s:sub(pos, pos)) do pos = pos + 1 end
+		tokens[n] = s:sub(chunk_a, pos - 1)
 		n = n + 1
 	end
 	return tokens
@@ -196,75 +313,120 @@ end
 -- Parse TAPE_WORDS(mac_X, N) pragma directives
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Find every TAPE_WORDS(mac_X, N) pragma in source.
+--- Skip preprocessor directives (lines starting with `#`).
+--- Returns the position past the newline at the end of the line.
+--- @param source string
+--- @param pos integer
+--- @return integer
+local function skip_preprocessor_line(source, pos)
+	local str_len = #source
+	local scan    = pos
+	while scan <= str_len and source:byte(scan) ~= BYTE_NEWLINE do
+		scan = scan + 1
+	end
+	return scan + 1
+end
+
+--- Parse `_Pragma("mac_X tape_atom words=N")` (operator form).
+--- @param source string
+--- @param ident_pos integer  -- position of the `_Pragma` ident
+--- @param after_ident integer -- position just past the ident
+--- @return MacroEntry|nil, integer  -- (entry or nil, new source position)
+local function parse_pragma_operator(source, ident_pos, after_ident)
+	local open_paren = skip_ws_and_cmt(source, after_ident)
+	if source:byte(open_paren) ~= BYTE_OPEN_PAREN then
+		return nil, open_paren + 1
+	end
+	local str, str_end = read_parens(source, open_paren)
+	str = trim(str)
+	if str:sub(1, 1) ~= '"' or str:sub(-1) ~= '"' then
+		return nil, str_end
+	end
+	local inner = str:sub(2, -2)
+	local space = find_byte(inner, BYTE_SPACE, 1)
+	if not space then return nil, str_end end
+	local name = inner:sub(1, space - 1)
+	local rest = inner:sub(space + 1)
+	local eq   = find_byte(rest, BYTE_EQUALS, 1)
+	if not eq then return nil, str_end end
+	local key = trim(rest:sub(1, eq - 1))
+	local val = trim(rest:sub(eq + 1))
+	if key ~= TAPE_ATOM_WORDS_KEY and key ~= WORDS_KEY then return nil, str_end end
+	return {
+		line  = source:sub(1, ident_pos) and 0 or 0,  -- see line_of below
+		name  = name,
+		words = tonumber(val) or 0,
+	}, str_end
+end
+
+--- Parse `#pragma mac_X tape_atom words=N` (directive form).
+--- @param source string
+--- @param ident_pos integer  -- position of the `pragma` ident
+--- @param after_ident integer -- position just past the ident
+--- @return MacroEntry|nil, integer  -- (entry or nil, new source position)
+local function parse_pragma_directive(source, ident_pos, after_ident)
+	local str_len    = #source
+	local rest_start = skip_ws_and_cmt(source, after_ident)
+	local eol        = rest_start
+	while eol <= str_len and source:byte(eol) ~= BYTE_NEWLINE do
+		eol = eol + 1
+	end
+	local line_text = trim(source:sub(rest_start, eol - 1))
+	local tokens    = split_ws(line_text)
+	local entry
+	if #tokens >= 3 and tokens[2] == "tape_atom" and tokens[3]:sub(1, WORDS_KEY_PREFIX_LEN) == WORDS_KEY_PREFIX then
+		entry = {
+			name  = tokens[1],
+			words = tonumber(tokens[3]:sub(WORDS_KEY_PREFIX_LEN + 1)) or 0,
+		}
+	elseif #tokens >= 2 and tokens[2]:sub(1, WORDS_KEY_PREFIX_LEN) == WORDS_KEY_PREFIX then
+		entry = {
+			name  = tokens[1],
+			words = tonumber(tokens[2]:sub(WORDS_KEY_PREFIX_LEN + 1)) or 0,
+		}
+	end
+	if entry then
+		local line_of = duffle.LineIndex(source)
+		entry.line = line_of(ident_pos)
+	end
+	return entry, eol
+end
+
+--- Find every `TAPE_WORDS(mac_X, N)` pragma in source.
 --- Accepts both forms:
----   _Pragma("mac_X tape_atom words=N")     (operator form)
----   #pragma mac_X tape_atom words=N        (directive form)
+---   `_Pragma("mac_X tape_atom words=N")`     (operator form)
+---   `#pragma mac_X tape_atom words=N`        (directive form)
+--- @param source string
+--- @return MacroEntry[]
 local function find_macro_word_annotations(source)
-	local line_of = duffle.LineIndex(source)
-	local out = {}
-	local len = #source
-	local i   = 1
-	while i <= len do
-		i = skip_ws_and_cmt(source, i); if i > len then break end
+	local out     = {}
+	local pos     = 1
+	local str_len = #source
+	while pos <= str_len do
+		pos = skip_ws_and_cmt(source, pos)
+		if pos > str_len then break end
+
 		-- Skip preprocessor directives (lines starting with #).
-		if source:sub(i, i) == "#" then
-			local j = i
-			while j <= len and source:sub(j, j) ~= "\n" do j = j + 1 end
-			i = j + 1
+		if source:byte(pos) == 35 then  -- '#'
+			pos = skip_preprocessor_line(source, pos)
 		else
-			local ident, after = read_ident(source, i)
+			local ident, after_ident = read_ident(source, pos)
 			if not ident then
-				i = i + 1
-			elseif ident == "_Pragma" then
-				local open = skip_ws_and_cmt(source, after)
-				if source:sub(open, open) == "(" then
-					local str, str_end = read_parens(source, open)
-					str = trim(str)
-					if str:sub(1, 1) == '"' and str:sub(-1) == '"' then
-						local inner = str:sub(2, -2)
-						local space = find_byte(inner, " ", 1)
-						if space then
-							local name = inner:sub(1, space - 1)
-							local rest = inner:sub(space + 1)
-							local eq = find_byte(rest, "=", 1)
-							if eq then
-								local key  = trim(rest:sub(1, eq - 1))
-								local val  = trim(rest:sub(eq + 1))
-								if key == "tape_atom words" or key == "words" then
-									local n = tonumber(val) or 0
-									out[#out + 1] = {
-										line = line_of(i),
-										name = name,
-										words = n,
-									}
-								end
-							end
-						end
-					end
-					i = str_end
-				else
-					i = open + 1
+				pos = pos + 1
+			elseif ident == PRAGMA_OPERATOR then
+				local entry, new_pos = parse_pragma_operator(source, pos, after_ident)
+				if entry then
+					local line_of = duffle.LineIndex(source)
+					entry.line = line_of(pos)
+					out[#out + 1] = entry
 				end
-			elseif ident == "pragma" then
-				-- Directive form: `#pragma mac_X tape_atom words=N`
-				local rest_start = skip_ws_and_cmt(source, after)
-				local j = rest_start
-				while j <= len and source:sub(j, j) ~= "\n" do j = j + 1 end
-				local line_text = trim(source:sub(rest_start, j - 1))
-				local tokens = split_ws(line_text)
-				if #tokens >= 3 and tokens[2] == "tape_atom" and tokens[3]:sub(1, 6) == "words=" then
-					local name = tokens[1]
-					local n    = tonumber(tokens[3]:sub(7)) or 0
-					out[#out + 1] = { line = line_of(i), name = name, words = n }
-				elseif #tokens >= 2 and tokens[2]:sub(1, 6) == "words=" then
-					local name = tokens[1]
-					local n    = tonumber(tokens[2]:sub(7)) or 0
-					out[#out + 1] = { line = line_of(i), name = name, words = n }
-				end
-				i = j
+				pos = new_pos
+			elseif ident == PRAGMA_IDENT then
+				local entry, new_pos = parse_pragma_directive(source, pos, after_ident)
+				if entry then out[#out + 1] = entry end
+				pos = new_pos
 			else
-				i = after
+				pos = after_ident
 			end
 		end
 	end
@@ -275,76 +437,105 @@ end
 -- Parse `typedef Struct_(Binds_X) { ... };` declarations
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Find every Binds_* struct declaration.
---- Returns a list of {line, name, fields = {{name, byte_offset}, ...}}.
+--- Walk a `Binds_X` body string and extract U4 fields (name + byte offset).
+--- Only U4 fields are tracked (Binds_* are always word arrays in this
+--- codebase -- pointers stored as U4, indices as U4, etc.).
+--- @param body string  -- the brace-delimited body (without the braces)
+--- @return BindsField[]  -- field list
+--- @return integer       -- total byte size
+local function parse_binds_body(body)
+	local fields   = {}
+	local byte_off = 0
+	local pos      = 1
+	local body_len = #body
+	while pos <= body_len do
+		pos = skip_ws_and_cmt(body, pos)
+		if pos > body_len then break end
+		local type_ident, type_after = read_ident(body, pos)
+		if not type_ident then
+			pos = pos + 1
+		elseif type_ident == U4_TYPE then
+			local field_after = skip_ws_and_cmt(body, type_after)
+			local fid, fafter = read_ident(body, field_after)
+			if fid then
+				fields[#fields + 1] = { name = fid, offset = byte_off }
+				byte_off = byte_off + U4_BYTES
+			end
+			pos = fafter or (type_after + 1)
+		else
+			pos = type_after + 1
+		end
+	end
+	return fields, byte_off
+end
+
+--- Try to parse a `typedef Struct_(Binds_X) { ... };` declaration.
+--- Returns the parsed BindsStruct (if the form matched) and the new
+--- source position. If the form didn't match, returns nil + a position
+--- to continue scanning from.
+--- @param source string
+--- @param ident_pos integer  -- position of the `typedef` ident start
+--- @param after_typedef integer -- position just past `typedef`
+--- @param line_of fun(pos: integer): integer
+--- @return BindsStruct|nil, integer
+local function parse_typedef_binds(source, ident_pos, after_typedef, line_of)
+	local after_type = skip_ws_and_cmt(source, after_typedef)
+	local type_ident, after_type_ident = read_ident(source, after_type)
+	if type_ident ~= STRUCT_TYPE then
+		return nil, after_type_ident or (after_type + 1)
+	end
+
+	local open_paren = skip_ws_and_cmt(source, after_type_ident)
+	if source:byte(open_paren) ~= BYTE_OPEN_PAREN then
+		return nil, open_paren + 1
+	end
+
+	local inner, after_paren = read_parens(source, open_paren)
+	local name = trim(inner)
+
+	local brace = scan_to_char(source, "{", after_paren)
+	if not brace then return nil, open_paren + 1 end
+
+	local body, after_brace = read_braces(source, brace)
+	local fields, bytes      = parse_binds_body(body)
+
+	-- Only emit Binds_* structs (other Struct_ typedefs are ignored).
+	if name:sub(1, BINDS_PREFIX_LEN) ~= BINDS_PREFIX then
+		return nil, after_brace
+	end
+
+	return {
+		line   = line_of(ident_pos),
+		name   = name,
+		fields = fields,
+		bytes  = bytes,
+	}, after_brace
+end
+
+--- Find every `Binds_*` struct declaration.
+--- @param source string
+--- @return BindsStruct[]
 local function find_binds_structs(source)
 	local line_of = duffle.LineIndex(source)
-	local out = {}
-	local len = #source
-	local i   = 1
-	while i <= len do
-		i = skip_ws_and_cmt(source, i); if i > len then break end
-		if source:sub(i, i) == "#" then
-			local j = i
-			while j <= len and source:sub(j, j) ~= "\n" do j = j + 1 end
-			i = j + 1
+	local out     = {}
+	local pos     = 1
+	local str_len = #source
+	while pos <= str_len do
+		pos = skip_ws_and_cmt(source, pos)
+		if pos > str_len then break end
+
+		if source:byte(pos) == 35 then  -- '#'
+			pos = skip_preprocessor_line(source, pos)
 		else
-			local ident, after = read_ident(source, i)
+			local ident, after_ident = read_ident(source, pos)
 			if not ident then
-				i = i + 1
+				pos = pos + 1
 			elseif ident == "typedef" then
-				local j = skip_ws_and_cmt(source, after)
-				local id2, after2 = read_ident(source, j)
-				if id2 ~= "Struct_" then
-					i = after2 or (j + 1)
-				elseif id2 == "Struct_" then
-					local open = skip_ws_and_cmt(source, after2)
-					if source:sub(open, open) == "(" then
-						local inner, after_paren = read_parens(source, open)
-						local name = trim(inner)
-						local brace = scan_to_char(source, "{", after_paren)
-						if brace then
-							local body, after_brace = read_braces(source, brace)
-							local fields = {}
-							local byte_off = 0
-							local k = 1
-							while k <= #body do
-								k = skip_ws_and_cmt(body, k); if k > #body then break end
-								local tid, tafter = read_ident(body, k)
-								if not tid then
-									k = k + 1
-								elseif tid == "U4" then
-									local fid, fafter = read_ident(body, skip_ws_and_cmt(body, tafter))
-									if fid then
-										fields[#fields + 1] = { name = fid, offset = byte_off }
-										byte_off = byte_off + 4
-									end
-									k = fafter or tafter + 1
-								else
-									k = tafter + 1
-								end
-							end
-							-- Only emit Binds_* structs.
-							if name:sub(1, 6) == "Binds_" then
-								out[#out + 1] = {
-									line   = line_of(i),
-									name   = name,
-									fields = fields,
-									bytes  = byte_off,
-								}
-							end
-							i = after_brace
-						else
-							i = open + 1
-						end
-					else
-						i = open + 1
-					end
-				else
-					i = after2 or (j + 1)
-				end
+				local binds_struct, new_pos = parse_typedef_binds(source, pos, after_ident, line_of)
+				if binds_struct then out[#out + 1] = binds_struct end
+				pos = new_pos
 			else
-				i = after
+				pos = after_ident
 			end
 		end
 	end
@@ -355,40 +546,58 @@ end
 -- Find every MipsAtom_(name) { ... } declaration in source
 -- ════════════════════════════════════════════════════════════════════════════
 
+--- Read the next identifier token from `s` starting at `pos`, where the
+--- identifier is a contiguous run of `[a-zA-Z0-9_]` characters (no
+--- underscore-starting alpha-only constraint). Returns the ident + the
+--- position just past it, or nil + pos if no identifier starts there.
+--- @param s string
+--- @param pos integer
+--- @return string|nil, integer
+local function read_alnum_ident(s, pos)
+	local str_len = #s
+	while pos <= str_len and is_space(s:sub(pos, pos)) do pos = pos + 1 end
+	local start = pos
+	while pos <= str_len and is_alnum(s:sub(pos, pos)) do pos = pos + 1 end
+	if pos == start then return nil, pos end
+	return s:sub(start, pos - 1), pos
+end
+
+--- Find every `MipsAtom_(name)` declaration in source. (Just the name +
+--- source line; the body is parsed separately by `parse_mips_atom`.)
+--- @param source string
+--- @return Atom[]
 local function find_atom_names(source)
 	local line_of = duffle.LineIndex(source)
-	local out  = {}
-	local len  = #source
-	local i    = 1
-	while i <= len do
-		i = skip_ws_and_cmt(source, i); if i > len then break end
-		local ident, after = read_ident(source, i)
+	local out     = {}
+	local pos     = 1
+	local str_len = #source
+	while pos <= str_len do
+		pos = skip_ws_and_cmt(source, pos)
+		if pos > str_len then break end
+
+		local ident, after_ident = read_ident(source, pos)
 		if not ident then
-			i = i + 1
-		elseif ident == "MipsAtom_" then
-			local open = skip_ws_and_cmt(source, after)
-			if source:sub(open, open) == "(" then
-				local inner, after_paren = read_parens(source, open)
-				local a = 1
-				while a <= #inner and is_space(inner:sub(a, a)) do a = a + 1 end
-				local b = a
-				while b <= #inner and is_alnum(inner:sub(b, b)) do b = b + 1 end
-				local name = inner:sub(a, b - 1)
-				if name ~= "" then
-					out[#out + 1] = { line = line_of(i), name = name }
+			pos = pos + 1
+		elseif ident ~= ATOM_DECL then
+			pos = after_ident
+		else
+			local open_paren = skip_ws_and_cmt(source, after_ident)
+			if source:byte(open_paren) ~= BYTE_OPEN_PAREN then
+				pos = open_paren + 1
+			else
+				local inner, after_paren = read_parens(source, open_paren)
+				local name, _ = read_alnum_ident(inner, 1)
+				if name and name ~= "" then
+					out[#out + 1] = { line = line_of(pos), name = name }
 				end
 				local brace = scan_to_char(source, "{", after_paren)
 				if brace then
 					local _, after_brace = read_braces(source, brace)
-					i = after_brace
+					pos = after_brace
 				else
-					i = open + 1
+					pos = open_paren + 1
 				end
-			else
-				i = open + 1
 			end
-		else
-			i = after
 		end
 	end
 	return out
@@ -451,72 +660,76 @@ local function new_annot_entry(line, ident, name, kind)
 	}
 end
 
---- Find every MipsAtom_(name) declaration in source, then look for an
---- immediately-following atom_info(...) call. If present, parse its
---- sub-calls into a normalized annotation entry linked to the MipsAtom_
---- name. If no atom_info follows, emit NO annotation entry (atoms
---- without annotations are valid in the new minimal shape).
+--- Try to parse an `atom_info(...)` call right after the `MipsAtom_(name)`
+--- parens. Returns the annotation entry (if present) and the new source
+--- position past the atom_info call. Returns nil if no atom_info follows.
+--- @param source string
+--- @param atom_name string
+--- @param after_mipsatom_paren integer  -- position past the MipsAtom_(...) close paren
+--- @param line_of fun(pos: integer): integer
+--- @return AtomAnnotation|nil, integer  -- (entry or nil, new source position)
+local function parse_atom_info_call(source, atom_name, after_mipsatom_paren, line_of)
+	local lookahead      = skip_ws_and_cmt(source, after_mipsatom_paren)
+	local look_ident, look_after = read_ident(source, lookahead)
+	if look_ident ~= ATOM_INFO then return nil, after_mipsatom_paren end
+
+	local info_open = skip_ws_and_cmt(source, look_after)
+	if source:byte(info_open) ~= BYTE_OPEN_PAREN then
+		return nil, info_open + 1
+	end
+
+	local info_inner, info_after = read_parens(source, info_open)
+	local args = parse_atom_annot_args(info_inner)
+	local entry = new_annot_entry(line_of(lookahead), ATOM_INFO, atom_name, "info")
+	ANNOT_ARG_HANDLERS.info(entry, args)
+	return entry, info_after
+end
+
+--- Find every `MipsAtom_(name) atom_info(...) { ... };` annotation in source.
+--- Returns a list of annotation entries. Atoms without a following
+--- `atom_info(...)` call produce NO entry (atoms without annotations are
+--- valid in the new minimal shape).
+--- @param source string
+--- @return AtomAnnotation[]
 local function find_atom_annotations(source)
 	local line_of = duffle.LineIndex(source)
-	local annots = {}
-	local len = #source
-	local i   = 1
-	while i <= len do
-		i = skip_ws_and_cmt(source, i); if i > len then break end
+	local annots  = {}
+	local pos     = 1
+	local str_len = #source
+	while pos <= str_len do
+		pos = skip_ws_and_cmt(source, pos)
+		if pos > str_len then break end
+
 		-- Skip preprocessor directives (lines starting with #).
-		if source:sub(i, i) == "#" then
-			local j = i
-			while j <= len and source:sub(j, j) ~= "\n" do j = j + 1 end
-			i = j + 1
-			goto continue
-		end
-
-		local ident, after = read_ident(source, i)
-		if not ident then
-			i = i + 1
-		elseif ident == "MipsAtom_" then
-			local open = skip_ws_and_cmt(source, after)
-			if source:sub(open, open) ~= "(" then
-				i = open + 1
-				goto continue
-			end
-			local inner, after_paren = read_parens(source, open)
-			local a = 1
-			while a <= #inner and is_space(inner:sub(a, a)) do a = a + 1 end
-			local b = a
-			while b <= #inner and is_alnum(inner:sub(b, b)) do b = b + 1 end
-			local name = inner:sub(a, b - 1)
-
-			-- Look for atom_info(...) right after MipsAtom_(name).
-			local lookahead = skip_ws_and_cmt(source, after_paren)
-			local look_ident, look_after = read_ident(source, lookahead)
-			if look_ident == "atom_info" then
-				local info_open = skip_ws_and_cmt(source, look_after)
-				if source:sub(info_open, info_open) == "(" then
-					local info_inner, info_after = read_parens(source, info_open)
-					local args = parse_atom_annot_args(info_inner)
-					local entry = new_annot_entry(line_of(lookahead), "atom_info", name, "info")
-					ANNOT_ARG_HANDLERS.info(entry, args)
-					annots[#annots + 1] = entry
-					i = info_after
+		if source:byte(pos) == 35 then  -- '#'
+			pos = skip_preprocessor_line(source, pos)
+		else
+			local ident, after_ident = read_ident(source, pos)
+			if not ident then
+				pos = pos + 1
+			elseif ident == ATOM_DECL then
+				local open_paren = skip_ws_and_cmt(source, after_ident)
+				if source:byte(open_paren) ~= BYTE_OPEN_PAREN then
+					pos = open_paren + 1
 				else
-					i = info_open + 1
+					local inner, after_paren = read_parens(source, open_paren)
+					local name, _ = read_alnum_ident(inner, 1)
+
+					local entry, new_pos = parse_atom_info_call(source, name, after_paren, line_of)
+					if entry then annots[#annots + 1] = entry end
+					pos = new_pos
+
+					-- Skip past the body { ... } if present.
+					local brace = scan_to_char(source, "{", pos)
+					if brace then
+						local _, after_brace = read_braces(source, brace)
+						pos = after_brace
+					end
 				end
 			else
-				-- No atom_info follows this MipsAtom_. Valid in new shape.
-				i = after_paren
+				pos = after_ident
 			end
-
-			-- Skip past the body { ... } if present.
-			local brace = scan_to_char(source, "{", i)
-			if brace then
-				local _, after_brace = read_braces(source, brace)
-				i = after_brace
-			end
-		else
-			i = after
 		end
-		::continue::
 	end
 	return annots
 end

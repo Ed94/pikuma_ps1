@@ -1,67 +1,138 @@
--- passes/static_analysis.lua
---
--- Per-atom static-analysis checks for the tape-atom build pipeline.
--- Currently ships Phase 1 checks (GTE pipeline-fill + mac_yield
--- uniformity). Phases 2/3 (ABI handoff discipline, GPU port-store
--- shape, per-atom cycle budget) extend this file.
---
--- Workspace boundary: same conventions as annotation.lua
---   - primitives from duffle.lua (read_parens, read_braces, scan_to_char, LineIndex)
---   - LPeg not needed: pure hand-rolled string scanning
---   - 5.3-compatible (no <close>, no continue keyword)
---   - no :match/:gmatch
---   - tab indent, EmmyLua @class/@param annotations
---
--- The orchestrator (ps1_meta.lua) wires this module in via the
--- PASSES table:
---   ["static-analysis"] = {
---       module = "passes.static_analysis",
---       kind   = "validation",      -- errors stop the build
---       deps   = {"word-counts", "components"},
---       out    = { { kind = "report",
---                    path_template = "<out_root>/<basename>.static_analysis.txt" } },
---   }
+--- passes/static_analysis.lua — Per-atom static-analysis checks.
+---
+--- The 5 checks currently shipped:
+---   1. **GTE pipeline-fill** — every `gte_cmdw_*` invocation must be
+---      preceded by the minimum number of `nop` words (per
+---      `duffle.duffle.GTE_PIPELINE_LATENCY`) so the COP2 pipeline latency is
+---      fully retired before the command issues.
+---   2. **mac_yield uniformity** — every atom body must contain exactly
+---      one `mac_yield()` call (control transfer pattern).
+---   3. **ABI handoff** — every `atom_bind(Binds_X)` must reference a
+---      `typedef Struct_(Binds_X) { ... }` declaration.
+---   4. **GPU port-store shape** — per-shape (`f3`/`f4`/`g4`/etc.) the
+---      sum of `mac_format_X_color` + `mac_gte_store_X_*` +
+---      `mac_insert_ot_tag_X` words must equal the GP0 cmd's expected
+---      packet size.
+---   5. **per-atom cycle budget** — sum each atom body's instruction
+---      latencies (per `duffle.duffle.INSTRUCTION_LATENCY`); report total.
+---
+--- The orchestrator (`ps1_meta.lua`) wires this module in via the
+--- PASSES table:
+---   `["static-analysis"] = { module = "passes.static_analysis",
+---                            kind   = "validation",
+---                            deps   = {"word-counts", "components"},
+---                            out    = { { kind = "report",
+---                                         path_template = "<out_root>/<basename>.static_analysis.txt" } } }`
+---
+--- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
+--- Lua 5.3 compatible. See
+--- `C:\projects\Pikuma\ps1-ai\conductor\code_styleguides\lua.md`.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
-local script_path = arg and arg[0] or "?"
-local last_sep = 0
-for i = 1, #script_path do
-	local c = script_path:sub(i, i)
-	if c == "/" or c == "\\" then last_sep = i end
-end
-local script_dir = last_sep == 0 and "./" or script_path:sub(1, last_sep)
-package.path   = script_dir .. "../?.lua;" .. script_dir .. "../?/init.lua;" .. script_dir .. "?.lua;" .. package.path
+-- `duffle.setup_package_path()` resolves `arg[0]` and prepends `scripts/`
+-- (and `scripts/passes/`) to `package.path`, so `require("duffle")`
+-- resolves regardless of CWD. See `duffle.lua` for the implementation.
 
-local duffle             = require("duffle")
-local read_ident         = duffle.read_ident
-local skip_ws_and_cmt    = duffle.skip_ws_and_cmt
-local read_parens        = duffle.read_parens
-local read_braces        = duffle.read_braces
-local read_brackets      = duffle.read_brackets
-local scan_to_char       = duffle.scan_to_char
-local split_top_level_commas = duffle.split_top_level_commas
-local trim               = duffle.trim
-local ensure_dir         = duffle.ensure_dir
-local write_file         = duffle.write_file
-local basename_no_ext    = duffle.basename_no_ext
+-- Bootstrap: see `ps1_meta.lua` for the rationale.
+dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
+local duffle = require("duffle")
 
--- Latency table lives in duffle.lua (shared between this pass + future
--- per-atom cycle-budget pass). Lazily read on first use.
-local GTE_PIPELINE_LATENCY = duffle.GTE_PIPELINE_LATENCY
+-- Domain tables (single source of truth in duffle.lua).
 
--- GP0 domain tables (Phase 2 check #4). Same source as GTE_PIPELINE_LATENCY.
-local GP0_CMD_SIZE       = duffle.GP0_CMD_SIZE
-local GP0_CMD_BY_SHAPE   = duffle.GP0_CMD_BY_SHAPE
-local GP0_MACRO_CONTRIB  = duffle.GP0_MACRO_CONTRIB
 
--- Instruction latency table (Phase 3). Per-macro cycle cost in the
--- best-case (no-stall) scenario. Unknown macros default to
--- UNKNOWN_INSTRUCTION_CYCLES with a warning.
-local INSTRUCTION_LATENCY        = duffle.INSTRUCTION_LATENCY
-local UNKNOWN_INSTRUCTION_CYCLES = duffle.UNKNOWN_INSTRUCTION_CYCLES
+
+
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Constants
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Atom declaration + component declaration identifiers.
+local ATOM_DECL        = "MipsAtom_"
+local ATOM_COMP        = "MipsAtomComp_"
+local ATOM_COMP_PROC   = "MipsAtomComp_Proc_"
+
+-- Marker-call identifiers inside atom bodies.
+local ATOM_LABEL       = "atom_label"
+local ATOM_OFFSET      = "atom_offset"
+local ATOM_INFO        = "atom_info"
+local ATOM_BIND        = "atom_bind"
+local ATOM_READS       = "atom_reads"
+local ATOM_WRITES      = "atom_writes"
+local ATOM_YIELD       = "mac_yield"
+local WORD_COUNT_PRAGMA = "WORD_COUNT("
+
+-- ASCII byte values used in tokenization.
+local BYTE_NEWLINE      = 10
+local BYTE_HASH         = 35   -- '#'
+local BYTE_OPEN_PAREN   = 40
+local BYTE_OPEN_BRACE   = 123
+local BYTE_OPEN_BRACK   = 91
+local BYTE_SEMI         = 59
+
+-- Per-check output paths (relative to ctx.out_root).
+local OUTPUT_EXTENSION = ".static_analysis.txt"
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Type declarations
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- @class SourceFile
+--- @field path     string  -- absolute path to the source file
+--- @field text     string  -- the full source text
+--- @field dir      string  -- the directory containing the source
+--- @field basename string  -- filename without extension
+
+--- @class PassCtx
+--- @field sources            SourceFile[]
+--- @field metadata_path      string
+--- @field shared             table
+--- @field shared.word_counts table<string, integer>
+--- @field out_root           string
+--- @field project_root       string
+--- @field upstream           table<string, table>
+--- @field flags              table
+--- @field dry_run            boolean
+--- @field verbose            boolean
+
+--- @class PassResult
+--- @field outputs  table[]
+--- @field errors   table[]
+--- @field warnings table[]
+
+--- @alias AtomName    string  -- lower_snake_case atom name
+--- @alias MacroName   string  -- lower_snake_case macro identifier
+--- @alias CheckName   string  -- "gte_pipeline_fill" | "mac_yield_uniformity" | "abi_handoff" | "gpu_port_store_shape" | "per_atom_cycle_budget"
+
+--- @class AtomBody
+--- @field line     integer  -- source line of the atom declaration
+--- @field name     AtomName -- atom name (e.g. "cube_g4_face")
+--- @field body     string   -- the brace-delimited body (without the braces)
+--- @field body_off integer  -- char offset of body[1] in source
+--- @field kind     string   -- "atom" | "comp_bare" | "comp_proc"
+
+--- @class Token
+--- @field tok      string  -- the raw token text (trimmed)
+--- @field line     integer -- source line of the token's start
+--- @field ident    string|nil -- the leading ident of the token (if any)
+--- @field kind     string  -- "n_words" | "mac_yield" | "gte_cmdw" | "mac_format" | "mac_gte_store" | "mac_insert_ot_tag" | "atom_label" | "atom_offset" | "other"
+
+--- @class Finding
+--- @field line     integer  -- source line of the finding
+--- @field atom     AtomName -- the atom this finding is for (or "")
+--- @field check    CheckName -- the check identifier
+--- @field kind     string   -- "error" | "warning" | "info"
+--- @field msg      string   -- the finding message
+
+--- @class AtomAnalysis
+--- @field atom       AtomBody
+--- @field tokens     Token[]     -- the tokens in the atom body, annotated
+--- @field findings   Finding[]   -- findings for this atom
+--- @field total_cycles integer   -- sum of token cycle costs (Phase 3)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Source walkers
@@ -94,18 +165,18 @@ local function find_atom_bodies(source_text)
 	local len      = #source_text
 	local i        = 1
 	while i <= len do
-		i = skip_ws_and_cmt(source_text, i); if i > len then break end
+		i = duffle.skip_ws_and_cmt(source_text, i); if i > len then break end
 		-- Skip preprocessor directives (#define / #include / #pragma /
 		-- etc). Otherwise the `#define MipsAtom_(sym) ...` definition
 		-- in lottes_tape.h gets matched as an atom named "sym" and
 		-- its `body` swallows the next real atom declaration via
-		-- scan_to_char("{", ...).
+		-- duffle.scan_to_char("{", ...).
 		if source_text:sub(i, i) == "#" then
 			local j = i
 			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
 			i = j + 1
 		else
-			local ident, after = read_ident(source_text, i)
+			local ident, after = duffle.read_ident(source_text, i)
 		if not ident then
 			i = i + 1
 		elseif ident == "MipsAtom_"
@@ -119,11 +190,11 @@ local function find_atom_bodies(source_text)
 			else                                         kind = "comp_proc"
 			end
 
-			local open = skip_ws_and_cmt(source_text, after)
+			local open = duffle.skip_ws_and_cmt(source_text, after)
 			if source_text:sub(open, open) ~= "(" then
 				i = open + 1
 			else
-				local inner, after_paren = read_parens(source_text, open)
+				local inner, after_paren = duffle.read_parens(source_text, open)
 
 				if kind == "comp_proc" then
 					-- MipsAtomComp_Proc_(sym, { body })
@@ -152,11 +223,11 @@ local function find_atom_bodies(source_text)
 								if depth == 0 then break end
 								j = j + 1
 							elseif c == 40 then
-								local _, a = read_parens(inner, j); j = a
+								local _, a = duffle.read_parens(inner, j); j = a
 							elseif c == 91 then
-								local _, a = read_brackets(inner, j); j = a
+								local _, a = duffle.read_brackets(inner, j); j = a
 							elseif c == 34 or c == 39 then
-								j = duffle.skip_str_or_cmt(inner, j) + 1
+								j = duffle.duffle.skip_str_or_cmt(inner, j) + 1
 							else
 								j = j + 1
 							end
@@ -197,9 +268,9 @@ local function find_atom_bodies(source_text)
 					if name == "" then
 						i = open + 1
 					else
-						local brace = scan_to_char(source_text, "{", after_paren)
+						local brace = duffle.scan_to_char(source_text, "{", after_paren)
 						if brace then
-							local body, after_brace = read_braces(source_text, brace)
+							local body, after_brace = duffle.read_braces(source_text, brace)
 							local body_off = brace + 1
 							out[#out + 1] = {
 								line     = line_of(i),
@@ -262,11 +333,11 @@ end
 -- the trailing comma, and `nop` becomes its own token. So no special
 -- handling is needed here.)
 local function nop_word_count(token)
-	local s = trim(token)
+	local s = duffle.trim(token)
 	-- strip trailing comma(s) (defensive against raw text via, but our
 	-- tokenize_body already strips them; this is a safety net)
 	s = s:gsub(",$", "")
-	s = trim(s)
+	s = duffle.trim(s)
 	if s == "nop"  then return 1 end
 	if s == "nop2" then return 2 end
 	return 0
@@ -283,7 +354,7 @@ local function tokenize_body(body)
 	local rel     = 1
 	while rel <= len do
 		-- Find next non-whitespace, non-comment start
-		local ws_end = skip_ws_and_cmt(body, rel)
+		local ws_end = duffle.skip_ws_and_cmt(body, rel)
 		if ws_end > rel then
 			rel = ws_end
 		end
@@ -299,19 +370,19 @@ local function tokenize_body(body)
 			if c == 10 then break end               -- '\n'
 			if c == 59 then break end               -- ';'
 			if c == 40 then                         -- '('
-				local _, a = read_parens(body, i); i = a
+				local _, a = duffle.read_parens(body, i); i = a
 			elseif c == 123 then                     -- '{'
-				local _, a = read_braces(body, i); i = a
+				local _, a = duffle.read_braces(body, i); i = a
 			elseif c == 91 then                      -- '['
-				local _, a = read_brackets(body, i); i = a
+				local _, a = duffle.read_brackets(body, i); i = a
 			elseif c == 34 or c == 39 then           -- '"' or '\''
-				i = duffle.skip_str_or_cmt(body, i) + 1
+				i = duffle.duffle.skip_str_or_cmt(body, i) + 1
 			else
 				i = i + 1
 			end
 		end
 		-- Extract token [rel .. i-1]
-		local tok = trim(body:sub(rel, i - 1))
+		local tok = duffle.trim(body:sub(rel, i - 1))
 		if tok ~= "" then
 			out[#out + 1] = { tok = tok, rel = rel }
 		end
@@ -319,7 +390,7 @@ local function tokenize_body(body)
 		if i <= len then
 			i = i + 1
 			-- Also skip whitespace before next token
-			local w = skip_ws_and_cmt(body, i)
+			local w = duffle.skip_ws_and_cmt(body, i)
 			if w > i then i = w end
 		end
 		rel = i
@@ -333,7 +404,7 @@ end
 
 --- Walk the token list. Whenever we hit a `gte_cmdw_<X>` token, count
 --- consecutive nop words starting at the next token. If count < the
---- minimum declared in `GTE_PIPELINE_LATENCY[X]`, record a finding.
+--- minimum declared in `duffle.GTE_PIPELINE_LATENCY[X]`, record a finding.
 ---
 --- Aliases (`gte_cmdw_rotate_translate_perspective_single` etc.) are
 --- resolved against the lookup table directly; if a macro name is not
@@ -344,7 +415,7 @@ local function check_gte_pipeline_fill(atoms, findings, line_of)
 	-- count consecutive `nop` words IMMEDIATELY PRECEDING it (the
 	-- source-level `nop2, gte_cmdw_X` idiom provides the pre-pipeline
 	-- fill that gte.h's wrapper functions provide internally). If
-	-- count < `GTE_PIPELINE_LATENCY[X]`, record a finding.
+	-- count < `duffle.GTE_PIPELINE_LATENCY[X]`, record a finding.
 	--
 	-- We count nops going backwards from the cmdw token, stopping at
 	-- the first non-nop token. Tokens like `mem_share` or `port_write`
@@ -363,7 +434,7 @@ local function check_gte_pipeline_fill(atoms, findings, line_of)
 			              or tok:match("^(gte_cmdw_[%w_]+)%s*$")
 			if cmdw_full then
 				local variant = cmdw_full:match("^gte_cmdw_(.+)$")
-				local need = GTE_PIPELINE_LATENCY[cmdw_full]
+				local need = duffle.GTE_PIPELINE_LATENCY[cmdw_full]
 				if need == nil then
 					-- alias or new gte_cmdw_<X> not yet in latency table
 					local line = a.line + line_in_body[tokens[ti].rel]
@@ -373,7 +444,7 @@ local function check_gte_pipeline_fill(atoms, findings, line_of)
 						check = "gte_pipeline_fill",
 						kind  = "warning",
 						msg   = string.format(
-							"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
+							"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
 							a.name, line, variant),
 					}
 					ti = ti + 1
@@ -539,42 +610,42 @@ local function find_binds_structs(source_text)
 	local len = #source_text
 	local i   = 1
 	while i <= len do
-		i = skip_ws_and_cmt(source_text, i); if i > len then break end
+		i = duffle.skip_ws_and_cmt(source_text, i); if i > len then break end
 		if source_text:sub(i, i) == "#" then
 			local j = i
 			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
 			i = j + 1
 		else
-			local ident, after = read_ident(source_text, i)
+			local ident, after = duffle.read_ident(source_text, i)
 			if not ident then
 				i = i + 1
 			elseif ident == "typedef" then
-				local j = skip_ws_and_cmt(source_text, after)
-				local id2, after2 = read_ident(source_text, j)
+				local j = duffle.skip_ws_and_cmt(source_text, after)
+				local id2, after2 = duffle.read_ident(source_text, j)
 				if id2 ~= "Struct_" then
 					i = after2 or (j + 1)
 				else
-					local open = skip_ws_and_cmt(source_text, after2)
+					local open = duffle.skip_ws_and_cmt(source_text, after2)
 					if source_text:sub(open, open) ~= "(" then
 						i = open + 1
 					else
-						local inner, after_paren = read_parens(source_text, open)
-						local name = trim(inner)
-						local brace = scan_to_char(source_text, "{", after_paren)
+						local inner, after_paren = duffle.read_parens(source_text, open)
+						local name = duffle.trim(inner)
+						local brace = duffle.scan_to_char(source_text, "{", after_paren)
 						if not brace then
 							i = open + 1
 						else
-							local body, after_brace = read_braces(source_text, brace)
+							local body, after_brace = duffle.read_braces(source_text, brace)
 							local fields = {}
 							local byte_off = 0
 							local k = 1
 							while k <= #body do
-								k = skip_ws_and_cmt(body, k); if k > #body then break end
-								local tid, tafter = read_ident(body, k)
+								k = duffle.skip_ws_and_cmt(body, k); if k > #body then break end
+								local tid, tafter = duffle.read_ident(body, k)
 								if not tid then
 									k = k + 1
 								elseif tid == "U4" then
-									local fid, fafter = read_ident(body, skip_ws_and_cmt(body, tafter))
+									local fid, fafter = duffle.read_ident(body, duffle.skip_ws_and_cmt(body, tafter))
 									if fid then
 										fields[#fields + 1] = { name = fid, offset = byte_off }
 										byte_off = byte_off + 4
@@ -610,60 +681,60 @@ local function find_atom_info(source_text)
 	local len = #source_text
 	local i   = 1
 	while i <= len do
-		i = skip_ws_and_cmt(source_text, i); if i > len then break end
+		i = duffle.skip_ws_and_cmt(source_text, i); if i > len then break end
 		if source_text:sub(i, i) == "#" then
 			local j = i
 			while j <= len and source_text:byte(j) ~= 10 do j = j + 1 end
 			i = j + 1
 		else
-			local ident, after = read_ident(source_text, i)
+			local ident, after = duffle.read_ident(source_text, i)
 			if not ident then
 				i = i + 1
 			elseif ident == "MipsAtom_" then
-				local open = skip_ws_and_cmt(source_text, after)
+				local open = duffle.skip_ws_and_cmt(source_text, after)
 				if source_text:sub(open, open) ~= "(" then
 					i = open + 1
 				else
-					local inner, after_paren = read_parens(source_text, open)
+					local inner, after_paren = duffle.read_parens(source_text, open)
 					local a = 1
 					while a <= #inner and inner:sub(a, a):match("[%s]") do a = a + 1 end
 					local b = a
 					while b <= #inner and inner:sub(b, b):match("[%w_]") do b = b + 1 end
 					local atom_name = inner:sub(a, b - 1)
-					local lookahead = skip_ws_and_cmt(source_text, after_paren)
-					local look_ident, look_after = read_ident(source_text, lookahead)
+					local lookahead = duffle.skip_ws_and_cmt(source_text, after_paren)
+					local look_ident, look_after = duffle.read_ident(source_text, lookahead)
 					if look_ident == "atom_info" then
-						local info_open = skip_ws_and_cmt(source_text, look_after)
+						local info_open = duffle.skip_ws_and_cmt(source_text, look_after)
 						if source_text:sub(info_open, info_open) == "(" then
-							local info_inner, info_after = read_parens(source_text, info_open)
+							local info_inner, info_after = duffle.read_parens(source_text, info_open)
 							local binds, reads, writes = nil, nil, nil
 							local j = 1
 							while j <= #info_inner do
-								j = skip_ws_and_cmt(info_inner, j); if j > #info_inner then break end
-								local sub_ident, sub_after = read_ident(info_inner, j)
+								j = duffle.skip_ws_and_cmt(info_inner, j); if j > #info_inner then break end
+								local sub_ident, sub_after = duffle.read_ident(info_inner, j)
 								if not sub_ident then
 									j = j + 1
 								elseif sub_ident == "atom_bind" then
-									local sub_open = skip_ws_and_cmt(info_inner, sub_after)
+									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_after)
 									if info_inner:sub(sub_open, sub_open) == "(" then
-										local sub_inner, sub_after2 = read_parens(info_inner, sub_open)
-										binds = trim(sub_inner)
+										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
+										binds = duffle.trim(sub_inner)
 										j = sub_after2
 									else
 										j = sub_open + 1
 									end
 								elseif sub_ident == "atom_reads" or sub_ident == "atom_writes" then
 									local kind = sub_ident
-									local sub_open = skip_ws_and_cmt(info_inner, sub_after)
+									local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_after)
 									if info_inner:sub(sub_open, sub_open) == "(" then
-										local sub_inner, sub_after2 = read_parens(info_inner, sub_open)
+										local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
 										local regs = {}
 										local p = 1
 										while p <= #sub_inner do
-											p = skip_ws_and_cmt(sub_inner, p); if p > #sub_inner then break end
-											local pid, pa = read_ident(sub_inner, p)
+											p = duffle.skip_ws_and_cmt(sub_inner, p); if p > #sub_inner then break end
+											local pid, pa = duffle.read_ident(sub_inner, p)
 											if pid then
-												regs[#regs + 1] = trim(pid)
+												regs[#regs + 1] = duffle.trim(pid)
 												p = pa
 											else
 												p = p + 1
@@ -816,14 +887,14 @@ end
 --- For every baked atom body, detect which GP0 primitive it's emitting
 --- (first `mac_format_<shape>_color` call). Sum contributions from
 --- `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.
---- Compare to GP0_CMD_SIZE[cmd_byte]. Mismatch = error.
+--- Compare to duffle.GP0_CMD_SIZE[cmd_byte]. Mismatch = error.
 ---
 --- Soft behavior (warnings):
 ---   - Atoms emitting a primitive via raw `store_word(R_PrimCursor, ...)`
 ---     (no `mac_format_X_color` call) emit a "manual packet assembly"
 ---     advisory. Cannot auto-validate.
 ---   - Atoms containing a `mac_<name>(...)` call whose name is not in
----     GP0_MACRO_CONTRIB emit a "new macro; update GP0_MACRO_CONTRIB"
+---     duffle.GP0_MACRO_CONTRIB emit a "new macro; update duffle.GP0_MACRO_CONTRIB"
 ---     advisory.
 ---
 --- Applies only to `kind = "atom"` (baked atoms). Components don't
@@ -844,24 +915,24 @@ local function check_gpu_portstore_shape(atoms, findings)
 				-- to get the bare shape suffix (f3 / g4 / etc).
 				local shape = tok:match("^mac_format_([%w_]+)_color%s*%(")
 				            or tok:match("^mac_format_([%w_]+)_color%s*$")
-				if shape and GP0_CMD_BY_SHAPE[shape] then
+				if shape and duffle.GP0_CMD_BY_SHAPE[shape] then
 					if not cmd_byte then
-						cmd_byte = GP0_CMD_BY_SHAPE[shape]
+						cmd_byte = duffle.GP0_CMD_BY_SHAPE[shape]
 						cmd_line = a.line + line_in_body[t.rel]
 					end
 					saw_format = true
 					local contrib_key = "mac_format_" .. shape .. "_color"
-					local n = GP0_MACRO_CONTRIB[contrib_key]
+					local n = duffle.GP0_MACRO_CONTRIB[contrib_key]
 					if n then contrib = contrib + n end
 				end
 				local gte_store = tok:match("^mac_gte_store_[%w_]+")
 				if gte_store then
-					local n = GP0_MACRO_CONTRIB[gte_store]
+					local n = duffle.GP0_MACRO_CONTRIB[gte_store]
 					if n then contrib = contrib + n end
 				end
 				local ot_tag = tok:match("^mac_insert_ot_tag_([%w_]+)")
 				if ot_tag then
-					local n = GP0_MACRO_CONTRIB["mac_insert_ot_tag_" .. ot_tag]
+					local n = duffle.GP0_MACRO_CONTRIB["mac_insert_ot_tag_" .. ot_tag]
 					if n then contrib = contrib + n end
 				end
 				if tok:match("^store_word%s*%(") and tok:find("R_PrimCursor", 1, true) then
@@ -879,7 +950,7 @@ local function check_gpu_portstore_shape(atoms, findings)
 					}
 				end
 			else
-				local expected = GP0_CMD_SIZE[cmd_byte]
+				local expected = duffle.GP0_CMD_SIZE[cmd_byte]
 				if contrib ~= expected then
 					findings[#findings + 1] = {
 						atom = a.name, line = cmd_line or a.line,
@@ -899,20 +970,20 @@ end
 
 --- Compute the cycle cost of one token. The token is a string like
 --- `add_ui(R_T0, R_T1, 4)` or `nop2` or `gte_cmdw_rtpt`. Returns:
----   cycles       - integer cycle cost (from INSTRUCTION_LATENCY, or
----                  UNKNOWN_INSTRUCTION_CYCLES if not in the table)
+---   cycles       - integer cycle cost (from duffle.INSTRUCTION_LATENCY, or
+---                  duffle.UNKNOWN_INSTRUCTION_CYCLES if not in the table)
 ---   macro_name   - the bare ident (e.g. `add_ui`, `gte_cmdw_rtpt`,
 ---                  `nop2`, `mac_yield`)
----   unknown      - true iff the macro wasn't in INSTRUCTION_LATENCY
+---   unknown      - true iff the macro wasn't in duffle.INSTRUCTION_LATENCY
 --- The function strips trailing `()` from function-call style macros
 --- so `mac_yield()` and `mac_yield` resolve identically.
 local function token_cycles(tok)
 	-- Extract the leading ident. Tolerate `(...)` args.
 	local ident = tok:match("^([%w_]+)")
-	if not ident then return UNKNOWN_INSTRUCTION_CYCLES, "?", true end
-	local cost = INSTRUCTION_LATENCY[ident]
+	if not ident then return duffle.UNKNOWN_INSTRUCTION_CYCLES, "?", true end
+	local cost = duffle.INSTRUCTION_LATENCY[ident]
 	if cost == nil then
-		return UNKNOWN_INSTRUCTION_CYCLES, ident, true
+		return duffle.UNKNOWN_INSTRUCTION_CYCLES, ident, true
 	end
 	return cost, ident, false
 end
@@ -968,7 +1039,7 @@ end
 ---                    mac_yield or end-of-body)
 ---   has_loops      - true iff a path re-entered a token it had visited
 ---                    (warning; loop bodies aren't supported)
----   unknown_macros - list of unique macro names not in INSTRUCTION_LATENCY
+---   unknown_macros - list of unique macro names not in duffle.INSTRUCTION_LATENCY
 ---   cycles_full    - sum of ALL token costs (the previous "best case"
 ---                    value; included for backward-compat; double-counts
 ---                    the BD-slot nop relative to cycles_min/max)
@@ -1155,7 +1226,7 @@ end
 
 --- Per-source check that emits one finding per unknown macro seen
 --- (deduplicated across atoms so the warning section doesn't get
---- spammed with N copies of "macro X not in INSTRUCTION_LATENCY").
+--- spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
 local function check_per_atom_cycle_budget(atoms, findings)
 	local unknown_seen = {}
 	for _, a in ipairs(atoms) do
@@ -1166,8 +1237,8 @@ local function check_per_atom_cycle_budget(atoms, findings)
 				findings[#findings + 1] = {
 					atom = a.name, line = a.line,
 					check = "per_atom_cycle_budget", kind = "warning",
-					msg = string.format("%s at line %d uses macro `%s` which is not in INSTRUCTION_LATENCY; cycle count will be +%d per call (best-case). Add an entry to duffle.M.INSTRUCTION_LATENCY.",
-						a.name, a.line, name, UNKNOWN_INSTRUCTION_CYCLES),
+					msg = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; cycle count will be +%d per call (best-case). Add an entry to duffle.M.duffle.INSTRUCTION_LATENCY.",
+						a.name, a.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
 				}
 			end
 		end
@@ -1284,7 +1355,7 @@ end
 local function emit_static_analysis_txt(ctx, src, result)
 	local out_path = ctx.out_root .. "/" .. src.basename .. ".static_analysis.txt"
 	if ctx.dry_run then return out_path end
-	ensure_dir(ctx.out_root)
+	duffle.ensure_dir(ctx.out_root)
 
 	local lines = {}
 	local function add(s) lines[#lines + 1] = s end
@@ -1352,7 +1423,7 @@ local function emit_static_analysis_txt(ctx, src, result)
 		add(string.format("  %s", i_.msg))
 	end
 
-	write_file(out_path, table.concat(lines, "\n") .. "\n")
+	duffle.write_file(out_path, table.concat(lines, "\n") .. "\n")
 	return out_path
 end
 
@@ -1370,7 +1441,7 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	local dir_basename = dir:match("([^/\\]+)$") or dir
 	local out_path = ctx.out_root .. "/" .. dir_basename .. ".static_analysis.txt"
 	if ctx.dry_run then return out_path end
-	ensure_dir(ctx.out_root)
+	duffle.ensure_dir(ctx.out_root)
 
 	local lines = {}
 	local function add(s) lines[#lines + 1] = s end
@@ -1545,7 +1616,7 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 		end
 	end
 
-	write_file(out_path, table.concat(lines, "\n") .. "\n")
+	duffle.write_file(out_path, table.concat(lines, "\n") .. "\n")
 	return out_path
 end
 

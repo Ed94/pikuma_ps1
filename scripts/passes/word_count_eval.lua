@@ -23,16 +23,8 @@
 -- `require("duffle")` resolves against `scripts/` regardless of CWD.
 -- Note: this boilerplate is duplicated in 6 other entry scripts; a
 -- Phase-6 extraction target (`duffle.setup_package_path()`).
-local script_path = arg and arg[0] or "?"
-local last_sep = 0
-for sep_pos = 1, #script_path do
-	local ch = script_path:sub(sep_pos, sep_pos)
-	if ch == "/" or ch == "\\" then last_sep = sep_pos end
-end
-local script_dir = last_sep == 0 and "./" or script_path:sub(1, last_sep)
-package.path   = script_dir .. "?.lua;" .. script_dir .. "?/init.lua;" .. package.path
-package.cpath = "C:\\projects\\Pikuma\\ps1\\toolchain\\luajit-2.1\\lib\\lua\\5.1\\?.dll;" .. package.cpath
-
+-- Bootstrap: see `ps1_meta.lua` for the rationale.
+dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
 local duffle = require("duffle")
 
 -- ════════════════════════════════════════════════════════════════════════════

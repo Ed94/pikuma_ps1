@@ -1,76 +1,105 @@
--- ps1_meta.lua
---
--- Orchestrator entry point for the tape-atom metaprogram pipeline.
--- Dispatches to pass modules under scripts/passes/, resolving dependencies
--- topologically. Single CLI surface (`--<pass>` flags + auto-dep + --dry-run).
---
--- Coding standard: tabs (1/level), EmmyLua annotations, no regex,
--- Lua 5.3 compatible.
-
+--- ps1_meta.lua — Orchestrator entry point for the tape-atom metaprogram pipeline.
+---
+--- Dispatches to pass modules under `scripts/passes/`, resolving
+--- dependencies topologically (Kahn's algorithm + cycle detection).
+--- Single CLI surface (`--<pass>` flags + auto-dep expansion + --dry-run).
+---
+--- **Architecture**:
+---   - **PASSES table** — declarative dep graph (data, not code).
+---   - **FLAG_HANDLERS table** — per-flag CLI dispatchers (handler-map
+---     pattern; replaces an 8-way if/elseif chain).
+---   - **parse_args** → **build_ctx** → **topo_sort** → **dispatch_passes**.
+---
+--- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
+--- Lua 5.3 compatible. 
+--- 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
-local script_path = arg and arg[0] or "?"
-local last_sep = 0
-for i = 1, #script_path do
-	local c = script_path:sub(i, i)
-	if c == "/" or c == "\\" then last_sep = i end
-end
-local script_dir = last_sep == 0 and "./" or script_path:sub(1, last_sep)
-package.path   = script_dir .. "?.lua;" .. script_dir .. "?/init.lua;" .. package.path
-package.cpath = "C:\\projects\\Pikuma\\ps1\\toolchain\\luajit-2.1\\lib\\lua\\5.1\\?.dll;" .. package.cpath
-
+-- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
+-- Note: this boilerplate is duplicated in 6 other entry scripts; a
+-- Phase-6 extraction target (`duffle.setup_package_path()`).
+-- Bootstrap: load `duffle_paths.lua` (uses `git rev-parse` to find the repo root, then sets package.path + package.cpath).
+-- After this line, `require("duffle")` and `require("passes.X")` both resolve.
+dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
 local duffle = require("duffle")
-local dirname          = duffle.dirname
-local basename_no_ext  = duffle.basename_no_ext
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Constants
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Exit codes (per the --help text and the post-build summary convention).
+local EXIT_OK                  = 0
+local EXIT_VALIDATION_ERRORS   = 1
+local EXIT_INTERNAL_ERROR      = 2
+
+-- Default --out-root value if not provided.
+local DEFAULT_OUT_ROOT         = "build/gen"
+
+-- Sentinel for "all passes" in `PASS_FLAG_TO_NAME`. Distinguishes `--all` from the per-pass flags (which map to individual pass names).
+local ALL_PASSES_SENTINEL      = "__all__"
+
+-- Sentinel key for the pass-flag dispatcher in `FLAG_HANDLERS`. 
+-- The actual pass names are looked up via `PASS_FLAG_TO_NAME`, not direct dispatch, so this key never matches a real flag.
+local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class PassDescriptor
---- @field module   string         -- module name passed to require()
---- @field kind     string         -- "shared" | "header-output" | "validation" | "report"
---- @field deps     string[]       -- names of upstream passes
---- @field desc     string         -- human description (used by --help + ASCII graph)
---- @field out      PassOutput[]   -- output paths (used by --dry-run + report)
+--- @field module string       -- module name passed to require()
+--- @field kind   string       -- "shared" | "header-output" | "validation" | "report"
+--- @field deps   string[]     -- names of upstream passes
+--- @field desc   string       -- human description (used by --help + ASCII graph)
+--- @field out    PassOutput[] -- output paths (used by --dry-run + report)
 
 --- @class PassOutput
 --- @field kind          string  -- "header" | "report"
 --- @field path_template string  -- e.g. "<source_dir>/gen/<basename>.macs.h"
 
 --- @class SourceFile
---- @field path     string
---- @field text     string
---- @field dir      string
---- @field basename string
+--- @field path     string  -- absolute path to the source file
+--- @field text     string  -- the full source text
+--- @field dir      string  -- the directory containing the source
+--- @field basename string  -- filename without extension
 
 --- @class PassCtx
---- @field sources            SourceFile[]
---- @field metadata_path      string
---- @field shared             table
---- @field shared.word_counts table<string, integer>
---- @field out_root           string
---- @field project_root       string
---- @field upstream           table<string, table>
---- @field flags              table
---- @field dry_run            boolean
---- @field verbose            boolean
+--- @field sources            SourceFile[]           -- all source files in the build
+--- @field metadata_path      string                 -- path to word_count.metadata.h
+--- @field shared             table                  -- cross-pass shared state
+--- @field shared.word_counts table<string, integer> -- populated by word-counts pass
+--- @field out_root           string                 -- output root (e.g. "build/gen")
+--- @field project_root       string                 -- project root (e.g. "code/")
+--- @field upstream           table<string, table>   -- per-pass output accumulator
+--- @field flags              table                  -- CLI flags + per-pass stash
+--- @field dry_run            boolean                -- if true, compute but don't write
+--- @field verbose            boolean                -- if true, log diagnostic info
+
+--- @class PassOutputEntry
+--- @field [string] string  -- dynamic shape; key is the output kind
+							 -- (e.g. "macs_h", "offsets_h", "errors_h",
+							 -- "annotations_txt", "static_analysis_txt",
+							 -- "summary_txt"), value is the path
+
+--- @class Finding
+--- @field line integer  -- source line (or 0 for pass-level)
+--- @field msg  string   -- finding message
 
 --- @class PassResult
---- @field outputs  table[]
---- @field errors   table[]
---- @field warnings table[]
+--- @field outputs  PassOutputEntry[] -- emitted file paths
+--- @field errors   Finding[]         -- build-stops (per-pass kind policy)
+--- @field warnings Finding[]         -- informational
 
 --- @class ParsedArgs
---- @field requested_set string[]    -- pass names to run (explicit --all expanded)
---- @field sources       string[]    -- --source values
---- @field metadata      string      -- --metadata value
---- @field out_root      string      -- --out-root value (default "build/gen")
---- @field project_root  string      -- --project-root value (default dirname(metadata))
---- @field dry_run       boolean
---- @field verbose       boolean
+--- @field requested_set string[]  -- pass names to run (explicit --all expanded)
+--- @field sources       string[]  -- --source values
+--- @field metadata      string    -- --metadata value
+--- @field out_root      string    -- --out-root value (default "build/gen")
+--- @field project_root  string    -- --project-root value (default dirname(metadata))
+--- @field dry_run       boolean   -- if true, compute but don't write
+--- @field verbose       boolean   -- if true, log diagnostic info
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PASSES table (data, not code) — the orchestrator's dep graph
@@ -78,7 +107,7 @@ local basename_no_ext  = duffle.basename_no_ext
 
 local PASSES = {
 	["word-counts"] = {
-		module = "word_count_eval",
+		module = "passes.word_count_eval",
 		kind   = "shared",
 		deps   = {},
 		desc   = "Build the shared metadata table (metadata.h + .macs.h)",
@@ -140,7 +169,7 @@ local PASS_FLAG_TO_NAME = {
 	["--offsets"]         = "offsets",
 	["--static-analysis"] = "static-analysis",
 	["--report"]          = "report",
-	["--all"]             = "__all__",
+	["--all"]             = ALL_PASSES_SENTINEL,
 }
 
 local ALL_PASS_NAMES = {
@@ -150,6 +179,7 @@ local ALL_PASS_NAMES = {
 
 --- Append every pass name to args.requested_set. Used by --all and
 --- by the "default to --all if no pass flags were given" fallback.
+--- @param args ParsedArgs
 local function request_all_passes(args)
 	for _, n in ipairs(ALL_PASS_NAMES) do
 		args.requested_set[#args.requested_set + 1] = n
@@ -247,9 +277,9 @@ end
 
 -- Pass-flag handler. Reads the closed-set table, expands --all,
 -- appends to requested_set. Single-statement, no nesting.
-FLAG_HANDLERS["__pass__"] = function(args, a)
+FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
 	local name = PASS_FLAG_TO_NAME[a]
-	if name == "__all__" then
+	if name == ALL_PASSES_SENTINEL then
 		request_all_passes(args)
 		return
 	end
@@ -265,26 +295,26 @@ local function parse_args(argv)
 		requested_set = {},
 		sources       = {},
 		metadata      = nil,
-		out_root      = "build/gen",
+		out_root      = DEFAULT_OUT_ROOT,
 		project_root  = nil,
 		dry_run       = false,
 		verbose       = false,
 	}
 
-	local i = 1
-	while i <= #argv do
-		local a = argv[i]
+	local pos = 1
+	while pos <= #argv do
+		local a = argv[pos]
 		local handler = FLAG_HANDLERS[a]
 		if handler then
-			i = handler(args, argv, i) or i
+			pos = handler(args, argv, pos) or pos
 		elseif PASS_FLAG_TO_NAME[a] then
-			FLAG_HANDLERS["__pass__"](args, a)
+			FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY](args, a)
 		else
 			io.stderr:write("ps1_meta: unknown flag '" .. a .. "'\n")
 			io.stderr:write("Run with --help for usage.\n")
-			os.exit(2)
+			os.exit(EXIT_INTERNAL_ERROR)
 		end
-		i = i + 1
+		pos = pos + 1
 	end
 
 	-- Default: --all if no explicit pass flags.
@@ -294,20 +324,20 @@ local function parse_args(argv)
 
 	-- Defaults: project_root = dirname(metadata).
 	if args.metadata and not args.project_root then
-		local d = dirname(args.metadata)
+		local d = duffle.dirname(args.metadata)
 		if #d > 0 and (d:sub(-1) == "/" or d:sub(-1) == "\\") then
 			d = d:sub(1, -2)
 		end
-		args.project_root = dirname(d)
+		args.project_root = duffle.dirname(d)
 	end
 
 	if not args.metadata then
 		io.stderr:write("ps1_meta: --metadata PATH is required\n")
-		os.exit(2)
+		os.exit(EXIT_INTERNAL_ERROR)
 	end
 	if #args.sources == 0 then
 		io.stderr:write("ps1_meta: at least one --source FILE is required\n")
-		os.exit(2)
+		os.exit(EXIT_INTERNAL_ERROR)
 	end
 
 	return args
@@ -328,13 +358,13 @@ local function build_ctx(args)
 		local f = io.open(path, "r")
 		if not f then
 			io.stderr:write("ps1_meta: cannot open --source " .. path .. "\n")
-			os.exit(2)
+			os.exit(EXIT_INTERNAL_ERROR)
 		end
 		local text = f:read("*a")
 		f:close()
 
-		local dir      = dirname(path)
-		local basename = basename_no_ext(path)
+		local dir      = duffle.dirname(path)
+		local basename = duffle.basename_no_ext(path)
 		if #dir > 0 and (dir:sub(-1) == "/" or dir:sub(-1) == "\\") then
 			dir = dir:sub(1, -2)
 		end
@@ -364,14 +394,13 @@ end
 -- Topological sort (Kahn's algorithm + cycle detection)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Topologically sort the requested pass set, augmented with all transitive deps.
---- Detects cycles and errors out with details.
+--- Compute the dep-closure of `requested_set`: include every pass name
+--- transitively required by the requested set.
 ---
 --- @param passes table<string, PassDescriptor>
 --- @param requested_set string[]
---- @return string[]  -- execution order
-local function topo_sort(passes, requested_set)
-	-- Step 1: dep-closure.
+--- @return table<string, boolean>  -- set of pass names needed (including transitive deps)
+local function dep_closure(passes, requested_set)
 	local needed = {}
 	for _, name in ipairs(requested_set) do needed[name] = true end
 	local changed = true
@@ -390,42 +419,91 @@ local function topo_sort(passes, requested_set)
 			end
 		end
 	end
+	return needed
+end
 
-	-- Step 2: Kahn's algorithm.
+--- Count entries in a hash table (Lua's `#t` doesn't work for hash tables).
+--- @param t table
+--- @return integer
+local function count_entries(t)
+	local n = 0
+	for _ in pairs(t) do n = n + 1 end
+	return n
+end
+
+--- Compute in-degrees for the Kahn sort: for each pass in `needed`,
+--- the number of its deps that are also in `needed`.
+---
+--- @param passes table<string, PassDescriptor>
+--- @param needed table<string, boolean>
+--- @return table<string, integer>
+local function compute_in_degrees(passes, needed)
 	local in_degree = {}
 	for name, _ in pairs(needed) do in_degree[name] = 0 end
 	for name, _ in pairs(needed) do
 		for _, dep in ipairs(passes[name].deps) do
 			if needed[dep] then
-				in_degree[name] = (in_degree[name] or 0) + 1
+				in_degree[name] = in_degree[name] + 1
 			end
 		end
 	end
+	return in_degree
+end
 
-	-- Seed with passes that have no unmet deps. Sort for determinism.
+--- Seed the Kahn ready queue with passes whose in-degree is 0, sorted
+--- alphabetically for deterministic execution order.
+---
+--- @param in_degree table<string, integer>
+--- @return string[]
+local function seed_ready_queue(in_degree)
 	local ready = {}
 	for name, deg in pairs(in_degree) do
 		if deg == 0 then ready[#ready + 1] = name end
 	end
 	table.sort(ready)
+	return ready
+end
 
-	local order = {}
-	while #ready > 0 do
-		local n = table.remove(ready, 1)
-		order[#order + 1] = n
-		for name, _ in pairs(needed) do
-			if name ~= n then
-				for _, dep in ipairs(passes[name].deps) do
-					if dep == n then
-						in_degree[name] = in_degree[name] - 1
-						if in_degree[name] == 0 then
-							ready[#ready + 1] = name
-							table.sort(ready)
-						end
+-- (internal) Pop the next ready pass, decrement the in-degree of every
+-- remaining pass that depended on it (inserting newly-zero-degree passes
+-- back into the ready queue), and append to `order`. Keeps `ready` sorted.
+-- @param passes table<string, PassDescriptor>
+-- @param needed table<string, boolean>
+-- @param in_degree table<string, integer>
+-- @param ready string[]
+-- @param order string[]
+local function process_next_ready(passes, needed, in_degree, ready, order)
+	local just_finished = table.remove(ready, 1)
+	order[#order + 1] = just_finished
+	for name, _ in pairs(needed) do
+		if name ~= just_finished then
+			for _, dep in ipairs(passes[name].deps) do
+				if dep == just_finished then
+					in_degree[name] = in_degree[name] - 1
+					if in_degree[name] == 0 then
+						ready[#ready + 1] = name
+						table.sort(ready)
 					end
 				end
 			end
 		end
+	end
+end
+
+--- Topologically sort the requested pass set, augmented with all transitive deps.
+--- Detects cycles and errors out with details.
+---
+--- @param passes table<string, PassDescriptor>
+--- @param requested_set string[]
+--- @return string[]  -- execution order
+local function topo_sort(passes, requested_set)
+	local needed    = dep_closure(passes, requested_set)
+	local in_degree = compute_in_degrees(passes, needed)
+	local ready     = seed_ready_queue(in_degree)
+
+	local order = {}
+	while #ready > 0 do
+		process_next_ready(passes, needed, in_degree, ready, order)
 	end
 
 	-- Cycle detection: if order doesn't include all needed passes,
@@ -433,12 +511,7 @@ local function topo_sort(passes, requested_set)
 	-- before Kahn could process them). Without this check, a fully-
 	-- closed cycle (e.g. A -> B -> A) would silently return an empty
 	-- order list, leaving the orchestrator to dispatch nothing.
-	--
-	-- Note: `#needed` returns 0 for hash tables (needed is a set,
-	-- not a sequence), so we count entries explicitly.
-	local needed_count = 0
-	for _ in pairs(needed) do needed_count = needed_count + 1 end
-	if #order ~= needed_count then
+	if #order ~= count_entries(needed) then
 		for name, deg in pairs(in_degree) do
 			if deg > 0 then
 				error("dependency cycle detected involving pass '" .. name .. "'")
@@ -518,6 +591,68 @@ end
 -- Main orchestrator
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- (internal) Push a pass's outputs + warnings into `ctx.upstream[name]`
+-- for downstream passes to consume.
+-- @param ctx PassCtx
+-- @param pass_name string
+-- @param result PassResult
+local function accumulate_pass_result(ctx, pass_name, result)
+	ctx.upstream[pass_name] = ctx.upstream[pass_name] or {}
+	for _, out in ipairs(result.outputs or {}) do
+		table.insert(ctx.upstream[pass_name], out)
+	end
+	for _, warn in ipairs(result.warnings or {}) do
+		table.insert(ctx.upstream[pass_name], warn)
+	end
+end
+
+-- (internal) If the pass's kind is in PASS_KIND_STOP_ON_ERROR and it
+-- reported errors, write each error to stderr. Returns true if any
+-- validation errors were reported.
+-- @param pass_name string
+-- @param pass PassDescriptor
+-- @param result PassResult
+-- @return boolean
+local function report_validation_errors(pass_name, pass, result)
+	local has_errors = result.errors and #result.errors > 0
+	if not (has_errors and PASS_KIND_STOP_ON_ERROR[pass.kind]) then
+		return false
+	end
+	for _, e in ipairs(result.errors) do
+		io.stderr:write(string.format("[%s] line %d: %s\n",
+			pass_name, e.line or 0, e.msg or ""))
+	end
+	return true
+end
+
+-- (internal) Run each pass in `order` in topological sequence. Tracks
+-- `had_errors` instead of os.exit()ing mid-loop so the report pass (and
+-- any other downstream pass) still runs and writes its per-module files.
+-- The legacy behavior was os.exit(1) on the first error, which left
+-- downstream per-module reports un-emitted; the 2026-07-10 change to
+-- per-module aggregation made that visible to the user (build/gen had
+-- only the partial reports from the failing pass), so we now complete
+-- all passes and set the exit code at the end.
+---
+-- @param ctx PassCtx
+-- @param order string[]
+-- @return boolean  -- true if any validation errors were reported
+local function dispatch_passes(ctx, order)
+	ctx.shared = {}
+	local had_errors = false
+	for _, pass_name in ipairs(order) do
+		local pass   = PASSES[pass_name]
+		local mod    = require(pass.module)
+		local result = mod.run(ctx)
+
+		accumulate_pass_result(ctx, pass_name, result)
+		if report_validation_errors(pass_name, pass, result) then
+			had_errors = true
+		end
+	end
+	return had_errors
+end
+
 --- Main entry point. Runs the requested passes in dep-topological order.
 --- @param argv string[]
 local function main(argv)
@@ -525,63 +660,25 @@ local function main(argv)
 		local args = parse_args(argv)
 		local ctx  = build_ctx(args)
 
-		-- 1. Compute requested set + dep-closed set.
 		local requested = args.requested_set
 		local closed    = topo_sort(PASSES, requested)
 
-		-- 2. --dry-run: print dep order + ASCII graph, exit 0.
+		-- --dry-run: print dep order + ASCII graph, exit OK.
 		if args.dry_run then
 			io.write(render_dep_graph(PASSES, requested, closed))
-			os.exit(0)
+			os.exit(EXIT_OK)
 		end
 
-		-- 3. Run passes in topological order. We track a `had_errors`
-		-- flag instead of os.exit()'ing mid-loop, so the report pass
-		-- (and any other downstream pass) still runs and writes its
-		-- per-module reports. The exit code at the end is set to 1
-		-- if any pass reported errors.
-		ctx.shared = {}
-		local had_errors = false
-		for _, pass_name in ipairs(closed) do
-			local pass  = PASSES[pass_name]
-			local mod   = require(pass.module)
-			local result = mod.run(ctx)
-
-			-- Collect outputs + warnings into ctx.upstream.
-			ctx.upstream[pass_name] = ctx.upstream[pass_name] or {}
-			for _, out in ipairs(result.outputs or {}) do
-				table.insert(ctx.upstream[pass_name], out)
-			end
-			for _, warn in ipairs(result.warnings or {}) do
-				table.insert(ctx.upstream[pass_name], warn)
-			end
-
-			-- Record errors for the exit code, but DON'T os.exit() here:
-			-- the report pass (kind="report") and any other downstream
-			-- pass still needs to run to emit its per-module files.
-			-- The legacy behavior was os.exit(1) on the first error,
-			-- which left downstream per-module reports un-emitted; the
-			-- 2026-07-10 change to per-module aggregation made that
-			-- visible to the user (build/gen had only the partial
-			-- reports from the failing pass), so we now complete
-			-- all passes and set the exit code at the end.
-			if (result.errors and #result.errors > 0) and PASS_KIND_STOP_ON_ERROR[pass.kind] then
-				for _, e in ipairs(result.errors) do
-					io.stderr:write(string.format("[%s] line %d: %s\n",
-						pass_name, e.line or 0, e.msg or ""))
-				end
-				had_errors = true
-			end
-		end
-		if had_errors then os.exit(1) end
+		local had_errors = dispatch_passes(ctx, closed)
+		if had_errors then os.exit(EXIT_VALIDATION_ERRORS) end
 	end)
 
 	if not ok then
 		io.stderr:write("[ps1_meta] internal error: " .. tostring(err) .. "\n")
-		os.exit(2)
+		os.exit(EXIT_INTERNAL_ERROR)
 	end
 
-	os.exit(0)
+	os.exit(EXIT_OK)
 end
 
 main({...})
