@@ -6,18 +6,20 @@ A rest from the usual.
 
 ## Dependencies
 
-I will be programming from a Windows 11 machine:
+I will be programming from a Windows 11 machine (may eventually try this on the Steam Deck...):
 ![system_info](./docs/assets/system_info.png)
-
-```ps1
-# not really used yet for scripts (may never)
-scoop install lua
-```
 
 [armips](https://github.com/Kingcom/armips)
 
 * Supports doing bare-metal assembly for the ps1
 * `scoop install armips` or just clone and build..
+
+[luajit-2.1](https://github.com/LuaJIT/LuaJIT.git)
+
+```scoop install luajit```
+
+* Used for lua scripts
+* Particularly, ps1_meta.lua which is a staged metaprogram pass for the custom C11 Assembly DSL used in this codebase.
 
 [pscx-redux](https://github.com/grumpycoders/pcsx-redux/): A collection of tools, research, hardware design, and libraries aiming at development and reverse engineering on the PlayStation 1.
 
@@ -57,3 +59,4 @@ scoop install lua
 ![polys!](./docs/assets/pcsx-redux.main_2025-08-03_20-45-35.png)  
 ![hello_psyq!](./docs/assets/pcsx-redux_2025-08-05_23-01-19.png)
 ![cube!](./docs/assets/pcsx-redux_2025-10-11_03-04-01.png)
+![cube and floor!](./docs/assets/pcsx-redux_2026-07-10_22-47-02.png)
