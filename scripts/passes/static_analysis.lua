@@ -784,7 +784,7 @@ local function validate(ctx, src)
 	local findings = {}
 	for _, a in ipairs(atoms) do
 		a.paths                  = a.paths or {}
-		a.paths.tokens           = duffle.tokenize_body(a.body)
+		a.paths.tokens           = a.body_tokens
 		a.paths.line_in_body     = duffle.build_body_line_index(a.body)
 		a.paths.tok_class        = classify_tokens(a.paths.tokens)
 

@@ -164,44 +164,6 @@ local function scan_for_atom_markers(token, at_pos, labels, branches)
 	end
 end
 
---- Find the end position (just past the closing ')') of the first atom_label/atom_offset call in `tok`. Returns 0 if no such call.
---- @param tok string
---- @return integer  -- 0 if no marker call found; otherwise end-1 (just past ')')
-local function find_marker_call_end(tok)
-	local pos     = 1
-	local tok_len = #tok
-	while pos <= tok_len do
-		pos = duffle.skip_ws_and_cmt(tok, pos)
-		if pos > tok_len then break end
-		local ch = tok:sub(pos, pos)
-		if duffle.is_space(ch) then
-			pos = pos + 1
-		elseif ch == "/" then
-			-- comment — skip past it (delegated to duffle.skip_str_or_cmt)
-			local nx = duffle.skip_str_or_cmt(tok, pos)
-			pos = (nx > pos) and nx or (pos + 1)
-		else
-			local ident, after_ident = duffle.read_ident(tok, pos)
-			-- scan: <ident>
-			if ident == LABEL_MARKER or ident == OFFSET_MARKER then
-				-- scan: atom_label(<name>)  OR  atom_offset(<tag>, <target>)
-				local open_paren = duffle.skip_ws_and_cmt(tok, after_ident)
-				if tok:sub(open_paren, open_paren) == "(" then
-					local _, end_paren = duffle.read_parens(tok, open_paren)
-					return end_paren - 1
-				end
-				return 0
-			end
-			pos = after_ident or (pos + 1)
-		end
-	end
-	return 0
-end
-
--- ════════════════════════════════════════════════════════════════════════════
--- Per-atom body scan (for atom_label / atom_offset markers)
--- ════════════════════════════════════════════════════════════════════════════
-
 -- (internal) Count words emitted by the rest of `tok` after a marker call
 -- (the marker call itself emits 0 words, but the source pattern may bundle the marker with the next instruction on the same line,
 -- separated by no top-level comma).
@@ -210,9 +172,12 @@ end
 -- @param word_counts table
 -- @return integer
 local function count_marker_rest(tok, word_counts)
-	local marker_end = find_marker_call_end(tok)
-	if marker_end <= 0 or marker_end >= #tok then return 0 end
-	local rest = duffle.trim(tok:sub(marker_end + 1))
+	-- duffle.find_marker_call_end returns the position PAST the closing `)` of the marker call
+	-- (or nil if `tok` isn't a marker call). Canonical impl in duffle.lua is faster than the
+	-- file-local copy that used to live here (byte-indexed, no `tok:sub` per char).
+	local marker_end = duffle.find_marker_call_end(tok)
+	if not marker_end or marker_end >= #tok then return 0 end
+	local rest = duffle.trim(tok:sub(marker_end))
 	if rest == "" then return 0 end
 	return count_token_words(rest, word_counts)
 end
@@ -348,17 +313,19 @@ end
 
 local M = {}
 
--- Project the pre-scanned SourceScan entries into the {name, body} shape this pass needs.
+-- Project the pre-scanned SourceScan entries into the {name, body, body_tokens} shape this pass needs.
 -- MipsAtom_ entries have kind="atom"; MipsCode code_<name> entries have kind="raw_atom".
+-- `body_tokens` is set by scan-source on every `scan.atoms[i]` / `scan.raw_atoms[i]`; we carry it forward
+-- so `scan_atom_body` reads from the precomputed table directly (no per-atom tokenize_body fallback).
 -- @param scan table  -- SourceScan from duffle.scan_source
--- @return table[]  -- list of {name=, body=}
+-- @return table[]  -- list of {name=, body=, body_tokens=}
 local function project_atoms(scan)
 	local out = {}
 	for _, a in ipairs(scan.atoms) do
-		out[#out + 1] = { name = a.raw_name, body = a.body }
+		out[#out + 1] = { name = a.raw_name, body = a.body, body_tokens = a.body_tokens }
 	end
 	for _, a in ipairs(scan.raw_atoms) do
-		out[#out + 1] = { name = a.name, body = a.body }
+		out[#out + 1] = { name = a.name, body = a.body, body_tokens = a.body_tokens }
 	end
 	return out
 end
@@ -374,7 +341,7 @@ local function process_source(ctx, src)
 
 	local atoms_data = {}
 	for _, atom in ipairs(atoms) do
-		local labels, branches, total = scan_atom_body(atom.body_tokens or duffle.tokenize_body(atom.body), ctx.shared.word_counts)
+		local labels, branches, total = scan_atom_body(atom.body_tokens, ctx.shared.word_counts)
 		atoms_data[#atoms_data + 1] = {
 			name        = atom.name,
 			total_words = total,

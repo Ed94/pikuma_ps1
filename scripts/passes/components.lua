@@ -350,6 +350,8 @@ end
 
 -- Project pre-scanned MipsAtomComp_ / MipsAtomComp_Proc_ entries into Component shape.
 -- Does per-source backward lookups for args (preceding function decl) and comment (preceding comment block).
+-- Carries `body_tokens` forward from scan-source so word_count_rec reads from the precomputed table
+-- instead of calling duffle.tokenize_body again.
 -- @param source string  -- the full source text (needed for backward lookups)
 -- @param scan  table   -- SourceScan from duffle.scan_source
 -- @return Component[]
@@ -360,11 +362,12 @@ local function project_components(source, scan)
 			local args    = find_function_args_for(source, a.raw_name, a.ident_pos)
 			local comment = preceding_comment_block(source, a.ident_pos)
 			out[#out + 1] = {
-				line    = a.line,
-				name    = a.name,
-				body    = a.body,
-				args    = args,
-				comment = comment,
+				line        = a.line,
+				name        = a.name,
+				body        = a.body,
+				body_tokens = a.body_tokens,
+				args        = args,
+				comment     = comment,
 			}
 		end
 	end
@@ -445,7 +448,7 @@ local function word_count_rec(name, comp_by_name, wc, cache)
 	local n
 	if cc then
 		n = 0
-		local tokens = cc.body_tokens or duffle.tokenize_body(cc.body)
+		local tokens = cc.body_tokens
 		for _, t in ipairs(tokens) do
 			local trimmed = t.tok
 			if trimmed ~= "" then

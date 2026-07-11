@@ -20,6 +20,12 @@
 
 local M = {}
 
+-- Optional native extension: lfs (LuaFileSystem). When present, ensure_dir uses
+-- lfs.attributes + lfs.mkdir instead of spawning `cmd.exe mkdir` — saves ~55ms per
+-- unique directory on Windows. Built by `update_deps.ps1` to `toolchain/lfs/lfs.dll`
+-- and wired into package.cpath by `scripts/duffle_paths.lua`.
+local lfs = pcall(require, "lfs") and require("lfs") or nil
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Cross-file type aliases
 -- ════════════════════════════════════════════════════════════════════════════
@@ -308,21 +314,37 @@ end
 -- Convert a (possibly relative) path to an absolute path, using CWD if needed.
 -- Normalizes forward slashes to backslashes on Windows.
 -- Used for byte-identical emit: the // Source: comment line uses the absolute path.
+--
+-- The CWD is memoized (one `io.popen("cd")` per process — ~50ms on Windows).
+-- Without the cache, calling this per-source in the components pass added ~1.5s to a 30-source build.
 -- @param path string
 -- @return string
+local _absolute_path_cache = {}
+
 function M.to_absolute_path(path)
+	if _absolute_path_cache[path] then return _absolute_path_cache[path] end
 	if #path >= 2 and path:sub(2, 2) == ":" then
 		-- Already absolute; normalize slashes for consistency.
-		return (path:gsub("/", "\\"))
+		local result = (path:gsub("/", "\\"))
+		_absolute_path_cache[path] = result
+		return result
 	end
-	local p = io.popen("cd")
-	if not p then return path end
-	local cwd = p:read("*l")
-	p:close()
-	if not cwd then return path end
+	-- Native: lfs.currentdir() is ~0ms vs io.popen("cd") at ~50ms per call.
+	local cwd
+	if lfs then
+		cwd = lfs.currentdir()
+	else
+		local p = io.popen("cd")
+		if not p then _absolute_path_cache[path] = path; return path end
+		cwd = p:read("*l")
+		p:close()
+	end
+	if not cwd then _absolute_path_cache[path] = path; return path end
 	cwd = cwd:gsub("/", "\\")
 	local tail = (path:gsub("/", "\\"))
-	return cwd .. "\\" .. tail
+	local result = cwd .. "\\" .. tail
+	_absolute_path_cache[path] = result
+	return result
 end
 
 -- Cache of directories already verified to exist in this process.
@@ -334,8 +356,15 @@ local _ensured_dirs = {}
 function M.ensure_dir(path)
 	if _ensured_dirs[path] then return end
 	_ensured_dirs[path] = true
-	local is_win = package.config:sub(1, 1) == "\\"
-	os.execute(is_win and ('if not exist "' .. path .. '" mkdir "' .. path .. '"') or ('mkdir -p "' .. path .. '" 2>/dev/null'))
+	if lfs then
+		-- Native: ~0ms when dir exists (the common case). lfs.mkdir on a new dir is ~2ms (no shell spawn).
+		-- Falls through silently if lfs.mkdir fails (e.g. permission denied); the subsequent write_file will surface the error.
+		if lfs.attributes(path, "mode") ~= "directory" then lfs.mkdir(path) end
+	else
+		-- Fallback: shell mkdir. Slow (~55ms per call on Windows due to cmd.exe spawn) but works without lfs.
+		local is_win = package.config:sub(1, 1) == "\\"
+		os.execute(is_win and ('if not exist "' .. path .. '" mkdir "' .. path .. '"') or ('mkdir -p "' .. path .. '" 2>/dev/null'))
+	end
 end
 
 -- Test helper: clear the cache (used by tests + between process runs).
