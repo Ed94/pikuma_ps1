@@ -132,14 +132,14 @@ MipsAtomComp_(ac_gte_load_tri_verts) {
 MipsAtomComp_(ac_insert_ot_tag_f3) {
 	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
 	add_u_self(  R_T1, R_OtBase),                              // T1 = & OrderingTable[OTZ]
-	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // AT = old_ot_head
+	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
 	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (5 - 1) << 24 = 4 << 24
 	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
 	or_u(        R_AT, R_AT, R_V0),                            // Merge length
-	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)), // prim->tag = packed(prim_length, old_addr)
+	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
 	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
 	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
-	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // OrderingTable[OTZ] = PrimCursor
+	store_word(  R_AT, R_T1,         O_(PolyTag,code)),        // OrderingTable[OTZ] = PrimCursor
 };
 
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
@@ -147,14 +147,14 @@ MipsAtomComp_(ac_insert_ot_tag_f3) {
 MipsAtomComp_(ac_insert_ot_tag_g4) {
 	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
 	add_u_self(  R_T1, R_OtBase),                              // T1 = & OrderingTable[OTZ]
-	load_word(   R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // AT = old_ot_head
+	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
 	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (9 - 1) << 24 = 8 << 24
 	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
 	or_u(        R_AT, R_AT, R_V0),                            // Merge length
-	store_word(  R_AT, R_PrimCursor, O_(PolyTag,bf_addr_len)), // prim->tag = packed(prim_length, old_addr)
+	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
 	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
 	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
-	store_word(  R_AT, R_T1,         O_(PolyTag,bf_addr_len)), // OrderingTable[OTZ] = PrimCursor
+	store_word(  R_AT, R_T1,         O_(PolyTag,code)),        // OrderingTable[OTZ] = PrimCursor
 };
 
 /* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given

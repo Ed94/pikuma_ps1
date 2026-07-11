@@ -378,7 +378,7 @@ enum {
 };
 typedef Struct_(PolyTag) {
 	union {
-		U4 bf_addr_len;
+		U4 code;
 		struct {
 			U4 addr: 24;
 			U4 len:  8;
