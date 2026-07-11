@@ -19,24 +19,58 @@
 
 local M = {}
 
--- Cache key for the repo root. Stored in `package.loaded` (process-global) so all 8 entry scripts + passes scripts share one git call.
--- Without this cache, `git rev-parse --show-toplevel` runs once per script load.
+-- Cache key for the repo root. Stored in `package.loaded` (process-global) so all 8 entry scripts + passes scripts share one resolution.
 local CACHE_KEY = "__duffle_repo_root__"
 
---- Resolve the repo root via git (cached after first call).
---- Returns a normalized path with a trailing forward-slash, or nil if not in a git repo.
+--- Resolve the repo root from this script's own path. Zero shell spawn.
+--- `duffle_paths.lua` always lives at `<repo>/scripts/duffle_paths.lua`, so the repo root is the
+--- parent of the directory containing this script. We derive it directly from `debug.getinfo(1, "S").source`
+--- (returns `@<path>` for the currently-running chunk).
+---
+--- Replaces the prior `io.popen("git rev-parse --show-toplevel")` approach, which cost ~100-180ms per
+--- LuaJIT process on Windows due to git's CLI startup. The path-derive approach costs <1ms.
+---
+--- If this script's path can't be parsed (shouldn't happen — dofile/debug.getinfo always populates source),
+--- fall back to a defensive walk: starting from this script's directory, walk UP until we find a parent that
+--- contains a `scripts/` directory. The first match is the repo root.
 --- @return string|nil
 local function find_repo_root()
 	if package.loaded[CACHE_KEY] then return package.loaded[CACHE_KEY] end
-	local p = io.popen("git rev-parse --show-toplevel 2>nul")
-	local root
-	if p then root = p:read("*l"); p:close() end
-	if not root or root == "" then return nil end
-	-- Normalize to forward slashes (Windows accepts both, but mixed `\` + `/` confuses LuaJIT's file APIs).
-	root = root:gsub("\\", "/")
-	if not root:match("/$") then root = root .. "/" end
-	package.loaded[CACHE_KEY] = root
-	return root
+
+	local source = debug.getinfo(1, "S").source
+	-- Strip the leading `@` (Lua's dofile marker) and the trailing `/duffle_paths.lua` filename.
+	-- What remains is the directory containing this script, i.e. `<repo>/scripts/` (with trailing slash or not).
+	local scripts_dir = source and source:match("^@?(.*)[/\\]duffle_paths%.lua$")
+	if scripts_dir then
+		-- The repo root is the parent of `scripts/`. Strip the trailing `scripts/` (with or without trailing slash).
+		local root = scripts_dir:gsub("scripts[\\/]?$", "")
+		root = root:gsub("\\", "/")
+		if root == "" then root = "./" end
+		if not root:match("/$") then root = root .. "/" end
+		package.loaded[CACHE_KEY] = root
+		return root
+	end
+
+	-- Defensive fallback: walk UP from this script's directory until we find a parent that contains `scripts/`.
+	-- In practice this branch never fires — debug.getinfo always returns a source for dofile()'d chunks.
+	local lfs = pcall(require, "lfs") and require("lfs") or nil
+	if lfs then
+		local dir = source and source:match("^@?(.*[/\\])") or "./"
+		dir = dir:gsub("\\", "/")
+		while dir and dir ~= "" do
+			local candidate_scripts = dir .. "scripts"
+			if lfs.attributes(candidate_scripts, "mode") == "directory" then
+				dir = dir:gsub("/$", "")
+				package.loaded[CACHE_KEY] = dir .. "/"
+				return dir .. "/"
+			end
+			local parent = dir:match("^(.*)/[^/]+/$")
+			if not parent then break end
+			dir = parent .. "/"
+		end
+	end
+
+	return nil
 end
 
 --- Set `package.path` (for `require("duffle")` + `require("passes.X")`) and
