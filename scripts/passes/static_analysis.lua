@@ -129,8 +129,20 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- Used by the checks to convert per-token offsets in the body to lina numbers relative to the start of `body`. 
 --- The atom's source-line of the body-start is added by the caller.
 ---
+-- Memoization cache for build_body_line_index / tokenize_body.
+-- Atom bodies are immutable for the duration of a validate() pass (they come from src.scan which is set once by scan-source),
+-- so the same body string is safe to use as a cache key. Each call site (5 check_* functions + analyze_atom_paths)
+-- was re-running the full O(body_len) scan on the SAME body. After memoization, the first call pays the O(body_len) cost,
+-- every subsequent call on the same body returns the cached table in O(1).
+--
+-- (Future-proofing: if a caller ever mutates the returned tokens / line-index tables, the cache aliasing means those
+-- mutations would leak across atoms. Current callers all read-only; safe today.)
+local _body_line_index_cache = {}
+local _tokenize_body_cache    = {}
+
 --- Simple line-counting: count `\n` chars from offset 1 up to the offset; that count + 1 is the line number (1-based).
 local function build_body_line_index(body)
+	if _body_line_index_cache[body] ~= nil then return _body_line_index_cache[body] end
 	local index = {}
 	local len = #body
 	local newline_count = 0
@@ -144,6 +156,7 @@ local function build_body_line_index(body)
 	end
 	-- Offsets beyond the body still resolve to the final line
 	index[len + 1] = newline_count + 1
+	_body_line_index_cache[body] = index
 	return index
 end
 
@@ -171,6 +184,7 @@ end
 --- `body_rel_offset` is the char offset within `body` of the start of the token. 
 --- Callers add it to the atom's `body_off` to get an absolute source position for line tracking.
 local function tokenize_body(body)
+	if _tokenize_body_cache[body] ~= nil then return _tokenize_body_cache[body] end
 	local out = {}
 	local len     = #body
 	local rel     = 1
@@ -183,7 +197,7 @@ local function tokenize_body(body)
 		if rel > len then break end
 
 		-- Find comma/newline/semicolon after this token.
-		-- Read balanced groups so commas inside parens/braces/brackets aren't treated as separators. 
+		-- Read balanced groups so commas inside parens/braces/brackets aren't treated as separators.
 		-- Comments / strings are skipped.
 		local scan = rel
 		while scan <= len do
@@ -193,9 +207,9 @@ local function tokenize_body(body)
 			if     c == 59            then break end               -- ';'
 			if     c == 40            then local _, a = duffle.read_parens    (body, scan); scan = a -- '('
 			elseif c == 123           then local _, a = duffle.read_braces    (body, scan); scan = a -- '{'
-			elseif c == 91            then local _, a = duffle.read_brackets  (body, scan); scan = a -- '[' 
+			elseif c == 91            then local _, a = duffle.read_brackets  (body, scan); scan = a -- '['
 			elseif c == 34 or c == 39 then scan       = duffle.skip_str_or_cmt(body, scan) + 1       -- '"' or '\''
-			else 
+			else
 				scan = scan + 1
 			end
 		end
@@ -213,6 +227,7 @@ local function tokenize_body(body)
 		end
 		rel = scan
 	end
+	_tokenize_body_cache[body] = out
 	return out
 end
 
@@ -277,16 +292,17 @@ end
 --- If count < the minimum declared in `duffle.GTE_PIPELINE_LATENCY[X]`, record a finding.
 --- Aliases are resolved against the lookup table directly; if a macro name is not in the table, emit a soft warning 
 --- (the user might have added a new gte_cmdw_* but not updated duffle.lua).
-local function check_gte_pipeline_fill(atoms, findings, line_of)
-	for _, a in ipairs(atoms) do
-		local tokens       = tokenize_body(a.body)
-		local line_in_body = build_body_line_index(a.body)
-		local tn = #tokens
-		local ti = 1
-		while ti <= tn do
-			check_one_gte_cmdw(a, tokens[ti].tok, tokens, ti, line_in_body, findings)
-			ti = ti + 1
-		end
+--- Per-atom: walk this atom's tokens, check every `gte_cmdw_*` for pipeline-fill compliance.
+--- Signature changed from `(atoms, findings)` to `(atom, findings)` in Stage 1B of the plex move:
+--- the per-atom iteration now lives in validate()'s single loop; each check is a per-atom predicate.
+local function check_gte_pipeline_fill(atom, findings)
+	local tokens       = tokenize_body(atom.body)
+	local line_in_body = build_body_line_index(atom.body)
+	local tn = #tokens
+	local ti = 1
+	while ti <= tn do
+		check_one_gte_cmdw(atom, tokens[ti].tok, tokens, ti, line_in_body, findings)
+		ti = ti + 1
 	end
 end
 
@@ -299,7 +315,7 @@ end
 ---
 --- Empty bodies are not currently flagged — runtime infrastructure atoms like `MipsAtom_(yield) { mac_yield() }` 
 --- and `MipsAtom_(tape_exit) { jump_reg(rret_addr), nop }` are valid as-is; mac_yield at the end is the contract.
-local function check_mac_yield_uniformity(atoms, findings)
+local function check_mac_yield_uniformity(atom, findings)
 	-- Per-kind semantics:
 	--   MipsAtom_          (baked atom): exactly 1 mac_yield at the end of the body. Control transfer is the atom's job.
 	--   MipsAtomComp_      (bare static-array component): ZERO mac_yield.
@@ -308,87 +324,85 @@ local function check_mac_yield_uniformity(atoms, findings)
 	--                      Same reasoning -- it's a function returning a MipsAtom slice, invoked from a parent atom.
 	--
 	-- The GTE pipeline-fill check applies to all 3 kinds (see check_gte_pipeline_fill). Only the mac_yield rule branches on kind.
-	for _, a in ipairs(atoms) do
-		local tokens = tokenize_body(a.body)
-		local line_in_body = build_body_line_index(a.body)
+	local tokens = tokenize_body(atom.body)
+	local line_in_body = build_body_line_index(atom.body)
 
-		local count    = 0
-		local last_idx = 0
-		for tok_idx, t in ipairs(tokens) do
-			local tok = t.tok
-			-- Match `mac_yield(...)` or just `mac_yield`. The bareword
-			-- variant is rare in modern style but tolerated.
-			if tok:match("^mac_yield%s*%(") or tok == "mac_yield" then
-				count    = count + 1
-				last_idx = tok_idx
+	local count    = 0
+	local last_idx = 0
+	for tok_idx, t in ipairs(tokens) do
+		local tok = t.tok
+		-- Match `mac_yield(...)` or just `mac_yield`. The bareword
+		-- variant is rare in modern style but tolerated.
+		if tok:match("^mac_yield%s*%(") or tok == "mac_yield" then
+			count    = count + 1
+			last_idx = tok_idx
+		end
+	end
+	local function line_for(idx)
+		return atom.line + line_in_body[tokens[idx].rel]
+	end
+
+	if atom.kind == "atom" then
+		-- Baked atom: exactly 1 yield at the end.
+		if count == 0 then
+			findings[#findings + 1] = {
+				atom  = atom.name,
+				line  = atom.line,
+				check = "mac_yield_uniformity",
+				kind  = "warning",
+				msg   = string.format(
+					"%s at line %d has no `mac_yield()`; every atom must hand control to the next via mac_yield at end",
+					atom.name, atom.line),
+			}
+		elseif count > 1 then
+			findings[#findings + 1] = {
+				atom  = atom.name,
+				line  = line_for(last_idx),
+				check = "mac_yield_uniformity",
+				kind  = "warning",
+				msg   = string.format(
+					"%s at line %d has %d `mac_yield()` calls; exactly 1 is allowed",
+					atom.name, line_for(last_idx), count),
+			}
+		elseif last_idx < #tokens then
+			-- 1 call, but not the last token. We DON'T fail if the post-token is just `nop` or `nop2` or a branch with `, nop` delay slot.
+			-- It's the standard "yield, then BD nop" idiom.
+			local post_non_nop = false
+			for search_idx = last_idx + 1, #tokens do
+				local t = tokens[search_idx].tok
+				if    t ~= "" and t ~= "nop" and t ~= "nop2"
+				   and not t:match("%,%s*nop%)%s*$") then
+					post_non_nop = true
+					break
+				end
 			end
-		end
-		local function line_for(idx)
-			return a.line + line_in_body[tokens[idx].rel]
-		end
-
-		if a.kind == "atom" then
-			-- Baked atom: exactly 1 yield at the end.
-			if count == 0 then
+			if post_non_nop then
 				findings[#findings + 1] = {
-					atom  = a.name,
-					line  = a.line,
-					check = "mac_yield_uniformity",
-					kind  = "warning",
-					msg   = string.format(
-						"%s at line %d has no `mac_yield()`; every atom must hand control to the next via mac_yield at end",
-						a.name, a.line),
-				}
-			elseif count > 1 then
-				findings[#findings + 1] = {
-					atom  = a.name,
+					atom  = atom.name,
 					line  = line_for(last_idx),
 					check = "mac_yield_uniformity",
 					kind  = "warning",
 					msg   = string.format(
-						"%s at line %d has %d `mac_yield()` calls; exactly 1 is allowed",
-						a.name, line_for(last_idx), count),
-				}
-			elseif last_idx < #tokens then
-				-- 1 call, but not the last token. We DON'T fail if the post-token is just `nop` or `nop2` or a branch with `, nop` delay slot.
-				-- It's the standard "yield, then BD nop" idiom.
-				local post_non_nop = false
-				for search_idx = last_idx + 1, #tokens do
-					local t = tokens[search_idx].tok
-					if    t ~= "" and t ~= "nop" and t ~= "nop2"
-					   and not t:match("%,%s*nop%)%s*$") then
-						post_non_nop = true
-						break
-					end
-				end
-				if post_non_nop then
-					findings[#findings + 1] = {
-						atom  = a.name,
-						line  = line_for(last_idx),
-						check = "mac_yield_uniformity",
-						kind  = "warning",
-						msg   = string.format(
-							"%s at line %d has `mac_yield()` at token %d/%d; the yield must be the LAST non-nop token in the body",
-							a.name, line_for(last_idx), last_idx, #tokens),
-					}
-				end
-			end
-		else
-			-- Component (comp_bare or comp_proc): ZERO yields. 
-			-- The parent atom does the yield. 
-			-- A yield inside a component would either be dead code (bare) or prematurely terminate the function (proc).
-			-- Both are bugs.
-			if count > 0 then
-				findings[#findings + 1] = {
-					atom  = a.name,
-					line  = line_for(last_idx),
-					check = "mac_yield_uniformity",
-					kind  = "warning",
-					msg   = string.format(
-						"%s at line %d is a %s component but has %d `mac_yield()` call(s); components must not yield (the parent atom does)",
-						a.name, line_for(last_idx), a.kind, count),
+						"%s at line %d has `mac_yield()` at token %d/%d; the yield must be the LAST non-nop token in the body",
+						atom.name, line_for(last_idx), last_idx, #tokens),
 				}
 			end
+		end
+	else
+		-- Component (comp_bare or comp_proc): ZERO yields.
+		-- The parent atom does the yield.
+		-- A yield inside a component would either be dead code (bare) or prematurely terminate the function (proc).
+		-- Both are bugs.
+		if count > 0 then
+			findings[#findings + 1] = {
+				atom  = atom.name,
+				line  = line_for(last_idx),
+				check = "mac_yield_uniformity",
+				kind  = "warning",
+				msg   = string.format(
+					"%s at line %d is a %s component but has %d `mac_yield()` call(s); components must not yield (the parent atom does)",
+					atom.name, line_for(last_idx), atom.kind, count),
+			}
 		end
 	end
 end
@@ -407,77 +421,73 @@ end
 ---   1. Body MUST contain one `load_word(R_*, R_TapePtr, O_(Binds_X, field))` per field of Binds_X. Missing field = error.
 ---   2. Body MUST contain an `add_ui_self(R_TapePtr, S_(Binds_X))` (or equivalent advance by the struct's byte count). Missing = error.
 ---   3. atom_bind(Binds_X) where Binds_X doesn't exist = error.
-local function check_abi_handoff(atoms, atom_infos, binds_index, findings)
-	local info_by_atom = {}
-	for _, info in ipairs(atom_infos) do
-		info_by_atom[info.atom_name] = info
+--- Per-atom: verify the atom body reads every field of its `Binds_X` from R_TapePtr and advances R_TapePtr by S_(Binds_X).
+--- Signature changed in Stage 1B: takes `(atom, pipe_ctx, findings)` where `pipe_ctx` carries the cross-atom
+--- `info_by_atom` + `binds_index` tables (built once by validate() before the per-atom loop).
+--- Per-atom iteration now lives in validate(); this is a per-atom predicate.
+local function check_abi_handoff(atom, pipe_ctx, findings)
+	local info = pipe_ctx.info_by_atom[atom.name]
+	if not info or not info.binds then return end
+	local binds_name = info.binds
+	local binds      = pipe_ctx.binds_index[binds_name]
+	if not binds then
+		findings[#findings + 1] = {
+			atom  = atom.name, line = atom.line,
+			check = "abi_handoff", kind = "error",
+			msg   = string.format("%s at line %d has `atom_bind(%s)` but no `typedef Struct_(%s)` declaration found in source",
+				atom.name, atom.line, binds_name, binds_name),
+		}
+		return
 	end
-
-	for _, a in ipairs(atoms) do
-		local info = info_by_atom[a.name]
-		if info and info.binds then
-			local binds_name = info.binds
-			local binds      = binds_index[binds_name]
-			if not binds then
-				findings[#findings + 1] = {
-					atom  = a.name, line = a.line,
-					check = "abi_handoff", kind = "error",
-					msg   = string.format("%s at line %d has `atom_bind(%s)` but no `typedef Struct_(%s)` declaration found in source",
-						a.name, a.line, binds_name, binds_name),
-				}
-			else
-				local tokens             = tokenize_body(a.body)
-				local line_in_body       = build_body_line_index(a.body)
-				local found_field_set = {}
-				local found_advance   = false
-				local bind_re         = "O_%(" .. binds_name .. ",%s*([%w_]+)%s*%)"
-				for _, t in ipairs(tokens) do
-					local tok = t.tok
-					if tok:match("^load_word%s*%(") then
-						if tok:find("R_TapePtr", 1, true) and tok:find("O_(" .. binds_name .. ",", 1, true) then
-							local field = tok:match(bind_re)
-							-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
-							if field then
-								found_field_set[field] = true
-							else
-								local body_line = a.line + line_in_body[t.rel]
-								findings[#findings + 1] = {
-									atom  = a.name, line = body_line,
-									check = "abi_handoff", kind = "error",
-									msg   = string.format("%s at line %d has load_word(R_TapePtr, O_(%s, <non-ident>)); expected O_(%s, <field>)",
-										a.name, body_line, binds_name, binds_name),
-								}
-							end
-						end
-					end
-				if tok:find("R_TapePtr", 1, true)
-				   and tok:find("S_(" .. binds_name .. ")", 1, true) then
-					-- scan: add_ui_self(R_TapePtr, S_(<Binds_X>))
-					found_advance = true
-				end
-				end
-
-				for _, f in ipairs(binds.fields) do
-					if not found_field_set[f.name] then
-						findings[#findings + 1] = {
-							atom  = a.name, line = a.line,
-							check = "abi_handoff", kind = "error",
-							msg   = string.format("%s at line %d binds %s but never loads field `%s` from R_TapePtr (expected O_(%s, %s))",
-								a.name, a.line, binds_name, f.name, binds_name, f.name),
-						}
-					end
-				end
-
-				if not found_advance then
+	local tokens             = tokenize_body(atom.body)
+	local line_in_body       = build_body_line_index(atom.body)
+	local found_field_set = {}
+	local found_advance   = false
+	local bind_re         = "O_%(" .. binds_name .. ",%s*([%w_]+)%s*%)"
+	for _, t in ipairs(tokens) do
+		local tok = t.tok
+		if tok:match("^load_word%s*%(") then
+			if tok:find("R_TapePtr", 1, true) and tok:find("O_(" .. binds_name .. ",", 1, true) then
+				local field = tok:match(bind_re)
+				-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
+				if field then
+					found_field_set[field] = true
+				else
+					local body_line = atom.line + line_in_body[t.rel]
 					findings[#findings + 1] = {
-						atom  = a.name, line = a.line,
+						atom  = atom.name, line = body_line,
 						check = "abi_handoff", kind = "error",
-						msg   = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)",
-							a.name, a.line, binds_name, binds_name, binds.bytes, binds.bytes / 4),
+						msg   = string.format("%s at line %d has load_word(R_TapePtr, O_(%s, <non-ident>)); expected O_(%s, <field>)",
+							atom.name, body_line, binds_name, binds_name),
 					}
 				end
 			end
 		end
+		if tok:find("R_TapePtr", 1, true)
+		   and tok:find("S_(" .. binds_name .. ")", 1, true) then
+			-- scan: add_ui_self(R_TapePtr, S_(<Binds_X>))
+			found_advance = true
+		end
+	end
+
+	for _, f in ipairs(binds.fields) do
+		if not found_field_set[f.name] then
+			findings[#findings + 1] = {
+				atom  = atom.name, line = atom.line,
+				check = "abi_handoff", kind = "error",
+				msg   = string.format("%s at line %d binds %s but never loads field `%s` from R_TapePtr (expected O_(%s, %s))",
+					atom.name, atom.line, binds_name, f.name, binds_name, f.name),
+			}
+		end
+	end
+
+	if not found_advance then
+		findings[#findings + 1] = {
+			atom  = atom.name, line = atom.line,
+			check = "abi_handoff", kind = "error",
+			msg   = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)",
+				atom.name, atom.line, binds_name, binds_name, binds.bytes, binds.bytes / 4),
+		}
 	end
 end
 
@@ -495,68 +505,67 @@ end
 ---   - Atoms containing a `mac_<name>(...)` call whose name is not in duffle.GP0_MACRO_CONTRIB emit a "new macro; update duffle.GP0_MACRO_CONTRIB" advisory.
 ---
 --- Applies only to `kind = "atom"` (baked atoms). Components don't emit full primitives.
-local function check_gpu_portstore_shape(atoms, findings)
-	for _, a in ipairs(atoms) do
-		if a.kind == "atom" then
-			local tokens = tokenize_body(a.body)
-			local line_in_body = build_body_line_index(a.body)
-			local cmd_byte = nil
-			local cmd_line = nil
-			local contrib = 0
-			local saw_format = false
-			local saw_prim_write = false
-			for _, t in ipairs(tokens) do
-				local tok = t.tok
-				-- Match `mac_format_<shape>_color(...)` and strip `_color`
-				-- to get the bare shape suffix (f3 / g4 / etc).
-				local shape = tok:match("^mac_format_([%w_]+)_color%s*%(") or tok:match("^mac_format_([%w_]+)_color%s*$")
-				if shape and duffle.GP0_CMD_BY_SHAPE[shape] then
-					if not cmd_byte then
-						cmd_byte = duffle.GP0_CMD_BY_SHAPE[shape]
-						cmd_line = a.line + line_in_body[t.rel]
-					end
-					saw_format = true
-					local contrib_key = "mac_format_" .. shape .. "_color"
-					local n = duffle.GP0_MACRO_CONTRIB[contrib_key]
-					if    n then contrib = contrib + n end
-				end
-				local gte_store = tok:match("^mac_gte_store_[%w_]+")
-				if gte_store then
-					local n = duffle.GP0_MACRO_CONTRIB[gte_store]
-					if    n then contrib = contrib + n end
-				end
-				local ot_tag = tok:match("^mac_insert_ot_tag_([%w_]+)")
-				if ot_tag then
-					local n = duffle.GP0_MACRO_CONTRIB["mac_insert_ot_tag_" .. ot_tag]
-					if    n then contrib = contrib + n end
-				end
-				if tok:match("^store_word%s*%(") and tok:find("R_PrimCursor", 1, true) then
-					saw_prim_write = true
-				end
-			end
-
+--- Per-atom: detect which GP0 primitive the atom is emitting, sum the macro contributions,
+--- compare to the expected packet size. Signature changed in Stage 1B: `(atom, findings)`.
+local function check_gpu_portstore_shape(atom, findings)
+	if atom.kind ~= "atom" then return end
+	local tokens = tokenize_body(atom.body)
+	local line_in_body = build_body_line_index(atom.body)
+	local cmd_byte = nil
+	local cmd_line = nil
+	local contrib = 0
+	local saw_format = false
+	local saw_prim_write = false
+	for _, t in ipairs(tokens) do
+		local tok = t.tok
+		-- Match `mac_format_<shape>_color(...)` and strip `_color`
+		-- to get the bare shape suffix (f3 / g4 / etc).
+		local shape = tok:match("^mac_format_([%w_]+)_color%s*%(") or tok:match("^mac_format_([%w_]+)_color%s*$")
+		if shape and duffle.GP0_CMD_BY_SHAPE[shape] then
 			if not cmd_byte then
-				if saw_prim_write and not saw_format then
-					findings[#findings + 1] = {
-						atom  = a.name, line = a.line,
-						check = "gpu_portstore_shape", kind = "warning",
-						msg   = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...)" 
-							.. " but uses no `mac_format_*_color`; the cmd byte + word count cannot be auto-validated." 
-							.. " Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.",
-							a.name, a.line),
-					}
-				end
-			else
-				local expected = duffle.GP0_CMD_SIZE[cmd_byte]
-				if contrib ~= expected then
-					findings[#findings + 1] = {
-						atom  = a.name, line = cmd_line or a.line,
-						check = "gpu_portstore_shape", kind = "error",
-						msg   = string.format("%s at line %d emits GP0 0x%02X with %d prim word(s); expected %d (cmd 0x%02X total = %d)",
-							a.name, cmd_line or a.line, cmd_byte, contrib, expected, cmd_byte, expected),
-					}
-				end
+				cmd_byte = duffle.GP0_CMD_BY_SHAPE[shape]
+				cmd_line = atom.line + line_in_body[t.rel]
 			end
+			saw_format = true
+			local contrib_key = "mac_format_" .. shape .. "_color"
+			local n = duffle.GP0_MACRO_CONTRIB[contrib_key]
+			if    n then contrib = contrib + n end
+		end
+		local gte_store = tok:match("^mac_gte_store_[%w_]+")
+		if gte_store then
+			local n = duffle.GP0_MACRO_CONTRIB[gte_store]
+			if    n then contrib = contrib + n end
+		end
+		local ot_tag = tok:match("^mac_insert_ot_tag_([%w_]+)")
+		if ot_tag then
+			local n = duffle.GP0_MACRO_CONTRIB["mac_insert_ot_tag_" .. ot_tag]
+			if    n then contrib = contrib + n end
+		end
+		if tok:match("^store_word%s*%(") and tok:find("R_PrimCursor", 1, true) then
+			saw_prim_write = true
+		end
+	end
+
+	if not cmd_byte then
+		if saw_prim_write and not saw_format then
+			findings[#findings + 1] = {
+				atom  = atom.name, line = atom.line,
+				check = "gpu_portstore_shape", kind = "warning",
+				msg   = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...)"
+					.. " but uses no `mac_format_*_color`; the cmd byte + word count cannot be auto-validated."
+					.. " Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.",
+					atom.name, atom.line),
+			}
+		end
+	else
+		local expected = duffle.GP0_CMD_SIZE[cmd_byte]
+		if contrib ~= expected then
+			findings[#findings + 1] = {
+				atom  = atom.name, line = cmd_line or atom.line,
+				check = "gpu_portstore_shape", kind = "error",
+				msg   = string.format("%s at line %d emits GP0 0x%02X with %d prim word(s); expected %d (cmd 0x%02X total = %d)",
+					atom.name, cmd_line or atom.line, cmd_byte, contrib, expected, cmd_byte, expected),
+			}
 		end
 	end
 end
@@ -758,42 +767,42 @@ local function analyze_atom_paths(atom)
 	local branch_count = 0
 	for _ in pairs(branches) do branch_count = branch_count + 1 end
 
-	return {
-		cycles_min     = cycles_min,
-		cycles_max     = cycles_max,
-		branches       = branch_count,
-		paths          = path_count,
-		has_loops      = has_loops,
-		unknown_macros = unknown_list,
-	}
+	-- Mutate the pre-allocated `atom.paths` slot in place (caller owns the table).
+	-- Mega-struct move: a single source of truth for all per-atom path-analysis data,
+	-- instead of returning a fresh table that would just get copied onto 5 atom fields.
+	-- If a caller ever DIDN'T pre-allocate (legacy code path), fall back to a fresh slot.
+	local p = atom.paths or {}
+	p.cycles_min     = cycles_min
+	p.cycles_max     = cycles_max
+	p.branches       = branch_count
+	p.paths          = path_count
+	p.has_loops      = has_loops
+	p.unknown_macros = unknown_list
+	atom.paths       = p
 end
 
 --- Per-source check that emits one finding per unknown macro seen
 --- (deduplicated across atoms so the warning section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
-local function check_per_atom_cycle_budget(atoms, findings)
-	local unknown_seen = {}
-	for _, a in ipairs(atoms) do
-		local tokens = tokenize_body(a.body)
-		local unknown_set = {}
-		for _, t in ipairs(tokens) do
-			local _, _, unknown = token_cycles(t.tok)
-			if unknown then
-				unknown_set[t.tok:match("^([%w_]+)") or "?"] = true
-			end
-		end
-		local unknown_macros = {}
-		for macro_name in pairs(unknown_set) do unknown_macros[#unknown_macros + 1] = macro_name end
-		for _, name in ipairs(unknown_macros) do
-			if not unknown_seen[name] then
-				unknown_seen[name] = a.line
-				findings[#findings + 1] = {
-					atom  = a.name, line = a.line,
-					check = "per_atom_cycle_budget", kind = "warning",
-					msg   = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; "
-						.. "cycle count will be +%d per call (best-case). Add an entry to duffle.INSTRUCTION_LATENCY.",
-						a.name, a.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
-				}
-			end
+--- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery (it's the canonical place that walks tokens
+--- and computes per-token cycle costs). We just sort + emit.
+--- Per-atom: emit one finding per unknown macro seen, deduplicated across atoms (so the warning
+--- section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
+--- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery (it's the canonical place that walks tokens
+--- and computes per-token cycle costs). We just sort + emit.
+--- Signature changed in Stage 1B: `(atom, pipe_ctx, findings)` — the `unknown_seen` dedup table lives on
+--- `pipe_ctx` so it persists across the per-atom loop in validate().
+local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
+	local p = atom.paths or {}
+	for _, name in ipairs(p.unknown_macros or {}) do
+		if not pipe_ctx.unknown_seen[name] then
+			pipe_ctx.unknown_seen[name] = atom.line
+			findings[#findings + 1] = {
+				atom  = atom.name, line = atom.line,
+				check = "per_atom_cycle_budget", kind = "warning",
+				msg   = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; "
+					.. "cycle count will be +%d per call (best-case). Add an entry to duffle.INSTRUCTION_LATENCY.",
+					atom.name, atom.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
+			}
 		end
 	end
 end
@@ -816,22 +825,42 @@ local function validate(ctx, src)
 		binds_index[b.name] = b
 	end
 
-	local findings = {}
-	check_gte_pipeline_fill(atoms, findings)
-	check_mac_yield_uniformity(atoms, findings)
-	check_abi_handoff(atoms, atom_infos, binds_index, findings)
-	check_gpu_portstore_shape(atoms, findings)
-	check_per_atom_cycle_budget(atoms, findings)
+	-- pipe_ctx: the cross-atom shared state for the per-atom pipeline (Fleury "expose structure").
+	-- Pre-allocated here, mutated by each per-atom check call below. Replaces the per-check
+	-- local tables that used to live inside each check_* function body.
+	--   info_by_atom  — atom_name -> atom_info (built once; check_abi_handoff reads it)
+	--   binds_index   — Binds_X -> binds struct (built once; check_abi_handoff reads it)
+	--   unknown_seen  — macro_name -> first atom line (accumulated across atoms; check_per_atom_cycle_budget dedups)
+	local info_by_atom = {}
+	for _, info in ipairs(atom_infos) do
+		info_by_atom[info.atom_name] = info
+	end
+	local pipe_ctx = {
+		info_by_atom  = info_by_atom,
+		binds_index   = binds_index,
+		unknown_seen  = {},
+	}
 
-	-- Path-aware cycle-budget output: attach per-path cycle data to each atom.
+	-- THE per-atom pipeline. ONE iteration of atoms; the 5 check_* functions + analyze_atom_paths
+	-- all run here, sharing a single tokenize_body + build_body_line_index per body.
+	-- Plex move: every piece of state derived from an atom body lives on `atom.paths` (the per-atom mega-struct);
+	-- readers (analyze_atom_paths, the 5 checks, the renderers) all consume `atom.paths`, not the raw `atoms` list.
+	-- Stage 1B: each check_* now takes `(atom, ...)` instead of `(atoms, findings)` — no more single-atom `{a}` shim.
+	local findings = {}
 	for _, a in ipairs(atoms) do
-		local p = analyze_atom_paths(a)
-		a.paths          = p
-		a.cycles_min     = p.cycles_min
-		a.cycles_max     = p.cycles_max
-		a.branch_count   = p.branches
-		a.unknown_macros = p.unknown_macros
-		a.has_loops      = p.has_loops
+		a.paths                  = a.paths or {}
+		a.paths.tokens           = tokenize_body(a.body)
+		a.paths.line_in_body     = build_body_line_index(a.body)
+
+		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
+		analyze_atom_paths(a)
+
+		-- Run all 5 checks on this one atom. Each is now a per-atom predicate.
+		check_gte_pipeline_fill(a, findings)
+		check_mac_yield_uniformity(a, findings)
+		check_abi_handoff(a, pipe_ctx, findings)
+		check_gpu_portstore_shape(a, findings)
+		check_per_atom_cycle_budget(a, pipe_ctx, findings)
 	end
 
 	local errors   = {}
@@ -987,16 +1016,16 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 		-- Sort atoms by max cycles descending for quick scanning.
 		local sorted = {}
 		for _, a in ipairs(atoms) do sorted[#sorted + 1] = a end
-		table.sort(sorted, function(x, y) return (x.cycles_max or 0) > (y.cycles_max or 0) end)
+		table.sort(sorted, function(x, y) return ((x.paths or {}).cycles_max or 0) > ((y.paths or {}).cycles_max or 0) end)
 		for _, a in ipairs(sorted) do
 			local p           = a.paths or {}
 			local br_count    = p.branches or 0
 			local path_count  = p.paths or 0
 			local loops_tag   = p.has_loops and "  [loop!]" or ""
 			local unknown_tag = ""
-			if a.unknown_macros and #a.unknown_macros > 0 then
+			if p.unknown_macros and #p.unknown_macros > 0 then
 				unknown_tag = string.format("  [unknown: %s]",
-					table.concat(a.unknown_macros, ", "))
+					table.concat(p.unknown_macros, ", "))
 			end
 			local name_label = a.name
 			if multi_source and a.source_path then
