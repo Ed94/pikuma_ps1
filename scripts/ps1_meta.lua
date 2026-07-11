@@ -573,7 +573,7 @@ end
 -- @param result PassResult
 -- @return boolean
 local function report_validation_errors(pass_name, pass, result)
-	local has_errors = result.errors and #result.errors > 0
+	local   has_errors = result.errors and #result.errors > 0
 	if not (has_errors and PASS_KIND_STOP_ON_ERROR[pass.kind]) then
 		return false
 	end

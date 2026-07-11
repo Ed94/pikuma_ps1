@@ -15,10 +15,8 @@
 --- Lua 5.3 compatible; no `<close>`/`<toclose>`, no `continue`, no
 --- 5.4 string.dump improvements. LuaJIT 5.1+extensions model is the primary target.
 ---
---- **No `:match` / `:gmatch` regex use anywhere**; all delimiter-
---- splitting is hand-rolled or via LPeg (the regex-free PEG library).
---- The hot lexer primitives are LPeg-backed where it pays off;
---- hand-rolled variants remain for callers that need a fallback.
+--- **No `:match` / `:gmatch` regex use anywhere**; 
+--- all delimiter-splitting is hand-rolled or via LPeg (the regex-free PEG library).
 
 local M = {}
 
@@ -320,21 +318,17 @@ function M._reset_ensured_dirs() _ensured_dirs = {} end
 
 -- Skip a string or C-style comment starting at position `pos`.
 -- Returns the position just past the construct, or `pos` unchanged if no string/comment starts there. LPeg-backed.
-function M.skip_str_or_cmt(s, pos)
-	return lpeg.match(lpeg_str_or_cmt_pat, s, pos) or pos
-end
+function M.skip_str_or_cmt(s, pos) return lpeg.match(lpeg_str_or_cmt_pat, s, pos) or pos end
 
 -- Skip whitespace AND C-style comments starting at position `pos`.
 -- LPeg-backed; ~5-10x faster than a hand-rolled byte-by-byte walker.
-function M.skip_ws_and_cmt(s, pos)
-	return lpeg.match(lpeg_ws_and_cmt_pat, s, pos) or pos
-end
+function M.skip_ws_and_cmt(s, pos) return lpeg.match(lpeg_ws_and_cmt_pat, s, pos) or pos end
 
 -- Read a C-style identifier (alpha followed by zero+ alnum) starting at position `pos`. 
 -- Returns the identifier string + the position just past it, or nil + pos if no identifier starts here. LPeg-backed.
 function M.read_ident(s, pos)
 	local result = lpeg.match(lpeg_ident_pat, s, pos)
-	if result then return result, pos + #result end
+	if    result then return result, pos + #result end
 	return nil, pos
 end
 
@@ -344,7 +338,9 @@ end
 function M.read_balanced(s, open_char, close_char, pos)
 	local open_byte = open_char:byte()
 	if s:byte(pos) ~= open_byte then return nil, pos end
+	-- scan: <open_char>
 	pos = pos + 1
+	-- scan: <open_char> <inner...>
 	local len   = #s
 	local depth = 1
 	local a     = pos
@@ -353,15 +349,23 @@ function M.read_balanced(s, open_char, close_char, pos)
 		if c == open_byte then
 			depth = depth + 1
 			pos = pos + 1
+			-- scan: <open_char> <inner...> <open_char> (depth=depth)
 		elseif c == close_char:byte() then
 			depth = depth - 1
 			if depth == 0 then break end
 			pos = pos + 1
+			-- scan: <open_char> <inner...> <close_char> (depth=depth)
 		else
 			local nx = M.skip_str_or_cmt(s, pos)
-			if nx > pos then pos = nx else pos = pos + 1 end
+			if nx > pos then
+				-- scan: <open_char> <inner...> <str|cmt>
+				pos = nx
+			else
+				pos = pos + 1
+			end
 		end
 	end
+	-- scan: <open_char> <inner> <close_char>
 	return s:sub(a, pos - 1), pos + 1
 end
 
@@ -379,12 +383,17 @@ function M.scan_to_char(s, target, start)
 	while pos <= #s do
 		local c = s:byte(pos)
 		if      c == target_byte then return pos end
+		-- scan: ... <target found> | <skipping to target>
 		if      c == BYTE_OPEN_PAREN  then local _, a = M.read_balanced(s, "(", ")", pos); pos = a
+			-- scan: ... ( <balanced> ) ...
 		elseif  c == BYTE_OPEN_BRACE  then local _, a = M.read_balanced(s, "{", "}", pos); pos = a
+			-- scan: ... { <balanced> } ...
 		elseif  c == BYTE_OPEN_BRACK  then local _, a = M.read_balanced(s, "[", "]", pos); pos = a
+			-- scan: ... [ <balanced> ] ...
 		else
 			local nx = M.skip_str_or_cmt(s, pos)
 			pos      = (nx > pos) and nx or (pos + 1)
+			-- scan: ... <str|cmt skipped> ...
 		end
 	end
 	return nil
@@ -447,28 +456,29 @@ function M.split_top_level_commas(body)
 	end
 
 	while pos <= body_len do
-		local c = body:byte(pos)
-		if c == BYTE_OPEN_PAREN then              -- '('
-			local _, a = M.read_parens(body, pos); pos = a
-		elseif c == BYTE_OPEN_BRACE then          -- '{'
-			local _, a = M.read_braces(body, pos); pos = a
-		elseif c == BYTE_OPEN_BRACK then          -- '['
-			local _, a = M.read_brackets(body, pos); pos = a
-		elseif c == BYTE_COMMA then               -- ','
+		local  c = body:byte(pos)
+		if     c == BYTE_OPEN_PAREN then local _, a = M.read_parens(body, pos); pos = a -- scan: ... ( <balanced> ...
+		elseif c == BYTE_OPEN_BRACE then local _, a = M.read_braces(body, pos); pos = a -- scan: ... { <balanced> ...
+		elseif c == BYTE_OPEN_BRACK then local _, a = M.read_brackets(body, pos); pos = a -- scan: ... ( <balanced> ...
+		elseif c == BYTE_COMMA then
+			-- scan: ... <token> , <next> ...
 			emit(pos - 1)
 			pos         = pos + 1
 			token_start = pos
-		elseif c == BYTE_SEMI then                -- ';'
+		elseif c == BYTE_SEMI then
+			-- scan: ... <token> ; <next> ...
 			emit(pos - 1)
 			pos         = pos + 1
 			token_start = pos
-		elseif c == BYTE_NEWLINE then             -- '\n'
+		elseif c == BYTE_NEWLINE then
+			-- scan: ... <token> \n <next> ...
 			emit(pos - 1)
 			pos         = pos + 1
 			token_start = pos
 		else
 			local nx = M.skip_str_or_cmt(body, pos)
 			if nx > pos then
+				-- scan: ... <str|cmt> ...
 				-- Skipped a comment or string at top level: emit token break.
 				pos = nx
 				emit(pos - 1)
@@ -477,6 +487,7 @@ function M.split_top_level_commas(body)
 			end
 		end
 	end
+	-- scan: <token> , <token> , ... <token>
 	emit(body_len)
 	return tokens
 end
@@ -495,6 +506,7 @@ function M.load_word_counts(metadata_path)
 		local nl       = M.find_byte(content, BYTE_NEWLINE, pos)
 		local line_end = nl or (len + 1)
 		local line     = content:sub(pos, line_end - 1)
+		-- scan: WORD_COUNT(<name>, <N>)
 		local trimmed  = M.trim(line)
 		if trimmed:sub(1, #prefix) == prefix and trimmed:sub(-1) == ")" then
 			local inner = trimmed:sub(#prefix + 1, #trimmed - 1)
@@ -527,11 +539,8 @@ function M.LineIndex(source)
 		local lo,   hi = 1, n
 		while lo <= hi do
 			local mid = math.floor((lo + hi) / 2)
-			if positions[mid] <= query_pos then
-				lo = mid + 1
-			else
-				hi = mid - 1
-			end
+			if positions[mid] <= query_pos then lo = mid + 1
+			else                                hi = mid - 1 end
 		end
 		return hi + 1
 	end
@@ -666,7 +675,7 @@ M.GP0_MACRO_CONTRIB = {
 	["mac_insert_ot_tag_g4"]                        = 1,
 }
 
--- Per-macro cycle cost (best-case, no stalls). Used by the static-analysis `count_atom_cycles` pass (Phase 3) to emit per-atom cycle budgets. 
+-- Per-macro cycle cost (best-case, no stalls). Used by the static-analysis pass to emit per-atom cycle budgets.
 -- The counts cover the EXPANDED instruction sequence the macro emits (NOT just the token it appears as in source).
 -- For example: 
 --   mac_pack_color_word(off, cmd, r, g, b) emits:

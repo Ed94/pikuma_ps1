@@ -1039,9 +1039,6 @@ end
 ---   has_loops      - true iff a path re-entered a token it had visited
 ---                    (warning; loop bodies aren't supported)
 ---   unknown_macros - list of unique macro names not in duffle.INSTRUCTION_LATENCY
----   cycles_full    - sum of ALL token costs (the previous "best case"
----                    value; included for backward-compat; double-counts
----                    the BD-slot nop relative to cycles_min/max)
 local function analyze_atom_paths(atom)
 	local tokens   = tokenize_body(atom.body)
 	local labels   = find_atom_labels(tokens)
@@ -1173,13 +1170,8 @@ local function analyze_atom_paths(atom)
 	end
 	if n >= 1 then dfs(1, 0, {}) end
 
-	-- cycles_full: sum of every token's cost (the legacy sum-of-all-tokens
-	-- value; over-counts BD-slot nops relative to the path-aware min/max).
-	local cycles_full = 0
-	for tok_idx = 1, n do cycles_full = cycles_full + costs[tok_idx] end
-
 	-- If no paths were recorded (e.g. atom body is empty), cycles_min/max
-	-- default to 0 (atom costs nothing). cycles_full is 0 too in that case.
+	-- default to 0 (atom costs nothing).
 	if cycles_min == math.huge then cycles_min = 0 end
 	if cycles_max == -1 then cycles_max = 0 end
 
@@ -1187,40 +1179,18 @@ local function analyze_atom_paths(atom)
 	for macro_name in pairs(unknown_set) do unknown_list[#unknown_list + 1] = macro_name end
 	table.sort(unknown_list)
 
-	-- branch_count: number of `branch_*(...)` tokens. (More useful than
-	-- `#branches` which is the size of the targets map and would be equal
-	-- to #branches anyway, but the rename is clearer.)
+	-- branch_count: number of `branch_*(...)` tokens.
 	local branch_count = 0
 	for _ in pairs(branches) do branch_count = branch_count + 1 end
 
 	return {
 		cycles_min     = cycles_min,
 		cycles_max     = cycles_max,
-		cycles_full    = cycles_full,
 		branches       = branch_count,
 		paths          = path_count,
 		has_loops      = has_loops,
 		unknown_macros = unknown_list,
 	}
-end
-
---- Returns total cycle count (the sum-of-all-tokens value, which over-counts
---- BD-slot nops) + unknown macro list. New code should call
---- `analyze_atom_paths(atom)` instead.
-local function count_atom_cycles(atom)
-	local tokens = tokenize_body(atom.body)
-	local total  = 0
-	local unknown_set = {}
-	for _, t in ipairs(tokens) do
-		local c, _, unknown = token_cycles(t.tok)
-		total = total + c
-		if unknown then
-			unknown_set[t.tok:match("^([%w_]+)") or "?"] = true
-		end
-	end
-	local unknown_list = {}
-	for macro_name in pairs(unknown_set) do unknown_list[#unknown_list + 1] = macro_name end
-	return total, unknown_list
 end
 
 --- Per-source check that emits one finding per unknown macro seen
@@ -1229,7 +1199,16 @@ end
 local function check_per_atom_cycle_budget(atoms, findings)
 	local unknown_seen = {}
 	for _, a in ipairs(atoms) do
-		local _, unknown_macros = count_atom_cycles(a)
+		local tokens = tokenize_body(a.body)
+		local unknown_set = {}
+		for _, t in ipairs(tokens) do
+			local _, _, unknown = token_cycles(t.tok)
+			if unknown then
+				unknown_set[t.tok:match("^([%w_]+)") or "?"] = true
+			end
+		end
+		local unknown_macros = {}
+		for macro_name in pairs(unknown_set) do unknown_macros[#unknown_macros + 1] = macro_name end
 		for _, name in ipairs(unknown_macros) do
 			if not unknown_seen[name] then
 				unknown_seen[name] = a.line
@@ -1269,22 +1248,15 @@ local function validate(ctx, src)
 	check_gpu_portstore_shape(atoms, findings)
 	check_per_atom_cycle_budget(atoms, findings)
 
-	-- Path-aware cycle-budget output: attach per-path cycle data to each
-	-- atom. Best-case (no-stall) cycle count with BD-slot absorbed; the
-	-- `cycles_full` field is the legacy sum-of-all-tokens value (kept
-	-- for backward compat; over-counts BD-slot nops).
-	local cycles_by_atom = {}
+	-- Path-aware cycle-budget output: attach per-path cycle data to each atom.
 	for _, a in ipairs(atoms) do
 		local p = analyze_atom_paths(a)
 		a.paths          = p
-		a.cycles         = p.cycles_max     -- default for any code that reads .cycles
 		a.cycles_min     = p.cycles_min
 		a.cycles_max     = p.cycles_max
-		a.cycles_full    = p.cycles_full
 		a.branch_count   = p.branches
 		a.unknown_macros = p.unknown_macros
 		a.has_loops      = p.has_loops
-		cycles_by_atom[a.name] = p
 	end
 
 	local errors   = {}
@@ -1347,86 +1319,8 @@ local function validate(ctx, src)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Per-source output: build/gen/<basename>.static_analysis.txt
+-- Per-directory output: build/gen/<dir_basename>.static_analysis.txt
 -- ════════════════════════════════════════════════════════════════════════════
-
-local function emit_static_analysis_txt(ctx, src, result)
-	local out_path = ctx.out_root .. "/" .. src.basename .. ".static_analysis.txt"
-	if ctx.dry_run then return out_path end
-	duffle.ensure_dir(ctx.out_root)
-
-	local lines = {}
-	local function add(s) lines[#lines + 1] = s end
-
-	add("========================================================")
-	add("STATIC ANALYSIS PASS -- " .. src.path)
-	add("========================================================")
-	add("")
-	-- Tally atoms by kind for the header summary
-	local n_atoms, n_bare, n_proc = 0, 0, 0
-	for _, a in ipairs(result.atoms) do
-		n_atoms = n_atoms + 1
-		if     a.kind == "comp_bare" then n_bare = n_bare + 1
-		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
-		end
-	end
-	local header_atoms = string.format("Atoms: %d", n_atoms)
-	if n_bare > 0 or n_proc > 0 then
-		header_atoms = header_atoms .. string.format("  (atoms: %d, comp_bare: %d, comp_proc: %d)",
-			n_atoms - n_bare - n_proc, n_bare, n_proc)
-	end
-	add(string.format("%s   Findings: %d   Errors: %d   Warnings: %d",
-		header_atoms, #result.findings, #result.errors, #result.warnings))
-	add("")
-
-	-- Group findings by atom for readability
-	local by_atom = {}
-	for _, f in ipairs(result.findings) do
-		by_atom[f.atom] = by_atom[f.atom] or {}
-		by_atom[f.atom][#by_atom[f.atom] + 1] = f
-	end
-
-		if next(by_atom) == nil then
-			add("  (no findings -- every atom passed all checks)")
-		else
-		add("── Findings by atom ─────────────────────────────────────")
-		for _, a in ipairs(result.atoms) do
-			local fs = by_atom[a.name]
-			if fs then
-				add(string.format("  %s   line %d", a.name, a.line))
-				for _, f in ipairs(fs) do
-					add(string.format("      [%s] %s", f.check, f.msg))
-				end
-			end
-		end
-	end
-
-	add("")
-	add("── Errors ──────────────────────────────────────────────")
-	if #result.errors == 0 then add("  (none)") end
-	for _, e in ipairs(result.errors) do
-		add(string.format("  X line %d  %s", e.line, e.msg))
-	end
-
-	add("")
-	add("── Warnings ────────────────────────────────────────────")
-	if #result.warnings == 0 then add("  (none)") end
-	for _, w in ipairs(result.warnings) do
-		add(string.format("  ! line %d  %s", w.line, w.msg))
-	end
-
-	add("")
-	add("── Info ────────────────────────────────────────────────")
-	for _, i_ in ipairs(result.info) do
-		add(string.format("  %s", i_.msg))
-	end
-
-	duffle.write_file(out_path, table.concat(lines, "\n") .. "\n")
-	return out_path
-end
-
--- (Old per-source emit function above; kept for backward compat but no longer called from M.run. 
--- Replaced by `emit_module_static_analysis_txt` which aggregates by directory.)
 
 --- Per-directory emit. Aggregates atoms + findings across every source
 --- in `dir_sources` and writes a single report to

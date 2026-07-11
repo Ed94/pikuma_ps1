@@ -123,7 +123,6 @@ MipsAtom_(floor_f3_face) atom_info(
 	nop,
 	branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop,
 	/* Format Primitive */
-	// mac_format_f3_color(0x20FF, 0xFFFF),  // works
 	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
 	mac_gte_store_f3_post_rtpt(),
 	

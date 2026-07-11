@@ -149,7 +149,6 @@ local BYTE_COMMA        = 44
 --- @field errors   Finding[]
 --- @field warnings Finding[]
 --- @field info     Finding[]
---- @field pragmas  table  -- reserved (currently always nil; legacy compat)
 
 --- ════════════════════════════════════════════════════════════════════════════
 -- split helpers
@@ -239,18 +238,14 @@ local function parse_regs_call(s)
 	return spec.kind, inner
 end
 
--- Resolve any phase_* / R_* alias macros in a register list.
--- (Phase / region / cadence aliases have been dropped. Kept as an identity function so callers can stay uniform.)
-local function resolve_reg_aliases(regs) return regs end
-
--- Parse a comma-separated inner content (e.g. inside atom_reads(...)) into a list of trimmed identifiers with aliases resolved.
+-- Parse a comma-separated inner content (e.g. inside atom_reads(...)) into a list of trimmed identifiers.
 local function parse_regs_list(inner)
 	local out = {}
 	for _, r in ipairs(split_csv_top(inner)) do
 		local trimmed = trim(r)
 		if    trimmed ~= "" then out[#out + 1] = trimmed end
 	end
-	return resolve_reg_aliases(out)
+	return out
 end
 
 -- Parse a single token (from split_csv_top) into an arg entry.
@@ -272,11 +267,11 @@ end
 
 --- Extract identifier args from a parenthesized group. 
 --- Returns a list of {kind, value} pairs where kind is one of:
----   "ident"        -- a bare identifier (e.g. phase_work)
+---   "ident"        -- a bare identifier (e.g. a reserved token)
 ---   "atom_reads"   -- an atom_reads(...) call: value is the register list
 ---   "atom_writes"  -- an atom_writes(...) call: value is the register list
 ---   "other"        -- something we can't classify (preserved as text)
-local function parse_atom_annot_args(inner)
+local function parse_atom_info_args(inner)
 	local args = {}
 	for _, tok in ipairs(split_csv_top(inner)) do
 		local s = trim(tok)
@@ -593,8 +588,7 @@ local function find_atom_names(source)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Find atom annotations (atom_annot / atom_init / atom_setup / atom_commit
--- / atom_bind / atom_terminate)
+-- Find atom annotations (atom_info + atom_bind / atom_reads / atom_writes)
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- True iff the parsed arg is a register-list call (any recognized form).
@@ -612,8 +606,7 @@ function ANNOT_ARG_HANDLERS.info(entry, args)
 		elseif arg.kind == "atom_reads"  then entry.reads  = arg.value
 		elseif arg.kind == "atom_writes" then entry.writes = arg.value
 		elseif arg.kind == "ident"       then
-			-- Reserved for future phase tokens. Currently ignored.
-			-- (Could be reintroduced as `phase_*` sub-calls of atom_info.)
+			-- Reserved for future use. Currently ignored.
 		else
 			entry.errors[#entry.errors + 1] = string.format("unexpected atom_info arg kind=%s value=%s", arg.kind, tostring(arg.value))
 		end
@@ -653,7 +646,7 @@ local function parse_atom_info_call(source, atom_name, after_mipsatom_paren, lin
 
 	local info_inner, info_after = read_parens(source, info_open)
 	-- scan: MipsAtom_(<name>) atom_info(<binds>, <reads>, <writes>)
-	local args                   = parse_atom_annot_args(info_inner)
+	local args                   = parse_atom_info_args(info_inner)
 	local entry                  = new_annot_entry(line_of(lookahead), ATOM_INFO, atom_name, "info")
 	ANNOT_ARG_HANDLERS.info(entry, args)
 	return entry, info_after
@@ -713,7 +706,7 @@ local function find_atom_annotations(source)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Validation (ported from tape_atom_annotation_pass.lua:1193-1405)
+-- Validation
 -- ════════════════════════════════════════════════════════════════════════════
 
 local function validate(ctx, src)
@@ -865,7 +858,6 @@ local function validate(ctx, src)
 		atoms    = atoms,
 		annots   = annots,
 		macros   = macros,
-		pragmas  = pragmas,
 		binds    = binds,
 		errors   = errors,
 		warnings = warnings,
