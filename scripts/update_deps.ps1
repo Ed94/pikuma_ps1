@@ -4,25 +4,31 @@ $path_code      = join-path $path_root 'code'
 $path_scripts   = join-path $path_root 'scripts'
 $path_toolchain = join-path $path_root 'toolchain'
 
+# Halt on any error (instead of PowerShell's default `Continue`).
+$ErrorActionPreference = 'Stop'
+
 $misc = join-path $PSScriptRoot 'helpers/misc.ps1'
 . $misc
 
 # TODO(Ed): Review usage of these deps
 # I orgiinally cloned them when starting to get to the C runtime usage of the course
 # However, based on the heavy reliance of the PSX.Dev extension I might fallback; also
-# The gdb server doesn't need the full repo and were only using the src/mips 
+# The gdb server doesn't need the full repo and were only using the src/mips
 # which has a standalone repo (nuggets)
 # armips may not be used at all but I'm not sure...
 
 $url_armips     = 'https://github.com/Kingcom/armips.git'
 $url_pcsx_redux = 'https://github.com/grumpycoders/pcsx-redux.git'
 $url_psyq_iwyu  = 'https://github.com/johnbaumann/psyq_include_what_you_use.git'
+$url_lpeg       = 'https://github.com/roberto-ieru/LPeg.git'
 
 $path_armips     = join-path $path_toolchain 'armips'
 $path_pcsx_redux = join-path $path_toolchain 'pcsx-redux'
 $path_psyq_iwyu  = join-path $path_toolchain 'psyq_iwyu'
+$path_lpeg       = join-path $path_toolchain 'lpeg'
 
 clone-gitrepo $path_armips     $url_armips
+clone-gitrepo $path_lpeg       $url_lpeg
 clone-gitrepo $path_pcsx_redux $url_pcsx_redux
 clone-gitrepo $path_psyq_iwyu  $url_psyq_iwyu
 
@@ -37,3 +43,40 @@ pop-location
 # $path_pcsx_redux_binaries   = join-path $path_pcsx_redux_vsprojects 'x64/Release'
 
 # $psyq_obj_parser = join-path $path_pcsx_redux_binaries 'psyq-obj-parser.exe'
+
+# Locate luajit via scoop. `luajit.exe` is on PATH via scoop's shim;
+# we use `scoop prefix` to find the install root for the include dir
+# (needed to compile lpeg against luajit's headers).
+# If scoop or luajit is missing, fail fast with an actionable message.
+$luajit_prefix = & scoop prefix luajit 2>$null
+if (-not $luajit_prefix -or -not (Test-Path (Join-Path $luajit_prefix 'bin/luajit.exe'))) {
+	write-error "luajit not found via 'scoop prefix luajit'. Install via: scoop install luajit"
+	exit 1
+}
+
+# Discover the luajit include dir by globbing `include/luajit-*`.
+# This avoids hardcoding a specific version (e.g. `luajit-2.1`).
+$luajit_include_root = Join-Path $luajit_prefix 'include'
+$lua_inc_dir = Get-ChildItem -Path $luajit_include_root -Directory -Filter 'luajit-*' -ErrorAction SilentlyContinue |
+	Select-Object -First 1 -ExpandProperty FullName
+if (-not $lua_inc_dir) {
+	write-error "No 'luajit-*' include dir found under '$luajit_include_root'. The scoop luajit install may be broken."
+	exit 1
+}
+
+# Generate lpeg.dll by compiling the 6 source files directly.
+# `gcc` is on PATH (scoop's shim puts it there).
+# The source files: lpcap.c lpcode.c lpcset.c lpprint.c lptree.c lpvm.c
+# (per the lpeg makefile — no `make.lua` template generator in this version).
+# Link against luajit's import library (`libluajit-5.1.a`) for the Lua C API symbols (lua_*, luaL_*).
+$luajit_lib_dir = Join-Path $luajit_prefix 'lib'
+$lpeg_sources = @('lpcap.c', 'lpcode.c', 'lpcset.c', 'lpprint.c', 'lptree.c', 'lpvm.c')
+$lpeg_compile_args = @(
+	'-O2', '-shared',
+	"-I$lua_inc_dir",
+	"-L$luajit_lib_dir",
+	'-o', 'lpeg.dll'
+) + $lpeg_sources + @('-lluajit-5.1')
+push-location $path_lpeg
+&	gcc @lpeg_compile_args
+pop-location
