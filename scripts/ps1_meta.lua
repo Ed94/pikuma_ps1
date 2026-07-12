@@ -148,6 +148,13 @@ local PASSES = {
 		desc   = "[FUTURE] GTE pipeline-fill, mac_yield uniformity, etc.",
 		out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } },
 	},
+	["atoms-source-map"] = {
+		module = "passes.atoms_source_map",
+		kind   = "header-output",
+		deps   = {"word-counts", "components"},
+		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging)",
+		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.atoms.sourcemap.txt" } },
+	},
 	report = {
 		module = "passes.report",
 		kind   = "report",
@@ -167,19 +174,20 @@ local PASS_KIND_STOP_ON_ERROR = {
 
 -- Closed set of CLI flags -> pass names.
 local PASS_FLAG_TO_NAME = {
-	["--word-counts"]     = "word-counts",
-	["--components"]      = "components",
-	["--validate"]        = "annotation",
-	["--offsets"]         = "offsets",
-	["--static-analysis"] = "static-analysis",
-	["--report"]          = "report",
-	["--scan-source"]     = "scan-source",
-	["--all"]             = ALL_PASSES_SENTINEL,
+	["--word-counts"]       = "word-counts",
+	["--components"]        = "components",
+	["--validate"]          = "annotation",
+	["--offsets"]           = "offsets",
+	["--static-analysis"]   = "static-analysis",
+	["--atoms-source-map"]  = "atoms-source-map",
+	["--report"]            = "report",
+	["--scan-source"]       = "scan-source",
+	["--all"]               = ALL_PASSES_SENTINEL,
 }
 
 local ALL_PASS_NAMES = {
 	"scan-source", "word-counts", "components", "annotation",
-	"offsets", "static-analysis", "report",
+	"offsets", "static-analysis", "atoms-source-map", "report",
 }
 
 --- Append every pass name to args.requested_set. Used by --all and by the "default to --all if no pass flags were given" fallback.
@@ -212,6 +220,7 @@ PASS_FLAGS (pick one or more, or use --all):
   --components          Generate <module>/gen/<basename>.macs.h
   --validate            Run atom annotation DSL validation
   --offsets             Generate <module>/gen/<basename>.offsets.h
+  --atoms-source-map    Generate <basename>.atoms.sourcemap.txt per source
   --static-analysis     [FUTURE] GTE pipeline-fill, mac_yield uniformity
   --report              Render per-project summary
   --all                 Equivalent to all 6 flags above (default)
@@ -221,6 +230,8 @@ COMMON_FLAGS:
   --metadata PATH       Path to metadata.h (required)
   --out-root DIR        Output root for reports (default: build/gen)
   --project-root DIR    Project root for .macs.h scan (default: dirname(metadata))
+  --gdb-runtime         Also emit <out_root>/gdb_tape_atoms_runtime.gdb (post-link, requires --elf)
+  --elf PATH            Path to linked .elf (for --gdb-runtime address resolution)
   --dry-run             Print dep order + ASCII graph; exit 0 without running
   --verbose             Print per-pass debug output
   --help                Show this help and exit
@@ -252,6 +263,12 @@ FLAG_HANDLERS["--source"]       = function(args, argv, arg_idx) args.sources[#ar
 FLAG_HANDLERS["--metadata"]     = function(args, argv, arg_idx) args.metadata                   = argv[arg_idx + 1]; return arg_idx + 1 end
 FLAG_HANDLERS["--out-root"]     = function(args, argv, arg_idx) args.out_root                   = argv[arg_idx + 1]; return arg_idx + 1 end
 FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx) args.project_root               = argv[arg_idx + 1]; return arg_idx + 1 end
+
+-- Per-pass stash flags. Read by `passes/atoms_source_map.lua` to opt into the
+-- post-link gdb-runtime emission. Same shape as the existing per-flag handlers:
+-- mutates `args.flags` (which propagates into `ctx.flags`).
+FLAG_HANDLERS["--gdb-runtime"]  = function(args) args.flags                       = args.flags or {}; args.flags.gdb_runtime = true end
+FLAG_HANDLERS["--elf"]          = function(args, argv, arg_idx) args.flags       = args.flags or {}; args.flags.elf_path  = argv[arg_idx + 1]; return arg_idx + 1 end
 
 -- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set. Single-statement, no nesting.
 FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
@@ -368,7 +385,7 @@ local function build_ctx(args)
 		upstream      = {},
 		out_root      = args.out_root,
 		project_root  = args.project_root,
-		flags         = {},
+		flags         = args.flags or {},
 		dry_run       = args.dry_run,
 		verbose       = args.verbose,
 	}
