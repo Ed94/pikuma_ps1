@@ -24,6 +24,7 @@
 			"autorun": [
 				"monitor reset shellhalt",
 				"load hello_psyq.elf",
+				"source scripts/gdb/gdb_tape_atoms.gdb",
 				"tbreak main",
 				"continue"
 			]

@@ -2,22 +2,23 @@
 ---
 --- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
 --- for `MipsAtom_(name)` (kind="atom"), `MipsAtomComp_` / `MipsAtomComp_Proc_` (kind="comp_*"),
---- and `MipsCode code_<name>` (kind="raw_atom") declarations. Walks each atom's
---- pre-tokenized body (`{{tok=string, rel=integer}, ...}` from `duffle.tokenize_body`), counts
---- per-token word contributions via `ctx.shared.word_counts`, and emits one
---- `WORD N LINE L TEXT T` line per `.word` to `gen/<basename>.atoms.sourcemap.txt`.
+--- and `MipsCode code_<name>` (kind="raw_atom") declarations. 
+--- Walks each atom's pre-tokenized body (`{{tok=string, rel=integer}, ...}` from `duffle.tokenize_body`), 
+--- counts per-token word contributions via `ctx.shared.word_counts`, and emits one
+--- `WORD N LINE L TEXT T` line per `.word` to `<out_root>/<basename>.atoms.sourcemap.txt`.
 ---
 --- **Two output forms** (per the workspace's per-emission-form pattern from
 --- `guide_metaprogram_ssdl.md`):
----   1. **Canonical text form** — `<source_dir>/gen/<basename>.atoms.sourcemap.txt`.
----      Always emitted. Format-version-tagged for forward-compat.
----   2. **gdb-runtime form** — `<ctx.out_root>/gdb_tape_atoms_runtime.gdb` (pure
----      gdb command script; addresses pre-computed via `nm`; the 9 user commands
----      defined as `define ... end` blocks). Emitted ONLY when
----      `ctx.flags.gdb_runtime` is true AND `ctx.flags.elf_path` points to an
----      existing ELF. The gdb runtime form lets `gdb-multiarch --without-python`
----      users (the common case on Windows MinGW builds) load the source-map data
----      via `source <path>` — no Python/Tcl/Guile required.
+---   1. **Canonical text form** — `<out_root>/<basename>.atoms.sourcemap.txt`.
+---      Always emitted. Format-version-tagged for forward-compat. 
+---      Lives in `<out_root>/` (build/gen) NOT `<source_dir>/gen/`. This file is a **build report**, not a compile artifact. 
+---      Matches the convention used by `annotation.lua` (`<out_root>/<basename>.errors.h`) + `static_analysis.lua` (`<out_root>/<basename>.static_analysis.txt`).
+---      Compile artifacts (`*.macs.h`, `*.offsets.h`) stay in `<source_dir>/gen/`.
+---   2. **gdb-runtime form** — `<ctx.out_root>/gdb_tape_atoms_runtime.gdb`
+---      (pure gdb command script; addresses pre-computed via `nm`; the 9 user commands defined as `define ... end` blocks).
+---      Emitted ONLY when `ctx.flags.gdb_runtime` is true AND `ctx.flags.elf_path` points to an existing ELF.
+---      The gdb runtime form lets `gdb-multiarch --without-python` users (the common case on Windows MinGW builds) 
+---      load the source-map data via `source <path>` — no Python/Tcl/Guile required.
 ---
 --- **Output format** (canonical text form):
 ---   ```
@@ -33,16 +34,14 @@
 ---   ENDATOM
 ---   ```
 ---
---- Marker calls (`atom_label(...)`, `atom_offset(...)`) emit 0 `.word`s. They share the
---- same walking convention as `passes/offsets.lua :: scan_atom_body`: markers do NOT
---- advance the word-offset counter, but if a marker is bundled on the same token with a
---- trailing instruction (e.g. `atom_label(foo) load_half_u(...)`), the trailing
---- instruction's word count is added. This matches `offsets.lua :: count_marker_rest`.
+--- Marker calls (`atom_label(...)`, `atom_offset(...)`) emit 0 `.word`s. 
+--- They share the same walking convention as `passes/offsets.lua :: scan_atom_body`: 
+--- markers do NOT advance the word-offset counter, but if a marker is bundled on the same token with a
+--- trailing instruction (e.g. `atom_label(foo) load_half_u(...)`), 
+--- the trailing instruction's word count is added. This matches `offsets.lua :: count_marker_rest`.
 ---
 --- **Conventions:** tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible. See "lua.md" in the ps1-ai styleguides.
----
---- Provenance: generated 2026-07-11 by track gdb_tape_atom_debugging_20260711.
+--- Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -67,19 +66,6 @@ local FORMAT_VERSION = 1
 -- Marker-call identifiers (mirrors offsets.lua:33-34).
 local LABEL_MARKER  = "atom_label"
 local OFFSET_MARKER = "atom_offset"
-
--- gdb-runtime file header + atom-count default for C2 alias table (32 entries).
-local C2_DATA_ALIASES = {
-	"v0.xy", "v0.z",  "v1.xy", "v1.z",  "v2.xy", "v2.z",
-	"rgb",   "otz",
-	"ir0",   "ir1",   "ir2",   "ir3",
-	"sxy0",  "sxy1",  "sxy2",  "sxyp",
-	"sz0",   "sz1",   "sz2",   "sz3",
-	"rgb_fifo", "mac0_in",
-	"?",     "?",     "?",     "?",
-	"mac0",  "mac1",  "mac2",  "mac3",
-	"mac4",  "mac5",  "mac6",  "mac7",
-}
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
@@ -106,9 +92,9 @@ local function is_marker_token(tok)
 	return leading == LABEL_MARKER or leading == OFFSET_MARKER
 end
 
---- Count words contributed by the non-marker portion of `tok` (after the marker's
---- closing `)`). Mirrors offsets.lua:182 `count_marker_rest`. Returns 0 if there's
---- no trailing content after the marker call.
+--- Count words contributed by the non-marker portion of `tok` (after the marker's closing `)`).
+--- Mirrors offsets.lua:182 `count_marker_rest`. 
+--- Returns 0 if there's no trailing content after the marker call.
 --- @param tok string
 --- @param wc table
 --- @return integer
@@ -120,9 +106,9 @@ local function count_marker_rest(tok, wc)
 	return count_token_words(rest, wc)
 end
 
---- Compute per-word entries for an atom. Shared between the canonical text form
---- (per-source `.atoms.sourcemap.txt`) and the gdb-runtime form
---- (`gdb_tape_atoms_runtime.gdb`).
+--- Compute per-word entries for an atom. 
+--- Shared between the canonical text form (per-source `.atoms.sourcemap.txt`) 
+--- and the gdb-runtime form (`gdb_tape_atoms_runtime.gdb`).
 ---
 --- Returns a list of `{pos, line, text}` entries + the total word count.
 --- Markers contribute 0 entries (the marker call emits 0 `.word`s).
@@ -245,8 +231,8 @@ local function gdb_escape(s)
 	return (s:gsub("\\", "\\\\"):gsub('"', '\\"'))
 end
 
---- Build the list of atoms with addresses + word entries. Shared helper for the
---- gdb-runtime file emission.
+--- Build the list of atoms with addresses + word entries.
+--- Shared helper for the gdb-runtime file emission.
 --- @param ctx PassCtx
 --- @return table[] -- list of {idx, name, src_path, file_base, addr, size_bytes, words, entries}
 local function build_atom_table(ctx)
@@ -302,15 +288,13 @@ local function build_atom_table(ctx)
 	return matched
 end
 
---- Append the 9 gdb command definitions to `lines`. Pure gdb scripting —
---- no Python, no Tcl, no Guile required. **Fully hardcoded per-atom** because
---- gdb doesn't do nested `$` substitution in var names — `$__atom_name_$__i`
---- inside a `while` loop is treated as one literal identifier, not a concat.
+--- Append the 9 gdb command definitions to `lines`. Pure gdb scripting no Python, no Tcl, no Guile required. 
+--- **Fully hardcoded per-atom** because gdb doesn't do nested `$` substitution in var names
+--- `$__atom_name_$__i` inside a `while` loop is treated as one literal identifier, not a concat.
 ---
---- Each command is a static sequence of `printf` / `tbreak` / `if ... end`
---- blocks. The Lua pass emits N atoms' worth of lines — no runtime iteration.
---- With 7 atoms + ~200 word entries, the runtime file is ~2000 lines, all
---- auto-generated, no human edit ever.
+--- Each command is a static sequence of `printf` / `tbreak` / `if ... end` blocks.
+--- The Lua pass emits N atoms' worth of lines — no runtime iteration. 
+--- With 7 atoms + ~200 word entries, the runtime file is ~2000 lines, all auto-generated, no human edit ever.
 --- @param lines   table  -- output line buffer (mutated in place)
 --- @param matched table  -- list of atom records from `build_atom_table`
 local function append_gdb_commands(lines, matched)
@@ -382,10 +366,11 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "  set $__pc = (unsigned int)$pc"
 	lines[#lines + 1] = "  set $__matched = 0"
 	for _, a in ipairs(matched) do
-		local end_addr = a.addr + a.words * 4
+		-- Precompute end_addr (gdb 12.1's expression evaluator chokes on `addr + words*4`).
 		lines[#lines + 1] = string.format(
-			"  if $__pc >= $__atom_addr_%d && $__pc < $__atom_addr_%d + $__atom_words_%d * 4",
-			a.idx, a.idx, a.idx)
+			"  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
+		lines[#lines + 1] = string.format(
+			"  if $__pc >= $__atom_addr_%d && $__pc < $__end_%d", a.idx, a.idx)
 		lines[#lines + 1] = string.format(
 			'    printf "atom:    code_%%s\\n", $__atom_name_%d', a.idx)
 		lines[#lines + 1] = '    printf "addr:    0x%08x\\n", $__pc'
@@ -425,14 +410,19 @@ local function append_gdb_commands(lines, matched)
 
 	-- ── stepi_inside_atom ──
 	-- Hardcoded one if-containment-check per atom (no loop).
+	-- Precompute end_addr in Lua so we don't ask gdb to evaluate `addr + words*4`
+	-- inside the if condition (gdb 12.1's expression evaluator chokes on the
+	-- `*` and emits a misleading 'function malloc' error in some gdb builds).
 	lines[#lines + 1] = "define stepi_inside_atom"
 	lines[#lines + 1] = "  set $__in_atom = 0"
 	lines[#lines + 1] = "  set $__did_step = 0"
+	lines[#lines + 1] = "  set $__pc = (unsigned int)$pc"
 	for _, a in ipairs(matched) do
-		local end_addr = a.addr + a.words * 4
+		-- Precompute end_addr in the convenience var (single expression gdb handles).
 		lines[#lines + 1] = string.format(
-			"  if $pc >= $__atom_addr_%d && $pc < $__atom_addr_%d + $__atom_words_%d * 4",
-			a.idx, a.idx, a.idx)
+			"  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
+		lines[#lines + 1] = string.format(
+			"  if $__pc >= $__atom_addr_%d && $__pc < $__end_%d", a.idx, a.idx)
 		lines[#lines + 1] = "    set $__in_atom = 1"
 		lines[#lines + 1] = "    stepi"
 		lines[#lines + 1] = "    set $__did_step = 1"
@@ -448,30 +438,29 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = ""
 
-	-- ── show_c2 (32 entries) ──
-	-- Hardcoded with `$c2_data[N]` (COP2 data regs). Requires target attached.
+	-- ── show_c2 ──
+	-- GTE data regs (COP2). pcsx-redux's gdb stub doesn't expose COP2 (only
+	-- 72 regs: 32 GPR + COP0 + FPR).
+	--   curl http://localhost:8080/api/v1/lua/gte
+	-- We keep the command definition as a stub that points the user at the plugin.
 	lines[#lines + 1] = "define show_c2"
-	for i = 0, 31 do
-		local alias = C2_DATA_ALIASES[i + 1] or "?"
-		lines[#lines + 1] = string.format(
-			'  printf "C2[%%2d]   0x%%08x  [%%s]\\n", %d, $c2_data[%d], "%s"',
-			i, i, alias)
-	end
+	lines[#lines + 1] = '  echo "[gdb_tape_atoms] show_c2: gdb stub does not expose COP2 in this build."'
+	lines[#lines + 1] = '  echo "[gdb_tape_atoms] Use scripts/pcsx_debug_helper.zip + curl http://localhost:8080/api/v1/lua/gte"'
+	lines[#lines + 1] = '  echo "[gdb_tape_atoms] (or pcsx-redux Debug > Registers window for a native view)"'
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = "document show_c2"
-	lines[#lines + 1] = "  Pretty-print all 32 C2 data registers as hex + named alias. Requires target attached."
+	lines[#lines + 1] = "  Stub. The gdb stub in this pcsx-redux build does not expose COP2 regs."
+	lines[#lines + 1] = "  For GTE data + control state, use the pcsx_debug_helper Lua plugin or the"
+	lines[#lines + 1] = "  pcsx-redux Debug > Registers window."
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = ""
 
-	-- ── show_c2ctl (32 entries) ──
+	-- ── show_c2ctl ──
 	lines[#lines + 1] = "define show_c2ctl"
-	for i = 0, 31 do
-		lines[#lines + 1] = string.format(
-			'  printf "C2CTL[%%2d]  0x%%08x\\n", %d, $c2_control[%d]', i, i)
-	end
+	lines[#lines + 1] = '  echo "[gdb_tape_atoms] show_c2ctl: see show_c2 for the same workaround."'
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = "document show_c2ctl"
-	lines[#lines + 1] = "  Pretty-print all 32 C2 control registers as hex. Requires target attached."
+	lines[#lines + 1] = "  Stub. Same workaround as show_c2."
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = ""
 
@@ -488,9 +477,8 @@ local function append_gdb_commands(lines, matched)
 end
 
 --- Emit the gdb-runtime file (post-link). Pure gdb scripting — no Python.
---- Reads ELF addresses via `mipsel-none-elf-nm -S`, embeds them in
---- `<ctx.out_root>/gdb_tape_atoms_runtime.gdb` so gdb loads the data via
---- `set $var = ...` + `define ... end` blocks at source-time.
+--- Reads ELF addresses via `mipsel-none-elf-nm -S`, embeds them in `<ctx.out_root>/gdb_tape_atoms_runtime.gdb`
+--- so gdb loads the data via `set $var = ...` + `define ... end` blocks at source-time.
 --- @param ctx PassCtx
 local function emit_gdb_runtime(ctx)
 	if not (ctx.flags and ctx.flags.gdb_runtime) then return end
@@ -563,7 +551,7 @@ end
 
 local M = {}
 
---- Pass entry: emit one `gen/<basename>.atoms.sourcemap.txt` per source file
+--- Pass entry: emit one `<out_root>/<basename>.atoms.sourcemap.txt` per source file
 --- that contains at least one `MipsAtom_(name)` / `MipsCode code_<name>` declaration.
 --- Optionally also emit `<ctx.out_root>/gdb_tape_atoms_runtime.gdb` when
 --- `ctx.flags.gdb_runtime` is true.
@@ -591,7 +579,10 @@ function M.run(ctx)
 			local n_raw_atoms = src.scan.raw_atoms and #src.scan.raw_atoms or 0
 			if n_atoms + n_raw_atoms > 0 then
 				local basename = duffle.basename_no_ext(src.path)
-				local out_path = src.dir .. "/gen/" .. basename .. ".atoms.sourcemap.txt"
+				-- Build report, NOT compile artifact: live in <out_root> alongside the other reports
+				-- (annotation.lua's *.errors.h, static_analysis.lua's *.static_analysis.txt, gdb_tape_atoms_runtime.gdb).
+				-- The per-source <source_dir>/gen/ is reserved for headers actually #included by C.
+				local out_path = ctx.out_root .. "/" .. basename .. ".atoms.sourcemap.txt"
 				local content  = render_source_map(src, wc)
 
 				if not ctx.dry_run then
