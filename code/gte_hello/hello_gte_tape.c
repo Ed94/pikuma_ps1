@@ -27,10 +27,10 @@ internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri)
 ,	atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 ){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)), 
-	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)), 
-	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)), 
-	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)), 
+	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)),
+	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)),
+	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)),
+	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)),
 	add_ui_self(            R_TapePtr, S_(Binds_CubeTri)),
 	mac_yield()
 };
@@ -41,7 +41,7 @@ internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri)
  *  Reads 4 indices from R_FaceCur (V4_S2 = 8 bytes), loads 4 vertices into
  *  the GTE, runs the PsyQ RotAverageNclip4 sequence, and renders a Poly_G4.
  */
-internal 
+internal
 MipsAtom_(cube_g4_face) atom_info(
 		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
 		atom_writes(R_PrimCursor, R_FaceCursor)
@@ -94,21 +94,21 @@ typedef Struct_(Binds_FloorTri) {
 	V3_S2* VertBase;
 	U4*    OtBase;
 };
-internal 
+internal
 MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri)
 	, atom_reads(R_TapePtr)
 	, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 ){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)), 
-	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)), 
-	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,VertBase)), 
-	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,OtBase)), 
+	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)),
+	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)),
+	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,VertBase)),
+	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,OtBase)),
 	add_ui_self(            R_TapePtr, S_(Binds_FloorTri)),
 	mac_yield()
 };
 
-internal 
+internal
 MipsAtom_(floor_f3_face) atom_info(
 	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 	, atom_writes(R_PrimCursor, R_FaceCursor)
@@ -117,7 +117,7 @@ MipsAtom_(floor_f3_face) atom_info(
 	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple,
 	nop2, gte_cmdw_nclip,
- 
+
 	/* Culling (Branch forward if Backface) */
 	nop2, gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop,
@@ -125,21 +125,21 @@ MipsAtom_(floor_f3_face) atom_info(
 	/* Format Primitive */
 	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
 	mac_gte_store_f3_post_rtpt(),
-	
+
 	/* Calculate Depth */
-	nop2, gte_avg_sort_z3,            
-	nop2, gte_mv_from_data_r(R_T1, C2_OTZ),      
+	nop2, gte_avg_sort_z3,
+	nop2, gte_mv_from_data_r(R_T1, C2_OTZ),
 	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
-	add_ui(      R_AT, R_0,  OrderingTbl_Len),   
-	set_lt_u(    R_AT, R_T1, R_AT), 
-	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop, 
+	add_ui(      R_AT, R_0,  OrderingTbl_Len),
+	set_lt_u(    R_AT, R_T1, R_AT),
+	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
 	/* Insert into Ordering Table Linked List */
 	mac_insert_ot_tag_f3(),
 	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 		// Note(Ed): No bounds checking, should be checked before atom runs.
 
 /* Advance Input Cursor & Yield (Both branch targets land here) */
-atom_label(floor_f3_face_exit) 
+atom_label(floor_f3_face_exit)
 	add_ui_self(R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
 	mac_yield()
 };
@@ -150,7 +150,7 @@ internal MipsAtom_(sync_primitive_arena) atom_info(atom_bind(Binds_SyncPrimitive
 	, atom_writes(R_TapePtr)
 ){
 	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,used)),
-	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)),      
+	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)),
 	add_ui_self(    R_TapePtr, S_(Binds_SyncPrimitiveArena)),
 	/* Calculate byte offset and store directly back to RAM */
 	sub_u(     R_T0, R_PrimCursor, R_T0), // R_T0    = R_PrimCursor - binds.cursor

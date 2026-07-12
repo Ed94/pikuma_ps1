@@ -155,6 +155,17 @@ local PASSES = {
 		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging)",
 		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.atoms.sourcemap.txt" } },
 	},
+	["dwarf-injection"] = {
+		module = "passes.dwarf_injection",
+		kind   = "shared",
+		deps   = {"atoms-source-map"},
+		desc   = "Inject per-atom .debug_line + .debug_aranges into the ELF (post-link; writes section .bin blobs for objcopy splice)",
+		out    = {
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_line.bin" },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_aranges.bin" },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_rnglists.bin" },
+		},
+	},
 	report = {
 		module = "passes.report",
 		kind   = "report",
@@ -180,6 +191,7 @@ local PASS_FLAG_TO_NAME = {
 	["--offsets"]           = "offsets",
 	["--static-analysis"]   = "static-analysis",
 	["--atoms-source-map"]  = "atoms-source-map",
+	["--dwarf-injection"]   = "dwarf-injection",
 	["--report"]            = "report",
 	["--scan-source"]       = "scan-source",
 	["--all"]               = ALL_PASSES_SENTINEL,
@@ -187,7 +199,7 @@ local PASS_FLAG_TO_NAME = {
 
 local ALL_PASS_NAMES = {
 	"scan-source", "word-counts", "components", "annotation",
-	"offsets", "static-analysis", "atoms-source-map", "report",
+	"offsets", "static-analysis", "atoms-source-map", "dwarf-injection", "report",
 }
 
 --- Append every pass name to args.requested_set. Used by --all and by the "default to --all if no pass flags were given" fallback.
@@ -221,6 +233,7 @@ PASS_FLAGS (pick one or more, or use --all):
   --validate            Run atom annotation DSL validation
   --offsets             Generate <module>/gen/<basename>.offsets.h
   --atoms-source-map    Generate <basename>.atoms.sourcemap.txt per source
+  --dwarf-injection     Inject per-atom .debug_line + .debug_aranges (post-link, requires --elf)
   --static-analysis     [FUTURE] GTE pipeline-fill, mac_yield uniformity
   --report              Render per-project summary
   --all                 Equivalent to all 6 flags above (default)
@@ -231,7 +244,8 @@ COMMON_FLAGS:
   --out-root DIR        Output root for reports (default: build/gen)
   --project-root DIR    Project root for .macs.h scan (default: dirname(metadata))
   --gdb-runtime         Also emit <out_root>/gdb_tape_atoms_runtime.gdb (post-link, requires --elf)
-  --elf PATH            Path to linked .elf (for --gdb-runtime address resolution)
+  --dwarf-injection     Opt in to DWARF injection (writes <basename>.dwarf_*.bin blobs for objcopy splice; requires --elf)
+  --elf PATH            Path to linked .elf (for --gdb-runtime / --dwarf-injection)
   --dry-run             Print dep order + ASCII graph; exit 0 without running
   --verbose             Print per-pass debug output
   --help                Show this help and exit
@@ -269,6 +283,12 @@ FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx) args.project_roo
 -- mutates `args.flags` (which propagates into `ctx.flags`).
 FLAG_HANDLERS["--gdb-runtime"]  = function(args) args.flags                       = args.flags or {}; args.flags.gdb_runtime = true end
 FLAG_HANDLERS["--elf"]          = function(args, argv, arg_idx) args.flags       = args.flags or {}; args.flags.elf_path  = argv[arg_idx + 1]; return arg_idx + 1 end
+-- F' track: enable DWARF injection (default OFF; opt-in via .vscode/launch.json or ps1_meta CLI).
+FLAG_HANDLERS["--dwarf-injection"] = function(args)
+	args.flags = args.flags or {}
+	args.flags.dwarf_injection = true
+	args.requested_set[#args.requested_set + 1] = "dwarf-injection"
+end
 
 -- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set. Single-statement, no nesting.
 FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
@@ -582,8 +602,8 @@ local function render_dep_graph(passes, requested, closed)
 	add("   |<base>.macs.h |   |<base>.errors |   |<base>.offsets|   |<base>.static  |")
 	add("   |   (header)   |   |  .h          |   |  .h          |   |  _analysis    |")
 	add("   +------+-------+   |  +annot.txt  |   |  (header)    |   |  .txt         |")
-	add("          |           +------+-------+   +--------------+   +------+--------+")
-	add("          v                v                                       v")
+	add("          |           +--+-----------+   +--------------+   +------+--------+")
+	add("          v              v                                         v")
 	add("   +------+----------------+  +------+-------+                     |")
 	add("   |offsets|static-analysis|  |report|       |<--------------------+")
 	add("   |       |               |  +------+-------+")

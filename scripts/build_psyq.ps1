@@ -394,6 +394,55 @@ function build-gte_hello {
 		-out_root (join-path $path_build 'gen') `
 		-passes @('--gdb-runtime') `
 		-extra_args @('--elf', $elf)
+	ps1-meta -sources $atom_sources -metadata $path_atom_metadata `
+		-out_root (join-path $path_build 'gen') `
+		-passes @('--dwarf-injection') `
+		-extra_args @('--elf', $elf)
+
+	# F' track: post-link DWARF injection. The new Lua pass writes
+	# build/gen/<basename>.dwarf_*.bin blobs; we splice them into a COPY
+	# of the ELF via objcopy --update-section (works fine from PowerShell).
+	# The un-injected $elf + $exe are unchanged (shipping binary).
+	$dwarfLineBin    = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_line.bin'
+	$dwarfArangesBin = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_aranges.bin'
+	$dwarfRnglistsBin = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_rnglists.bin'
+	$injectElf       = Join-Path $path_build 'hello_gte.dwarf-injected.elf'
+	if ((Test-Path $dwarfLineBin) -and (Test-Path $dwarfArangesBin) -and (Test-Path $dwarfRnglistsBin)) {
+		Write-Host "[build] DWARF-injecting $elf -> $injectElf"
+		Copy-Item -LiteralPath $elf -Destination $injectElf
+		& $Objcopy --update-section ".debug_line=$dwarfLineBin"    $injectElf
+		if ($LASTEXITCODE -ne 0) {
+			Write-Warning "[build] objcopy .debug_line update failed (exit $LASTEXITCODE); removing $injectElf"
+			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
+		} else {
+			& $Objcopy --update-section ".debug_aranges=$dwarfArangesBin" $injectElf
+			if ($LASTEXITCODE -ne 0) {
+				Write-Warning "[build] objcopy .debug_aranges update failed (exit $LASTEXITCODE); removing $injectElf"
+				Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
+			} else {
+				& $Objcopy --update-section ".debug_rnglists=$dwarfRnglistsBin" $injectElf
+				if ($LASTEXITCODE -ne 0) {
+					Write-Warning "[build] objcopy .debug_rnglists update failed (exit $LASTEXITCODE); removing $injectElf"
+					Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
+				} else {
+					# Baked atoms execute from RAM but are emitted as C data arrays, so
+					# their ELF sections lack SHF_EXECINSTR. GDB discards line rows for
+					# non-code sections. Mark only the debug-copy sections executable;
+					# the shipping ELF and PS-EXE remain byte/flag unchanged.
+					& $Objcopy `
+						--set-section-flags ".rodata=alloc,load,readonly,code,contents" `
+						--set-section-flags ".data=alloc,load,data,code,contents" `
+						$injectElf
+					if ($LASTEXITCODE -ne 0) {
+						Write-Warning "[build] objcopy atom-section flag update failed (exit $LASTEXITCODE); removing $injectElf"
+						Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
+					} else {
+						Write-Host "[build] DWARF-injected ELF: $injectElf"
+					}
+				}
+			}
+		}
+	}
 }
 build-gte_hello
 
