@@ -116,7 +116,7 @@ local function scan_binds_fields(body)
 			local field_ident, field_end = duffle.read_ident(body, duffle.skip_ws_and_cmt(body, type_end))
 			if field_ident then
 				fields[#fields + 1] = { name = field_ident, offset = byte_off }
-				byte_off = byte_off + 4
+				byte_off = byte_off + 0x04    -- U4 field = 4 bytes (= 1 .word)
 			end
 			body_pos = field_end or (type_end + 1)
 		else

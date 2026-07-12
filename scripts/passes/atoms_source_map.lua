@@ -52,6 +52,7 @@
 -- returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle           = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local elf_dwarf        = require("elf_dwarf")
 local word_count_eval  = require("word_count_eval")
 local count_token_words = word_count_eval.count_token_words
 
@@ -202,27 +203,6 @@ end
 -- gdb-runtime emission (post-link, addresses via nm)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Read ELF symbol addresses via `mipsel-none-elf-nm -S`. Returns map: name -> {addr, size_bytes}.
---- @param elf_path string
---- @return table
-local function read_nm(elf_path)
-	local addrs = {}
-	-- Use io.popen (subprocess spawn ~50ms on Windows). For frequent calls,
-	-- we'd memoize via package.loaded — but this only runs in the post-link pass.
-	local f = io.popen('mipsel-none-elf-nm -S "' .. elf_path .. '" 2>nul')
-	if not f then return addrs end
-	for line in f:lines() do
-		-- Format: "80015eac 0000015c r code_cube_g4_face"
-		-- The symbol-type letter (`r` for read-only .rodata) sits between size and name.
-		local addr_hex, size_hex, name = line:match("^(%x+)%s+(%x+)%s+%a%s+code_(%S+)")
-		if addr_hex and size_hex and name then
-			addrs[name] = { tonumber(addr_hex, 16), tonumber(size_hex, 16) }
-		end
-	end
-	f:close()
-	return addrs
-end
-
 --- Escape a string for embedding in a gdb `set $var = "..."` literal.
 --- gdb uses C-style escaping; we escape `\` and `"` (newlines were flattened earlier).
 --- @param s string
@@ -237,7 +217,7 @@ end
 --- @return table[] -- list of {idx, name, src_path, file_base, addr, size_bytes, words, entries}
 local function build_atom_table(ctx)
 	local wc = (ctx.shared and ctx.shared.word_counts) or {}
-	local addrs = read_nm(ctx.flags.elf_path)
+	local addrs = elf_dwarf.read_nm(ctx.flags.elf_path)
 
 	local matched = {}
 	for _, src in ipairs(ctx.sources) do

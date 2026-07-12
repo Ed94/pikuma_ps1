@@ -168,28 +168,18 @@ if arg and arg[1] then
 	end
 
 	-- Accept either a directory or a file path. Directory args are
-	-- expanded via `dir /b *.lua` (Windows) or `ls *.lua` (Unix).
+	-- expanded via lfs.dir (native, no subprocess).
+	local lfs = require("lfs")
 	local function is_dir(p)
-		local f = io.open(p, "r")
-		if    f then f:close() return false end
-		return true
+		return lfs.attributes(p, "mode") == "directory"
 	end
 	local function list_lua(dir)
 		local out = {}
-		local cmd
-		if package.config:sub(1, 1) == "\\" then
-			cmd = 'dir /b "' .. dir .. '\\*.lua" 2>nul'
-		else
-			cmd = 'ls -1 "' .. dir .. '"/*.lua 2>/dev/null'
-		end
-		local p = io.popen(cmd)
-		if p then
-			for line in p:lines() do
-				if line:match("%.lua$") then
-					out[#out + 1] = dir .. "/" .. line
-				end
+		if not is_dir(dir) then return out end
+		for entry in lfs.dir(dir) do
+			if entry:match("%.lua$") then
+				out[#out + 1] = dir .. "/" .. entry
 			end
-			p:close()
 		end
 		return out
 	end

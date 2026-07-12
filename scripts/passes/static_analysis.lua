@@ -476,7 +476,7 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 			atom  = atom.name, line = atom.line,
 			check = "abi_handoff", kind = "error",
 			msg   = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)",
-				atom.name, atom.line, binds_name, binds_name, binds.bytes, binds.bytes / 4),
+				atom.name, atom.line, binds_name, binds_name, binds.bytes, binds.bytes / 0x04),
 		}
 	end
 end

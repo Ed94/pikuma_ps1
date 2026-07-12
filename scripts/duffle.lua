@@ -41,96 +41,55 @@ local lfs = require("lfs")
 -- ASCII byte constants
 -- ════════════════════════════════════════════════════════════════════════════
 
-local BYTE_SPACE      = 32    -- ' '
-local BYTE_TAB        = 9     -- '\t'
-local BYTE_NEWLINE    = 10    -- '\n'
-local BYTE_CR         = 13    -- '\r'
-local BYTE_VT         = 11    -- '\v'
-local BYTE_FF         = 12    -- '\f'
+local BYTE_SPACE      = 0x20    -- ' '
+local BYTE_TAB        = 0x09    -- '\t'
+local BYTE_NEWLINE    = 0x0A    -- '\n'
+local BYTE_CR         = 0x0D    -- '\r'
+local BYTE_VT         = 0x0B    -- '\v'
+local BYTE_FF         = 0x0C    -- '\f'
 
-local BYTE_UNDERSCORE = 95    -- '_'
-local BYTE_DOT        = 46    -- '.'
-local BYTE_SLASH      = 47    -- '/'
-local BYTE_BACKSLASH  = 92    -- '\\'
-local BYTE_STAR       = 42    -- '*'
-local BYTE_DQUOTE     = 34    -- '"'
-local BYTE_SQUOTE     = 39    -- '\''
-local BYTE_COMMA      = 44    -- ','
-local BYTE_SEMI       = 59    -- ';'
+local BYTE_UNDERSCORE = 0x5F    -- '_'
+local BYTE_DOT        = 0x2E    -- '.'
+local BYTE_SLASH      = 0x2F    -- '/'
+local BYTE_BACKSLASH  = 0x5C    -- '\\'
+local BYTE_STAR       = 0x2A    -- '*'
+local BYTE_DQUOTE     = 0x22    -- '"'
+local BYTE_SQUOTE     = 0x27    -- '\''
+local BYTE_COMMA      = 0x2C    -- ','
+local BYTE_SEMI       = 0x3B    -- ';'
 
-local BYTE_OPEN_PAREN  = 40   -- '('
-local BYTE_OPEN_BRACE  = 123  -- '{'
-local BYTE_OPEN_BRACK  = 91   -- '['
+local BYTE_OPEN_PAREN  = 0x28   -- '('
+local BYTE_OPEN_BRACE  = 0x7B   -- '{'
+local BYTE_OPEN_BRACK  = 0x5B   -- '['
 
-local BYTE_LOWER_A = 97       -- 'a'
-local BYTE_LOWER_Z = 122      -- 'z'
-local BYTE_UPPER_A = 65       -- 'A'
-local BYTE_UPPER_Z = 90       -- 'Z'
+local BYTE_LOWER_A = 0x61       -- 'a'
+local BYTE_LOWER_Z = 0x7A       -- 'z'
+local BYTE_UPPER_A = 0x41       -- 'A'
+local BYTE_UPPER_Z = 0x5A       -- 'Z'
 
-local BYTE_DIGIT_0 = 48       -- '0'
-local BYTE_DIGIT_9 = 57       -- '9'
+local BYTE_DIGIT_0 = 0x30       -- '0'
+local BYTE_DIGIT_9 = 0x39       -- '9'
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section -1: Bootstrap (path-setup at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- When duffle.lua is first loaded (via `dofile` from an entry script or via `require` from a passes script), 
--- the code below sruns and sets `package.path` + `package.cpath` so subsequent `require`s resolve.
--- Idempotent: re-loads just re-set the same paths.
+-- Path setup is done by `scripts/duffle_paths.lua`, which derives the repo
+-- root from `debug.getinfo(1, "S").source` (NO subprocess, ~0ms) and
+-- then calls `require("duffle")`. The prior `io.popen("git rev-parse ...")`
+-- approach in this section was removed during F'' because:
 --
--- **Entry scripts** trigger this with one line:
--- `local duffle = dofile(arg[0]:match("(.*[/\\])") .. "/../duffle.lua")` which runs this top-level + returns `M`.
+--   1. Every entry script + every passes script now uses
+--      `dofile("duffle_paths.lua")` (14 call sites; verified via grep).
+--      The `find_repo_root` / `setup_package_path` defined here was dead
+--      code in practice.
+--   2. `git rev-parse` costs ~100-180ms per subprocess spawn on Windows.
+--      `debug.getinfo` is <1ms. There's no reason to keep the slow path
+--      even as a "fallback".
 --
--- **Passes scripts** are loaded via `require("passes.X")` from the entry script; by the time they run, 
--- the entry script has already triggered this bootstrap, so the paths are set.
-
---- Resolve the repo root via `git rev-parse --show-toplevel` (cached).
---- Returns a path with a trailing separator, or nil if not in a git repo.
---- @return string|nil
-local function find_repo_root()
-	-- Cached in `package.loaded` (process-global) so all 8 entry scripts + passes scripts share one git call.
-	-- Without this, git rev-parse runs once per script load.
-	if package.loaded.__duffle_repo_root__ then return package.loaded.__duffle_repo_root__ end
-	local p = io.popen("git rev-parse --show-toplevel 2>nul")
-	local root
-	if p then
-		root = p:read("*l")
-		p:close()
-	end
-	if not root or root == "" then return nil end
-	if not root:match("[/\\]$") then root = root .. "/" end
-	package.loaded.__duffle_repo_root__ = root
-	return root
-end
-
---- Set `package.path`  (for `require("duffle")` + `require("passes.X")`)
---- and `package.cpath` (for `lpeg.dll` on Windows).
-function M.setup_package_path()
-	local repo_root = find_repo_root()
-	if not repo_root then
-		io.stderr:write("[duffle] git rev-parse failed -- not in a git repo?\n")
-		os.exit(2)
-	end
-
-	-- From the repo root, derive both `scripts/` and `scripts/passes/` so `require("duffle")` AND `require("passes.annotation")` resolve.
-	local scripts_dir = repo_root .. "scripts/"
-	local passes_dir  = repo_root .. "scripts/passes/"
-	package.path = scripts_dir .. "?.lua;"
-		.. scripts_dir .. "?/init.lua;"
-		.. passes_dir .. "?.lua;"
-		.. passes_dir .. "?/init.lua;"
-		.. package.path
-
--- cpath: only needed on Windows for the bundled lpeg.dll. 
--- (LPeg is optional -- duffle.lua's `pcall(require, "lpeg")` falls back to hand-rolled scanners if the .dll isn't loadable.)
-	if package.config:sub(1, 1) == "\\" then
-		package.cpath = repo_root .. "toolchain/luajit-2.1/lib/lua/5.1/?.dll;"
-			.. package.cpath
-	end
-end
-
--- NOTE: `M.setup_package_path()` is NOT auto-called here. The entry scripts explicitly `dofile("duffle_paths.lua")` first, which calls `M.setup_package_path()`. 
--- The function exists for the helper to use (so the path-setup logic is centralized in duffle.lua).
+-- If a future use case ever needs to load `duffle.lua` WITHOUT going
+-- through `duffle_paths.lua`, set `package.path` manually before `require`.
+-- See `docs/guide_metaprogram_ssdl.md` §"I/O primitives" for the pattern.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 0: LPeg patterns (compiled once at module load)
@@ -173,7 +132,7 @@ local lpeg_block_cmt_pat = P("/*") * (P(1) - P("*/"))^0 * P("*/")
 local lpeg_str_or_cmt_pat = lpeg_str_pat + lpeg_chr_pat + lpeg_line_cmt_pat + lpeg_block_cmt_pat
 
 -- Whitespace + comment skipper: zero+ (whitespace run | string | comment).
-local ws_pat = S(" \t\n\r\v\f")
+local ws_pat              = S(" \t\n\r\v\f")
 local lpeg_ws_and_cmt_pat = (ws_pat + lpeg_str_or_cmt_pat)^0
 
 -- Generic "skip until target, but step over balanced groups" matcher.
@@ -185,11 +144,9 @@ local lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  en
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 1: character classification (byte-based for hot loops)
 -- ════════════════════════════════════════════════════════════════════════════
---
 -- Two APIs:
 --   is_space(c), is_alpha(c), etc. — accept a single-char STRING (legacy)
 --   is_space_byte(b), is_alpha_byte(b), etc. — accept a single-byte INTEGER
---
 -- The byte-based versions are 5-10x faster in tight loops because they avoid the string allocation per s:sub(pos, pos) call.
 
 -- Whitespace characters per C locale.
@@ -209,8 +166,8 @@ function M.is_digit_byte(b) return b and b >= BYTE_DIGIT_0 and b <= BYTE_DIGIT_9
 -- Letter OR digit OR underscore.
 function M.is_alnum_byte(b) return M.is_alpha_byte(b) or M.is_digit_byte(b) end
 
--- String-based wrappers (kept for callers that already have a single-char
--- string; the byte versions are what the hot loops should call).
+-- String-based wrappers (kept for callers that already have a single-char string;
+-- the byte versions are what the hot loops should call).
 function M.is_space(c)
 	if type(c) == "number" then return M.is_space_byte(c) end
 	return c == " "  or c == "\t" or c == "\n" or c == "\r" or c == "\v" or c == "\f"
@@ -240,7 +197,6 @@ function M.trim(s)
 end
 
 -- Linear-search for a single-byte target in a string.
--- (Phase 3 retained this for places where LPeg is overkill.)
 -- @param haystack string
 -- @param target integer  -- byte value
 -- @param start integer   -- optional 1-indexed start (default 1)
@@ -305,6 +261,25 @@ function M.write_file_lf(path, content)
 	f:write(content); f:close()
 end
 
+-- Return `{path, ...}` for files in `out_root` whose basename matches
+-- `pattern` (Lua pattern, NOT regex — `%.` not `\.`). Empty list if
+-- `out_root` doesn't exist or matches nothing.
+--
+-- **Cost:** ~2ms native (lfs.dir) vs ~56ms subprocess (`dir /b`).
+-- @param out_root Path
+-- @param pattern string  -- Lua pattern matched against basename only
+-- @return string[]
+function M.list_dir(out_root, pattern)
+	local files = {}
+	if lfs.attributes(out_root, "mode") ~= "directory" then return files end
+	for entry in lfs.dir(out_root) do
+		if entry:match(pattern) then
+			files[#files + 1] = out_root .. "\\" .. entry
+		end
+	end
+	return files
+end
+
 -- Convert a (possibly relative) path to an absolute path, using CWD if needed.
 -- Normalizes forward slashes to backslashes on Windows.
 -- Used for byte-identical emit: the // Source: comment line uses the absolute path.
@@ -354,7 +329,7 @@ function M._reset_ensured_dirs() _ensured_dirs = {} end
 -- Group a list of `SourceFile`-shaped records by their `dir` field.
 -- Used by the annotation / static-analysis / report passes to partition sources into per-DIRECTORY (per-module) buckets
 -- before emitting per-module reports. Insertion order preserved within each bucket (matches source order in `ctx.sources`).
--- @param sources table[]   -- list of source records (each having a `dir` string field)
+-- @param sources table[]          -- list of source records (each having a `dir` string field)
 -- @return table<string, table[]>  -- map of `dir` -> sources in that dir
 function M.group_sources_by_dir(sources)
 	local by_dir = {}
@@ -370,7 +345,7 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Skip a string or C-style comment starting at position `pos`.
--- Returns the position just past the construct, or `pos` unchanged if no string/comment starts there. LPeg-backed.
+-- Returns the position just past the construct, or `pos` unchanged if no string/comment starts there.
 function M.skip_str_or_cmt(s, pos) return lpeg.match(lpeg_str_or_cmt_pat, s, pos) or pos end
 
 -- Skip whitespace AND C-style comments starting at position `pos`.
@@ -378,7 +353,7 @@ function M.skip_str_or_cmt(s, pos) return lpeg.match(lpeg_str_or_cmt_pat, s, pos
 function M.skip_ws_and_cmt(s, pos) return lpeg.match(lpeg_ws_and_cmt_pat, s, pos) or pos end
 
 -- Read a C-style identifier (alpha followed by zero+ alnum) starting at position `pos`. 
--- Returns the identifier string + the position just past it, or nil + pos if no identifier starts here. LPeg-backed.
+-- Returns the identifier string + the position just past it, or nil + pos if no identifier starts here.
 function M.read_ident(s, pos)
 	local result = lpeg.match(lpeg_ident_pat, s, pos)
 	if    result then return result, pos + #result end
@@ -523,8 +498,8 @@ function M.split_top_level_commas(body)
 
 	while pos <= body_len do
 		local  c = body:byte(pos)
-		if     c == BYTE_OPEN_PAREN then local _, a = M.read_parens(body, pos); pos = a -- scan: ... ( <balanced> ...
-		elseif c == BYTE_OPEN_BRACE then local _, a = M.read_braces(body, pos); pos = a -- scan: ... { <balanced> ...
+		if     c == BYTE_OPEN_PAREN then local _, a = M.read_parens(body, pos);   pos = a -- scan: ... ( <balanced> ...
+		elseif c == BYTE_OPEN_BRACE then local _, a = M.read_braces(body, pos);   pos = a -- scan: ... { <balanced> ...
 		elseif c == BYTE_OPEN_BRACK then local _, a = M.read_brackets(body, pos); pos = a -- scan: ... ( <balanced> ...
 		elseif c == BYTE_COMMA then
 			-- scan: ... <token> , <next> ...
@@ -587,13 +562,22 @@ function M.tokenize_body(body)
 		local scan = rel
 		while scan <= len do
 			local c = body:byte(scan)
-			if     c == 44            then break end               -- ','
-			if     c == 10            then break end               -- '\n'
-			if     c == 59            then break end               -- ';'
-			if     c == 40            then local _, a = M.read_parens   (body, scan); scan = a -- '('
-			elseif c == 123           then local _, a = M.read_braces   (body, scan); scan = a -- '{'
-			elseif c == 91            then local _, a = M.read_brackets (body, scan); scan = a -- '['
-			elseif c == 34 or c == 39 then scan       = M.skip_str_or_cmt(body, scan) + 1     -- '"' or '\''
+			-- Terminator bytes (delimit a token at the top level): ',' = 0x2C,
+			-- '\n' = 0x0A, ';' = 0x3B. These also appear as separators between
+			-- argument lists inside the parens/braces/brackets, so we stop the
+			-- scan when we hit any of them.
+			if     c == BYTE_COMMA   then break end
+			if     c == BYTE_NEWLINE then break end
+			if     c == BYTE_SEMI    then break end
+			-- Group opener bytes (consume the balanced group via the matching reader):
+			-- '(' = 0x28, '{' = 0x7B, '[' = 0x5B.
+			if     c == BYTE_OPEN_PAREN then local _, a = M.read_parens   (body, scan); scan = a
+			elseif c == BYTE_OPEN_BRACE then local _, a = M.read_braces   (body, scan); scan = a
+			elseif c == BYTE_OPEN_BRACK then local _, a = M.read_brackets (body, scan); scan = a
+			-- String-literal byte ('"' = 0x22 or '\'' = 0x27): skip past the
+			-- quoted region in one shot.
+			elseif c == BYTE_DQUOTE or c == BYTE_SQUOTE then
+				scan = M.skip_str_or_cmt(body, scan) + 1
 			else
 				scan = scan + 1
 			end
@@ -639,7 +623,9 @@ function M.build_body_line_index(body)
 		if pos > 1 then
 			index[pos] = newline_count + 1
 		end
-		if body:byte(pos) == 10 then
+		-- Newline byte = 0x0A (BYTE_NEWLINE). Counts line boundaries so the
+		-- index maps each source-byte offset → its 1-based line number.
+		if body:byte(pos) == BYTE_NEWLINE then
 			newline_count = newline_count + 1
 		end
 	end
@@ -667,11 +653,11 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 function M.load_word_counts(metadata_path)
-	local counts      = {}
-	local content     = M.read_file(metadata_path)
-	local len         = #content
-	local pos         = 1
-	local prefix      = "WORD_COUNT("
+	local counts  = {}
+	local content = M.read_file(metadata_path)
+	local len     = #content
+	local pos     = 1
+	local prefix  = "WORD_COUNT("
 	while pos <= len do
 		local nl       = M.find_byte(content, BYTE_NEWLINE, pos)
 		local line_end = nl or (len + 1)
@@ -691,8 +677,6 @@ function M.load_word_counts(metadata_path)
 	return counts
 end
 
-
--- ════════════════════════════════════════════════════════════════════════════
 -- ══════════════════════════════════════════════════
 -- Section 6: LineIndex (perf fix — replaces the per-call rescan line_of)
 -- ══════════════════════════════════════════════════
@@ -731,10 +715,9 @@ M.WAVE_CONTEXT_REGS = {
 
 -- The annotation DSL has been reduced to a single annotation macro:
 --   atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
--- All phase / region / cadence / async / resource / group tokens have
--- been dropped. They may be reintroduced later as optional sub-calls
--- of atom_info; for now, the parser only recognizes atom_info + its
--- three sub-calls (atom_bind, atom_reads, atom_writes).
+-- All phase / region / cadence / async / resource / group tokens have been dropped.
+-- They may be reintroduced later as optional sub-calls of atom_info; 
+-- for now, the parser only recognizes atom_info + its three sub-calls (atom_bind, atom_reads, atom_writes).
 M.TAPE_ATOM_MACROS = {
 	["atom_info"] = { kind = "info", binds = false },
 }
@@ -1010,7 +993,7 @@ M.INSTRUCTION_LATENCY = {
 	["atom_writes"]         = 0,
 }
 
--- Default cycle cost for unknown macros. 
+-- Default cycle cost for unknown macros.
 -- The static-analysis pass adds 1 cycle per unknown token and emits a "new macro; update INSTRUCTION_LATENCY"
 -- advisory so the cycle budget stays accurate as the codebase grows.
 M.UNKNOWN_INSTRUCTION_CYCLES = 1

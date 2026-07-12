@@ -211,8 +211,8 @@ local function request_all_passes(args)
 end
 
 -- Per-flag handlers. Each handler takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it). 
--- Returning nil + os.exit() handles termination flags (--help). This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep 
--- and made the dispatch logic hard to scan.
+-- Returning nil + os.exit() handles termination flags (--help). 
+-- This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep  and made the dispatch logic hard to scan.
 local FLAG_HANDLERS = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
