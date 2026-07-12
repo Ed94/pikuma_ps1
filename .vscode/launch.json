@@ -4,7 +4,7 @@
 	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
 	"version": "0.2.0",
 	"configurations": [
-		{
+{
 			"name": "Debug: Hello Psy-Q!",
 			"type": "gdb",
 			"request": "attach",
@@ -12,6 +12,10 @@
 			"remote": true,
 			"cwd": "${workspaceRoot}/build",
 			"valuesFormatting": "parseText",
+			"registerLimit": "1-32",
+			"frameFilters": false,
+			"showDevDebugOutput": false,
+			"printCalls": false,
 			"stopAtConnect": true,
 			"gdbpath": "gdb-multiarch",
 			"windows": {
@@ -21,6 +25,12 @@
 				"gdbpath": "gdb"
 			},
 			"executable": "${workspaceRoot}/build/hello_psyq.elf",
+			"setupCommands": [
+				{ "text": "set mi-async off" },
+				{ "text": "set remotetimeout 0" },
+				{ "text": "set logging file build/gen/hello_gte.gdb.log" },
+				{ "text": "set logging redirect on" }
+			],
 			"autorun": [
 				"monitor reset shellhalt",
 				"load hello_psyq.elf",
@@ -37,6 +47,10 @@
 			"remote": true,
 			"cwd": "${workspaceRoot}/build",
 			"valuesFormatting": "parseText",
+			"registerLimit": "1-32",
+			"frameFilters": false,
+			"showDevDebugOutput": false,
+			"printCalls": false,
 			"stopAtConnect": true,
 			"gdbpath": "gdb-multiarch",
 			"windows": {
@@ -46,6 +60,12 @@
 				"gdbpath": "gdb"
 			},
 			"executable": "${workspaceRoot}/build/hello_gpu.elf",
+			"setupCommands": [
+				{ "text": "set mi-async off" },
+				{ "text": "set remotetimeout 0" },
+				{ "text": "set logging file build/gen/hello_gte.gdb.log" },
+				{ "text": "set logging redirect on" }
+			],
 			"autorun": [
 				"monitor reset shellhalt",
 				"load hello_gpu.elf",
@@ -61,6 +81,10 @@
 			"remote": true,
 			"cwd": "${workspaceRoot}/build",
 			"valuesFormatting": "parseText",
+			"registerLimit": "1-32",
+			"frameFilters": false,
+			"showDevDebugOutput": false,
+			"printCalls": false,
 			"stopAtConnect": true,
 			"gdbpath": "gdb-multiarch",
 			"windows": {
@@ -70,6 +94,12 @@
 				"gdbpath": "gdb"
 			},
 			"executable": "${workspaceRoot}/build/hello_gte.elf",
+			"setupCommands": [
+				{ "text": "set mi-async off" },
+				{ "text": "set remotetimeout 0" },
+				{ "text": "set logging file build/gen/hello_gte.gdb.log" },
+				{ "text": "set logging redirect on" }
+			],
 			"autorun": [
 				"monitor reset shellhalt",
 				"load hello_gte.elf",
@@ -85,6 +115,10 @@
 			"remote": true,
 			"cwd": "${workspaceRoot}",
 			"valuesFormatting": "parseText",
+			"registerLimit": "1-32",
+			"frameFilters": false,
+			"showDevDebugOutput": false,
+			"printCalls": false,
 			"stopAtConnect": true,
 			"gdbpath": "gdb-multiarch",
 			"windows": {
@@ -94,6 +128,12 @@
 				"gdbpath": "gdb"
 			},
 			"executable": "${workspaceRoot}/build/hello_gte.dwarf-injected.elf",
+			"setupCommands": [
+				{ "text": "set mi-async off" },
+				{ "text": "set remotetimeout 0" },
+				{ "text": "set logging file build/gen/hello_gte.gdb.log" },
+				{ "text": "set logging redirect on" }
+			],
 			"autorun": [
 				"monitor reset shellhalt",
 				"load build/hello_gte.dwarf-injected.elf",
