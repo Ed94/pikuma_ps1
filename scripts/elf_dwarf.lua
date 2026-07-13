@@ -3,11 +3,9 @@
 --- All ELF32 + DWARF-specific code lives here.
 ---
 --- **What this module contains:**
----   - **Format-constant tables** (
----     the byte-offset / opcode / size encyclopedias for ELF32, DWARF4 aranges, DWARF5 rnglists, DWARF line-program, MIPS).
+---   - **Format-constant tables** (the byte-offset / opcode / size encyclopedias for ELF32, DWARF4 aranges, DWARF5 rnglists, DWARF line-program, MIPS).
 ---     Every constant carries a spec:` comment naming the spec section that defines it (convention established by F'').
----   - **I/O helpers**: little-endian byte read/write, ELF32 section walker, nm symbol reader,
----     source-map parser, native directory glob.
+---   - **I/O helpers**: little-endian byte read/write, ELF32 section walker, nm symbol reader, source-map parser, native directory glob.
 ---
 --- **Conventions:** tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -208,7 +206,6 @@ end
 --- **Cost:** one file open + one `f:seek` + one `f:read` per section header 
 --- (we walk all `e_shnum` headers regardless of how many names are requested, to find the .shstrtab first).
 --- For frequent callers, pass the union of all needed sections in one call.
----
 --  can add `.debug_info` + `.debug_loc` + `.debug_str_offsets` to the list without writing a 2nd ELF walker.
 --- @param elf_path Path
 --- @param section_names string[]  -- list of section names to read
@@ -305,9 +302,8 @@ function M.read_elf_sections(elf_path, section_names)
 	return result
 end
 
---- Read ELF symbol addresses by walking the `.symtab` + `.strtab` sections
---- directly (no `nm` subprocess). Returns a map `{name -> {addr, size_bytes}}`
---- for every `code_<name>` symbol.
+--- Read ELF symbol addresses by walking the `.symtab` + `.strtab` sections directly (no `nm` subprocess). 
+--- Returns a map `{name -> {addr, size_bytes}}` for every `code_<name>` symbol.
 ---
 --- **Why direct parsing instead of `mipsel-none-elf-nm -S`?**
 --- The `nm` subprocess costs ~50ms per spawn on Windows (cmd.exe + mipsel-none-elf-nm.exe). Parsing `.symtab` ourselves is ~0ms.
@@ -318,9 +314,6 @@ end
 --- - We filter on STB_GLOBAL (high nibble of st_info = 1) to match `nm`'s default (external symbols only). STB_WEAK excluded.
 --- - We strip the `code_` prefix to match the previous `read_nm` output. 
 --- - `st_size > 0` filter excludes undefined/imported symbols.
----
---- **Cost:** ~1ms (file open + 2 section reads + symtab iteration).
---- Previously: ~50ms (nm subprocess spawn).
 ---
 --- @param elf_path Path
 --- @return table<string, {integer, integer}>
@@ -359,11 +352,11 @@ function M.read_nm(elf_path)
 				-- Extract the name from .strtab (null-terminated C string).
 				local name_end = strtab:find("\0", st_name_off + 1, true) or (st_name_off + 1)
 				local name     = strtab:sub(st_name_off + 1, name_end - 1)
-				-- Filter: only `code_<name>` symbols (matches nm output).
-				local short = name:match("^code_(.+)$")
-				if short then
+				-- Filter: keep all symbol-table symbols (atoms emit their name as the bare `<name>` since the `code_` prefix was removed from the MipsAtom_ macro).
+				-- The atoms_source_map pass already filters out non-atom symbols via the source-map.txt cross-ref.
+				if name and #name > 0 then
 					local st_value = M.read_u32_le(symtab, entry_off + SYM_ST_VALUE - 1)
-					addrs[short] = { st_value, st_size }
+					addrs[name] = { st_value, st_size }
 				end
 			end
 		end
@@ -376,9 +369,8 @@ end
 -- LEB128 encoders (Unsigned + Signed Little-Endian Base 128)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- DWARF uses LEB128 to encode variable-length integers in its wire format
--- (line-program opcodes, DW_AT values, etc.). Both encoders pack 7 bits
--- of data per byte + 1 bit of "more bytes follow" signaling.
+-- DWARF uses LEB128 to encode variable-length integers in its wire format (line-program opcodes, DW_AT values, etc.).
+-- Both encoders pack 7 bits of data per byte + 1 bit of "more bytes follow" signaling.
 --
 -- Per-byte layout:
 --
@@ -391,8 +383,7 @@ end
 --     bit 6 = 0 → value is positive (or zero); zero-extend on decode
 --     bit 6 = 1 → value is negative;            one-extend on decode
 --
--- The signed encoder must emit the MINIMUM number of bytes whose final 7-bit
--- payload already has the correct sign bit set 
+-- The signed encoder must emit the MINIMUM number of bytes whose final 7-bit payload already has the correct sign bit set 
 -- (otherwise the decoder would round-trip to a different value).
 --
 -- Spec: DWARF5 §7.6 "Variable-Length Data" / Appendix C.
@@ -403,14 +394,11 @@ local LEB_CONT_BIT = 0x80
 -- Low 7 bits of each LEB128 byte. The actual data payload.
 local LEB_DATA_MASK = 0x7F
 
--- Bit 6 of the 7-bit data (i.e. 0x40). For SLEB128: the sign-bit position
--- used by the decoder for sign extension. Encoders MUST stop when the next
--- byte would be redundant AND the sign bit in the last byte matches the
--- value's sign.
+-- Bit 6 of the 7-bit data (i.e. 0x40). For SLEB128: the sign-bit position used by the decoder for sign extension.
+-- Encoders MUST stop when the next byte would be redundant AND the sign bit in the last byte matches the value's sign.
 local SLEB_SIGN_BIT = 0x40
 
---- ULEB128 (Unsigned Little-Endian Base 128) encoder. Returns the byte
---- string for the non-negative integer `n`.
+--- ULEB128 (Unsigned Little-Endian Base 128) encoder. Returns the byte string for the non-negative integer `n`.
 ---
 --- Algorithm:
 ---   - Extract the low 7 bits of `n` (LEB_DATA_MASK = 0x7F).
@@ -442,8 +430,7 @@ end
 ---   - If `n == -1` (sign-extended all-1s) AND bit 6 of the data = 1 → negative terminator (sign bit says "one-extend").
 ---
 --- Without these checks, the decoder would round-trip to a different value
---- (e.g. encoding `0` as `0x80 0x00` decodes to `0` correctly but is 2
---- bytes long; the termination check picks the 1-byte `0x00` form).
+--- (e.g. encoding `0` as `0x80 0x00` decodes to `0` correctly but is 2 bytes long; the termination check picks the 1-byte `0x00` form).
 ---
 --- @param n integer  -- any integer (negative allowed)
 --- @return string

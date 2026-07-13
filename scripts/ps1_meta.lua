@@ -158,12 +158,16 @@ local PASSES = {
 	["dwarf-injection"] = {
 		module = "passes.dwarf_injection",
 		kind   = "shared",
-		deps   = {"atoms-source-map"},
-		desc   = "Inject per-atom .debug_line + .debug_aranges into the ELF (post-link; writes section .bin blobs for objcopy splice)",
+		deps   = {"scan-source", "atoms-source-map"},
+		desc   = "Inject per-atom .debug_line + .debug_aranges (F') + per-atom .debug_info subprogram + per-wave-context-reg .debug_info variables (G') into the ELF (post-link; writes 7 section .bin blobs for objcopy splice). (rbind composite) reads ctx.sources[i].scan to find atom_bind(Binds_X) atoms + their Binds_X struct fields; emits per-Binds_X DW_TAG_structure_type DIEs + per-rbind-atom DW_TAG_variable 'bind_args' DIEs with piece-chain DW_OP_bregN/DW_OP_piece location expressions.",
 		out    = {
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_line.bin" },
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_aranges.bin" },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_line.bin"     },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_aranges.bin"  },
 			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_rnglists.bin" },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_abbrev.bin"   },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_info.bin"     },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_str.bin"      },
+			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_loc.bin"      },
 		},
 	},
 	report = {
@@ -290,6 +294,8 @@ FLAG_HANDLERS["--dwarf-injection"] = function(args)
 	args.requested_set[#args.requested_set + 1] = "dwarf-injection"
 end
 
+-- G' (atom locals) is now consolidated into --dwarf-injection; no separate flag.
+
 -- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set. Single-statement, no nesting.
 FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
 	local name = PASS_FLAG_TO_NAME[a]
@@ -381,9 +387,8 @@ local function build_ctx(args)
 			dir = dir:sub(1, -2)
 		end
 
-		-- src.scan is populated by the "scan-source" pass (the first pass in the
-		-- dep graph). build_ctx just opens + reads the files; the scan itself
-		-- happens in the pass module, not inline in the orchestrator.
+		-- src.scan is populated by the "scan-source" pass (the first pass in the dep graph).
+		-- build_ctx just opens + reads the files; the scan itself happens in the pass module, not inline in the orchestrator.
 		sources[#sources + 1] = {
 			path     = path,
 			text     = text,
@@ -523,9 +528,9 @@ local function topo_sort(passes, requested_set)
 		process_next_ready(passes, needed, in_degree, ready, order)
 	end
 
-	-- Cycle detection: if order doesn't include all needed passes, some are stuck with in_degree > 0 (the cycle closed on itself
-	-- before Kahn could process them). Without this check, a fully-closed cycle (e.g. A -> B -> A) would silently return an emspty order list, 
-	-- leaving the orchestrator to dispatch nothing.
+	-- Cycle detection: if order doesn't include all needed passes, some are stuck with in_degree > 0
+	-- (the cycle closed on itself before Kahn could process them).
+	-- Without this check, a fully-closed cycle (e.g. A -> B -> A) would silently return an emspty order list, leaving the orchestrator to dispatch nothing.
 	if #order ~= count_entries(needed) then
 		for name, deg in pairs(in_degree) do
 			if deg > 0 then

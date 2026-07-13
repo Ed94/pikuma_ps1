@@ -14,7 +14,7 @@ typedef U4 const MipsCode;
 typedef Slice_(MipsCode);
 typedef Slice_MipsCode MipsAtom;
 
-#define MipsAtom_(sym) MipsCode tmpl(code,sym) [] align_(4) =
+#define MipsAtom_(sym) MipsCode sym [] align_(4) =
 
 // Bare form: file-scope declaration with hardcoded body.
 // Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
@@ -89,13 +89,13 @@ FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start
 FI_ TapeBuilder tb_make_old(             FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
 FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ mem.ptr, mem.len, 0 }; }
 
-#define tb_emit_(tb, atom) tb_emit(tb, tmpl(code,atom))
+#define tb_emit_(tb, atom) tb_emit(tb, atom)
 FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
 FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 
-FI_ Slice_U4 tb_end  (TapeBuilder* tb) { tb_emit(tb,code_tape_exit); return (Slice_U4){ C_(U4*,tb->ptr), tb->used }; }
+FI_ Slice_U4 tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Slice_U4){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Slice_U4){ C_(U4*,tb.ptr),  tb.used }; }
-#define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,code_tape_exit))
+#define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,tape_exit))
 
 #pragma endregion Tape Drive
 
@@ -237,9 +237,8 @@ FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode_R code) {
 
 // When done authoring, utilize this to cap-off the atom
 FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
-	LP_ MipsAtom_(yield) { mac_yield() };
-	mem_copy(ab->start, u4_(code_yield), S_(code_yield));
-	mem_bump(ab->start, ab->capacity, & ab->used, S_(code_yield));
+	mem_copy(ab->start, u4_(ac_yield), S_(ac_yield));
+	mem_bump(ab->start, ab->capacity, & ab->used, S_(ac_yield));
 }
 
 #define mipsatom_from_builder(ab) (MipsAtom){ab.start, ab.used}
