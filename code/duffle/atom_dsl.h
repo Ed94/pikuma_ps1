@@ -18,11 +18,13 @@
  *     - atom word-counts in word_counts.metadata.h agree with the body's
  *       actual .word count.
  *
- *   WHY A PURE MACRO (atom_info, atom_bind, atom_reads, atom_writes, atom_label)
- *   -----------------------------------------------------------------
- *   Each of these expands to a C comment or to nothing. The C preprocessor
- *   strips them to whitespace. The metaprogram reads the literal token from
- *   source-as-written, NOT from the preprocessed output. This means:
+ *   WHY PURE MACROS
+ *   ---------------
+ *   atom_info, atom_bind, atom_reads, atom_writes, atom_label,
+ *   atom_dbg_skip_over each expand to a C comment or to nothing. The C
+ *   comment or to nothing. The C preprocessor strips them to whitespace.
+ *   The metaprogram reads the literal tokens from source-as-written, NOT from
+ *   the preprocessed output. This means:
  *     - the C compiler does no work for them (no __attribute__, no
  *       _Pragma, no asm side-effects)
  *     - they can never silently drift from the metaprogram's view
@@ -149,6 +151,20 @@
  *
  * ============================================================================*/
 #define atom_info(...)  /* atom_info(__VA_ARGS__) */
+
+/* ----------------------------------------------------------------------------
+ * DEBUG SOURCE-STEP MARKERS
+ *
+ * Place atom_dbg_skip_over() before a MipsAtom_, MipsAtomComp_, or
+ * MipsAtomComp_Proc_ declaration. The following declaration kind determines
+ * whether the marker selects a whole atom or a component inline view. The
+ * source scanner associates the marker with that declaration; placement
+ * diagnostics are handled by the annotation pass.
+ *
+ * The macro expands to a comment only. It emits no C data or MIPS words and
+ * therefore cannot affect runtime output.
+ * ----------------------------------------------------------------------------*/
+#define atom_dbg_skip_over() /* atom_dbg_skip_over: skip the following atom or component source view */
 
 /* ----------------------------------------------------------------------------
  * atom_bind(Binds_X) -- rbind sub-call of atom_info

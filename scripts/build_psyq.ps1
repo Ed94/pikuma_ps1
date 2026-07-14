@@ -456,36 +456,43 @@ function build-gte_hello {
 	# The F' splice block above already covered .debug_line / .debug_aranges / .debug_rnglists;
 	# we extend the same Copy-Item + objcopy chain to splice the G' 4 sections
 	# (.debug_info, .debug_abbrev, .debug_str via --update-section; .debug_loc via --add-section since it doesn't exist in the source ELF).
-	$dwarfInfoBin   = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_info.bin'
-	$dwarfAbbrevBin = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_abbrev.bin'
-	$dwarfStrBin    = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_str.bin'
-	$dwarfLocBin    = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_loc.bin'
-	if ((Test-Path $dwarfInfoBin) -and (Test-Path $dwarfAbbrevBin) -and (Test-Path $dwarfStrBin) -and (Test-Path $dwarfLocBin)) 
+	$dwarfInfoBin      = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_info.bin'
+	$dwarfAbbrevBin    = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_abbrev.bin'
+	$dwarfStrBin       = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_str.bin'
+	$dwarfLocBin       = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_loc.bin'
+	$dwarfLoclistsBin  = Join-Path (Join-Path $path_build 'gen') 'hello_gte.dwarf_loclists.bin'
+	if ((Test-Path $dwarfInfoBin) -and (Test-Path $dwarfAbbrevBin) -and (Test-Path $dwarfStrBin) -and (Test-Path $dwarfLocBin) -and (Test-Path $dwarfLoclistsBin))
 	{
-		Write-Host "[build] G' atom-locals: splicing .debug_info/.debug_abbrev/.debug_str/.debug_loc into $injectElf"
+		Write-Host "[build] G' atom-locals: splicing .debug_info/.debug_abbrev/.debug_str/.debug_loc/.debug_loclists into $injectElf"
 		& $Objcopy --update-section ".debug_info=$dwarfInfoBin"     $injectElf
-		$last_exit_code_error = ($LASTEXITCODE -ne 0) 
+		$last_exit_code_error = ($LASTEXITCODE -ne 0)
 		if ($last_exit_code_error) {
 			Write-Warning "[build] objcopy .debug_info update failed (exit $LASTEXITCODE)"
 			return;
-		} 
+		}
 		& $Objcopy --update-section ".debug_abbrev=$dwarfAbbrevBin" $injectElf
 		if ($LASTEXITCODE -ne 0) {
 			Write-Warning "[build] objcopy .debug_abbrev update failed (exit $LASTEXITCODE)"
 			return;
-		} 
+		}
 		& $Objcopy --update-section ".debug_str=$dwarfStrBin"      $injectElf
 		if ($LASTEXITCODE -ne 0) {
 			Write-Warning "[build] objcopy .debug_str update failed (exit $LASTEXITCODE)"
-		} 
-		else 
+		}
+		else
 		{
 			# .debug_loc doesn't exist in the source ELF; --add-section creates it.
 			& $Objcopy --add-section ".debug_loc=$dwarfLocBin"     $injectElf
 			if ($LASTEXITCODE -ne 0) {
 				Write-Warning "[build] objcopy .debug_loc add-section failed (exit $LASTEXITCODE)"
 			} else {
-				Write-Host "[build] G' atom-locals-injected: $injectElf"
+				# .debug_loclists doesn't exist in the source ELF; --add-section creates it.
+				& $Objcopy --add-section ".debug_loclists=$dwarfLoclistsBin" $injectElf
+				if ($LASTEXITCODE -ne 0) {
+					Write-Warning "[build] objcopy .debug_loclists add-section failed (exit $LASTEXITCODE)"
+				} else {
+					Write-Host "[build] G' atom-locals-injected: $injectElf"
+				}
 			}
 		}
 	}

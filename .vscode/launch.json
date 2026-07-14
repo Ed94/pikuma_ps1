@@ -138,6 +138,7 @@
 				"monitor reset shellhalt",
 				"load build/hello_gte.dwarf-injected.elf",
 				"source scripts/gdb/gdb_tape_atoms.gdb",
+				"source build/gen/hello_gte.gdbinit",
 				"tbreak main",
 				"continue"
 			]

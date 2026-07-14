@@ -152,14 +152,17 @@ local PASSES = {
 		module = "passes.atoms_source_map",
 		kind   = "header-output",
 		deps   = {"word-counts", "components"},
-		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging)",
-		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.atoms.sourcemap.txt" } },
+		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging) AND gen/<basename>.atoms.provenance.txt (per-.word provenance; each word tagged with its call-site file:line and, when emitted by a mac_X(...) component invocation, the component's definition file:line). Consumed by passes/dwarf_injection.lua to synthesize DW_TAG_inlined_subroutine instances for source-level Step Into on component invocations (Phase 3 — debug_ux).",
+		out    = {
+			{ kind = "report", path_template = "<out_root>/<basename>.atoms.sourcemap.txt"   },
+			{ kind = "report", path_template = "<out_root>/<basename>.atoms.provenance.txt" },
+		},
 	},
 	["dwarf-injection"] = {
 		module = "passes.dwarf_injection",
 		kind   = "shared",
 		deps   = {"scan-source", "atoms-source-map"},
-		desc   = "Inject per-atom .debug_line + .debug_aranges (F') + per-atom .debug_info subprogram + per-wave-context-reg .debug_info variables (G') into the ELF (post-link; writes 7 section .bin blobs for objcopy splice). (rbind composite) reads ctx.sources[i].scan to find atom_bind(Binds_X) atoms + their Binds_X struct fields; emits per-Binds_X DW_TAG_structure_type DIEs + per-rbind-atom DW_TAG_variable 'bind_args' DIEs with piece-chain DW_OP_bregN/DW_OP_piece location expressions.",
+		desc   = "Inject per-atom .debug_line + .debug_aranges (F') + per-atom .debug_info subprogram + per-wave-context-reg .debug_info variables (G') into the ELF (post-link; writes 7 section .bin blobs plus one deterministic .gdbinit sidecar). (rbind composite) reads ctx.sources[i].scan to find atom_bind(Binds_X) atoms + their Binds_X struct fields; emits per-Binds_X DW_TAG_structure_type DIEs + per-rbind-atom DW_TAG_variable 'bind_args' DIEs with piece-chain DW_OP_bregN/DW_OP_piece location expressions.",
 		out    = {
 			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_line.bin"     },
 			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_aranges.bin"  },
@@ -168,6 +171,7 @@ local PASSES = {
 			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_info.bin"     },
 			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_str.bin"      },
 			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_loc.bin"      },
+			{ kind = "report", path_template = "<out_root>/<basename>.gdbinit"            },
 		},
 	},
 	report = {

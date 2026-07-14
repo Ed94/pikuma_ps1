@@ -28,6 +28,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$gdbInitPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\build\gen\hello_gte.gdbinit'))
+if (-not (Test-Path -LiteralPath $gdbInitPath -PathType Leaf)) {
+    Write-Warning "Generated GDB skip sidecar missing (non-fatal): $gdbInitPath. Run the GTE build to regenerate it; debugger launch will continue without generated skip-over commands."
+}
+
 # ── Pre-checks ──
 foreach ($p in @($PcsxPath, $ExePath, $HelperZip)) {
     if (-not (Test-Path $p)) {

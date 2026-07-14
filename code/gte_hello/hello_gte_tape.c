@@ -109,6 +109,7 @@ MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri)
 };
 
 internal
+atom_dbg_skip_over()
 MipsAtom_(floor_f3_face) atom_info(
 	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 	, atom_writes(R_PrimCursor, R_FaceCursor)

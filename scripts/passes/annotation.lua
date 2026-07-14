@@ -27,6 +27,27 @@ local WAVE_CONTEXT_REGS = duffle.WAVE_CONTEXT_REGS
 
 local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 
+-- Phase 5 closed sets. atom_dbg_reg_default and atom_reg_types MUST target
+-- one of these registers; atom_view MUST reference a real Binds_* struct.
+local SEMANTIC_DEFAULT_REGS = {
+	["R_TapePtr"] = true, ["R_AtomJmp"] = true,
+	["R_PrimCursor"] = true, ["R_FaceCursor"] = true,
+	["R_VertBase"] = true, ["R_OtBase"] = true,
+}
+
+local COMPUTE_REG_PREFIX = "R_"
+local COMPUTE_REG_RE =   -- permits R_T0..R_T3 + caller-trash (not wave-context)
+	"^R_T[0-3]$"
+
+-- Compute-register types are restricted to byte-width primitives (no struct
+-- identity in this phase). Pointer depth is also bounded — typed pointer
+-- chains live in the Binds_* struct, not in a per-atom override.
+local ALLOWED_COMPUTE_TYPES = {
+	["U4"] = true, ["S4"] = true,
+	["U2"] = true, ["S2"] = true,
+	["U1"] = true, ["S1"] = true,
+}
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
 -- ════════════════════════════════════════════════════════════════════════════
@@ -66,6 +87,16 @@ local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 --- @field writes  string[]      -- R_* names (write targets)
 --- @field errors  string[]|nil  -- parse-time errors from scan_source (atom_info body malformed)
 
+--- @class SkipOverMarker  -- sub-shape of scan_source.lua's @class SkipOverMarker
+--- @field marker_kind    string                       -- exact marker ident (always "atom_dbg_skip_over")
+--- @field marker_line    integer
+--- @field args           string|nil                   -- trimmed text inside the parens (nil when has_parens is false)
+--- @field has_parens     boolean
+--- @field pending        boolean                      -- true while awaiting the following declaration
+--- @field superseded_by_marker_line integer|nil       -- set on a marker that was bumped out of the pending slot
+--- @field target_kind    string|nil                   -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
+--- @field declaration_line integer|nil
+
 --- @class Finding
 --- @field line integer  -- source line (or 0 for pass-level)
 --- @field msg  string   -- finding message
@@ -76,9 +107,14 @@ local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
 --- @field info     Finding[]
 
 --- @class PipeCtx
---- @field atom_index   table<string, AtomAnnotation>  -- name -> AtomAnnotation (only kind=="atom")
---- @field binds_index  table<string, BindsStruct>     -- name -> BindsStruct
---- @field annot_counts table<string, integer>          -- name -> annotation count (for unique_annotation check)
+--- @field atom_index     table<string, AtomAnnotation>     -- name -> AtomAnnotation (only kind=="atom")
+--- @field binds_index    table<string, BindsStruct>        -- name -> BindsStruct
+--- @field annot_counts   table<string, integer>             -- name -> annotation count (for unique_annotation check)
+--- @field types          table<string, RegTypeDefault>      -- from scan_source
+--- @field atom_views     table<string, AtomViewEntry>       -- from scan_source
+--- @field seen_defaults  table<string, integer>             -- duplicate atom_dbg_reg_default detection
+--- @field seen_field     table<string, integer>             -- Binds_* -> count of fields (set/checked by check_binds_no_duplicate_fields)
+--- @field _scan          SourceScan                         -- full scan payload (typed-view sub-calls live here)
 
 --- @class AnnotatedResult
 --- @field atoms    AtomEntry[]
@@ -217,24 +253,244 @@ local function check_macro_word_drift(m, wc, findings)
 	}
 end
 
+---- Check: atom_dbg_reg_default(R_X, <type>) must target a wave-context register
+--- and the type name must be a recognized C type (we currently allow the
+--- types actually used in the codebase; pointer depth must be 0 or 1).
+--- Also detects duplicate defaults for the same register.
+--- @param _src SourceFile        -- unused (kept for the per_source shape)
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+-- Known type names accepted in atom_dbg_reg_default and the Binds_*-via-atom_view
+-- resolution path. The Phase 5 list mirrors the canonical duffle math.h
+-- typedefs plus the byte-width primitives used as compute-register overrides.
+local KNOWN_REG_DEFAULT_TYPES = {
+	["U4"] = true, ["S4"] = true,
+	["U2"] = true, ["S2"] = true,
+	["U1"] = true, ["S1"] = true,
+	["MipsCode"] = true, ["MipsAtom"] = true,
+	["V2_S2"] = true, ["V2_S4"] = true,
+	["V3_S2"] = true, ["V3_S4"] = true,
+	["V4_S2"] = true, ["V4_S4"] = true,
+	["M3_S2"] = true,
+	["void"] = true,
+}
+
+local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
+	-- Detect duplicate defaults using the ordered occurrence list (the
+	-- out.types hash only retains the last declaration).
+	local seen_first_line = {}
+	for _, occ in ipairs(pipe_ctx.type_occurrences or {}) do
+		if seen_first_line[occ.reg] == nil then
+			seen_first_line[occ.reg] = occ.source_line
+		else
+			findings.errors[#findings.errors + 1] = {
+				line = occ.source_line,
+				msg  = string.format(
+					"duplicate atom_dbg_reg_default for %q at line %d (first declared at line %d); one default per register",
+					occ.reg, occ.source_line, seen_first_line[occ.reg]),
+			}
+		end
+	end
+	for reg, def in pairs(pipe_ctx.types or {}) do
+		if not SEMANTIC_DEFAULT_REGS[reg] then
+			findings.errors[#findings.errors + 1] = {
+				line = def.source_line,
+				msg  = string.format(
+					"atom_dbg_reg_default at line %d references unknown register %q; expected one of R_TapePtr, R_AtomJmp, R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase",
+					def.source_line, reg),
+			}
+		end
+		if def.pointer_depth == nil or def.pointer_depth < 0 or def.pointer_depth > 1 then
+			findings.errors[#findings.errors + 1] = {
+				line = def.source_line,
+				msg  = string.format(
+					"atom_dbg_reg_default at line %d for %q has unsupported pointer depth %d (expected 0 or 1)",
+					def.source_line, reg, def.pointer_depth or -1),
+			}
+		end
+		if not def.type_name or not KNOWN_REG_DEFAULT_TYPES[def.type_name] then
+			findings.errors[#findings.errors + 1] = {
+				line = def.source_line,
+				msg  = string.format(
+					"atom_dbg_reg_default at line %d for %q uses unknown type %q (allowed: byte-width primitives, V*_S*, M3_S2, MipsCode, void)",
+					def.source_line, reg, tostring(def.type_name)),
+			}
+		end
+	end
+end
+
+--- Check: atom_reg_types(R_X, <type>) entries must point to a compute register
+--- (R_T0..R_T3) with a recognized fundamental type.
+--- @param _src SourceFile
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_atom_reg_types(_src, pipe_ctx, findings)
+	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
+		if ai.reg_type_overrides then
+			for reg, ov in pairs(ai.reg_type_overrides) do
+				if not reg:match(COMPUTE_REG_RE) then
+					findings.errors[#findings.errors + 1] = {
+						line = ai.info_line,
+						msg  = string.format(
+							"atom '%s' has atom_reg_types for %q; compute-register types are restricted to R_T0..R_T3",
+							ai.atom_name, reg),
+					}
+				end
+				if not ov.type_name or not ALLOWED_COMPUTE_TYPES[ov.type_name] then
+					findings.errors[#findings.errors + 1] = {
+						line = ai.info_line,
+						msg  = string.format(
+							"atom '%s' atom_reg_types for %q uses unknown compute type %q (allowed: U1/U2/U4/S1/S2/S4)",
+							ai.atom_name, reg, tostring(ov.type_name)),
+					}
+				end
+			end
+		end
+	end
+end
+
+--- Check: atom_view(Binds_X) entries must reference a real Binds_* struct
+--- and that struct must declare at least one field.
+--- @param _src SourceFile
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_atom_view_layout(_src, pipe_ctx, findings)
+	for atom_name, view in pairs(pipe_ctx.atom_views or {}) do
+		if not view.binds_name then
+			-- The atom had atom_reg_types but no atom_view; no layout check needed.
+		else
+			local bs = pipe_ctx.binds_index[view.binds_name]
+			if not bs then
+				findings.errors[#findings.errors + 1] = {
+					line = view.info_line,
+					msg  = string.format(
+						"atom '%s' has atom_view(%s) but no Struct_(%s) { ... } declaration was found",
+						atom_name, view.binds_name, view.binds_name),
+				}
+			elseif not bs.fields or #bs.fields == 0 then
+				findings.errors[#findings.errors + 1] = {
+					line = bs.line,
+					msg  = string.format(
+						"atom '%s' has atom_view(%s) but that struct declares zero typed fields",
+						atom_name, view.binds_name),
+				}
+			end
+		end
+	end
+end
+
+--- Check: Binds_* structs may not have duplicate field names (they would
+--- defeat the typed-field name lookup that atom_view exposes in gdb).
+--- @param _src SourceFile
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_binds_no_duplicate_fields(_src, pipe_ctx, findings)
+	for _, bs in ipairs(pipe_ctx.binds_list or {}) do
+		local seen = {}
+		for _, f in ipairs(bs.fields or {}) do
+			seen[f.name] = (seen[f.name] or 0) + 1
+		end
+		for name, count in pairs(seen) do
+			if count > 1 then
+				findings.errors[#findings.errors + 1] = {
+					line = bs.line,
+					msg  = string.format(
+						"%s has duplicate field name %q (count %d); the typed-view contract requires unique field names",
+						bs.name, name, count),
+				}
+			end
+		end
+	end
+end
+
+-- Check: skip-over markers must satisfy shape + placement constraints.
+--- Walks the priority list once; at most one error is appended per marker so that
+--- a single source-level defect does not cascade into multiple findings.
+--- Priority order (first defect wins):
+---   1. has_parens == false         -> requires parentheses: marker()
+---   2. args  ~= ""                 -> takes no arguments
+---   3. superseded_by_marker_line   -> duplicate marker (cite superseding line)
+---   4. pending + no target_kind    -> dangling (no following declaration)
+---   5. unsupported target_kind      -> marker precedes an unrelated declaration
+--- Valid markers before whole-atom / bare-component / proc-component declarations
+--- emit no error and remain in src.scan.skip_over.atoms / .components for Task 15.
+--- @param marker SkipOverMarker
+--- @param _pipe_ctx PipeCtx     -- unused today; kept for plex-shape consistency with per_annot
+--- @param findings Findings
+local function check_skip_marker(marker, _pipe_ctx, findings)
+	local kind = marker.marker_kind
+	local line = marker.marker_line
+
+	if not marker.has_parens then
+		findings.errors[#findings.errors + 1] = {
+			line = line,
+			msg  = string.format("%s marker at line %d requires parentheses: marker()", kind, line),
+		}
+		return
+	end
+
+	if marker.args ~= nil and marker.args ~= "" then
+		findings.errors[#findings.errors + 1] = {
+			line = line,
+			msg  = string.format("%s marker at line %d takes no arguments; found %q", kind, line, marker.args),
+		}
+		return
+	end
+
+	if marker.superseded_by_marker_line then
+		findings.errors[#findings.errors + 1] = {
+			line = line,
+			msg  = string.format("duplicate %s marker at line %d; superseded by another %s marker at line %d",
+				kind, line, kind, marker.superseded_by_marker_line),
+		}
+		return
+	end
+
+	if marker.pending and not marker.target_kind then
+		findings.errors[#findings.errors + 1] = {
+			line = line,
+			msg  = string.format("dangling %s marker at line %d: no following MipsAtom_/MipsAtomComp_/MipsAtomComp_Proc_ declaration",
+				kind, line),
+		}
+		return
+	end
+
+	if marker.target_kind
+		and marker.target_kind ~= "atom"
+		and marker.target_kind ~= "comp_bare"
+		and marker.target_kind ~= "comp_proc" then
+		findings.errors[#findings.errors + 1] = {
+			line = line,
+			msg  = string.format("%s marker at line %d must precede MipsAtom_, MipsAtomComp_, or MipsAtomComp_Proc_; found an unrelated declaration",
+				kind, line),
+		}
+	end
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHECK_RULES — data-driven check dispatch (the plex pattern)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Each rule entry picks one of three "shapes" of dispatch:
---   per_annot(annot, pipe_ctx, findings) — runs once per AtomAnnotation
---   post(pipe_ctx, findings)             — runs once after all per_annot calls complete (full-corpus aggregation)
---   per_macro(macro, wc, findings)       — runs once per TAPE_WORDS / _Pragma macro declaration
+-- Each rule entry picks one of four "shapes" of dispatch:
+--   per_annot(annot, pipe_ctx, findings)             — runs once per AtomAnnotation
+--   post(pipe_ctx, findings)                         — runs once after all per_annot calls complete (full-corpus aggregation)
+--   per_macro(macro, wc, findings)                   — runs once per TAPE_WORDS / _Pragma macro declaration
+--   per_skip_marker(marker, pipe_ctx, findings)      — runs once per src.scan.skip_over.markers entry (Task 14)
 --
 -- Adding a new check = 1 row here + 1 function above. The `validate()` dispatch loop never needs editing.
 
 local CHECK_RULES = {
-	{ name = "atom_decl_exists",         per_annot = check_atom_decl_exists         },
-	{ name = "binds_struct_exists",      per_annot = check_binds_struct_exists      },
-	{ name = "binds_field_wave_context", per_annot = check_binds_field_wave_context },
-	{ name = "reads_wave_context",       per_annot = check_reads_wave_context       },
-	{ name = "unique_annotation",        post      = check_unique_annotation        },
-	{ name = "macro_word_drift",         per_macro = check_macro_word_drift         },
+	{ name = "atom_decl_exists",          per_annot       = check_atom_decl_exists          },
+	{ name = "binds_struct_exists",       per_annot       = check_binds_struct_exists       },
+	{ name = "binds_field_wave_context",  per_annot       = check_binds_field_wave_context  },
+	{ name = "reads_wave_context",        per_annot       = check_reads_wave_context        },
+	{ name = "unique_annotation",         post            = check_unique_annotation         },
+	{ name = "macro_word_drift",          per_macro       = check_macro_word_drift          },
+	{ name = "skip_marker_validation",    per_skip_marker = check_skip_marker              },
+	{ name = "semantic_reg_defaults",     per_source      = check_semantic_reg_defaults     },
+	{ name = "atom_reg_types",            per_source      = check_atom_reg_types            },
+	{ name = "atom_view_layout",          per_source      = check_atom_view_layout          },
+	{ name = "binds_no_duplicate_fields", per_source      = check_binds_no_duplicate_fields },
 }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -276,10 +532,27 @@ local function validate(ctx, src)
 
 	-- Build pipe_ctx (Fleury: expose structure). Pre-compute everything the per-check functions need.
 	-- Single source of truth for atom / binds / annotation-count lookups.
+	-- Phase 5 typed views: pipe_ctx.types / pipe_ctx.atom_views / pipe_ctx.seen_defaults
+	-- are projected from the scan payload so per_source check rules can iterate.
+	local seen_defaults = {}
+	for reg, _ in pairs(scan.types or {}) do
+		seen_defaults[reg] = (seen_defaults[reg] or 0) + 1
+	end
+	local atom_infos_list = {}
+	for _, ai in ipairs(scan.atom_infos or {}) do
+		atom_infos_list[#atom_infos_list + 1] = ai
+	end
+
 	local pipe_ctx = {
-		atom_index   = {},
-		binds_index  = {},
-		annot_counts = {},
+		atom_index      = {},
+		binds_index     = {},
+		annot_counts    = {},
+		types           = scan.types or {},
+		type_occurrences = scan.type_occurrences or {},
+		atom_views      = scan.atom_views or {},
+		seen_defaults   = seen_defaults,
+		atom_infos_list = atom_infos_list,
+		binds_list      = scan.binds or {},
 	}
 	for _, a in ipairs(atoms)      do pipe_ctx.atom_index [a.name] = a end
 	for _, b in ipairs(scan.binds) do pipe_ctx.binds_index[b.name] = b end
@@ -319,12 +592,30 @@ local function validate(ctx, src)
 		if rule.post then rule.post(pipe_ctx, findings) end
 	end
 
+	-- Per-skip-marker rules (Task 14). Each raw marker recorded by scan_source
+	-- (in scan.skip_over.markers) is validated independently; the check emits at
+	-- most one error per marker. Valid markers stay attached to scan.skip_over.atoms /
+	-- .components for Task 15's dwarf_injection.lua consumer.
+	local skip_markers = scan.skip_over and scan.skip_over.markers or {}
+	for _, marker in ipairs(skip_markers) do
+		for _, rule in ipairs(CHECK_RULES) do
+			if rule.per_skip_marker then rule.per_skip_marker(marker, pipe_ctx, findings) end
+		end
+	end
+
 	-- Per-macro rules (TAPE_WORDS vs WORD_COUNT drift).
 	local wc = ctx.shared.word_counts
 	for _, m in ipairs(scan.macros) do
 		for _, rule in ipairs(CHECK_RULES) do
 			if rule.per_macro then rule.per_macro(m, wc, findings) end
 		end
+	end
+
+	-- Per-source rules (Phase 5 typed views: reg defaults, atom_view layout,
+	-- compute-register type overrides, Binds_* field uniqueness). Each
+	-- per_source rule sees the full scan payload via pipe_ctx.
+	for _, rule in ipairs(CHECK_RULES) do
+		if rule.per_source then rule.per_source(src, pipe_ctx, findings) end
 	end
 
 	-- Information summary (always emitted).

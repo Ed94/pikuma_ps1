@@ -366,6 +366,7 @@ local function project_components(source, scan)
 				body_tokens = a.body_tokens,
 				args        = args,
 				comment     = comment,
+				kind        = a.kind,  -- "comp_bare" | "comp_proc"; Phase 3 provenance emitter reads this.
 			}
 		end
 	end
@@ -677,12 +678,46 @@ local function update_shared_word_counts(ctx, components, counts)
 	end
 end
 
+--- @class ComponentDef
+--- @field name    string  -- bare name (without ac_/mac_ prefix)
+--- @field line    integer -- definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
+--- @field path    string  -- absolute source path of the definition
+--- @field kind    string  -- "comp_bare" | "comp_proc"
+
+--- (internal) Extend `ctx.shared.components` with this source's components-by-name
+-- map so downstream passes (atoms_source_map, dwarf_injection) can resolve
+-- `mac_X(...)` invocations back to their component definition file:line.
+--- Phase 3 (debug_ux) provenance emission uses this to attribute each emitted
+-- `.word` to either a component macro or the enclosing atom body.
+-- @param ctx PassCtx
+-- @param src SourceFile
+-- @param components Component[]
+local function update_shared_components(ctx, src, components)
+	ctx.shared.components         = ctx.shared.components or {}
+	local rel_path = src.path:gsub("\\", "/")
+	for _, c in ipairs(components) do
+		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`). The atoms_source_map
+		-- pass strips the `mac_` prefix from the call site identifier before lookup.
+		ctx.shared.components[c.name] = {
+			name = c.name,
+			line = c.line,
+			path = rel_path,
+			kind = c.kind or "comp_bare",
+		}
+	end
+end
+
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
 	local outputs  = {}
 	local errors   = {}
 	local warnings = {}
+
+	-- Initialize shared component map (Phase 3 — debug_ux). The atoms_source_map
+	-- and dwarf_injection passes consume `ctx.shared.components` to resolve
+	-- `mac_X(...)` invocations back to the component's definition file:line.
+	ctx.shared.components = ctx.shared.components or {}
 
 	for _, src in ipairs(ctx.sources) do
 		-- project_components reads from src.scan + does backward lookups on src.text
@@ -694,6 +729,9 @@ function M.run(ctx)
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }
 				update_shared_word_counts(ctx, components, counts)
+				-- Phase 3 (debug_ux): share component definitions with downstream passes.
+				-- `mac_X(...)` invocations in atom bodies resolve back to (path, line) via this map.
+				update_shared_components(ctx, src, components)
 			end
 		end
 	end

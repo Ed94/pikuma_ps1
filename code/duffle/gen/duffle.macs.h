@@ -23,7 +23,6 @@ WORD_COUNT(mac_yield, 4)
 ,	load_half_u(R_T2, R_FaceCursor, 2 * S_(S2))
 WORD_COUNT(mac_load_tri_indices, 3)
 
-/* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
 #define mac_gte_load_tri_verts(...) \
 	shift_lleft(R_AT, R_T0, v3s2_byteoff) \
 ,	add_u_self(R_AT, R_VertBase) \
@@ -77,7 +76,7 @@ WORD_COUNT(mac_insert_ot_tag_g4, 11)
 
 #define mac_pack_color_word(off, cmd, r, g, b) \
 	load_upper_i(R_AT, (cmd) << 8  | (b)) \
-,	or_i_self(   R_AT, ((g)   << 8) | (r)) \
+,	or_i_self(   R_AT, ((g)  << 8) | (r)) \
 ,	store_word(  R_AT, R_PrimCursor, (off))
 WORD_COUNT(mac_pack_color_word, 3)
 
