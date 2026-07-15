@@ -3,36 +3,20 @@
  * ============================================================================
  *
  * ATOM DSL: Annotation layer for tape atoms (lottes_tape.h).
+ * The metaprogram (scripts/passes/annotation.lua) reads source-as-written and validates:
+ *   - atom_info(...) shape: up to three sub-calls (atom_bind(Binds_X), atom_reads(...), atom_writes(...)) in any order and are optional.
+ *   - rbind atoms (atom_info(..., atom_bind(Binds_X), ...)) reference a real Binds_* struct declaration.
+ *   - wave-context positions only reference the 4-register set: R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase.
+ *     Note(Ed): Not sure if I'll generlaize this later.
+ *   - atom word-counts in word_counts.metadata.h match the body's actual .word count.
  *
- *   WHAT THIS HEADER IS
- *   -------------------
- *   The metaprogram (scripts/passes/annotation.lua) reads source-as-written
- *   and validates:
- *     - atom_info(...) shape: up to three sub-calls (atom_bind(Binds_X),
- *       atom_reads(...), atom_writes(...)) in any order. All optional.
- *       (No phase token for now; phases may be reintroduced later.)
- *     - rbind atoms (atom_info(..., atom_bind(Binds_X), ...)) reference a
- *       real Binds_* struct declaration.
- *     - wave-context positions only reference the canonical 4-register
- *       set: R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase.
- *     - atom word-counts in word_counts.metadata.h agree with the body's
- *       actual .word count.
- *
- *   WHY PURE MACROS
- *   ---------------
- *   atom_info, atom_bind, atom_reads, atom_writes, atom_label,
- *   atom_dbg_skip_over each expand to a C comment or to nothing. The C
- *   comment or to nothing. The C preprocessor strips them to whitespace.
- *   The metaprogram reads the literal tokens from source-as-written, NOT from
- *   the preprocessed output. This means:
- *     - the C compiler does no work for them (no __attribute__, no
- *       _Pragma, no asm side-effects)
- *     - they can never silently drift from the metaprogram's view
- *       (the metaprogram re-reads the source on every build)
- *     - the annotation is invisible to the linker, debugger, and IDE
+ * Pure macro anntation.
+ * ---------------
+ * Don't want to constraint the macro usage to some attribute placment constraint, etc, don't want ot dela with the compiler.
+ * atom_info, atom_bind, atom_reads, atom_writes, atom_label, atom_dbg_skip_over each expand to a C comment or to nothing
+ * (C preprocessor strips them to whitespace).
  *
  * ============================================================================
- *
  *  Usage:
  *      MipsAtom_(cube_tri) atom_info(
  *         atom_reads (R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
@@ -62,30 +46,15 @@
  *
  *  Annotation rules
  *  ----------------
- *      1. atom_info(...) is OPTIONAL. Most atoms have no annotation.
- *         Atoms without atom_info are silently skipped by the metaprogram.
- *
- *      2. If present, atom_info takes up to three sub-calls, all
- *         order-independent within the arg list:
- *           - atom_bind(Binds_X) (optional; only for rbind atoms)
- *           - atom_reads(...) (optional; wave-context registers)
- *           - atom_writes(...) (optional; wave-context registers)
- *
- *      3. atom_bind(Binds_X) pins the ABI-struct shape -- the metaprogram
- *         cross-references Binds_X against the
- *         `typedef struct Binds_X { ... } Binds_X;` declaration.
- *
- *      4. atom_reads(...) and atom_writes(...) args are wave-context
- *         registers: R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase.
- *         Closed set. GTE / SP / DMA / I/O state is declared in source
- *         comments, not in atom_reads/atom_writes.
- *
- *      5. atom_label(name) is an anchor -- the macro is empty in C; the
- *         metaprogram records the marker at the current pos for offset
- *         calculation.
- *
- *      6. atom_offset(F, T) is resolved by gen/atom_offsets.h, generated
- *         from the atom_label markers.
+ *      1. atom_info(...) is OPTIONAL. Atoms without atom_info are silently skipped by the metaprogram.
+ *      2. If present, atom_info takes up to three sub-calls, all order-independent within the arg list:
+ *           - atom_bind(Binds_X) (binds a struct context to an atom).
+ *           - atom_reads(...) (context registers)
+ *           - atom_writes(...) (context registers)
+ *      3. atom_bind(Binds_X): metaprogram cross-references Binds_X against the `typedef struct Binds_X { ... } Binds_X;` declaration.
+ *      4. atom_reads(...) and atom_writes(...) used to to check if registers are used correctly in macros: R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase.
+ *      5. atom_label(name) utilize with atom_offset as a target location.
+ *      6. atom_offset(F, T) is resolved by gen/atom_offsets.h, generated from the atom_label markers. Calculated during the offset pass of the lua  metaprogram.
  */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -94,75 +63,32 @@
 #endif
 
 /* ============================================================================
- * WAVE-CONTEXT REGISTERS -- canonical register set for the tape wave model.
+ * atom_reads(...) / atom_writes(...)
  *
- *   R_PrimCursor  output pointer into the prim arena (next OT entry to write)
- *   R_FaceCursor  input pointer into the face array (next face to consume)
- *   R_VertBase    base pointer into the vertex arena (this wave's vertices)
- *   R_OtBase      base pointer into the ordering table (this wave's OT slot)
- *
- * Closed set. If your atom needs to touch GTE / SP / DMA / other side state,
- * declare it at the source level as you normally would -- but DO NOT put
- * those registers in atom_reads/atom_writes.
- *
- * ============================================================================*/
-
-/* ============================================================================
- * atom_reads(...) / atom_writes(...) -- wave-context register list
- *
- *   atom_reads(R_PrimCursor, R_FaceCursor)
- *         ->  (R_PrimCursor, R_FaceCursor)   // comma-evaluated, discarded
- *
- * The macro produces a comma-evaluated expression that the C compiler
- * silently discards (it sits in an unused arg position -- the result is
- * never bound). The Lua tool pattern-matches the "atom_reads(...)" /
- * "atom_writes(...)" token to extract the list.
- *
- * You can have at most one atom_reads(...) and at most one atom_writes(...)
- * in an atom_info(...) call. To declare multiple disjoint sets (rare), just
- * declare the union -- the metaprogram doesn't track which reads need which
- * writes at this granularity.
- *
+ * Used during the static analysis pass of the metaprogram to do 
  * ============================================================================*/
 #define atom_reads(...)  (__VA_ARGS__)
 #define atom_writes(...) (__VA_ARGS__)
 
 /* ============================================================================
- * ATOM ANNOTATION MACROS
- *
- *   atom_info -- single unified annotation. OPTIONAL. Most atoms have none.
- *
+ *   atom_info :
  *      MipsAtom_(cube_tri) atom_info(
  *         atom_reads (R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
  *       , atom_writes(R_PrimCursor, R_FaceCursor)
  *      ){ ... };
- *
- *   Shape (sub-args order-independent; all optional):
- *     - atom_bind(Binds_X):  at most one; pins the ABI-struct shape
- *     - atom_reads(...):     at most one; comma-list of wave-context registers
- *     - atom_writes(...):    at most one; comma-list of wave-context registers
- *
- *   No phase token for now. The metaprogram doesn't check ordering across
- *   atoms -- phases (init / bind / setup / work / commit / terminate) will
- *   be reintroduced when ordering checks are added.
- *
- *   The macro expands to a C comment (or to nothing). The C compiler does
- *   no work. The metaprogram reads the source-as-written directly.
- *
+ * 
+ *  - atom_bind(Binds_X): metaprogram cross-references Binds_X against the `typedef struct Binds_X { ... } Binds_X;` declaration.
+ *  - atom_reads(...):    comma-list of registers
+ *  - atom_writes(...):   comma-list of registers
  * ============================================================================*/
 #define atom_info(...)  /* atom_info(__VA_ARGS__) */
 
 /* ----------------------------------------------------------------------------
  * DEBUG SOURCE-STEP MARKERS
  *
- * Place atom_dbg_skip_over() before a MipsAtom_, MipsAtomComp_, or
- * MipsAtomComp_Proc_ declaration. The following declaration kind determines
- * whether the marker selects a whole atom or a component inline view. The
- * source scanner associates the marker with that declaration; placement
- * diagnostics are handled by the annotation pass.
- *
- * The macro expands to a comment only. It emits no C data or MIPS words and
- * therefore cannot affect runtime output.
+ * Place atom_dbg_skip_over() before a MipsAtom_, MipsAtomComp_, or MipsAtomComp_Proc_. 
+ * The following declaration kind determines whether the marker selects a whole atom or a component inline view.
+ * The source scanner associates the marker with that declaration; placement diagnostics are handled by the annotation pass.
  * ----------------------------------------------------------------------------*/
 #define atom_dbg_skip_over() /* atom_dbg_skip_over: skip the following atom or component source view */
 
@@ -174,13 +100,7 @@
  *       , atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
  *   ){ ... };
  *
- * The Binds_X MUST be a typedef'd type (declared via
- * `typedef struct Binds_X { ... } Binds_X;` somewhere in the source).
- * The Lua tool cross-references this. Missing struct = error.
- *
- * atom_bind is a SUB-CALL of atom_info, not a standalone annotation macro.
- *
- * The macro expands to a C comment. The metaprogram reads source-as-written.
+ * The Binds_X MUST be a typedef'd type (declared via `typedef struct Binds_X { ... } Binds_X;` somewhere in the source).
  * ----------------------------------------------------------------------------*/
 #define atom_bind(binds_struct)  /* atom_bind(binds_struct) */
 
@@ -193,25 +113,12 @@
  *
  *   atom_offset(culling, bounds_chk)         ← resolved by gen/.offsets.h
  *
- * The metaprogram generates gen/atom_offsets.h with one
- *   #define atom_offset__culling__bounds_chk  ((target - branch_pos - 1))
- * per atom_offset(F, T) call. The preprocessor then expands your call to
- * the right immediate value.
+ * The metaprogram generates gen/atom_offsets.h with one #define with the offset value per atom_offset(F, T) call.
+ * The preprocessor then expands the call to the right immediate value.
  *
- * If gen/atom_offsets.h is stale (or atom_label(name) is undefined),
- * `atom_offset__F__T` becomes an undefined macro and the C build fails.
- * This catches:
- *   - typo in atom_label (no anchor → metaprogram doesn't emit the macro)
- *   - .offsets.h not regenerated after body edits
- *   - body edit that broke the offset math (recompile + retest picks it up
- *     in CPU emulator)
- *
+ * If gen/atom_offsets.h is stale (or atom_label(name) is undefined), `atom_offset_F_T`
+ * becomes an undefined macro and the C build fails.
  * ============================================================================*/
-
 #define atom_offset(F, T) atom_offset_ ## F ## _ ## T
-/* atom_label is a pure annotation for the metaprogram's offset calculations.
- * The macro expands to a C comment, so the C preprocessor strips it to
- * whitespace — NO instruction word is emitted in the asm. The metaprogram
- * still recognises the literal `atom_label(name)` token in source and
- * records the marker at the current pos. */
+// atom_label is a pure annotation for the metaprogram's offset calculations.
 #define atom_label(name) /* atom_label anchor: name */

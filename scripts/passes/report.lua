@@ -16,7 +16,7 @@
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; a Phase-6 extraction target (`duffle.setup_package_path()`).
+-- Note: this boilerplate is duplicated in 6 other entry scripts; extraction target (`duffle.setup_package_path()`).
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works
@@ -61,16 +61,16 @@ local PASS_NAME = "report"
 --- @field basename string  -- filename without extension
 
 --- @class PassCtx
---- @field sources            SourceFile[]            -- all source files in the build
---- @field metadata_path      string                  -- path to word_count.metadata.h
---- @field shared             table                   -- cross-pass shared state
---- @field out_root           string                  -- output root (e.g. "build/gen")
---- @field project_root       string                  -- project root (e.g. "code/")
---- @field upstream           table<string, table>    -- per-pass upstream outputs
---- @field flags              table                   -- CLI flags + per-pass stash
---- @field flags._annot_results ModuleEntry[]         -- stashed by annotation pass
---- @field dry_run            boolean                 -- if true, compute but don't write
---- @field verbose            boolean                 -- if true, log diagnostic info
+--- @field sources            SourceFile[]         -- all source files in the build
+--- @field metadata_path      string               -- path to word_count.metadata.h
+--- @field shared             table                -- cross-pass shared state
+--- @field out_root           string               -- output root (e.g. "build/gen")
+--- @field project_root       string               -- project root (e.g. "code/")
+--- @field upstream           table<string, table> -- per-pass upstream outputs
+--- @field flags              table                -- CLI flags + per-pass stash
+--- @field flags._annot_results ModuleEntry[]      -- stashed by annotation pass
+--- @field dry_run            boolean              -- if true, compute but don't write
+--- @field verbose            boolean              -- if true, log diagnostic info
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
@@ -312,8 +312,8 @@ local function render_module_report(dir, sources, results)
 		macros   = total_macros, errors = total_errors,  warnings = total_warnings,
 	}
 
-	-- THE per-section dispatch. ONE loop over SECTION_RENDERERS. Each renderer writes its
-	-- header + content via the `add` closure (pre-bound above).
+	-- THE per-section dispatch. ONE loop over SECTION_RENDERERS.
+	-- Each renderer writes its header + content via the `add` closure (pre-bound above).
 	-- Adding a new section = 1 row here + 1 render_<thing>_section function.
 	for _, section in ipairs(SECTION_RENDERERS) do
 		add(section.header)

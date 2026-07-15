@@ -1,16 +1,14 @@
---- ps1_meta.lua — Orchestrator entry point for the tape-atom metaprogram pipeline.
+--- ps1_meta.lua — Orchestrator entry point for the tape-atom metaprogram.
 ---
---- Dispatches to pass modules under `scripts/passes/`, resolving
---- dependencies topologically (Kahn's algorithm + cycle detection).
---- Single CLI surface (`--<pass>` flags + auto-dep expansion + --dry-run).
+--- Dispatches to pass modules under `scripts/passes/`, resolving dependencies topologically (Kahn's algorithm + cycle detection).
 ---
 --- **Architecture**:
 ---   - **PASSES table** — declarative dep graph (data, not code).
 ---   - **FLAG_HANDLERS table** — per-flag CLI dispatchers (handler-map pattern; replaces an 8-way if/elseif chain).
 ---   - **parse_args** → **build_ctx** (just opens + reads source files; no inline scanning) → **topo_sort** → **dispatch_passes**.
----   - The first pass in the dep graph is `scan-source` (see `passes/scan_source.lua`). 
+---   - The first pass in the dep graph is `scan-source` (see `passes/scan_source.lua`).
 ---     It calls `duffle.scan_source` once per source to produce the fat `SourceScan` payload, which is attached to each `src.scan`. 
----     Every other pass that reads source structure depends on `scan-source` and consumes `src.scan` as a read-only payload. 
+---     Every other pass that reads source structure depends on `scan-source` and consumes `src.scan` as a read-only. 
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -152,7 +150,7 @@ local PASSES = {
 		module = "passes.atoms_source_map",
 		kind   = "header-output",
 		deps   = {"word-counts", "components"},
-		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging) AND gen/<basename>.atoms.provenance.txt (per-.word provenance; each word tagged with its call-site file:line and, when emitted by a mac_X(...) component invocation, the component's definition file:line). Consumed by passes/dwarf_injection.lua to synthesize DW_TAG_inlined_subroutine instances for source-level Step Into on component invocations (Phase 3 — debug_ux).",
+		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging) AND gen/<basename>.atoms.provenance.txt (per-.word provenance; each word tagged with its call-site file:line and, when emitted by a mac_X(...) component invocation, the component's definition file:line). Consumed by passes/dwarf_injection.lua to synthesize DW_TAG_inlined_subroutine instances for source-level Step Into on component invocations.",
 		out    = {
 			{ kind = "report", path_template = "<out_root>/<basename>.atoms.sourcemap.txt"   },
 			{ kind = "report", path_template = "<out_root>/<basename>.atoms.provenance.txt" },
@@ -206,8 +204,15 @@ local PASS_FLAG_TO_NAME = {
 }
 
 local ALL_PASS_NAMES = {
-	"scan-source", "word-counts", "components", "annotation",
-	"offsets", "static-analysis", "atoms-source-map", "dwarf-injection", "report",
+	"scan-source",
+	"word-counts",
+	"components",
+	"annotation",
+	"offsets",
+	"static-analysis",
+	"atoms-source-map",
+	"dwarf-injection",
+	"report",
 }
 
 --- Append every pass name to args.requested_set. Used by --all and by the "default to --all if no pass flags were given" fallback.
@@ -286,8 +291,8 @@ FLAG_HANDLERS["--metadata"]     = function(args, argv, arg_idx) args.metadata   
 FLAG_HANDLERS["--out-root"]     = function(args, argv, arg_idx) args.out_root                   = argv[arg_idx + 1]; return arg_idx + 1 end
 FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx) args.project_root               = argv[arg_idx + 1]; return arg_idx + 1 end
 
--- Per-pass stash flags. Read by `passes/atoms_source_map.lua` to opt into the
--- post-link gdb-runtime emission. Same shape as the existing per-flag handlers:
+-- Per-pass stash flags. Read by `passes/atoms_source_map.lua` to opt into the post-link gdb-runtime emission.
+-- Same shape as the existing per-flag handlers:
 -- mutates `args.flags` (which propagates into `ctx.flags`).
 FLAG_HANDLERS["--gdb-runtime"]  = function(args) args.flags                       = args.flags or {}; args.flags.gdb_runtime = true end
 FLAG_HANDLERS["--elf"]          = function(args, argv, arg_idx) args.flags       = args.flags or {}; args.flags.elf_path  = argv[arg_idx + 1]; return arg_idx + 1 end
@@ -300,7 +305,7 @@ end
 
 -- G' (atom locals) is now consolidated into --dwarf-injection; no separate flag.
 
--- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set. Single-statement, no nesting.
+-- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set.
 FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
 	local name = PASS_FLAG_TO_NAME[a]
 	if name == ALL_PASSES_SENTINEL then
@@ -311,7 +316,6 @@ FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
 end
 
 --- Parse argv into a structured table. Validates against a closed enum.
----
 --- @param argv string[]
 --- @return ParsedArgs
 local function parse_args(argv)
@@ -371,7 +375,6 @@ end
 
 --- Build the PassCtx from parsed args. Reads each source file once at startup;
 --- passes consume `src.text`, not the path (path is preserved for error reporting).
----
 --- @param args ParsedArgs
 --- @return PassCtx
 local function build_ctx(args)
@@ -425,7 +428,6 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Compute the dep-closure of `requested_set`: include every pass name transitively required by the requested set.
----
 --- @param passes table<string, PassDescriptor>
 --- @param requested_set string[]
 --- @return table<string, boolean>  -- set of pass names needed (including transitive deps)
@@ -461,7 +463,6 @@ local function count_entries(t)
 end
 
 --- Compute in-degrees for the Kahn sort: for each pass in `needed`, the number of its deps that are also in `needed`.
----
 --- @param passes table<string, PassDescriptor>
 --- @param needed table<string, boolean>
 --- @return table<string, integer>
@@ -479,8 +480,7 @@ local function compute_in_degrees(passes, needed)
 end
 
 --- Seed the Kahn ready queue with passes whose in-degree is 0, sorted alphabetically for deterministic execution order.
----
---- @param in_degree table<string, integer>
+-- @param in_degree table<string, integer>
 --- @return string[]
 local function seed_ready_queue(in_degree)
 	local ready = {}
@@ -518,7 +518,6 @@ end
 
 --- Topologically sort the requested pass set, augmented with all transitive deps.
 --- Detects cycles and errors out with details.
----
 --- @param passes table<string, PassDescriptor>
 --- @param requested_set string[]
 --- @return string[]  -- execution order
@@ -552,7 +551,6 @@ end
 
 --- Render the dep graph as ASCII art. Output width capped at 78 columns.
 --- Falls back to the simpler "Resolved dependency order" list only if graph width exceeds terminal width.
----
 --- @param passes table<string, PassDescriptor>
 --- @param requested string[]  -- originally-requested passes (subset of closed)
 --- @param closed string[]     -- dep-closed execution order
@@ -572,8 +570,7 @@ local function render_dep_graph(passes, requested, closed)
 	add("")
 
 	-- Data-driven ASCII graph built from the actual PASSES table.
-	-- Shows the source -> scan_source -> pass chain. Each pass is
-	-- shown once; edges are "feeds into" arrows based on deps.
+	-- Shows the source -> scan_source -> pass chain. Each pass is shown once; edges are "feeds into" arrows based on deps.
 	add("[ps1_meta] Pass graph (read top-to-bottom; edges = 'feeds into'):")
 	add("")
 
@@ -658,7 +655,6 @@ local function report_validation_errors(pass_name, pass, result)
 end
 
 -- (internal) Run each pass in `order` in topological sequence.
---
 -- @param ctx PassCtx
 -- @param order string[]
 -- @return boolean  -- true if any validation errors were reported

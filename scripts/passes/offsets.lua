@@ -231,8 +231,7 @@ end
 -- Offset computation + header generation
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Compute branch offsets as `target_word - branch_word - 1`
--- (the standard MIPS branch-immediate encoding).
+-- Compute branch offsets as `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding).
 -- @param labels table<string, integer>
 -- @param branches table[]
 -- @return BranchOffset[]

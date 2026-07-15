@@ -261,11 +261,8 @@ function M.write_file_lf(path, content)
 	f:write(content); f:close()
 end
 
--- Return `{path, ...}` for files in `out_root` whose basename matches
--- `pattern` (Lua pattern, NOT regex — `%.` not `\.`). Empty list if
--- `out_root` doesn't exist or matches nothing.
---
--- **Cost:** ~2ms native (lfs.dir) vs ~56ms subprocess (`dir /b`).
+-- Return `{path, ...}` for files in `out_root` whose basename matches `pattern` (Lua pattern, NOT regex — `%.` not `\.`).
+-- Empty list if `out_root` doesn't exist or matches nothing.
 -- @param out_root Path
 -- @param pattern string  -- Lua pattern matched against basename only
 -- @return string[]
@@ -309,9 +306,6 @@ function M.to_absolute_path(path)
 end
 
 -- Cache of directories already verified to exist in this process.
--- Each ensure_dir() call may otherwise spawn a `cmd.exe mkdir` (50-100ms per call on Windows) — calling it inside per-source loops added 1.5+
--- seconds to the report pass. Cache makes ensure_dir idempotent within the process lifetime.
--- (safe across passes; the dir state doesn't change).
 local _ensured_dirs = {}
 
 function M.ensure_dir(path)
@@ -445,7 +439,7 @@ end
 --
 -- FIX (2026-07-09): split at top-level NEWLINES and SEMICOLONS too, AND emit a token break after a top-level comment/string. 
 -- Previous behavior glued the macro call after a comment into the same token, so `word_count_of_token` only saw the 
--- leading ident (often nil after stripping the comment), undercounting the body. See Phase 1 of the branch-offset regression  investigation. 
+-- leading ident (often nil after stripping the comment), undercounting the body.
 -- Pure-comment / pure-string chunks (which now appear between real statements) are filtered out so they contribute 0 words instead of 1.
 function M.split_top_level_commas(body)
 	local tokens      = {}
@@ -537,9 +531,6 @@ end
 -- Section 4b: tokenize_body + build_body_line_index (shared, memoized)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Moved here from passes/static_analysis.lua so all passes can share the memoized
--- per-body tokenization. The memoization key is the body string (immutable per pass).
-
 local _tokenize_body_cache        = {}
 local _tokenize_body_simple_cache = {}
 local _body_line_index_cache      = {}
@@ -562,20 +553,17 @@ function M.tokenize_body(body)
 		local scan = rel
 		while scan <= len do
 			local c = body:byte(scan)
-			-- Terminator bytes (delimit a token at the top level): ',' = 0x2C,
-			-- '\n' = 0x0A, ';' = 0x3B. These also appear as separators between
-			-- argument lists inside the parens/braces/brackets, so we stop the
-			-- scan when we hit any of them.
+			-- Terminator bytes (delimit a token at the top level): ',' = 0x2C, '\n' = 0x0A, ';' = 0x3B.
+			-- These also appear as separators between argument lists inside the parens/braces/brackets, 
+			-- so we stop the scan when we hit any of them.
 			if     c == BYTE_COMMA   then break end
 			if     c == BYTE_NEWLINE then break end
 			if     c == BYTE_SEMI    then break end
-			-- Group opener bytes (consume the balanced group via the matching reader):
-			-- '(' = 0x28, '{' = 0x7B, '[' = 0x5B.
+			-- Group opener bytes (consume the balanced group via the matching reader): '(' = 0x28, '{' = 0x7B, '[' = 0x5B.
 			if     c == BYTE_OPEN_PAREN then local _, a = M.read_parens   (body, scan); scan = a
 			elseif c == BYTE_OPEN_BRACE then local _, a = M.read_braces   (body, scan); scan = a
 			elseif c == BYTE_OPEN_BRACK then local _, a = M.read_brackets (body, scan); scan = a
-			-- String-literal byte ('"' = 0x22 or '\'' = 0x27): skip past the
-			-- quoted region in one shot.
+			-- String-literal byte ('"' = 0x22 or '\'' = 0x27): skip past the quoted region in one shot.
 			elseif c == BYTE_DQUOTE or c == BYTE_SQUOTE then
 				scan = M.skip_str_or_cmt(body, scan) + 1
 			else
@@ -731,12 +719,13 @@ M.TAPE_ATOM_MACROS = {
 -- The check (`scripts/passes/static_analysis.lua :: check_gte_pipeline_fill`) walks each atom body,
 -- counts the consecutive nop words before every `gte_cmdw_*` invocation, and reports a finding if the count is below this minimum.
 --
--- PRE-FILL vs POST-FILL: this table models PRE-cmdw nops (retiring preceding C2 writes), NOT the post-cmdw input-latch
--- window. The PSX-SPX pipeline timings doc (`docs/psx-spx/docs/gtepipelinetimings.md`) measures a DIFFERENT number:
--- the smallest N nops between `cop2` and `mtc2` to a specific input register at which the write no longer affects
--- the output. For nearly all instructions, inputs latch in the first 0-4 cycles — the GTE snapshots its input
--- register file early and works from internal pipeline storage afterward. The documented total cycle count is
--- NOT the "do not touch inputs" window; the actual read window is much shorter.
+-- PRE-FILL vs POST-FILL: this table models PRE-cmdw nops (retiring preceding C2 writes),
+-- NOT the post-cmdw input-latch window. 
+-- The PSX-SPX pipeline timings doc (`docs/psx-spx/docs/gtepipelinetimings.md`) measures a DIFFERENT number:
+-- the smallest N nops between `cop2` and `mtc2` to a specific input register at which the write no longer affects the output.
+-- For nearly all instructions, inputs latch in the first 0-4 cycles — the GTE snapshots its input register file early and works
+--  from internal pipeline storage afterward. The documented total cycle count is NOT the "do not touch inputs" window;
+-- the actual read window is much shorter.
 --
 -- The `gte_rtpt()` / `gte_nclip()` wrapper macros in gte.h emit the pre-cmd nops internally (asm_words(nop, nop, ...)),
 -- but THOSE WRAPPERS ARE NOT USED INSIDE ATOM BODIES in this codebase.

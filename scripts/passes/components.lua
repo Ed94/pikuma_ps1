@@ -1,12 +1,12 @@
 --- passes/components.lua — Component-macro header generator.
 ---
 --- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
---- for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations, then does
---- per-source backward lookups for the function-args string (from the preceding `FI_ MipsAtom ac_X(...)`
---- function declaration) and the preceding comment block (for LSP/IntelliSense signature docs).
+--- for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations, then does per-source backward lookups
+--- for the function-args string (from the preceding `FI_ MipsAtom ac_X(...)` function declaration)
+--- and the preceding comment block (for LSP/IntelliSense signature docs).
 ---
---- Emits a per-directory `<dir_basename>.macs.h` containing one `#define mac_X(sig) \` macro per component
---- + `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
+--- Emits a per-directory `<dir_basename>.macs.h` containing one `#define mac_X(sig) \` macro per component + `WORD_COUNT(mac_X, N)`
+--- entries for downstream offset computation.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -26,8 +26,7 @@
 
 -- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
--- Uses `debug.getinfo` to find this file's own directory, so it works
--- both standalone and when require'd from the orchestrator.
+-- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir  = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
@@ -43,9 +42,9 @@ local ATOM_COMP_PROC  = "MipsAtomComp_Proc_"
 local MIPS_ATOM       = "MipsAtom"  -- prefix on the function declaration that wraps an AtomComp_Proc_
 
 -- Component-name prefixes.
-local AC_PREFIX       = "ac_"        -- arg to MipsAtomComp_(ac_X); the X is the atom name
+local AC_PREFIX       = "ac_"  -- arg to MipsAtomComp_(ac_X); the X is the atom name
 local AC_PREFIX_LEN   = 3
-local MAC_PREFIX      = "mac_"       -- prefix on generated macros; the rest is the atom name
+local MAC_PREFIX      = "mac_" -- prefix on generated macros; the rest is the atom name
 local MAC_PREFIX_LEN  = 4
 
 -- ASCII byte values used in tokenization.
@@ -84,11 +83,11 @@ local GEN_SUBDIR      = "gen"
 --- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
 
 --- @class Component
---- @field name    string        -- atom name (without `ac_` prefix)
---- @field body    string        -- brace-delimited body (without the braces)
---- @field args    string|nil    -- function-args string (function form only)
---- @field line    integer       -- source line of the declaration
---- @field comment string|nil    -- preceding `/* */` or `//` comment block (signature doc)
+--- @field name    string     -- atom name (without `ac_` prefix)
+--- @field body    string     -- brace-delimited body (without the braces)
+--- @field args    string|nil -- function-args string (function form only)
+--- @field line    integer    -- source line of the declaration
+--- @field comment string|nil -- preceding `/* */` or `//` comment block (signature doc)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Local helpers (file I/O + path normalization)
@@ -348,8 +347,7 @@ end
 
 -- Project pre-scanned MipsAtomComp_ / MipsAtomComp_Proc_ entries into Component shape.
 -- Does per-source backward lookups for args (preceding function decl) and comment (preceding comment block).
--- Carries `body_tokens` forward from scan-source so word_count_rec reads from the precomputed table
--- instead of calling duffle.tokenize_body again.
+-- Carries `body_tokens` forward from scan-source so word_count_rec reads from the precomputed table instead of calling duffle.tokenize_body again.
 -- @param source string  -- the full source text (needed for backward lookups)
 -- @param scan  table   -- SourceScan from duffle.scan_source
 -- @return Component[]
@@ -366,7 +364,7 @@ local function project_components(source, scan)
 				body_tokens = a.body_tokens,
 				args        = args,
 				comment     = comment,
-				kind        = a.kind,  -- "comp_bare" | "comp_proc"; Phase 3 provenance emitter reads this.
+				kind        = a.kind,  -- "comp_bare" | "comp_proc"; provenance emitter reads this.
 			}
 		end
 	end
@@ -474,10 +472,9 @@ end
 
 --- Compute word counts for every component in `components` in a single pass.
 --- The name-lookup table + memoization cache are built ONCE (per source) instead of per-component,
---- so the cache survives across siblings and a component's recursive `mac_Y(...)` references hit memoized values
---- instead of re-walking the body.
+--- so the cache survives across siblings and a component's recursive `mac_Y(...)` 
+--- references hit memoized values instead of re-walking the body.
 --- Cycle detection (A -> B -> A) is preserved via the in-progress `-1` sentinel in `cache`.
----
 --- @param components Component[]
 --- @param wc table<string, integer>
 --- @return table<string, integer>  -- map of component name (without `mac_`) -> word count
@@ -608,8 +605,8 @@ local function header_boilerplate(src)
 		"// Component atoms (MipsAtomComp_(ac_*)) -> macro variants (mac_*)",
 		"",
 		-- Self-contained: define WORD_COUNT if not already defined.
-		-- We use the same definition here so the auto-generated entries below expand to compile-time constants whether
-		-- the metadata file is included first or not.
+		-- We use the same definition here so the auto-generated entries below expand 
+		-- to compile-time constants whether the metadata file is included first or not.
 		"#ifndef WORD_COUNT",
 		"#define WORD_COUNT(name, count)  enum { words_##name = (count) };",
 		"#endif",
@@ -633,7 +630,6 @@ end
 --- Emit a per-source `.macs.h` header with the `mac_X` macros + `WORD_COUNT` entries. 
 --- Writes in BINARY mode so LF line endings are preserved (the git blob is LF; Windows text-mode would emit CRLF and break the byte-identical diff).
 --- Honors `ctx.dry_run`: prints the intended path but does not write the file.
----
 --- @param ctx PassCtx
 --- @param src SourceFile
 --- @param components Component[]
@@ -666,8 +662,7 @@ end
 -- Pass entry
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Extend `ctx.shared.word_counts` with this source's component macros
--- so offsets sees them without re-reading the file.
+-- (internal) Extend `ctx.shared.word_counts` with this source's component macros so offsets sees them without re-reading the file.
 -- @param ctx PassCtx
 -- @param components Component[]
 -- @param counts table<string, integer>  -- precomputed word counts (from count_all_components)
@@ -684,11 +679,9 @@ end
 --- @field path    string  -- absolute source path of the definition
 --- @field kind    string  -- "comp_bare" | "comp_proc"
 
---- (internal) Extend `ctx.shared.components` with this source's components-by-name
--- map so downstream passes (atoms_source_map, dwarf_injection) can resolve
--- `mac_X(...)` invocations back to their component definition file:line.
---- Phase 3 (debug_ux) provenance emission uses this to attribute each emitted
--- `.word` to either a component macro or the enclosing atom body.
+--- (internal) Extend `ctx.shared.components` with this source's components-by-name map so downstream passes
+--- (atoms_source_map, dwarf_injection) can resolve `mac_X(...)` invocations back to their component definition file:line.
+--- provenance emission uses this to attribute each emitted `.word` to either a component macro or the enclosing atom body.
 -- @param ctx PassCtx
 -- @param src SourceFile
 -- @param components Component[]
@@ -696,8 +689,8 @@ local function update_shared_components(ctx, src, components)
 	ctx.shared.components         = ctx.shared.components or {}
 	local rel_path = src.path:gsub("\\", "/")
 	for _, c in ipairs(components) do
-		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`). The atoms_source_map
-		-- pass strips the `mac_` prefix from the call site identifier before lookup.
+		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`). 
+		-- The atoms_source_map pass strips the `mac_` prefix from the call site identifier before lookup.
 		ctx.shared.components[c.name] = {
 			name = c.name,
 			line = c.line,
@@ -714,9 +707,9 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Initialize shared component map (Phase 3 — debug_ux). The atoms_source_map
-	-- and dwarf_injection passes consume `ctx.shared.components` to resolve
-	-- `mac_X(...)` invocations back to the component's definition file:line.
+	-- Initialize shared component map.
+	-- The atoms_source_map and dwarf_injection passes consume `ctx.shared.components` to resolve `mac_X(...)` 
+	-- invocations back to the component's definition file:line.
 	ctx.shared.components = ctx.shared.components or {}
 
 	for _, src in ipairs(ctx.sources) do
@@ -729,7 +722,7 @@ function M.run(ctx)
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }
 				update_shared_word_counts(ctx, components, counts)
-				-- Phase 3 (debug_ux): share component definitions with downstream passes.
+				-- share component definitions with downstream passes.
 				-- `mac_X(...)` invocations in atom bodies resolve back to (path, line) via this map.
 				update_shared_components(ctx, src, components)
 			end

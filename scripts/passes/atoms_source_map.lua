@@ -10,14 +10,14 @@
 --- **Two output forms** (per the workspace's per-emission-form pattern from
 --- `guide_metaprogram_ssdl.md`):
 ---   1. **Canonical text form** — `<out_root>/<basename>.atoms.sourcemap.txt`.
----      Always emitted. Format-version-tagged for forward-compat. 
----      Lives in `<out_root>/` (build/gen) NOT `<source_dir>/gen/`. This file is a **build report**, not a compile artifact. 
+---      Format-version-tagged for forward-compat. 
+---      Lives in `<out_root>/` (build/gen).
 ---      Matches the convention used by `annotation.lua` (`<out_root>/<basename>.errors.h`) + `static_analysis.lua` (`<out_root>/<basename>.static_analysis.txt`).
 ---      Compile artifacts (`*.macs.h`, `*.offsets.h`) stay in `<source_dir>/gen/`.
 ---   2. **gdb-runtime form** — `<ctx.out_root>/gdb_tape_atoms_runtime.gdb`
 ---      (pure gdb command script; addresses pre-computed via `nm`; the 9 user commands defined as `define ... end` blocks).
 ---      Emitted ONLY when `ctx.flags.gdb_runtime` is true AND `ctx.flags.elf_path` points to an existing ELF.
----      The gdb runtime form lets `gdb-multiarch --without-python` users (the common case on Windows MinGW builds) 
+---      The gdb runtime form lets `gdb-multiarch --without-python` users (the common case on Windows MinGW builds)
 ---      load the source-map data via `source <path>` — no Python/Tcl/Guile required.
 ---
 --- **Output format** (canonical text form):
@@ -47,9 +47,9 @@
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works
--- both standalone + when require'd). `duffle_paths.lua` sets package.path then
--- returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
+-- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` 
+-- (works both standalone + when require'd). `duffle_paths.lua` sets package.path then returns `require("duffle")` 
+-- at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle           = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 local elf_dwarf        = require("elf_dwarf")
@@ -60,8 +60,8 @@ local count_token_words = word_count_eval.count_token_words
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Format version emitted as the first line. Bump + add a migration test if the
--- format changes; the gdb runtime loader rejects mismatches (E2).
+-- Format version emitted as the first line. Bump + add a migration test if the format changes; 
+-- the gdb runtime loader rejects mismatches (E2).
 local FORMAT_VERSION = 1
 
 -- Marker-call identifiers (mirrors offsets.lua:33-34).
@@ -73,12 +73,12 @@ local OFFSET_MARKER = "atom_offset"
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class AtomSourceMapCtx
---- @field sources            table[]    -- SourceScan payload per source (from `ctx.sources`)
---- @field shared             table      -- `ctx.shared`
---- @field shared.word_counts table      -- macro name -> word count (populated by word-counts + components passes)
---- @field out_root           string     -- output root (e.g. "build/gen")
---- @field dry_run            boolean    -- if true, compute but don't write
---- @field flags              table      -- `ctx.flags`; reads `flags.gdb_runtime` + `flags.elf_path`
+--- @field sources            table[] -- SourceScan payload per source (from `ctx.sources`)
+--- @field shared             table   -- `ctx.shared`
+--- @field shared.word_counts table   -- macro name -> word count (populated by word-counts + components passes)
+--- @field out_root           string  -- output root (e.g. "build/gen")
+--- @field dry_run            boolean -- if true, compute but don't write
+--- @field flags              table   -- `ctx.flags`; reads `flags.gdb_runtime` + `flags.elf_path`
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Helpers
@@ -108,8 +108,7 @@ local function count_marker_rest(tok, wc)
 end
 
 --- Compute per-word entries for an atom. 
---- Shared between the canonical text form (per-source `.atoms.sourcemap.txt`) 
---- and the gdb-runtime form (`gdb_tape_atoms_runtime.gdb`).
+--- Shared between the canonical text form and the gdb-runtime form.
 ---
 --- Returns a list of `{pos, line, text}` entries + the total word count.
 --- Markers contribute 0 entries (the marker call emits 0 `.word`s).
@@ -135,9 +134,8 @@ local function compute_word_entries(atom, src, wc)
 			-- Source line for THIS token = line containing byte offset `atom.body_off + rel`.
 			-- `src.scan.line_of(...)` is O(log N) via LineIndex.
 			local line = src.scan.line_of(atom.body_off + rel)
-			-- Flatten newlines + tabs in TEXT to spaces so each WORD entry fits on
-			-- one physical line. The gdb Python parser (or our pure-gdb parser)
-			-- does line-based splits; multi-line TEXT would break it.
+			-- Flatten newlines + tabs in TEXT to spaces so each WORD entry fits on one physical line.
+			-- The gdb Python parser (or our pure-gdb parser) does line-based splits; multi-line TEXT would break it.
 			local text = duffle.trim(tok):gsub("[\t\r\n]+", " ")
 			for _ = 1, words do
 				entries[#entries + 1] = { pos = pos, line = line, text = text }
@@ -149,16 +147,16 @@ local function compute_word_entries(atom, src, wc)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Provenance emission (Phase 3 — debug_ux)
+-- Provenance emission
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Component-macro invocation prefix (mirrors components.lua's MAC_PREFIX).
 local MAC_PREFIX     = "mac_"
 local MAC_PREFIX_LEN = 4
 
---- Strip the `mac_` prefix from a token's leading identifier. Returns nil
---- if the identifier doesn't start with `mac_` (so non-component tokens
---- like `load_half_u`, `nop2`, `gte_cmdw_*` fall through cleanly).
+--- Strip the `mac_` prefix from a token's leading identifier.
+--- Returns nil if the identifier doesn't start with `mac_` 
+--- (so non-component tokens like `load_half_u`, `nop2`, `gte_cmdw_*` fall through cleanly).
 --- @param tok string
 --- @return string|nil
 local function strip_mac_prefix_from_token(tok)
@@ -170,14 +168,13 @@ local function strip_mac_prefix_from_token(tok)
 	return nil
 end
 
---- Compute per-word provenance entries for an atom. Mirrors `compute_word_entries`
---- but additionally classifies each emitted `.word` as either:
+--- Compute per-word provenance entries for an atom. Mirrors `compute_word_entries` but additionally classifies each emitted `.word` as either:
 ---   - `RAW`     — emitted by a direct instruction token (no component provenance)
----   - `MACRO X` — emitted by a `mac_X(...)` component invocation, with the
----                  component's definition file:line resolved from `ctx.shared.components`.
+---   - `MACRO X` — emitted by a `mac_X(...)` component invocation,
+---                 with the component's definition file:line resolved from `ctx.shared.components`.
 ---
---- Returns a list of `{pos, line, text, comp_name, comp_line, comp_path}` entries + the
---- total word count. `comp_name` is nil for RAW rows.
+--- Returns a list of `{pos, line, text, comp_name, comp_line, comp_path}` entries + the total word count.
+--- `comp_name` is nil for RAW rows.
 --- @param atom table  -- one entry of scan.atoms / scan.raw_atoms
 --- @param src  table  -- SourceFile (has .scan with .line_of(), .path)
 --- @param wc   table  -- shared.word_counts
@@ -232,7 +229,7 @@ end
 
 --- Render one atom's provenance stanza. Format:
 ---   `WORD N  CALL <src-path>:<src-line>  MACRO <name> "<def-path>:<def-line>"`  (for component words)
----   `WORD N  CALL <src-path>:<src-line>  RAW`                                    (for direct instructions)
+---   `WORD N  CALL <src-path>:<src-line>  RAW`                                   (for direct instructions)
 --- Returns (lines, total_words).
 --- @param src    table
 --- @param atom   table
@@ -249,13 +246,10 @@ local function emit_provenance_stanza(src, atom, wc, comp)
 
 	for _, pe in ipairs(entries) do
 		if pe.comp_name then
-			lines[#lines + 1] = string.format(
-				'WORD %d  CALL %s:%d  MACRO %s "%s:%d"',
+			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d"',
 				pe.pos, rel_path, pe.line, pe.comp_name, pe.comp_path, pe.comp_line)
 		else
-			lines[#lines + 1] = string.format(
-				"WORD %d  CALL %s:%d  RAW",
-				pe.pos, rel_path, pe.line)
+			lines[#lines + 1] = string.format("WORD %d  CALL %s:%d  RAW", pe.pos, rel_path, pe.line)
 		end
 	end
 
@@ -276,27 +270,23 @@ local function render_provenance(src, wc, comp)
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
 	lines[#lines + 1] = "# Per-.word provenance: maps each emitted .word to its call site (atom body"
 	lines[#lines + 1] = "# file:line) and, when the word was emitted by a `mac_X(...)` component invocation,"
-	lines[#lines + 1] = "# the component's definition file:line. Used by dwarf_injection (Phase 3) to synthesize"
+	lines[#lines + 1] = "# the component's definition file:line. Used by dwarf_injection to synthesize"
 	lines[#lines + 1] = "# DW_TAG_inlined_subroutine instances for component step-into."
 
 	for _, atom in ipairs(src.scan.atoms or {}) do
 		local stanza = emit_provenance_stanza(src, atom, wc, comp)
-		for _, line in ipairs(stanza) do
-			lines[#lines + 1] = line
-		end
+		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
 	for _, atom in ipairs(src.scan.raw_atoms or {}) do
 		local stanza = emit_provenance_stanza(src, atom, wc, comp)
-		for _, line in ipairs(stanza) do
-			lines[#lines + 1] = line
-		end
+		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
 
 	return table.concat(lines, "\n") .. "\n"
 end
 
---- Render one atom's stanza for the canonical text form
---- (ATOM header line, N WORD lines, ENDATOM marker). Returns (lines, total_words).
+--- Render one atom's stanza for the canonical text form (ATOM header line, N WORD lines, ENDATOM marker).
+--- Returns (lines, total_words).
 --- @param src    table
 --- @param atom   table
 --- @param wc     table
@@ -308,7 +298,6 @@ local function emit_atom_stanza(src, atom, wc)
 
 	-- ATOM header line with placeholder total (patched after we know it).
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
-
 	for _, we in ipairs(entries) do
 		lines[#lines + 1] = string.format("WORD %d  LINE %d  TEXT %s",
 			we.pos, we.line, we.text)
@@ -330,17 +319,13 @@ local function render_source_map(src, wc)
 	lines[#lines + 1] = "# FORMAT_VERSION " .. FORMAT_VERSION
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
 
-	for _, atom in ipairs(src.scan.atoms or {}) do
+	for   _, atom in ipairs(src.scan.atoms or {}) do
 		local stanza = emit_atom_stanza(src, atom, wc)
-		for _, line in ipairs(stanza) do
-			lines[#lines + 1] = line
-		end
+		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
-	for _, atom in ipairs(src.scan.raw_atoms or {}) do
+	for   _, atom in ipairs(src.scan.raw_atoms or {}) do
 		local stanza = emit_atom_stanza(src, atom, wc)
-		for _, line in ipairs(stanza) do
-			lines[#lines + 1] = line
-		end
+		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
 
 	return table.concat(lines, "\n") .. "\n"
@@ -363,7 +348,7 @@ end
 --- @param ctx PassCtx
 --- @return table[] -- list of {idx, name, src_path, file_base, addr, size_bytes, words, entries}
 local function build_atom_table(ctx)
-	local wc = (ctx.shared and ctx.shared.word_counts) or {}
+	local wc    = (ctx.shared and ctx.shared.word_counts) or {}
 	local addrs = elf_dwarf.read_nm(ctx.flags.elf_path)
 
 	local matched = {}
@@ -431,8 +416,7 @@ local function append_gdb_commands(lines, matched)
 	for _, a in ipairs(matched) do
 		-- gdb 12.1 quirk: literals in printf args require an attached target.
 		-- Use the per-atom convenience vars set above as printf args.
-		lines[#lines + 1] = string.format(
-			'  printf "  code_%%-32s @ 0x%%08x  %%4d words\\n", $__atom_name_%d, $__atom_addr_%d, $__atom_words_%d',
+		lines[#lines + 1] = string.format('  printf "  code_%%-32s @ 0x%%08x  %%4d words\\n", $__atom_name_%d, $__atom_addr_%d, $__atom_words_%d',
 			a.idx, a.idx, a.idx)
 	end
 	lines[#lines + 1] = "end"
@@ -445,8 +429,7 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "define break_atom"
 	lines[#lines + 1] = '  echo "Usage: break_atom_<exact_name>  (pick from the list below)"'
 	for _, a in ipairs(matched) do
-		lines[#lines + 1] = string.format(
-			'  printf "  break_atom_%%-32s\\n", $__atom_name_%d', a.idx)
+		lines[#lines + 1] = string.format('  printf "  break_atom_%%-32s\\n", $__atom_name_%d', a.idx)
 	end
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = "document break_atom"
@@ -457,8 +440,7 @@ local function append_gdb_commands(lines, matched)
 	for _, a in ipairs(matched) do
 		lines[#lines + 1] = string.format("define break_atom_%s", a.name)
 		lines[#lines + 1] = string.format("  break *$__atom_addr_%d", a.idx)
-		lines[#lines + 1] = string.format(
-			'  printf "  Breakpoint set at code_%s (0x%%08x)\\n", $__atom_addr_%d', a.name, a.idx)
+		lines[#lines + 1] = string.format('  printf "  Breakpoint set at code_%s (0x%%08x)\\n", $__atom_addr_%d', a.name, a.idx)
 		lines[#lines + 1] = "end"
 		lines[#lines + 1] = string.format("document break_atom_%s", a.name)
 		lines[#lines + 1] = string.format("  Set a breakpoint at code_%s.", a.name)
@@ -494,33 +476,24 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "  set $__matched = 0"
 	for _, a in ipairs(matched) do
 		-- Precompute end_addr (gdb 12.1's expression evaluator chokes on `addr + words*4`).
-		lines[#lines + 1] = string.format(
-			"  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
-		lines[#lines + 1] = string.format(
-			"  if $__pc >= $__atom_addr_%d && $__pc < $__end_%d", a.idx, a.idx)
-		lines[#lines + 1] = string.format(
-			'    printf "atom:    code_%%s\\n", $__atom_name_%d', a.idx)
+		lines[#lines + 1] = string.format("  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
+		lines[#lines + 1] = string.format("  if $__pc >= $__atom_addr_%d && $__pc < $__end_%d", a.idx, a.idx)
+		lines[#lines + 1] = string.format('    printf "atom:    code_%%s\\n", $__atom_name_%d', a.idx)
 		lines[#lines + 1] = '    printf "addr:    0x%08x\\n", $__pc'
-		lines[#lines + 1] = string.format(
-			"    set $__word = ($__pc - $__atom_addr_%d) / 4", a.idx)
-		lines[#lines + 1] = string.format(
-			'    printf "word:    %%d/%%d\\n", $__word, $__atom_words_%d', a.idx)
+		lines[#lines + 1] = string.format("    set $__word = ($__pc - $__atom_addr_%d) / 4", a.idx)
+		lines[#lines + 1] = string.format('    printf "word:    %%d/%%d\\n", $__word, $__atom_words_%d', a.idx)
 		-- One inner-if per WORD entry. Each word's line + text hardcoded.
 		for _, we in ipairs(a.entries) do
-			lines[#lines + 1] = string.format(
-				"    if $__word == %d", we.pos)
+			lines[#lines + 1] = string.format("    if $__word == %d", we.pos)
 			-- Escape TEXT for printf format string.
 			local escaped_text = we.text:gsub("%%", "%%%%"):gsub('"', '\\"')
-			lines[#lines + 1] = string.format(
-				'      printf "source:  %%s:%%d  %%s\\n", $__atom_file_%d, %d, "%s"',
-				a.idx, we.line, escaped_text)
+			lines[#lines + 1] = string.format('      printf "source:  %%s:%%d  %%s\\n", $__atom_file_%d, %d, "%s"', a.idx, we.line, escaped_text)
 			lines[#lines + 1] = "    end"
 		end
 		-- Fallback for words beyond the source map (shouldn't happen if nm matches).
 		local max_word = 0
 		if #a.entries > 0 then max_word = a.entries[#a.entries].pos end
-		lines[#lines + 1] = string.format(
-			'    if $__word > %d', max_word)
+		lines[#lines + 1] = string.format('    if $__word > %d', max_word)
 		lines[#lines + 1] = '      printf "source:  (no source-map entry for word %%d; map may be stale)\\n", $__word'
 		lines[#lines + 1] = "    end"
 		lines[#lines + 1] = "    set $__matched = 1"
@@ -537,19 +510,16 @@ local function append_gdb_commands(lines, matched)
 
 	-- ── stepi_inside_atom ──
 	-- Hardcoded one if-containment-check per atom (no loop).
-	-- Precompute end_addr in Lua so we don't ask gdb to evaluate `addr + words*4`
-	-- inside the if condition (gdb 12.1's expression evaluator chokes on the
-	-- `*` and emits a misleading 'function malloc' error in some gdb builds).
+	-- Precompute end_addr in Lua so we don't ask gdb to evaluate `addr + words*4` inside the if condition
+	-- (gdb 12.1's expression evaluator chokes on the `*` and emits a misleading 'function malloc' error in some gdb builds).
 	lines[#lines + 1] = "define stepi_inside_atom"
 	lines[#lines + 1] = "  set $__in_atom = 0"
 	lines[#lines + 1] = "  set $__did_step = 0"
 	lines[#lines + 1] = "  set $__pc = (unsigned int)$pc"
 	for _, a in ipairs(matched) do
 		-- Precompute end_addr in the convenience var (single expression gdb handles).
-		lines[#lines + 1] = string.format(
-			"  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
-		lines[#lines + 1] = string.format(
-			"  if $__pc >= $__atom_addr_%d && $__pc < $__end_%d", a.idx, a.idx)
+		lines[#lines + 1] = string.format("  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
+		lines[#lines + 1] = string.format("  if $__pc >= $__atom_addr_%d && $__pc < $__end_%d", a.idx, a.idx)
 		lines[#lines + 1] = "    set $__in_atom = 1"
 		lines[#lines + 1] = "    stepi"
 		lines[#lines + 1] = "    set $__did_step = 1"
@@ -609,7 +579,7 @@ end
 --- @param ctx PassCtx
 local function emit_gdb_runtime(ctx)
 	if not (ctx.flags and ctx.flags.gdb_runtime) then return end
-	local elf_path = ctx.flags.elf_path
+	local  elf_path = ctx.flags.elf_path
 	if not elf_path or elf_path == "" then
 		io.stderr:write("[atoms_source_map] --gdb-runtime requires --elf <elf>\n")
 		return
@@ -678,13 +648,10 @@ end
 
 local M = {}
 
---- Pass entry: emit one `<out_root>/<basename>.atoms.sourcemap.txt` per source file
---- that contains at least one `MipsAtom_(name)` / `MipsCode code_<name>` declaration.
---- Also emits `<out_root>/<basename>.atoms.provenance.txt` (Phase 3 — debug_ux):
---- per-.word provenance with `mac_X(...)` component resolution back to the
---- component's definition file:line.
---- Optionally also emit `<ctx.out_root>/gdb_tape_atoms_runtime.gdb` when
---- `ctx.flags.gdb_runtime` is true.
+--- Pass entry: emit one `<out_root>/<basename>.atoms.sourcemap.txt` per source file that contains at least one `MipsAtom_(name)` / `MipsCode code_<name>` declaration.
+--- Also emits `<out_root>/<basename>.atoms.provenance.txt`:
+--- per-.word provenance with `mac_X(...)` component resolution back to the component's definition file:line.
+--- Optionally also emit `<ctx.out_root>/gdb_tape_atoms_runtime.gdb` when `ctx.flags.gdb_runtime` is true.
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
@@ -702,10 +669,9 @@ function M.run(ctx)
 		}
 	end
 
-	-- Phase 3 (debug_ux): shared.components map is populated by `passes/components.lua`.
-	-- Used to attribute each emitted `.word` to either a component macro or the
-	-- enclosing atom body. If absent, all words fall through as RAW (correct
-	-- behavior — provenance is additive).
+	-- shared.components map is populated by `passes/components.lua`.
+	-- Used to attribute each emitted `.word` to either a component macro or the enclosing atom body.
+	-- If absent, all words fall through as RAW (correct behavior — provenance is additive).
 	local comp = (ctx.shared and ctx.shared.components) or {}
 
 	-- Always emit the canonical text form (per-source).
@@ -720,11 +686,8 @@ function M.run(ctx)
 				local sourcemap_path = ctx.out_root .. "/" .. basename .. ".atoms.sourcemap.txt"
 				local sourcemap_body = render_source_map(src, wc)
 
-				-- (2) atoms.provenance.txt — Phase 3 (debug_ux): per-.word provenance
-				--     with `mac_X(...)` component resolution back to the component's
-				--     definition file:line. Consumed by `passes/dwarf_injection.lua`
-				--     to synthesize `DW_TAG_inlined_subroutine` instances for
-				--     source-level Step Into on component invocations.
+				-- (2) atoms.provenance.txt — per-.word provenance with `mac_X(...)` component resolution back to the component's definition file:line.
+				--     Consumed by `passes/dwarf_injection.lua` to synthesize `DW_TAG_inlined_subroutine` instances for source-level Step Into on component invocations.
 				local prov_path = ctx.out_root .. "/" .. basename .. ".atoms.provenance.txt"
 				local prov_body = render_provenance(src, wc, comp)
 

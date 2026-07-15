@@ -14,9 +14,8 @@
 -- Native dependencies
 -- ════════════════════════════════════════════════════════════════════════════
 
--- lfs is wired into package.cpath by `duffle_paths.lua` (vendored under
--- `toolchain/lfs/lfs.dll`). Required here for native directory ops
--- (replaces the ~56ms `dir /b` subprocess with ~2ms native).
+-- lfs is wired into package.cpath by `duffle_paths.lua`  (vendored under `toolchain/lfs/lfs.dll`). 
+-- Required here for native directory ops (replaces the ~56ms `dir /b` subprocess with ~2ms native).
 local lfs = require("lfs")
 
 local M = {}
@@ -24,8 +23,7 @@ local M = {}
 -- ════════════════════════════════════════════════════════════════════════════
 -- DWARF tag + form constants
 -- ════════════════════════════════════════════
--- (DWARF5 §7.5.5 "Tag Encodings" + Table 7.1; gcc emits these exact values for
--- the DWARF3-extension and DWARF5 line units.)
+-- (DWARF5 §7.5.5 "Tag Encodings" + Table 7.1; gcc emits these exact values for the DWARF3-extension and DWARF5 line units.)
 
 M.DW_TAG = {
 	compile_unit        = 0x11,
@@ -80,13 +78,13 @@ M.DW_FORM = {
 }
 
 M.DW_ATE = {
-	address    = 0x01,
-	boolean    = 0x02,
+	address       = 0x01,
+	boolean       = 0x02,
 	complex_float = 0x03,
-	float      = 0x04,
-	signed     = 0x05,
-	signed_char = 0x06,
-	unsigned   = 0x07,
+	float         = 0x04,
+	signed        = 0x05,
+	signed_char   = 0x06,
+	unsigned      = 0x07,
 	unsigned_char = 0x08,
 }
 
@@ -107,13 +105,12 @@ M.MIPS_BYTES_PER_WORD = 0x04
 -- ----------------------------------------------------------------------------
 -- ELF32 (System V ABI gABI v1.2)
 -- ----------------------------------------------------------------------------
---
 -- All offsets are 1-INDEXED (matching Lua string.sub convention), 
 -- expressed in hex so they map directly to the wire-format byte positions in the binary file. 
 -- To compute the 0-indexed file offset, subtract 1.
 --
--- Example: e_shoff_offset = 0x21 means the 4-byte e_shoff field 
--- starts at string.sub byte 0x21 (= 33 in 1-indexed), i.e. file offset 0x20 (= 32).
+-- Example: e_shoff_offset = 0x21 means the 4-byte e_shoff field starts at 
+-- string.sub byte 0x21 (= 33 in 1-indexed), i.e. file offset 0x20 (= 32).
 
 --- spec: System V ABI gABI v1.2 §"ELF Header" (Table 1) + §"Section Header Table"
 M.ELF32 = {
@@ -139,7 +136,6 @@ M.ELF32 = {
 -- ----------------------------------------------------------------------------
 -- DWARF4 .debug_aranges (per DWARF5 spec §7.4 — Address Range Table)
 -- ----------------------------------------------------------------------------
---
 -- All offsets are 1-INDEXED (matching Lua string.sub convention), in hex.
 
 --- spec: DWARF5 spec §7.4 (Address Range Table) — 32-bit DWARF form
@@ -159,7 +155,6 @@ M.DWARF4_ARANGES = {
 -- ----------------------------------------------------------------------------
 -- DWARF5 .debug_rnglists (per DWARF5 spec §2.17 + §7.21)
 -- ----------------------------------------------------------------------------
---
 -- All offsets are 1-INDEXED (matching Lua string.sub convention), in hex.
 
 --- spec: DWARF5 spec §2.17 + §7.21 (Range List Table) — 32-bit DWARF form
@@ -181,7 +176,6 @@ M.DWARF5_RNGLISTS = {
 -- ----------------------------------------------------------------------------
 -- DWARF line-program opcodes (per DWARF5 spec §6.2.5)
 -- ----------------------------------------------------------------------------
---
 -- Opcode VALUES stay in decimal — they're identifiers (DW_LNS_copy = 1), not binary positions.
 -- Compare to the *_offset fields above which are hex.
 
@@ -275,28 +269,26 @@ local function read_sleb128_at(buf, pos)
 	return nil, pos
 end
 
--- Find the 0-based offset of the table-terminator byte (a single 0) for the
--- abbrev table starting at `table_start`. Returns nil on truncated input.
--- Walks declaration headers (code, tag, has_children, attr/form pairs,
--- DW_FORM_implicit_const constant) until it finds a 0 byte that follows a
--- complete declaration. Mirrors dwarf_injection.lua :: find_abbrev_table_end.
+-- Find the 0-based offset of the table-terminator byte (a single 0) for the abbrev table starting at `table_start`.
+-- Returns nil on truncated input. Walks declaration headers 
+-- (code, tag, has_children, attr/form pairs, DW_FORM_implicit_const constant) until it finds a 0 byte that follows a complete declaration. Mirrors dwarf_injection.lua :: find_abbrev_table_end.
 local function find_abbrev_table_end(table_bytes, table_start)
 	local pos, len = table_start, #table_bytes
 	if pos >= len or table_bytes:byte(pos + 1) == 0 then return pos end
 	while pos < len do
-		local _code, code_end = read_uleb128_at(table_bytes, pos)
+		local  _code, code_end = read_uleb128_at(table_bytes, pos)
 		if not _code then return nil end
 		pos = code_end
-		local _tag, tag_end = read_uleb128_at(table_bytes, pos)
+		local  _tag, tag_end = read_uleb128_at(table_bytes, pos)
 		if not _tag then return nil end
 		pos = tag_end
 		if pos >= len then return nil end
 		pos = pos + 1   -- has_children byte
 		while pos < len do
-			local attr, attr_end = read_uleb128_at(table_bytes, pos)
+			local  attr, attr_end = read_uleb128_at(table_bytes, pos)
 			if not attr then return nil end
 			pos = attr_end
-			local form, form_end = read_uleb128_at(table_bytes, pos)
+			local  form, form_end = read_uleb128_at(table_bytes, pos)
 			if not form then return nil end
 			pos = form_end
 			if attr == 0 and form == 0 then break end
@@ -321,8 +313,8 @@ local function read_c_string_at(buf, off)
 	return buf:sub(start + 1, off)
 end
 
--- Walk the .debug_abbrev table starting at 0-based offset `table_start` and
--- return a list of declarations: {code, tag, has_children, attrs={ {name, form}, ... }}.
+-- Walk the .debug_abbrev table starting at 0-based offset `table_start` and return a list of declarations:
+-- {code, tag, has_children, attrs={ {name, form}, ... }}.
 -- Stops at the table terminator.
 local function parse_abbrev_table(table_bytes, table_start)
 	local table_end = find_abbrev_table_end(table_bytes, table_start)
@@ -330,17 +322,17 @@ local function parse_abbrev_table(table_bytes, table_start)
 	local decls = {}
 	local pos = table_start
 	while pos < table_end do
-		local code, code_end = read_uleb128_at(table_bytes, pos)
+		local  code, code_end = read_uleb128_at(table_bytes, pos)
 		if not code then return nil, "truncated code" end
 		pos = code_end
-		local tag, tag_end = read_uleb128_at(table_bytes, pos)
+		local  tag, tag_end = read_uleb128_at(table_bytes, pos)
 		if not tag then return nil, "truncated tag" end
 		pos = tag_end
 		local has_children = table_bytes:byte(pos + 1)
 		pos = pos + 1
 		local attrs = {}
 		while true do
-			local attr, attr_end = read_uleb128_at(table_bytes, pos)
+			local  attr, attr_end = read_uleb128_at(table_bytes, pos)
 			if not attr then return nil, "truncated attr" end
 			pos = attr_end
 			local form, form_end = read_uleb128_at(table_bytes, pos)
@@ -349,7 +341,7 @@ local function parse_abbrev_table(table_bytes, table_start)
 			if attr == 0 and form == 0 then break end
 			attrs[#attrs + 1] = { name = attr, form = form }
 			if form == DW_FORM_implicit_const then
-				local _c, ce = read_sleb128_at(table_bytes, pos)
+				local  _c, ce = read_sleb128_at(table_bytes, pos)
 				if not _c then return nil, "truncated const" end
 				pos = ce
 			end
@@ -362,8 +354,8 @@ end
 -- Read a ULEB attribute value at 0-based offset `pos` for the given `form`.
 -- Returns (value, next_pos). For DW_FORM_string we return the inline string.
 -- For DW_FORM_strp we return the inline string resolved from `str_buf`.
--- For DW_FORM_ref4 we return the absolute CU-relative offset. The caller
--- decides whether to interpret that as a section offset.
+-- For DW_FORM_ref4 we return the absolute CU-relative offset.
+-- The caller decides whether to interpret that as a section offset.
 local function read_form_value(buf, str_buf, pos, form)
 	if form == M.DW_FORM.addr then
 		return M.read_u32_le(buf, pos + 1), pos + 4
@@ -374,16 +366,11 @@ local function read_form_value(buf, str_buf, pos, form)
 		-- DW_FORM_strp: 4-byte offset into .debug_str.
 		local strp_off = M.read_u32_le(buf, pos + 1)
 		return read_c_string_at(str_buf, strp_off), pos + 4
-	elseif form == M.DW_FORM.udata then
-		return read_uleb128_at(buf, pos)
-	elseif form == M.DW_FORM.data1 then
-		return buf:byte(pos + 1), pos + 1
-	elseif form == M.DW_FORM.data2 then
-		return M.read_u16_le(buf, pos + 1), pos + 2
-	elseif form == M.DW_FORM.data4 then
-		return M.read_u32_le(buf, pos + 1), pos + 4
-	elseif form == M.DW_FORM.ref4 then
-		return M.read_u32_le(buf, pos + 1), pos + 4
+	elseif form == M.DW_FORM.udata then return read_uleb128_at(buf, pos)
+	elseif form == M.DW_FORM.data1 then return buf:byte(pos + 1), pos + 1
+	elseif form == M.DW_FORM.data2 then return M.read_u16_le(buf, pos + 1), pos + 2
+	elseif form == M.DW_FORM.data4 then return M.read_u32_le(buf, pos + 1), pos + 4
+	elseif form == M.DW_FORM.ref4  then return M.read_u32_le(buf, pos + 1), pos + 4
 	elseif form == M.DW_FORM.sec_offset then
 		-- DW_FORM_sec_offset: 4-byte offset (size depends on DWARF version;
 		-- on DWARF5 32-bit it's always 4 bytes).
@@ -392,7 +379,7 @@ local function read_form_value(buf, str_buf, pos, form)
 		return 1, pos
 	elseif form == M.DW_FORM.exprloc then
 		-- DW_FORM_exprloc: ULEB byte count + that many bytes of DW_OP_*.
-		local len, ne = read_uleb128_at(buf, pos)
+		local  len, ne = read_uleb128_at(buf, pos)
 		if not len then return nil, pos end
 		return nil, ne + len
 	elseif form == DW_FORM_implicit_const then
@@ -405,53 +392,48 @@ local function read_form_value(buf, str_buf, pos, form)
 	end
 end
 
--- Index the .debug_info + .debug_abbrev sections of an existing ELF and
--- collect one entry per "interesting" type DIE in the FIRST compilation
--- unit. The index supports typed-view resolution for Phase 5:
---
+-- Index the .debug_info + .debug_abbrev sections of an existing ELF and collect one entry 
+-- per "interesting" type DIE in the FIRST compilation unit. 
+-- The index supports typed-views:
 --   index = {
---     by_name = { ["V4_S2"]  = {kind="structure_type", die_offset, byte_size, fields={...}},
---                 ["U4"]     = {kind="base_type",      die_offset, byte_size, encoding="unsigned"},
---                 ["MipsCode"]= {kind="typedef",       die_offset, target_kind=..., target_die_offset=...} },
+--     by_name = { ["V4_S2"]      = {kind="structure_type", die_offset, byte_size, fields={...}},
+--                 ["U4"]         = {kind="base_type",      die_offset, byte_size, encoding="unsigned"},
+--                 ["MipsCode"]   = {kind="typedef",        die_offset, target_kind=..., target_die_offset=...} },
 --     by_offset = { [die_offset] = {kind, name, ...} },     -- reverse lookup
 --   }
 --
--- Only the main CU is indexed. We do not walk nested CUs (this matches the
--- Phase 2-4 scope: the main CU is the only one in this build).
--- @param info string     -- .debug_info section bytes
--- @param abbrev string   -- .debug_abbrev section bytes
--- @param str_buf string  -- .debug_str section bytes (for DW_FORM_strp name resolution)
--- @param abbrev_offset integer  -- 0-based offset of the main CU's abbrev table
--- @param cu_start integer|nil  -- 0-based offset of the main CU (caller-known)
+-- @param info string             -- .debug_info section bytes
+-- @param abbrev string           -- .debug_abbrev section bytes
+-- @param str_buf string          -- .debug_str section bytes (for DW_FORM_strp name resolution)
+-- @param abbrev_offset integer   -- 0-based offset of the main CU's abbrev table
+-- @param cu_start integer|nil    -- 0-based offset of the main CU (caller-known)
 -- @return table|nil, string|nil  -- (index, error)
 function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 	if not info or #info < 12 or not abbrev or not abbrev_offset then return nil, "missing input" end
 	str_buf = str_buf or ""
-	-- Index the main table at abbrev_offset. The F' pass writes a trailing
-	-- 0 byte after the main table; the G' pass may append additional codes
-	-- (100-108) + a 0 terminator. The walker may encounter a code that
-	-- wasn't in the main table but exists later in the same .debug_abbrev;
-	-- on the first miss, walk the rest of the section to add any new
-	-- abbrevs we encounter.
-	local abbrev_decls, err = parse_abbrev_table(abbrev, abbrev_offset)
+	-- Index the main table at abbrev_offset. 
+	-- The F' pass writes a trailing 0 byte after the main table; the G' pass may append additional codes (100-108) + a 0 terminator.
+	-- The walker may encounter a code that wasn't in the main table but exists later in the same .debug_abbrev;
+	-- on the first miss, walk the rest of the section to add any new abbrevs we encounter.
+	local  abbrev_decls, err = parse_abbrev_table(abbrev, abbrev_offset)
 	if not abbrev_decls then return nil, err end
-	local abbrev_by_code = {}
+	local  abbrev_by_code = {}
 	for _, d in ipairs(abbrev_decls) do abbrev_by_code[d.code] = d end
 
 	-- Resolve cu_start + cu_end_excl.
 	local cu_end_excl
 	if cu_start then
 		local ul = M.read_u32_le(info, cu_start + 1)
-		if ul == 0xFFFFFFFF then return nil, "DWARF64 not supported" end
+		if    ul == 0xFFFFFFFF then return nil, "DWARF64 not supported" end
 		cu_end_excl = cu_start + 4 + ul
 	else
 		local pos = 0
 		cu_start = nil
 		while pos < #info do
 			local ul = M.read_u32_le(info, pos + 1)
-			if ul == 0xFFFFFFFF then break end
+			if    ul == 0xFFFFFFFF then break end
 			local unit_end = pos + 4 + ul
-			if unit_end > #info then break end
+			if    unit_end > #info then break end
 			local unit_abbrev = M.read_u32_le(info, pos + 9)
 			if unit_abbrev == abbrev_offset then
 				cu_start    = pos
@@ -464,7 +446,7 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 	end
 
 	-- Walk the CU's DIE tree at 0-based offset cu_start + 12.
-	-- Emit a flat list of type-bearing DEIs; recursion handles nested children
+	-- Emit a flat list of type-bearing DEIs; recursion handles nested children 
 	-- (members inside structure_type, types inside subprograms, etc.).
 	-- A non-type DIE's subtree is SKIPPED by walking until the matching null.
 	local by_name    = {}
@@ -475,7 +457,7 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 	local root_decl_code
 	root_decl_code, pos_cursor = read_uleb128_at(info, pos_cursor)
 	if not root_decl_code then return nil, "truncated root DIE code" end
-	local root_decl = abbrev_by_code[root_decl_code]
+	local  root_decl = abbrev_by_code[root_decl_code]
 	if not root_decl then return nil, "unknown root DIE abbrev" end
 	-- Skip root DIE attributes.
 	for _, attr in ipairs(root_decl.attrs) do
@@ -488,11 +470,10 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 		return { by_name = by_name, by_offset = by_offset }
 	end
 
-	-- Helper: skip a subtree rooted at the current DIE (pos_cursor is
-	-- positioned at the first child). Walks down and right until the
-	-- matching null terminator is consumed. Returns the new pos_cursor.
-	-- For DIE trees that contain only the closed type + member shapes,
-	-- the depth never exceeds 2 (type DIE -> member DIE -> null).
+	-- Helper: skip a subtree rooted at the current DIE (pos_cursor is positioned at the first child).
+	-- Walks down and right until the matching null terminator is consumed.
+	-- Returns the new pos_cursor. 
+	-- For DIE trees that contain only the closed type + member shapes, the depth never exceeds 2 (type DIE -> member DIE -> null).
 	local function skip_subtree(pos)
 		local depth = 1
 		while pos < cu_end_excl and depth > 0 do
@@ -513,8 +494,8 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 	-- Pre-declare n_visited so the closure helpers can read it.
 	local n_visited = 0
 
-	-- Helper: read one DIE's attributes. Returns (name, byte_size, encoding,
-	-- type_ref, new_pos_cursor) on success; (nil, error_string) on truncation.
+	-- Helper: read one DIE's attributes. 
+	-- Returns (name, byte_size, encoding, type_ref, new_pos_cursor) on success; (nil, error_string) on truncation.
 	local function read_die_attributes(decl, pos)
 		local die_name       = nil
 		local die_byte_size  = nil
@@ -567,24 +548,23 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 		return fields, pos
 	end
 
-	-- Top-level walker: iterate siblings. For each DIE, decide whether to
-	-- record (if type), descend (if structure_type with members), or skip
-	-- its subtree.
+	-- Top-level walker: iterate siblings.
+	-- For each DIE, decide whether to record (if type), descend (if structure_type with members), or skip its subtree.
 	while pos_cursor < cu_end_excl do
 		local code = info:byte(pos_cursor + 1)
-		if code == 0 then pos_cursor = pos_cursor + 1; break end
+		if    code == 0 then pos_cursor = pos_cursor + 1; break end
 		local decl = abbrev_by_code[code]
 		if not decl then
 			-- Lazily scan the rest of the section for the missing code.
-			-- The G' pass appends new abbrevs (100-108) after the main table's
-			-- terminator. On the first miss, walk the rest of the section.
+			-- The G' pass appends new abbrevs (100-108) after the main table's terminator.
+			-- On the first miss, walk the rest of the section.
 			local scan_pos = 0
 			while scan_pos < #abbrev do
 				if abbrev:byte(scan_pos + 1) == 0 then
 					scan_pos = scan_pos + 1
 					goto continue
 				end
-				local new_table, e3 = parse_abbrev_table(abbrev, scan_pos)
+				local  new_table, e3 = parse_abbrev_table(abbrev, scan_pos)
 				if not new_table then
 					scan_pos = scan_pos + 1
 					goto continue
@@ -595,7 +575,7 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 					end
 				end
 				-- Find the terminator (0 byte) of this table.
-				local term = find_abbrev_table_end(abbrev, scan_pos)
+				local  term = find_abbrev_table_end(abbrev, scan_pos)
 				if not term then break end
 				scan_pos = term + 1
 				::continue::
@@ -608,11 +588,11 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 		local die_offset = pos_cursor
 		pos_cursor = pos_cursor + 1
 		local read_result = { read_die_attributes(decl, pos_cursor) }
-		if #read_result == 2 then
+		if   #read_result == 2 then
 			return nil, read_result[2]
 		end
 		local die_name, die_byte_size, die_encoding, die_type_ref, pos_after_attrs
-			= read_result[1], read_result[2], read_result[3], read_result[4], read_result[5]
+		= read_result[1], read_result[2], read_result[3], read_result[4], read_result[5]
 		n_visited = n_visited + 1
 		local is_type = (decl.tag == M.DW_TAG.base_type
 		             or decl.tag == M.DW_TAG.structure_type
@@ -623,10 +603,10 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 		local member_fields = nil
 		pos_cursor = pos_after_attrs
 		if decl.tag == M.DW_TAG.structure_type and decl.has_children ~= 0 then
-			local f, np = read_member_fields(decl, pos_cursor)
+			local  f, np = read_member_fields(decl, pos_cursor)
 			if not f then return nil, np end
 			member_fields = f
-			pos_cursor = np
+			pos_cursor    = np
 		elseif decl.has_children ~= 0 then
 			-- Skip the subtree (e.g., DW_TAG_subprogram, DW_TAG_variable, etc.).
 			pos_cursor = skip_subtree(pos_cursor)
@@ -634,35 +614,34 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 
 		if is_type and die_name then
 			local kind
-			if decl.tag == M.DW_TAG.base_type       then kind = "base_type"
+			if     decl.tag == M.DW_TAG.base_type      then kind = "base_type"
 			elseif decl.tag == M.DW_TAG.structure_type then kind = "structure_type"
-			elseif decl.tag == M.DW_TAG.typedef      then kind = "typedef"
-			elseif decl.tag == M.DW_TAG.pointer_type then kind = "pointer_type"
-			elseif decl.tag == M.DW_TAG.const_type   then kind = "const_type" end
+			elseif decl.tag == M.DW_TAG.typedef        then kind = "typedef"
+			elseif decl.tag == M.DW_TAG.pointer_type   then kind = "pointer_type"
+			elseif decl.tag == M.DW_TAG.const_type     then kind = "const_type" end
 			local entry = {
-				kind         = kind,
-				name         = die_name,
-				die_offset   = die_offset,
-				byte_size    = die_byte_size,
-				encoding     = die_encoding,
-				type_ref     = die_type_ref,
-				fields       = member_fields,
+				kind       = kind,
+				name       = die_name,
+				die_offset = die_offset,
+				byte_size  = die_byte_size,
+				encoding   = die_encoding,
+				type_ref   = die_type_ref,
+				fields     = member_fields,
 			}
-			by_name[die_name]    = entry
+			by_name[die_name]     = entry
 			by_offset[die_offset] = entry
 		end
 	end
 	return { by_name = by_name, by_offset = by_offset }
 end
 
--- Resolve a chain of pointer + const + typedef + structure_type down to a
--- canonical struct or base type. The returned entry has kind, name, byte_size,
--- and (for structure_type) fields with {name, offset, type_name, pointer_depth}.
+-- Resolve a chain of pointer + const + typedef + structure_type down to a canonical struct or base type.
+-- The returned entry has kind, name, byte_size, and (for structure_type) fields with {name, offset, type_name, pointer_depth}.
 -- Returns nil if the chain cannot be resolved (e.g., missing DIE).
--- @param index table  -- M.index_main_cu_types result
--- @param start_offset integer  -- CU-relative DW_FORM_ref4 offset of the start
--- @param max_depth integer  -- cycle protection
--- @return table|nil  -- {kind, name, byte_size, fields?, pointer_depth}
+-- @param index table          -- M.index_main_cu_types result
+-- @param start_offset integer -- CU-relative DW_FORM_ref4 offset of the start
+-- @param max_depth integer    -- cycle protection
+-- @return table|nil           -- {kind, name, byte_size, fields?, pointer_depth}
 function M.resolve_type_chain(index, start_offset, max_depth)
 	max_depth = max_depth or 16
 	if not index or not start_offset then return nil end
@@ -673,12 +652,9 @@ function M.resolve_type_chain(index, start_offset, max_depth)
 		local entry = index.by_offset[cur_offset]
 		if not entry then return nil end
 		chain[#chain + 1] = entry
-		if entry.kind == "pointer_type" then
-			cur_offset = entry.type_ref
-		elseif entry.kind == "const_type" then
-			cur_offset = entry.type_ref
-		elseif entry.kind == "typedef" then
-			cur_offset = entry.type_ref
+		if     entry.kind == "pointer_type" then cur_offset = entry.type_ref
+		elseif entry.kind == "const_type"   then cur_offset = entry.type_ref
+		elseif entry.kind == "typedef"      then cur_offset = entry.type_ref
 		else
 			break
 		end
@@ -767,13 +743,13 @@ end
 --- (no subprocess; lfs only for the existence check). Returns `{[name] = bytes_or_empty_string, ...}`.
 ---
 --- **Convention:** offsets from `M.ELF32` (1-indexed for string.sub).
---- Every requested name has an entry in the returned dict; missing sections have an empty string (NOT nil)
---- so callers can do `sections[".debug_x"] or ""` for the missing case.
+--- Every requested name has an entry in the returned dict;
+--- missing sections have an empty string (NOT nil) so callers can do `sections[".debug_x"] or ""` for the missing case.
 ---
 --- **Cost:** one file open + one `f:seek` + one `f:read` per section header 
 --- (we walk all `e_shnum` headers regardless of how many names are requested, to find the .shstrtab first).
 --- For frequent callers, pass the union of all needed sections in one call.
---  can add `.debug_info` + `.debug_loc` + `.debug_str_offsets` to the list without writing a 2nd ELF walker.
+--  Can add `.debug_info` + `.debug_loc` + `.debug_str_offsets` to the list without writing a 2nd ELF walker.
 --- @param elf_path Path
 --- @param section_names string[]  -- list of section names to read
 --- @return table<string, string>
@@ -897,8 +873,7 @@ function M.read_nm(elf_path)
 	end
 
 	-- Iterate the 16-byte ELF32 symtab entries.
-	-- Each entry (1-indexed): st_name at 1, st_value at 5, st_size at 9,
-	-- st_info at 13, st_other at 14, st_shndx at 15.
+	-- Each entry (1-indexed): st_name at 1, st_value at 5, st_size at 9, st_info at 13, st_other at 14, st_shndx at 15.
 	local SYM_ENTRY_BYTES = 0x10
 	local SYM_ST_NAME     = 0x01
 	local SYM_ST_VALUE    = 0x05
@@ -940,7 +915,6 @@ end
 -- Both encoders pack 7 bits of data per byte + 1 bit of "more bytes follow" signaling.
 --
 -- Per-byte layout:
---
 --     bit:   7 6 5 4 3 2 1 0
 --           │ └───── 7-bit data ─────┘
 --           └─ continuation flag (LEB_CONT_BIT = 0x80)
@@ -966,13 +940,11 @@ local LEB_DATA_MASK = 0x7F
 local SLEB_SIGN_BIT = 0x40
 
 --- ULEB128 (Unsigned Little-Endian Base 128) encoder. Returns the byte string for the non-negative integer `n`.
----
 --- Algorithm:
 ---   - Extract the low 7 bits of `n` (LEB_DATA_MASK = 0x7F).
 ---   - Shift `n` right by 7 bits.
 ---   - If more bytes remain, OR in the continuation flag (LEB_CONT_BIT).
 ---   - Repeat until `n` is fully consumed.
----
 --- @param n integer  -- non-negative
 --- @return string
 function M.uleb128(n)
@@ -992,9 +964,7 @@ function M.uleb128(n)
 	return table.concat(bytes)
 end
 
---- SLEB128 (Signed Little-Endian Base 128) encoder. Returns the byte
---- string for the integer `n` (may be negative).
----
+--- SLEB128 (Signed Little-Endian Base 128) encoder. Returns the byte string for the integer `n` (may be negative).
 --- Algorithm differs from ULEB128 by the termination condition: stop when
 --- the remaining bits can be inferred from the sign bit in the last byte's
 --- 7-bit data payload.
@@ -1003,15 +973,14 @@ end
 ---
 --- Without these checks, the decoder would round-trip to a different value
 --- (e.g. encoding `0` as `0x80 0x00` decodes to `0` correctly but is 2 bytes long; the termination check picks the 1-byte `0x00` form).
----
 --- @param n integer  -- any integer (negative allowed)
 --- @return string
 function M.sleb128(n)
 	local bytes = {}
 	local more = true
 	while more do
-		local b = n % (LEB_DATA_MASK + 1)               -- extract low 7 bits
-		n = (n - b) / (LEB_DATA_MASK + 1)               -- arithmetic shift right by 7
+		local b = n % (LEB_DATA_MASK + 1) -- extract low 7 bits
+		n = (n - b) / (LEB_DATA_MASK + 1) -- arithmetic shift right by 7
 		-- Termination: remaining value bits fit in the sign bit of the last byte.
 		if     n == 0  and b <  SLEB_SIGN_BIT then more = false end  -- positive terminator
 		if     n == -1 and b >= SLEB_SIGN_BIT then more = false end  -- negative terminator
@@ -1087,7 +1056,7 @@ end
 --- Returns `{name -> {total = N, words = {{pos, call_file, call_line, comp_name, comp_file, comp_line}, ...}}}`.
 --- Returns `{}` on format-version mismatch (and logs to stderr).
 ---
---- **Wire format** (emitted by `passes/atoms_source_map.lua` since the Phase 3 debug_ux work):
+--- **Wire format** (emitted by `passes/atoms_source_map.lua`):
 --- ```
 --- # FORMAT_VERSION <n>
 --- ATOM <name> "<abs-source-path>" <total>
@@ -1097,11 +1066,10 @@ end
 --- ENDATOM
 --- ```
 ---
---- **Used by** `passes/dwarf_injection.lua` (Phase 3 — debug_ux) to:
+--- **Used by** `passes/dwarf_injection.lua` to:
 ---   - group consecutive MACRO rows into component invocations (one `DW_TAG_inlined_subroutine` each)
 ---   - emit abstract `DW_TAG_subprogram` per unique component name
 ---   - extend `.debug_line` so stepping into a `mac_X(...)` lands on the component's source line.
----
 --- @param prov_path string  -- path to *.atoms.provenance.txt
 --- @param expected_version integer  -- expected FORMAT_VERSION line
 --- @return table<string, table>

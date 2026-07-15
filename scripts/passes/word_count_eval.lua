@@ -15,7 +15,7 @@
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; a Phase-6 extraction target (`duffle.setup_package_path()`).
+-- Note: this boilerplate is duplicated in 6 other entry scripts; extraction target (`duffle.setup_package_path()`).
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
@@ -80,7 +80,6 @@ local M = {}
 --- For most tokens (regular MIPS instructions) this returns 1.
 --- For `mac_X(...)` calls, this returns the resolved word count from `wc` (recursively if needed). For `nop2` etc., returns wc[name].
 --- For unknown macros, returns 1 and (optionally) warns.
----
 --- @param token string        -- a single token from split_top_level_commas
 --- @param wc WordCounts       -- the shared word-count table
 --- @return integer
@@ -101,14 +100,6 @@ end
 -- │ Shared utility: scan_dir                                           │
 -- └────────────────────────────────────────────────────────────────────┘
 
---- Recursively scan a directory for files matching a glob suffix.
----
---- The `.macs.h` files produced by the components pass always live at `<project_root>/<module>/gen/`.
---- Native walk via lfs.attributes + lfs.dir: ~2ms vs ~56ms for the prior `dir /b /s` subprocess.
----
---- @param dir string        -- directory to scan (absolute or relative)
---- @param suffix string     -- file pattern, e.g. "*.macs.h"
---- @return string[]
 -- Cache the scan_dir result per (dir, suffix) in package.loaded.
 -- The cache persists for the lifetime of the Lua process (cleared when ps1_meta.lua exits).
 -- If a build removes/creates .macs.h files mid-process, the caller can invalidate by calling `M._invalidate_scan_cache()`.
@@ -116,7 +107,6 @@ local SCAN_CACHE_KEY = "__word_count_eval_scan_cache__"
 
 --- Scan `code/` for files matching `suffix` (e.g. `*.macs.h`).
 --- Native directory enumeration via lfs (~2ms). Zero subprocess spawns.
----
 --- @param dir string        -- project root directory
 --- @param suffix string     -- file pattern, e.g. "*.macs.h"
 --- @return string[]
@@ -160,7 +150,6 @@ function M._invalidate_scan_cache() package.loaded[SCAN_CACHE_KEY] = nil end
 
 --- Load metadata.h + scan for existing *.macs.h files into ctx.shared.word_counts.
 --- Loading the .macs.h files is idempotent: entries from later (current-build) .macs.h files override metadata.h entries of the same name.
----
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)

@@ -9,8 +9,7 @@
 ---      `mac_insert_ot_tag_X` words must equal the GP0 cmd's expected packet size.
 ---   5. **per-atom cycle budget** — sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
 ---
---- The orchestrator (`ps1_meta.lua`) wires this module in via the
---- PASSES table:
+--- The orchestrator (`ps1_meta.lua`) wires this module in via the PASSES table:
 ---   `["static-analysis"] = { module = "passes.static_analysis", kind = "validation", deps = {"word-counts", "components"},
 ---     out = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } } }`
 ---
@@ -37,22 +36,22 @@ local ATOM_COMP        = "MipsAtomComp_"
 local ATOM_COMP_PROC   = "MipsAtomComp_Proc_"
 
 -- Marker-call identifiers inside atom bodies.
-local ATOM_LABEL       = "atom_label"
-local ATOM_OFFSET      = "atom_offset"
-local ATOM_INFO        = "atom_info"
-local ATOM_BIND        = "atom_bind"
-local ATOM_READS       = "atom_reads"
-local ATOM_WRITES      = "atom_writes"
-local ATOM_YIELD       = "mac_yield"
+local ATOM_LABEL        = "atom_label"
+local ATOM_OFFSET       = "atom_offset"
+local ATOM_INFO         = "atom_info"
+local ATOM_BIND         = "atom_bind"
+local ATOM_READS        = "atom_reads"
+local ATOM_WRITES       = "atom_writes"
+local ATOM_YIELD        = "mac_yield"
 local WORD_COUNT_PRAGMA = "WORD_COUNT("
 
 -- ASCII byte values used in tokenization.
-local BYTE_NEWLINE      = 10
-local BYTE_HASH         = 35   -- '#'
-local BYTE_OPEN_PAREN   = 40
-local BYTE_OPEN_BRACE   = 123
-local BYTE_OPEN_BRACK   = 91
-local BYTE_SEMI         = 59
+local BYTE_NEWLINE    = 10
+local BYTE_HASH       = 35   -- '#'
+local BYTE_OPEN_PAREN = 40
+local BYTE_OPEN_BRACE = 123
+local BYTE_OPEN_BRACK = 91
+local BYTE_SEMI       = 59
 
 -- Per-check output paths (relative to ctx.out_root).
 local OUTPUT_EXTENSION = ".static_analysis.txt"
@@ -96,23 +95,23 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field kind     string   -- "atom" | "comp_bare" | "comp_proc"
 
 --- @class Token
---- @field tok      string  -- the raw token text (trimmed)
---- @field line     integer -- source line of the token's start
+--- @field tok      string     -- the raw token text (trimmed)
+--- @field line     integer    -- source line of the token's start
 --- @field ident    string|nil -- the leading ident of the token (if any)
---- @field kind     string  -- "n_words" | "mac_yield" | "gte_cmdw" | "mac_format" | "mac_gte_store" | "mac_insert_ot_tag" | "atom_label" | "atom_offset" | "other"
+--- @field kind     string     -- "n_words" | "mac_yield" | "gte_cmdw" | "mac_format" | "mac_gte_store" | "mac_insert_ot_tag" | "atom_label" | "atom_offset" | "other"
 
---- @class Finding
---- @field line     integer  -- source line of the finding
---- @field atom     AtomName -- the atom this finding is for (or "")
+--- @class Finding 
+--- @field line     integer   -- source line of the finding
+--- @field atom     AtomName  -- the atom this finding is for (or "")
 --- @field check    CheckName -- the check identifier
---- @field kind     string   -- "error" | "warning" | "info"
---- @field msg      string   -- the finding message
+--- @field kind     string    -- "error" | "warning" | "info"
+--- @field msg      string    -- the finding message
 
 --- @class AtomAnalysis
 --- @field atom       AtomBody
---- @field tokens     Token[]     -- the tokens in the atom body, annotated
---- @field findings   Finding[]   -- findings for this atom
---- @field total_cycles integer   -- sum of token cycle costs
+--- @field tokens     Token[]   -- the tokens in the atom body, annotated
+--- @field findings   Finding[] -- findings for this atom
+--- @field total_cycles integer -- sum of token cycle costs
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- classify_tokens — per-token classification (the plex's pre-computed data layer)
@@ -156,8 +155,8 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field o_arg2             string|nil      -- second arg of O_(<a>, <b>) captures
 --- @field s_arg1             string|nil      -- arg of S_(<a>) captures; nil for non-S_ tokens
 
--- Patterns for O_(<arg1>, <arg2>) and S_(<arg>) captures. UNANCHORED — the substring can appear
--- anywhere in the token (e.g., `load_word(R_T0, R_TapePtr, O_(Binds_X, field))` matches at position ~24).
+-- Patterns for O_(<arg1>, <arg2>) and S_(<arg>) captures.
+-- UNANCHORED, the substring can appea anywhere in the token (e.g., `load_word(R_T0, R_TapePtr, O_(Binds_X, field))` matches at position ~24).
 -- The binds_name match is deferred to check_abi_handoff (which compares tc.o_arg1 == atom.info.binds).
 local O_PATTERN = "O_%(([%w_]+),%s*([%w_]+)%s*%)"
 local S_PATTERN = "S_%(([%w_]+)%s*%)"
@@ -181,15 +180,15 @@ local function classify_tokens(tokens)
 		local is_load_word  = ident == "load_word"
 		local is_store_word = ident == "store_word"
 
-		-- Per-check pre-computes (R3 lift). Each pre-compute eliminates one per-token regex/string-find
-		-- call from check_abi_handoff / check_gpu_portstore_shape.
-		local mac_format_shape   = nil
-		local is_gte_store        = false
-		local is_ot_tag           = false
+		-- Per-check pre-computes (R3 lift).
+		-- Each pre-compute eliminates one per-token regex/string-find call from check_abi_handoff / check_gpu_portstore_shape.
+		local mac_format_shape     = nil
+		local is_gte_store         = false
+		local is_ot_tag            = false
 		local writes_r_prim_cursor = false
-		local reads_r_tape_ptr   = false
-		local o_arg1, o_arg2      = nil, nil
-		local s_arg1              = nil
+		local reads_r_tape_ptr     = false
+		local o_arg1, o_arg2       = nil, nil
+		local s_arg1               = nil
 
 		if ident == "atom_label" then
 			is_atom_label = true
@@ -235,10 +234,8 @@ local function classify_tokens(tokens)
 			s_arg1               = s_arg1,
 		}
 		-- Advance the nop run for the NEXT token.
-		if nop_words > 0 then
-			nop_run = nop_run + nop_words
-		else
-			nop_run = 0
+		if nop_words > 0 then nop_run = nop_run + nop_words
+		else                  nop_run = 0
 		end
 	end
 	return tc
@@ -268,9 +265,9 @@ local function check_one_gte_cmdw(atom, tc_entry, ti, line_in_body, findings)
 				"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
 				atom.name, line, variant),
 		}
-	elseif need > 0 then
+	elseif  need > 0 then
 		local have = tc_entry.nop_prefix
-		if have < need then
+		if    have < need then
 			findings[#findings + 1] = {
 				atom  = atom.name,
 				line  = line,
@@ -435,8 +432,8 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 	local found_field_set = {}
 	local found_advance   = false
 
-	-- Reads from tc_entry fields pre-computed by classify_tokens (R3 lift). Eliminates 3 per-token
-	-- string-find/match calls (R_TapePtr + O_(binds_name,...) + bind_re) → 3 O(1) field reads.
+	-- Reads from tc_entry fields pre-computed by classify_tokens (R3 lift). 
+	-- Eliminates 3 per-token string-find/match calls (R_TapePtr + O_(binds_name,...) + bind_re) → 3 O(1) field reads.
 	for tok_idx = 1, #tokens do
 		local tc_entry = tc[tok_idx]
 		-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
@@ -510,7 +507,7 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	-- string matches (mac_format_X_color + mac_gte_store_<shape> + mac_insert_ot_tag_<shape> + R_PrimCursor)
 	for tok_idx = 1, #tokens do
 		local tc_entry = tc[tok_idx]
-		local shape = tc_entry.mac_format_shape
+		local shape    = tc_entry.mac_format_shape
 		if shape and duffle.GP0_CMD_BY_SHAPE[shape] then
 			if not cmd_byte then
 				cmd_byte = duffle.GP0_CMD_BY_SHAPE[shape]
@@ -607,14 +604,10 @@ local function analyze_atom_paths(atom)
 	end
 
 	-- A token is a terminator if it's `mac_yield`.
-	local function is_terminator(tok_idx)
-		return tc[tok_idx].is_yield
-	end
+	local function is_terminator(tok_idx) return tc[tok_idx].is_yield end
 
 	-- A token is a "branch" if the classification says so.
-	local function is_branch(tok_idx)
-		return tc[tok_idx].is_branch
-	end
+	local function is_branch(tok_idx) return tc[tok_idx].is_branch end
 	local function successors(tok_idx)
 		local tok = tokens[tok_idx].tok
 		if is_terminator(tok_idx) then
@@ -639,9 +632,7 @@ local function analyze_atom_paths(atom)
 			return succ, nil
 		end
 		-- Normal token: just the next one
-		if tok_idx + 1 <= n then
-			return { tok_idx + 1 }, nil
-		end
+		if tok_idx + 1 <= n then return { tok_idx + 1 }, nil end
 		return {}, nil
 	end
 
@@ -696,7 +687,7 @@ local function analyze_atom_paths(atom)
 
 	-- If no paths were recorded (e.g. atom body is empty), cycles_min/max default to 0 (atom costs nothing).
 	if cycles_min == math.huge then cycles_min = 0 end
-	if cycles_max == -1 then cycles_max = 0 end
+	if cycles_max == -1        then cycles_max = 0 end
 
 	local unknown_list = {}
 	for macro_name in pairs(unknown_set) do unknown_list[#unknown_list + 1] = macro_name end
@@ -722,14 +713,9 @@ end
 
 --- Per-source check that emits one finding per unknown macro seen
 --- (deduplicated across atoms so the warning section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
---- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery (it's the canonical place that walks tokens
---- and computes per-token cycle costs). We just sort + emit.
---- Per-atom: emit one finding per unknown macro seen, deduplicated across atoms (so the warning
---- section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
---- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery (it's the canonical place that walks tokens
---- and computes per-token cycle costs). We just sort + emit.
---- Signature changed in Stage 1B: `(atom, pipe_ctx, findings)` — the `unknown_seen` dedup table lives on
---- `pipe_ctx` so it persists across the per-atom loop in validate().
+--- Per-atom: emit one finding per unknown macro seen, deduplicated across atoms 
+--- (so the warning section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
+--- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery (it's the canonical place that walks tokens and computes per-token cycle costs).
 local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 	local p = atom.paths or {}
 	for _, name in ipairs(p.unknown_macros or {}) do
@@ -756,10 +742,10 @@ end
 -- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
 
 local CHECK_RULES = {
-	{ name = "gte_pipeline_fill",    per_atom = check_gte_pipeline_fill     },
-	{ name = "mac_yield_uniformity", per_atom = check_mac_yield_uniformity  },
-	{ name = "abi_handoff",          per_atom = check_abi_handoff           },
-	{ name = "gpu_portstore_shape",  per_atom = check_gpu_portstore_shape  },
+	{ name = "gte_pipeline_fill",     per_atom = check_gte_pipeline_fill     },
+	{ name = "mac_yield_uniformity",  per_atom = check_mac_yield_uniformity  },
+	{ name = "abi_handoff",           per_atom = check_abi_handoff           },
+	{ name = "gpu_portstore_shape",   per_atom = check_gpu_portstore_shape   },
 	{ name = "per_atom_cycle_budget", per_atom = check_per_atom_cycle_budget },
 }
 
@@ -782,8 +768,8 @@ local function validate(ctx, src)
 	end
 
 	-- pipe_ctx: the cross-atom shared state for the per-atom pipeline (Fleury "expose structure").
-	-- Pre-allocated here, mutated by each per-atom check call below. Replaces the per-check
-	-- local tables that used to live inside each check_* function body.
+	-- Pre-allocated here, mutated by each per-atom check call below.
+	-- Replaces the per-check local tables that used to live inside each check_* function body.
 	--   info_by_atom  — atom_name -> atom_info (built once; check_abi_handoff reads it)
 	--   binds_index   — Binds_X -> binds struct (built once; check_abi_handoff reads it)
 	--   unknown_seen  — macro_name -> first atom line (accumulated across atoms; check_per_atom_cycle_budget dedups)
@@ -919,7 +905,7 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 
 	-- Group findings by atom (with source prefix when multi-source module)
 	local multi_source = #dir_sources > 1
-	local by_atom = {}
+	local by_atom      = {}
 	for _, f in ipairs(findings) do
 		by_atom[f.atom] = by_atom[f.atom] or {}
 		by_atom[f.atom][#by_atom[f.atom] + 1] = f
@@ -1066,9 +1052,9 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Aggregate per-DIRECTORY (per-module). One static_analysis.txt per source-directory, emitted only if the directory contains at least one atom. 
+	-- Aggregate per-DIRECTORY (per-module).
+	-- One static_analysis.txt per source-directory, emitted only if the directory contains at least one atom. 
 	-- Empty-source directories (e.g. duffle headers with no atoms) produce no report.
-	--
 	-- Group sources by `src.dir`. The first component of `dir` is the module name (e.g. "code/duffle" -> "duffle", "code/gte_hello" -> "gte_hello").
 	-- Output path is `<out_root>/<module_basename>.static_analysis.txt`.
 	local by_dir = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)

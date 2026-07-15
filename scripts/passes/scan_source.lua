@@ -38,8 +38,8 @@ local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- @field macros     MacroEntry[]    -- #pragma mac_X tape_atom words=N  +   _Pragma("...")
 --- @field skip_over  SkipOverScan    -- atom/component debug-step markers + resolved declaration associations
 --- @field types      table<string, RegTypeDefault> -- atom_dbg_reg_default(R_X, <type>) declarations
---- @field atom_views table<string, AtomViewEntry> -- MipsAtom_(name) -> {binds_name, reg_type_overrides, info_line}
---- @field line_of    fun(pos: integer): integer  -- shared LineIndex closure
+--- @field atom_views table<string, AtomViewEntry>  -- MipsAtom_(name) -> {binds_name, reg_type_overrides, info_line}
+--- @field line_of    fun(pos: integer): integer    -- shared LineIndex closure
 
 --- @class SkipOverScan
 --- @field atoms      table<string, SkipOverAssociation>
@@ -51,7 +51,7 @@ local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- @field marker_line    integer
 --- @field marker_pos     integer
 --- @field after_paren    integer
---- @field args           string|nil  -- trimmed marker args; valid Task 13 markers use ""
+--- @field args           string|nil  -- trimmed marker args""
 --- @field has_parens     boolean
 --- @field pending        boolean
 --- @field superseded_by_marker_line integer|nil
@@ -110,15 +110,15 @@ local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 --- @class AtomEntry
 --- @field line       integer
---- @field name       string         -- atom name (for components: without ac_ prefix)
---- @field body       string         -- brace-delimited body (without the braces)
---- @field body_off   integer        -- char offset of body[1] in source
---- @field kind       string         -- "atom" | "comp_bare" | "comp_proc" | "raw_atom"
---- @field raw_name   string         -- un-stripped name (for components: with ac_ prefix)
---- @field ident_pos  integer        -- position of the MipsAtom_/MipsAtomComp_ ident start
---- @field after_paren integer       -- position past the closing paren
---- @field args       string|nil     -- populated by components pass (backward lookup)
---- @field comment    string|nil     -- populated by components pass (backward lookup)
+--- @field name       string     -- atom name (for components: without ac_ prefix)
+--- @field body       string     -- brace-delimited body (without the braces)
+--- @field body_off   integer    -- char offset of body[1] in source
+--- @field kind       string     -- "atom" | "comp_bare" | "comp_proc" | "raw_atom"
+--- @field raw_name   string     -- un-stripped name (for components: with ac_ prefix)
+--- @field ident_pos  integer    -- position of the MipsAtom_/MipsAtomComp_ ident start
+--- @field after_paren integer   -- position past the closing paren
+--- @field args       string|nil -- populated by components pass (backward lookup)
+--- @field comment    string|nil -- populated by components pass (backward lookup)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Local helpers (shared by per-form parsers)
@@ -133,13 +133,13 @@ local QUALIFIER_KEYWORDS = {
 	["internal"] = true, ["LP_"]   = true, ["global"]   = true, ["gkknown"] = true,
 }
 
--- "ac_" prefix length on component names (e.g., `MipsAtomComp_(ac_X, ...)`). The components pass strips
--- this prefix to derive the macro name (e.g., `mac_X`). Single source of truth — was duplicated in two
--- branches of the pre-refactor scan_source.
+-- "ac_" prefix length on component names (e.g., `MipsAtomComp_(ac_X, ...)`).
+-- The components pass strips this prefix to derive the macro name (e.g., `mac_X`). 
 local AC_PREFIX     = "ac_"
 local AC_PREFIX_LEN = 3
 
--- Strip the "ac_" prefix from a component name. Returns the input unchanged if it doesn't start with the prefix.
+-- Strip the "ac_" prefix from a component name.
+-- Returns the input unchanged if it doesn't start with the prefix.
 -- @param raw_name string
 -- @return string
 local function strip_ac_prefix(raw_name)
@@ -150,8 +150,6 @@ local function strip_ac_prefix(raw_name)
 end
 
 -- Preserve a source marker until the following declaration parser observes it.
--- Task 13 records evidence only; Task 14 diagnoses non-empty args,
--- duplicates, dangling markers, and unrelated declaration placement.
 local function push_skip_over_marker(out, marker)
 	local markers = out.skip_over.markers
 	local prior   = markers[#markers]
@@ -163,9 +161,9 @@ local function push_skip_over_marker(out, marker)
 	markers[#markers + 1] = marker
 end
 
--- Attach the pending marker to the next declaration. The declaration form
--- disambiguates whole atoms from components; unsupported declarations retain
--- placement evidence for annotation.lua and populate neither lookup table.
+-- Attach the pending marker to the next declaration. 
+-- The declaration form disambiguates whole atoms from components;
+-- unsupported declarations retain placement evidence for annotation.lua and populate neither lookup table.
 local function associate_skip_over_marker(out, target_name, target_raw_name, target_kind, declaration_line, declaration_pos)
 	local markers = out.skip_over.markers
 	local marker  = markers[#markers]
@@ -193,8 +191,8 @@ local function associate_skip_over_marker(out, target_name, target_raw_name, tar
 	end
 end
 
--- Read a top-level comma-delimited argument list. Mirrors split_top_level_commas
--- in shape; kept inline so scan_source can remain dependency-free.
+-- Read a top-level comma-delimited argument list. Mirrors split_top_level_commas in shape;
+-- kept inline so scan_source can remain dependency-free.
 local function read_top_level_args(text, pos)
 	local args = {}
 	pos = duffle.skip_ws_and_cmt(text, pos)
@@ -219,8 +217,8 @@ local function read_top_level_args(text, pos)
 	return args
 end
 
--- Parse a `Type*` chain (zero or more `*` separated by optional whitespace)
--- followed by the type ident. Returns (type_name, pointer_depth) or nil.
+-- Parse a `Type*` chain (zero or more `*` separated by optional whitespace) followed by the type ident.
+-- Returns (type_name, pointer_depth) or nil.
 local function parse_type_chain(text, pos)
 	if pos > #text then return nil end
 	-- Skip leading whitespace before the type ident.
@@ -419,8 +417,8 @@ local function parse_atom_dbg_skip_over(source, pos, ident_end, line_of, out)
 	return parse_skip_over_marker(source, pos, ident_end, line_of, out, "atom_dbg_skip_over")
 end
 
--- Parse `atom_dbg_reg_default(R_X, <type>...)`; the second argument may be
--- a `Type` or `Type*`/`Type**` chain. Records in `out.types[R_X]`.
+-- Parse `atom_dbg_reg_default(R_X, <type>...)`;
+-- the second argument may be a `Type` or `Type*`/`Type**` chain. Records in `out.types[R_X]`.
 local function parse_atom_dbg_reg_default(source, pos, ident_end, line_of, out)
 	local open_paren = duffle.skip_ws_and_cmt(source, ident_end)
 	if source:sub(open_paren, open_paren) ~= "(" then return open_paren + 1 end
@@ -488,15 +486,14 @@ local function parse_mips_atom(source, pos, ident_end, line_of, out)
 				}
 			elseif raw_name and ai_overrides then
 				-- Record per-atom overrides even without atom_view.
-				out.atom_views[raw_name] = out.atom_views[raw_name]
-					or { atom_name = raw_name, binds_name = nil, reg_type_overrides = nil, info_line = line_of(lookahead) }
+				out.atom_views[raw_name] = out.atom_views[raw_name] or { atom_name = raw_name, binds_name = nil, reg_type_overrides = nil, info_line = line_of(lookahead) }
 				out.atom_views[raw_name].reg_type_overrides = ai_overrides
 			end
 			brace_search_pos = info_after
 		end
 	end
 
-	local brace = duffle.scan_to_char(source, "{", brace_search_pos)
+	local  brace = duffle.scan_to_char(source, "{", brace_search_pos)
 	if not brace then return open_paren + 1 end
 
 	local body, after_brace = duffle.read_braces(source, brace)
@@ -525,7 +522,7 @@ local function parse_mips_atom_comp(source, pos, ident_end, line_of, out)
 	if source:sub(open_paren, open_paren) ~= "(" then return open_paren + 1 end
 	local inner, after_paren = duffle.read_parens(source, open_paren)
 
-	local raw_name = duffle.read_ident(inner, 1)
+	local  raw_name = duffle.read_ident(inner, 1)
 	if not raw_name then return open_paren + 1 end
 
 	local brace = duffle.scan_to_char(source, "{", after_paren)

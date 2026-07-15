@@ -168,8 +168,7 @@ MipsAtomComp_Proc_(ac_pack_color_word, {
 })
 
 /* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
- * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields).
- * Migrated from hello_gte_tape.c; takes RGB form per the Phase 3 convention. */
+ * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields). */
 FI_ MipsAtom ac_format_f3_color(U1 r, U1 g, U1 b)
 MipsAtomComp_Proc_(ac_format_f3_color, { mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b) })
 

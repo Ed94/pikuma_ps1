@@ -485,7 +485,9 @@ function build-gte_hello {
 			& $Objcopy --add-section ".debug_loc=$dwarfLocBin"     $injectElf
 			if ($LASTEXITCODE -ne 0) {
 				Write-Warning "[build] objcopy .debug_loc add-section failed (exit $LASTEXITCODE)"
-			} else {
+			} 
+			else 
+			{
 				# .debug_loclists doesn't exist in the source ELF; --add-section creates it.
 				& $Objcopy --add-section ".debug_loclists=$dwarfLoclistsBin" $injectElf
 				if ($LASTEXITCODE -ne 0) {
