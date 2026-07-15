@@ -1,7 +1,6 @@
 /* ============================================================================
  *  duffle DSL Suffix Conventions
  *  ============================================================================
- *
  *  Every mnemonic in this header follows the same suffix grammar:
  *
  *  Primitive commands: gp0_cmd_poly_f3 = 0x20    (byte opcode)
@@ -26,8 +25,7 @@
  *    0. Opcode IDs             gp0_cmd_poly_f3 = 0x20
  *
  *  Vendor mnemonics (gte_mtc2, gte_mfc2, etc.) are NOT in this header.
- *  They live in the opt-in `gp_vendor_sym.h` for users who prefer the
- *  PSYQ-style names.
+ *  They live in the opt-in `gp_vendor_sym.h` for users who prefer the PSYQ-style names.
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -41,15 +39,14 @@
 /* ============================================================================
  *  Hardware MMIO Addresses
  *  ============================================================================
- *
  *  PSX GPU has two 32-bit ports in the I/O register region at KSEG2
  *  0x1F800000+. GP0 (offset 0x10) is the data port (commands + params).
  *  GP1 (offset 0x14) is the control port (status, ctrl writes).
  * ============================================================================ */
 /* IO base address (KSEG2 0x1F800000+ for the I/O register region).
- * The 16-bit upper half `IO_BASE_ADDR_HI16` is the form used by
- * tape-side macros that pin a register to hold the IO base and access
- * ports via offsets — `lui $reg, 0x1F80` (1 word) then `sw $data, GPIO_PORT*_OFFSET($reg)` (1 word). 
+ * The 16-bit upper half `IO_BASE_ADDR_HI16` is the form used by tape-side macros that pin a register
+ * to hold the IO base and access ports via offsets:
+ *   `lui $reg, 0x1F80` (1 word) then `sw $data, GPIO_PORT*_OFFSET($reg)` (1 word). 
  * Mirrors the `IO_BASE_ADDR equ 0x1F80` + `gpio_port0 equ 0x1810` pattern from graphics_hello/gp.s. */
 enum {
     IO_BASE_ADDR      = 0x1F800000,  /* full 32-bit I/O region base */
@@ -75,12 +72,10 @@ enum {
 /* ============================================================================
  *  GP0 command byte constants + Layer 1 (GPU bitfield shifts)
  *  ============================================================================
- *
  *  8-bit GP0 opcodes (the upper byte of a primitive's first word). These are the BYTE only.
- *  The layer-1 bitfield-layout constants live in the same enum block
- *  so the encoder can reference them by name. 
- *  NO macro body past this point uses a raw shift or raw mask. 
- *  Every shift/width/mask is named here, named once. 
+ *  The layer-1 bitfield-layout constants live in the same enum block so the encoder can reference them by name. 
+ *  NO macro body past this point uses a raw shift or raw mask.
+ *  Every shift/width/mask is named here, named once.
  *  Mirrors the OPCODE_SHIFT / RS_SHIFT / REG_MASK convention from mips.h.
  * ============================================================================ */
 enum {
@@ -143,9 +138,7 @@ enum {
 /* ============================================================================
  *  Layer 1.5 (per-field encoders) + Layer 2 (composite) + Layer 3 (semantic GP0 word builders)
  *  ============================================================================
- *
- *  Layer 1.5 encoders take one field's value, mask it to its own width,
- *  and shift it to its own position. 
+ *  Layer 1.5 encoders take one field's value, mask it to its own width, and shift it to its own position. 
  *  Mirrors `enc_op` / `enc_rs` / `enc_rt` in mips.h and `enc_gte_sf` / `enc_gte_mx` in gte.h. 
  *  Layer-2 composite encoders OR the per-field encoders together; layer-3 semantic macros delegate to the composites.
  *  No raw shifts or magic numbers in any macro body below this point.
@@ -186,10 +179,9 @@ enum {
 /* ============================================================================
  *  GP1 command byte constants + Layer 1 (display-mode + range + draw-area bitfield shifts)
  *  ============================================================================
- *
- *  GP1 status bits are read from HW_GP1; ctrl writes use GP1 commands
- *  packed into 32-bit words (cmd byte in the upper 8 bits via
- *  `enc_gp0_cmd(cmd)` — never a raw shift).
+ *  GP1 status bits are read from HW_GP1;
+ *  ctrl writes use GP1 commands packed into 32-bit words 
+ *  (cmd byte in the upper 8 bits via `enc_gp0_cmd(cmd)`).
  * ============================================================================ */
 enum {
     gp1_cmd_Reset                  = 0x00,
@@ -202,10 +194,9 @@ enum {
     gp1_cmd_VerticalDisplayRange   = 0x07,
     gp1_cmd_DisplayMode            = 0x08,
     /* Note: GP1 only has commands 0x00..0x08. 
-		 * The state-setter commands (SetTextureWindow, * SetDrawArea*, 
-		 * SetDrawOffset, SetMaskBit) live in the GP0 enum as * 0xE1..0xE6. 
-		 * DrawArea word builders are below as GP0s * macros 
-		 * (since they emit GP0 commands). */
+		 * The state-setter commands (SetTextureWindow, * SetDrawArea*, SetDrawOffset, SetMaskBit) 
+		 * live in the GP0 enum as * 0xE1..0xE6.
+		 * DrawArea word builders are below as GP0s * macros (since they emit GP0 commands). */
 
     /* ---- Display-mode payload flags (per PSX-SPX §"GP1 Display Mode").
      * Bit positions match the encoder shifts below; values are the
@@ -259,8 +250,7 @@ enum {
 #define enc_gp1_vrange_word(y1, y2)        (enc_gp0_cmd(gp1_cmd_VerticalDisplayRange)   | enc_gp1_vrange_y1(y1) | enc_gp1_vrange_y2(y2))
 
 /* ---- Layer 2: GP0 state-setter composite encoders ----
- * GP0(0xE3) SetDrawArea top-left and GP0(0xE4) SetDrawArea bottom-right
- * both use the same X/Y 10-bit signed payload as GP1 DisplayRange. */
+ * GP0(0xE3) SetDrawArea top-left and GP0(0xE4) SetDrawArea bottom-right both use the same X/Y 10-bit signed payload as GP1 DisplayRange. */
 #define enc_gp0_draw_area_tl_word(x, y)    (enc_gp0_cmd(gp0_cmd_SetDrawArea_TopLeft)  | enc_gp1_draw_x(x) | enc_gp1_draw_y(y))
 #define enc_gp0_draw_area_br_word(x, y)    (enc_gp0_cmd(gp0_cmd_SetDrawArea_BotRight) | enc_gp1_draw_x(x) | enc_gp1_draw_y(y))
 
@@ -282,7 +272,6 @@ enum {
 /* ============================================================================
  *  Pre-baked GPU state words
  *  ============================================================================
- *
  *  Common command words for boot-time GPU init and standard display configurations.
  * ============================================================================ */
 
@@ -356,7 +345,6 @@ enum {
 /* ============================================================================
  *  Primitive structs (8 polygon variants + tag)
  *  ============================================================================
- *
  *  Each struct follows the GPU-documented memory layout for the corresponding primitive command. 
  *  The PolyTag is the OT-link header; the rest of the struct is the primitive's body.
  *
@@ -390,9 +378,9 @@ typedef Struct_(PolyTag) {
  * No raw C-style casts. RHS values are assumed to be `U4` — caller passes a `U4` directly. */
 #define set_len(tag,v)  (C_(PolyTag_R,tag)->len  = u4_(v))
 #define set_addr(tag,v) (C_(PolyTag_R,tag)->addr = u4_(v))
-/* `set_code` is no longer in the new PolyTag design — the code byte lives
- *  in the primitive body (e.g. `((Poly_F3*)(p))->code`), not in the tag.
- *  Use the typed primitive structs (Poly_F3, Poly_G4, etc.) and the `set_poly_*` setters, 
+/* `set_code` is no longer in the new PolyTag design — the code byte lives in the primitive body
+ * (e.g. `((Poly_F3*)(p))->code`), not in the tag.
+ *  Use the typed primitive structs (Poly_F3, Poly_G4, etc.) and the `set_poly_*` setters,
  *  which set both the tag's length and the code. */
 #define get_len(tag)  C_(U4,C_(PolyTag_R,tag)->len)
 #define get_addr(tag) C_(U4,C_(PolyTag_R,tag)->addr)
@@ -511,7 +499,6 @@ typedef Struct_(Poly_GT4) {
 /* ============================================================================
  *  Texture Page (TPage) bit layout
  *  ============================================================================
- *
  *  The TPage data word sent via GP0(0x2X) has:
  *    bits  0..3   = texture page X    (4 bits, 64-px units, 0..16)
  *    bit   4      = texture page Y    (1 bit,  64-px units, 0/1)
@@ -575,7 +562,6 @@ typedef Struct_(TexturePage) { U4 raw; };
 /* ============================================================================
  *  CLUT (Color Look-Up Table) semantics
  *  ============================================================================
- * 
  *  CLUT is loaded into VRAM by sending a GP0 command whose payload is:
  *    bits  0..5   = Y in 16-px units (palette row)
  *    bits  6..14  = X in 16-px units (palette column)
@@ -608,7 +594,6 @@ enum {
 /* ============================================================================
  *  TIM file format constants and headers
  *  ============================================================================
- *
  *  TIM (Sony .TIM texture image) file structure:
  *    +0x00  U4 file_id (always 0x10 = TIM magic)
  *    +0x04  U4 version (always 0x00 for v1)
@@ -626,9 +611,8 @@ enum {
  *         +0x06 U2 px_height
  *         +0x08 ... pixel data
  *
- *  Future?: add `tim_load_to_vram(tim_ptr, vram_addr)` that
- *  emits the necessary GP0 commands. Stoppped for now at the
- *  struct + enum level.
+ *  Future?: add `tim_load_to_vram(tim_ptr, vram_addr)` that emits the necessary GP0 commands.
+ *  Stoppped for now at the struct + enum level.
  * ============================================================================ */
 enum {
     tim_file_id_magic = 0x10,
@@ -659,35 +643,24 @@ typedef Struct_(TIM_SectionHeader) {
  *  Tape-side GPU operations (NOT in this header)
  *  ============================================================================
  *
- *  No `mac_gp0_send` or related macros live in gp.h. Rationale: the
- *  Lottes tape model uses OT-DMA for primitive submission, so atom bodies
- *  write to main RAM (the OT/primitive buffer) and to GTE state — never
- *  directly to the GPU ports at 0x1F801810 / 0x1F801814. See
- *  `mac_format_f3_color`, `mac_insert_ot_tag`, `mac_gte_store_f3` in
- *  lottes_tape.h for the patterns atom bodies actually use.
+ *  No `mac_gp0_send` or related macros live in gp.h.
+ *  Rationale: the Lottes tape model uses OT-DMA for primitive submission, so atom bodies write to main RAM (the OT/primitive buffer)
+ *  and to GTE state — never directly to the GPU ports at 0x1F801810 / 0x1F801814.
+ *  See `mac_format_f3_color`, `mac_insert_ot_tag`, `mac_gte_store_f3` in lottes_tape.h for the patterns atom bodies actually use.
  *
- *  If a feature need arises requires tape-side GPU port writes (e.g. DMA-kick to
- *  start GPU consumption of the OT, VBlank sync via GP1 status poll),
- *  the right home is `lottes_tape.h` alongside the rest of the `mac_*`
- *  family — the encoder infrastructure is already in place:
+ *  If a feature need arises requires tape-side GPU port writes 
+ *  (e.g. DMA-kick to start GPU consumption of the OT, VBlank sync via GP1 status poll),
+ *  the right home is `lottes_tape.h` alongside the rest of the `mac_*` family:
+ *    1. The caller pins a register to hold the IO base, e.g. register U4 r_io rgcc(R_T4) = IO_BASE_ADDR;
+ *       The compiler emits `lui R_T4, IO_BASE_ADDR_HI16` outside the atom body (in the C prologue before tape_run).
+ *    2. The atom body uses `store_word(R_data, R_T4, GPIO_PORT0_OFFSET)` to write to GP0, and `store_word(R_data, R_T4, GPIO_PORT1_OFFSET)`
+ *       to write to GP1. Both are preprocessor-encodable because R_T4 is a fixed register and the GPIO_PORT*_OFFSET constants
+ *       fit in the `sw`'s 16-bit signed offset field. No placeholder-pun, no asm constraints, no hidden register choice.
+ *       Same pattern as the old graphics_hello/hello_gp_routines.s `reg_io_offset`/`gcmd_push` convention.
  *
- *    1. The caller pins a register to hold the IO base, e.g.
- *         register U4 r_io rgcc(R_T4) = IO_BASE_ADDR;
- *       The compiler emits `lui R_T4, IO_BASE_ADDR_HI16` outside the
- *       atom body (in the C prologue before tape_run).
- *
- *    2. The atom body uses `store_word(R_data, R_T4, GPIO_PORT0_OFFSET)`
- *       to write to GP0, and `store_word(R_data, R_T4, GPIO_PORT1_OFFSET)`
- *       to write to GP1. Both are preprocessor-encodable because R_T4 is
- *       a fixed register and the GPIO_PORT*_OFFSET constants fit in the
- *       `sw`'s 16-bit signed offset field. No placeholder-pun, no asm
- *       constraints, no hidden register choice. Same pattern as the
- *       old graphics_hello/hello_gp_routines.s `reg_io_offset`/`gcmd_push`
- *       convention.
- *
- *  This mirrors the existing tape-side wave-context discipline: the
- *  caller binds the IO-base register via `rgcc()`, the macro assumes
- *  the binding is in effect, and the encoding falls out at preprocessor
- *  time. No additional GPU-domain macro layer required.
+ *  This mirrors the existing tape-side wave-context discipline: 
+ *  the caller binds the IO-base register via `rgcc()`, the macro assumes the binding is in effect,
+ *  and the encoding falls out at preprocessor time. 
+ *  No additional GPU-domain macro layer required.
  * ============================================================================ */
 #pragma endregion Tape-Side Macros

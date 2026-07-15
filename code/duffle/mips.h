@@ -1,38 +1,28 @@
 /* ============================================================================
  *  duffle DSL Suffix Conventions
  *  ============================================================================
- *
  *  Every mnemonic in this header follows the same suffix grammar:
- *
- *    _i        Immediate value (16-bit constant operand). Combine with
- *              _u or _s (single-letter modifier + type combined): add_ui,
- *              add_si. Examples: add_ui, add_si, and_i, or_i, xor_i,
- *              load_upper_i. and_i is sign-agnostic (andi zero-extends).
- *              load_upper_i is a unique verb; _i is the immediate marker,
- *              not a modifier+type combination.
- *
- *    _u        Unsigned (no-overflow, no-sign-extension). R-type
- *              arithmetic examples: add_u, sub_u, mult_u, div_u. I-type
- *              (combined with _i): add_ui.
- *
- *    _s        Signed (overflow-traps, sign-extends). R-type: add_s,
- *              sub_s, mult_s, div_s, set_lt_s. I-type (combined with _i):
- *              add_si.
+ *    _i: Immediate value (16-bit constant operand). 
+ *        Combine with _u or _s (single-letter modifier + type combined): add_ui, add_si.
+ *        Examples: add_ui, add_si, and_i, or_i, xor_i, load_upper_i. and_i is sign-agnostic (andi zero-extends).
+ *        load_upper_i is a unique verb; _i is the immediate marker, not a modifier+type combination.
+ *    _u: Unsigned (no-overflow, no-sign-extension).
+ *        R-type arithmetic examples: add_u, sub_u, mult_u, div_u. I-type (combined with _i): add_ui.
+ *    _s: Signed (overflow-traps, sign-extends). 
+ *        R-type: add_s, sub_s, mult_s, div_s, set_lt_s. I-type (combined with _i): add_si.
  *
  *  --- Shift family (R-type): verb-modifier-direction ---
- *    The shift macros use `shift_<modifier><direction>`. Modifier is
- *    the single letter `l` (logical) or `a` (arithmetic). Direction
- *    is the word `left` or `right`. Combined: `_lleft`, `_lright`,
- *    `_aright`. Examples: shift_lleft( rd, rt, shamt) (= sll)
- *                         shift_lright(rd, rt, shamt) (= srl)
- *                         shift_aright(rd, rt, shamt) (= sra)
- *    (no `_aleft`; MIPS has no `sla` — arithmetic-left is bit-identical
- *    to logical-left, so use shift_lleft for that case)
+ *    The shift macros use `shift_<modifier><direction>`.
+ *    Modifier is the single letter `l` (logical) or `a` (arithmetic).
+ *    Direction is the word `left` or `right`. Combined: `_lleft`, `_lright`, `_aright`.
+ *    Examples: shift_lleft( rd, rt, shamt) (= sll)
+ *              shift_lright(rd, rt, shamt) (= srl)
+ *              shift_aright(rd, rt, shamt) (= sra)
+ *    (no `_aleft`; MIPS has no `sla` — arithmetic-left is bit-identical to logical-left, so use shift_lleft for that case)
  *
  *  --- Jump/Call family ---
- *    Simple jumps keep the original short names: jump (j), jump_reg
- *    (jr), jump_link (jalr rs, rd). The jump-and-link-to variants
- *    (jal, jalr rs with default $ra) get the `call_` verb instead:
+ *    Simple jumps keep the original short names: jump (j), jump_reg (jr), jump_link (jalr rs, rd).
+ *    The jump-and-link-to variants (jal, jalr rs with default $ra) get the `call_` verb instead:
  *    call_addr (jal), call_reg (jalr rs, default $ra).
  *    Examples: jump(off)         (= j)
  *              jump_reg(rs)      (= jr)
@@ -40,32 +30,22 @@
  *              call_reg(rs)      (= jalr rs, default $ra)
  *              call_addr(off)    (= jal)
  *
- *    _r        Register marker — used only when the register type needs
- *              disambiguation (e.g., GTE data register vs control
- *              register). NOT used in plain R-type arithmetic (the
- *              R-type is implicit). Examples: gte_mv_to_data_r,
- *              gte_mv_to_ctrl_r.
+ *    _r: Register marker — used only when the register type needs disambiguation (e.g., GTE data register vs control register).
+ *        NOT used in plain R-type arithmetic (the R-type is implicit). Examples: gte_mv_to_data_r, gte_mv_to_ctrl_r.
+ *    _self:     Destination equals one source operand.
+ *               Examples: add_ui_self (I-type, to self), add_u_self (R-type, to self).
+ *    _mv_to_:   Direction: data flows into X.
+ *               Example: gte_mv_to_data_r, gte_mv_to_ctrl_r.
+ *    _mv_from_: Direction: data flows out of X.
+ *               Example: gte_mv_from_data_r, gte_mv_from_ctrl_r.
+ *    _str:      String-form — emits inline-asm string instead of `.word`.
+ *               Example: gte_rtpt_asm_str.
+ *    _2w / _1w: Word count of the emitted sequence.
+ *               Example: load_imm_2w.
  *
- *    _self     Destination equals one source operand.
- *              Examples: add_ui_self (I-type, to self),
- *                        add_u_self (R-type, to self).
- *
- *    _mv_to_   Direction: data flows into X.
- *              Example: gte_mv_to_data_r, gte_mv_to_ctrl_r.
- *
- *    _mv_from_ Direction: data flows out of X.
- *              Example: gte_mv_from_data_r, gte_mv_from_ctrl_r.
- *
- *    _str      String-form — emits inline-asm string instead of `.word`.
- *              Example: gte_rtpt_asm_str.
- *
- *    _2w / _1w Word count of the emitted sequence.
- *              Example: load_imm_2w.
- *
- *    _cop2     RESERVED — DO NOT USE in macro names. The `gte_` namespace
- *              prefix already implies coprocessor 2. Use `c2` only in:
- *                (a) integer opcode enums (op_lwc2 = 0x32, op_swc2 = 0x3A)
- *                (b) vendor-mnemonic macro aliases (gte_mtc2, gte_mfc2)
+ *    _cop2: RESERVED — DO NOT USE in macro names. The `gte_` namespace prefix already implies coprocessor 2. Use `c2` only in:
+ *      (a) integer opcode enums (op_lwc2 = 0x32, op_swc2 = 0x3A)
+ *      (b) vendor-mnemonic macro aliases (gte_mtc2, gte_mfc2)
  *
  *  Primitive commands: gp0_cmd_poly_f3 = 0x20 (byte opcode)
  *  Packed 32-bit cmd:  gp0_word_poly_f3(r, g, b) (32-bit, shifted)
@@ -80,9 +60,8 @@
  *            gte_lw_v0_xy(base) (gte + lw + v0 + xy)
  *            load_upper_i       (load-upper + immediate, unique verb)
  *
- *  Vendor mnemonics (sll, srl, sra, jr, j, jal, jalr) are NOT in this
- *  header. They live in the opt-in `mips_vendor_sym.h` for users who
- *  prefer the textbook MIPS assembly mnemonics.
+ *  Vendor mnemonics (sll, srl, sra, jr, j, jal, jalr) are NOT in this header.
+ *  They live in the opt-in `mips_vendor_sym.h` for users who prefer the textbook MIPS assembly mnemonics.
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -98,19 +77,17 @@ enum {
 /* ============================================================================
  *  REGISTER INTEGER IDS (preprocessor-visible)
  * ============================================================================
- *  Every R_* enum below has a parallel R_*_Code `#define` so that the
- *  preprocessor can stringify the integer (e.g. for asm clobber lists and
- *  register-variable declarations via `rgcc(R_X)`). The enum value is
- *  bound to the `#define` so the two forms cannot drift apart.
+ *  Every R_* enum below has a parallel R_*_Code `#define` so that the preprocessor can stringify the integer
+ *  (e.g. for asm clobber lists and register-variable declarations via `rgcc(R_X)`).
+ *  The enum value is bound to the `#define` so the two forms cannot drift apart.
  *
- *  Only registers that get stringified need a `_Code` form; the rest are
- *  plain enum values. If you need to add a new one, follow the pattern:
+ *  Only registers that get stringified need a `_Code` form; the rest are plain enum values.
+ *  If you need to add a new one, follow the pattern:
  *      #define R_T7_Code 15
- *      R_T7 = R_T7_Code,        // in the enum
+ *      R_T7 = R_T7_Code,     // in the enum
  *
- *  User code should always reference the enum form (`R_T4`) at arithmetic
- *  sites and let `rlit(R_T4_Code)` / `rgcc(R_T4)` handle the stringify
- *  cases — never write the bare number `12`.
+ *  User code should always reference the enum form (`R_T4`) at arithmetic sites and let
+ *  `rlit(R_T4_Code)` / `rgcc(R_T4)` handle the stringify cases — never write the bare number `12`.
  * ============================================================================ */
 #define R_0_Code    0
 #define R_AT_Code   1
@@ -225,7 +202,6 @@ enum {
 	/* 2F: N/A */
 	// , op_lwc0
 
-
 	// , op_load_addr  = op_la
 	// , op_load_imm   = op_li
 	, op_jump       = op_j
@@ -327,15 +303,15 @@ enum { _BitOffsets = 0
  * Argument order matches the MIPS assembly syntax:
  *   dest-first, then source operands, then immediate last.
  *
- *   load_word(rt, base, off)   → lw   rt, off(base)
- *   store_word(rt, base, off)  → sw   rt, off(base)
- *   add_ui(rt, rs, imm)        → addiu rt, rs, imm
- *   shift_lleft(rd, rt, shamt)   → sll   rd, rt, shamt
- *   shift_lright(rd, rt, shamt)  → srl   rd, rt, shamt
- *   shift_aright(rd, rt, shamt)  → sra   rd, rt, shamt
- *   jump_reg(rs)               → jr    rs
- *   jump_link(rs, rd)          → jalr  rs        (link in rd, default $ra)
- *   nop                        → sll   $0, $0, 0
+ *   load_word(rt, base, off)    → lw   rt, off(base)
+ *   store_word(rt, base, off)   → sw   rt, off(base)
+ *   add_ui(rt, rs, imm)         → addiu rt, rs, imm
+ *   shift_lleft(rd, rt, shamt)  → sll   rd, rt, shamt
+ *   shift_lright(rd, rt, shamt) → srl   rd, rt, shamt
+ *   shift_aright(rd, rt, shamt) → sra   rd, rt, shamt
+ *   jump_reg(rs)                → jr    rs
+ *   jump_link(rs, rd)           → jalr  rs        (link in rd, default $ra)
+ *   nop                         → sll   $0, $0, 0
  */
 #define load_word(rt, base, off)   enc_i(op_lw,    (base), (rt), (off))
 #define load_byte(rt, base, off)   enc_i(op_lb,    (base), (rt), (off))
@@ -404,12 +380,9 @@ enum { _BitOffsets = 0
  * mult_s / mult_u → mult / multu   (writes HI/LO; result in LO)
  * div_s / div_u   → div / divu     (LO = quot, HI = rem)
  *
- * NOTE: dsl.h defines `add_s`/`sub_s`/`mut_s`/`gt_s`/etc. as
- * _Generic-based signed integer-arithmetic helpers for U1/U2/U4. Those
- * live in a different conceptual layer (generic arithmetic on DSL
- * types) and would collide with the instruction encoders here. The
- * `#undef` below lets the gas-style names below win; if a file needs
- * both, the dsl.h versions can be reached via their long forms
+ * NOTE: dsl.h defines `add_s`/`sub_s`/`mut_s`/`gt_s`/etc. as _Generic-based signed integer-arithmetic helpers for U1/U2/U4.
+ * Those live in a different conceptual layer (generic arithmetic on DSL types) and would collide with the instruction encoders here.
+ * The `#undef` below lets the gas-style names below win; if a file needs both, the dsl.h versions can be reached via their long forms
  * (e.g. `def_signed_op`-style or the underlying `add_s1/s2/s4`). */
 #undef add_s
 #undef sub_s
@@ -441,7 +414,7 @@ enum { _BitOffsets = 0
 #define mov_to_low(rs)             enc_r(op_special, (rs), R_0, R_0, 0, fc_mtlo)
 
 /* --- Atomic branches (no pseudos like bgt/bge; compose with slt_* + branch_ne) ---
- * branch_equal  rs, rt, off → beq   rs, rt, off
+ * branch_equal   rs, rt, off → beq   rs, rt, off
  * branch_ne      rs, rt, off → bne   rs, rt, off
  * branch_lt_zero rs, off     → bltz  rs, off
  * branch_gt_zero rs, off     → bgtz  rs, off
@@ -472,22 +445,18 @@ enum { _BitOffsets = 0
 
 /* load_imm_2w — unconditional 2-word `li` form: `lui` + (ori | addi).
  *
- * Granular companion to `load_imm`: skips the compile-time range checks
- * and always emits 2 .words. Use this when:
+ * Granular companion to `load_imm`: skips the compile-time range checks and always emits 2 .words. Use this when:
  *   - you know `imm` is > 0xFFFF (otherwise you're wasting a word), OR
  *   - `imm` is not a compile-time constant and you want predictable
  *     2-word emission without the `__builtin_constant_p` branches.
  *
  * The lo16 strategy is still chosen at expansion time on the lo half:
- *   lo16 in 0x0000..0x7FFF  →  addi (sign-ext is harmless, the lui
- *                              already cleared bits 15..0)
- *   lo16 in 0x8000..0xFFFF  →  ori  (zero-extends to preserve the
- *                              intended bit pattern)
+ *   lo16 in 0x0000..0x7FFF  →  addi (sign-ext is harmless, the lui already cleared bits 15..0)
+ *   lo16 in 0x8000..0xFFFF  →  ori  (zero-extends to preserve the intended bit pattern)
  *
- * For situations where you need to bypass even this choice (e.g. to
- * force a specific encoding for a known discontiguous high/low pair),
+ * For situations where you need to bypass even this choice 
+ * (e.g. to force a specific encoding for a known discontiguous high/low pair),
  * see `load_imm_2w_ori_forced` and `load_imm_2w_addi_forced` below.
- *
  * Statement-level (not expression-level): emits its own `asm volatile(...)`.
  */
 #define load_imm_2w(rt, imm) do {                         \
@@ -518,9 +487,8 @@ enum { _BitOffsets = 0
 } while (0)
 
 /* load_imm_2w_addi_forced — force the `lui` + `addi` form regardless of lo16 sign.
- * Use when you know sign-extension is fine (e.g. lo16 is treated as
- * signed downstream) and you want a smaller effective instruction
- * (the assembler/MIPS hardware will sign-extend the imm16). */
+ * Use when you know sign-extension is fine (e.g. lo16 is treated as signed downstream) 
+ * and you want a smaller effective instruction (the assembler/MIPS hardware will sign-extend the imm16). */
 #define load_imm_2w_addi_forced(rt, imm) do {   \
 	/*U4 _li2a_imm_ = (U4)(imm);*/                \
 	asm volatile(asm_words(                       \
@@ -532,23 +500,17 @@ enum { _BitOffsets = 0
 
 /* load_imm rt, imm — true `li` semantics (assembler `li` pseudo)
  *
- * Dispatches at compile time on the immediate's range, picking the
- * smallest single-instruction form when possible:
+ * Dispatches at compile time on the immediate's range, picking the smallest single-instruction form when possible:
+ *   imm in 0       .. 0x7FFF     →  addi  rt, $0, imm   (1 word)
+ *   imm in 0x8000  .. 0xFFFF     →  ori   rt, $0, imm   (1 word; sign-bit must be zeroed)
+ *   imm in 0x10000 .. 0xFFFFFFFF →  lui + (ori | addi)  (2 words)
  *
- *   imm in   0 ..  0x7FFF  →  addi  rt, $0, imm   (1 word)
- *   imm in 0x8000 .. 0xFFFF →  ori   rt, $0, imm   (1 word; sign-bit must be zeroed)
- *   imm in  0x10000 ..  0xFFFFFFFF  →  lui + (ori | addi)  (2 words)
- *
- * Statement-level (not expression-level): the macro emits its own
- * `asm volatile(...)` block with 1 or 2 .word constants. Callers can
- * group multiple `load_imm` calls in a single volatile by using the
- * lower-level encoders directly:
- *
+ * Statement-level (not expression-level): the macro emits its own `asm volatile(...)` block with 1 or 2 .word constants.
+ * Callers can group multiple `load_imm` calls in a single volatile by using the lower-level encoders directly:
  *      load_imm(R_T4, 0x12345678);          // emits 2 .words
  *
- * Falls back to a 2-word form if `imm` is not a compile-time constant,
- * but that path is unusual (load_imm is most useful with literal
- * addresses and magic numbers). */
+ * Falls back to a 2-word form if `imm` is not a compile-time constant, but that path is unusual
+ * (load_imm is most useful with literal addresses and magic numbers). */
 #define load_imm(rt, imm) do {                                     \
 	if (cexpr_(imm) && ((imm) <= 0x7FFFU)) {                         \
 		/* Small positive: addi rt, $0, imm */                         \
@@ -588,9 +550,8 @@ enum { _BitOffsets = 0
 
 
 /* Standard clobber list for pure-MIPS asm volatile blocks: caller-saved
- * GPRs that the kernel treats as volatile (v0/v1/t0/t1/ra) plus the
- * "memory" barrier. The register ids are passed through `rlit` so
- * the R_*_Code `#define`s are stringified into "$N" at expansion time. */
+ * GPRs that the kernel treats as volatile (v0/v1/t0/t1/ra) plus the "memory" barrier.
+ * The register ids are passed through `rlit` so the R_*_Code `#define`s are stringified into "$N" at expansion time. */
 #define clbr_volatile_gprs rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain
 
 #define asm_mips_flush_icache() asm volatile( asm_words( \

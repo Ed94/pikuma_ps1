@@ -2,9 +2,8 @@
  *  duffle DSL — MIPS Vendor Mnemonics (opt-in)
  *  ============================================================================
  *
- *  Provides the textbook MIPS assembly mnemonics as thin aliases to the
- *  canonical duffle macros in mips.h. The duffle names are primary; this
- *  header is for users who prefer the textbook mnemonics.
+ *  Provides the textbook MIPS assembly mnemonics as thin aliases to the canonical duffle macros in mips.h.
+ *  The duffle names are primary; this header is for users who prefer the textbook mnemonics.
  *
  *  USAGE:   #include "duffle/mips_vendor_sym.h"   // after mips.h
  *

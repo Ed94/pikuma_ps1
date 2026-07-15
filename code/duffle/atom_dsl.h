@@ -6,8 +6,6 @@
  * The metaprogram (scripts/passes/annotation.lua) reads source-as-written and validates:
  *   - atom_info(...) shape: up to three sub-calls (atom_bind(Binds_X), atom_reads(...), atom_writes(...)) in any order and are optional.
  *   - rbind atoms (atom_info(..., atom_bind(Binds_X), ...)) reference a real Binds_* struct declaration.
- *   - wave-context positions only reference the 4-register set: R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase.
- *     Note(Ed): Not sure if I'll generlaize this later.
  *   - atom word-counts in word_counts.metadata.h match the body's actual .word count.
  *
  * Pure macro anntation.
@@ -48,13 +46,13 @@
  *  ----------------
  *      1. atom_info(...) is OPTIONAL. Atoms without atom_info are silently skipped by the metaprogram.
  *      2. If present, atom_info takes up to three sub-calls, all order-independent within the arg list:
- *           - atom_bind(Binds_X) (binds a struct context to an atom).
- *           - atom_reads(...) (context registers)
- *           - atom_writes(...) (context registers)
+ *           - atom_bind(Binds_X)
+ *           - atom_reads(...)
+ *           - atom_writes(...)
  *      3. atom_bind(Binds_X): metaprogram cross-references Binds_X against the `typedef struct Binds_X { ... } Binds_X;` declaration.
- *      4. atom_reads(...) and atom_writes(...) used to to check if registers are used correctly in macros: R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase.
- *      5. atom_label(name) utilize with atom_offset as a target location.
- *      6. atom_offset(F, T) is resolved by gen/atom_offsets.h, generated from the atom_label markers. Calculated during the offset pass of the lua  metaprogram.
+ *      4. atom_reads(...) and atom_writes(...): Used to to check if registers are used correctly in macros: R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase.
+ *      5. atom_label(name: Utilize with atom_offset as a target location.
+ *      6. atom_offset(F, T): Resolved by gen/atom_offsets.h, generated from the atom_label markers. Calculated during the offset pass of the lua  metaprogram.
  */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -116,8 +114,7 @@
  * The metaprogram generates gen/atom_offsets.h with one #define with the offset value per atom_offset(F, T) call.
  * The preprocessor then expands the call to the right immediate value.
  *
- * If gen/atom_offsets.h is stale (or atom_label(name) is undefined), `atom_offset_F_T`
- * becomes an undefined macro and the C build fails.
+ * If gen/atom_offsets.h is stale (or atom_label(name) is undefined), `atom_offset_F_T` becomes an undefined macro and the C build fails.
  * ============================================================================*/
 #define atom_offset(F, T) atom_offset_ ## F ## _ ## T
 // atom_label is a pure annotation for the metaprogram's offset calculations.

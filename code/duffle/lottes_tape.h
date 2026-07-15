@@ -16,14 +16,12 @@ typedef Slice_MipsCode MipsAtom;
 
 #define MipsAtom_(sym) MipsCode sym [] align_(4) =
 
-// Bare form: file-scope declaration with hardcoded body.
 // Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
 //   MipsAtomComp_(ac_X) { body }
 // expands to:
 //   MipsCode ac_X[] align_(4) = { body };
 #define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
 
-// Function form: function-body block that returns a MipsAtom slice.
 // Used for components with value-args (e.g., ac_format_f3_color).
 //   FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
 // expands to:
@@ -109,8 +107,7 @@ FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Sli
 MipsAtomComp_(ac_yield) {
 	load_word(R_AtomJmp, R_TapePtr, 0),
 	add_ui_self(         R_TapePtr, S_(MipsCode)),
-	jump_reg( R_AtomJmp),
-	nop,
+	jump_reg( R_AtomJmp), nop,
 };
 
 /* Words: 3; Loads 3 S2 indices from the face array */
@@ -268,8 +265,7 @@ internal MipsAtom_(mips_flush_icache) {
 	store_word(rret_addr, rstack_ptr, S_(U4)),           // sw  $ra,   4($sp) 
 	add_ui(rret_0, rdiscard, bios_flushcache),           // addiu $a0, $0, 0x44 
 	add_ui(rtmp_0, rdiscard, bios_table_addr),           // addiu $t0, $0, 0xA0 
-	jump_link(rtmp_0, rret_addr),                        // jalr  $t0, $ra 
-	nop,                                                 // BD slot 
+	jump_link(rtmp_0, rret_addr), nop,                   // jalr  $t0, $ra, BD slot
 	load_word(rret_addr, rstack_ptr, S_(U4)),            // lw   $ra, 4($sp) 
 	jump_reg(rret_addr),                                 // jr   $ra 
 	add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment),  // sp += 8 (BD) 

@@ -35,12 +35,7 @@ internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri)
 	mac_yield()
 };
 
-/* ============================================================================
- *  cube_g4_face — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
- * ============================================================================
- *  Reads 4 indices from R_FaceCur (V4_S2 = 8 bytes), loads 4 vertices into
- *  the GTE, runs the PsyQ RotAverageNclip4 sequence, and renders a Poly_G4.
- */
+ // cube_g4_face — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
 internal
 MipsAtom_(cube_g4_face) atom_info(
 		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),

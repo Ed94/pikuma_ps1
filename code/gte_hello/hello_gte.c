@@ -259,8 +259,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
 
-		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
-		TapeBuilder tb = tb_make_old(&tape_arena); tb_scope(& tb) {
+		LP_ U4 mem_temp_tape[512];
+		TapeBuilder tb = tb_make(slice_ut_arr(mem_temp_tape)); tb_scope(& tb) {
 			tb_emit(& tb, rbind_cube_g4_face);
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(smem.cube.faces));

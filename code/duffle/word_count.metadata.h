@@ -5,11 +5,10 @@
 // Format: WORD_COUNT(MACRO_NAME, COUNT)
 // One line per macro that appears in your atom sources.
 //
-// This file is encoding-macros-only. The auto-generated component
-// macros (mac_X) live in duffle/gen/<dir>.macs.h (included separately
-// by the unity build). The unity build should include THIS file and
-// the .macs.h file in the same TU, with both wrapped (or the
-// include guard order handled) to avoid WORD_COUNT redeclaration.
+// This file is encoding-macros-only. 
+// The auto-generated component macros (mac_X) live in duffle/gen/<dir>.macs.h (included separately by the unity build).
+// The unity build should include THIS file and the .macs.h file in the same TU, with both wrapped 
+// (or the include guard order handled) to avoid WORD_COUNT redeclaration.
 //
 // To regenerate: hand-count the instructions in each macro definition.
 // (You'll only need to do this once per macro — they don't change often.)
