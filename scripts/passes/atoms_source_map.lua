@@ -170,17 +170,23 @@ end
 
 --- Compute per-word provenance entries for an atom. Mirrors `compute_word_entries` but additionally classifies each emitted `.word` as either:
 ---   - `RAW`     — emitted by a direct instruction token (no component provenance)
----   - `MACRO X` — emitted by a `mac_X(...)` component invocation,
----                 with the component's definition file:line resolved from `ctx.shared.components`.
+---   - `MACRO X` — emitted by a `mac_X(...)` component invocation, with the component's definition file:line resolved from `ctx.shared.components`.
 ---
---- Returns a list of `{pos, line, text, comp_name, comp_line, comp_path}` entries + the total word count.
---- `comp_name` is nil for RAW rows.
+--- Returns a list of `{pos, line, text, comp_name, comp_line, comp_path, body_line}` entries + the total word count.
+--- `comp_name` is nil for RAW rows. `body_line` is the line of THIS specific word in the macro body (component source file, not the caller's source);
+--- it differs from `comp_line` (= the macro signature line) for every body word whose macro-body token is on a different physical line.
+--- `body_line` is `nil` for RAW rows and for component words whose component declaration could not be indexed (older pass combinations / external macros).
+---
+--- The per-word body-line lookup mirrors `passes/dwarf_injection.lua :: compute_invocation_body_lines`:
+--- walk the component's pre-tokenized body in lockstep with `count_token_words` and attribute the source line via `src.scan.line_of(...)` to each emitted `.word`.
+--- Atom labels (`atom_label(...)`) emit 0 `.word`s and are skipped to stay aligned with the macro-side word-counting contract.
 --- @param atom table  -- one entry of scan.atoms / scan.raw_atoms
 --- @param src  table  -- SourceFile (has .scan with .line_of(), .path)
 --- @param wc   table  -- shared.word_counts
 --- @param comp table  -- shared.components map: bare_name -> {name=, line=, path=, kind=}
+--- @param comp_body_index table  -- per-source component body index: bare_name -> {body_off, body_tokens, line_of}
 --- @return table[], integer
-local function compute_provenance_entries(atom, src, wc, comp)
+local function compute_provenance_entries(atom, src, wc, comp, comp_body_index)
 	local entries = {}
 	local pos     = 0
 	for _, t in ipairs(atom.body_tokens) do
@@ -207,10 +213,41 @@ local function compute_provenance_entries(atom, src, wc, comp)
 			comp_kind = comp[bare].kind
 		end
 
+		-- Per-word body lines: lazily allocate from the indexed component body the first time we see a `mac_X(...)` call to a given component.
+		-- We allocate ONE full body_lines vector per (call) and consume it sequentially; 
+		-- if a single atom calls the same component more than once, each call refetches its own vector. 
+		-- (Today no atom calls the same `mac_X(...)` twice, but the refetch keeps the semantics correct even if that changes.)
+		local body_lines = nil
+		local function fetch_body_lines()
+			if not (bare and comp_body_index) then return nil end
+			local idx = comp_body_index[bare]
+			if not (idx and idx.body_tokens and idx.line_of) then return nil end
+			local lines = {}
+			for _, bt in ipairs(idx.body_tokens) do
+				local bt_tok = duffle.trim(bt.tok or "")
+				if bt_tok ~= "" then
+					local leading = duffle.read_ident(bt_tok, 1)
+					local bt_words
+					if leading == "atom_label" or leading == "atom_offset" then
+						bt_words = 0
+					else
+						bt_words = count_token_words(bt_tok, wc)
+					end
+					if bt_words > 0 then
+						local body_line = idx.line_of(idx.body_off + bt.rel)
+						for _ = 1, bt_words do lines[#lines + 1] = body_line end
+					end
+				end
+			end
+			return lines
+		end
+
 		if words > 0 then
 			local line = src.scan.line_of(atom.body_off + rel)
 			local text = duffle.trim(tok):gsub("[\t\r\n]+", " ")
-			for _ = 1, words do
+			-- Fetch body_lines ONCE per token (one mac_X(...) call exhausts N body words).
+			if comp_name then body_lines = fetch_body_lines() end
+			for i = 1, words do
 				entries[#entries + 1] = {
 					pos       = pos,
 					line      = line,
@@ -219,6 +256,7 @@ local function compute_provenance_entries(atom, src, wc, comp)
 					comp_line = comp_line,
 					comp_path = comp_path,
 					comp_kind = comp_kind,
+					body_line = body_lines and body_lines[i],
 				}
 				pos = pos + 1
 			end
@@ -228,26 +266,35 @@ local function compute_provenance_entries(atom, src, wc, comp)
 end
 
 --- Render one atom's provenance stanza. Format:
----   `WORD N  CALL <src-path>:<src-line>  MACRO <name> "<def-path>:<def-line>"`  (for component words)
----   `WORD N  CALL <src-path>:<src-line>  RAW`                                   (for direct instructions)
+---   `WORD N  CALL <src-path>:<src-line>  MACRO <name> "<def-path>:<def-line>"  [BODY <line>]`  (for component words)
+---   `WORD N  CALL <src-path>:<src-line>  RAW`                                                  (for direct instructions)
+--- `BODY <line>` is the source line of THIS specific word within the macro body
+--- (lottes_tape.h:N where N is the per-word body line).
+--- Absent for RAW rows and for component rows whose component declaration could not be indexed (older pass combinations / external macros).
+--- Downstream consumers (dwarf_injection, tests) fall back to DefLine / comp_line when BODY is absent.
 --- Returns (lines, total_words).
 --- @param src    table
 --- @param atom   table
 --- @param wc     table
 --- @param comp   table  -- shared.components map
+--- @param comp_body_index table  -- per-source component body index: bare_name -> {body_off, body_tokens, line_of}
 --- @return string[], integer
-local function emit_provenance_stanza(src, atom, wc, comp)
+local function emit_provenance_stanza(src, atom, wc, comp, comp_body_index)
 	local lines    = {}
 	local rel_path = src.path:gsub("\\", "/")
-	local entries, total = compute_provenance_entries(atom, src, wc, comp)
+	local entries, total = compute_provenance_entries(atom, src, wc, comp, comp_body_index)
 
 	-- ATOM header line with placeholder total (patched after we know it).
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
 
 	for _, pe in ipairs(entries) do
 		if pe.comp_name then
-			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d"',
-				pe.pos, rel_path, pe.line, pe.comp_name, pe.comp_path, pe.comp_line)
+			local body_suffix = ""
+			if pe.body_line then
+				body_suffix = "  BODY " .. tostring(pe.body_line)
+			end
+			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d"%s',
+				pe.pos, rel_path, pe.line, pe.comp_name, pe.comp_path, pe.comp_line, body_suffix)
 		else
 			lines[#lines + 1] = string.format("WORD %d  CALL %s:%d  RAW", pe.pos, rel_path, pe.line)
 		end
@@ -259,26 +306,38 @@ local function emit_provenance_stanza(src, atom, wc, comp)
 	return lines, total
 end
 
+--- Build a per-source component body index keyed by the bare component name (e.g. `gte_load_tri_verts`).
+--- Each entry holds the data we need to map each emitted `.word` to its actual source line within the macro body:
+---   body_off    -- byte offset of the `{` (start of body) in the component's source file.
+---   body_tokens -- list of {tok, rel} pairs; `rel` is the byte offset within the body.
+---   line_of     -- closure resolving byte offsets in the component's source file to lines.
+--- Only `comp_bare` + `comp_proc` declarations contribute (a macro invocation can only resolve to one of those).
+--- First declaration wins (subsequent redeclarations would collide; today's sources declare each component exactly once).
 --- Render the full provenance file content for one source (one `.atoms.provenance.txt` per source).
 --- @param src table
 --- @param wc table
 --- @param comp table  -- shared.components map
+--- @param comp_body_index table  -- cross-source component body index (built once in M.run; may be empty)
 --- @return string
-local function render_provenance(src, wc, comp)
+local function render_provenance(src, wc, comp, comp_body_index)
 	local lines = {}
 	lines[#lines + 1] = "# FORMAT_VERSION 1"
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
 	lines[#lines + 1] = "# Per-.word provenance: maps each emitted .word to its call site (atom body"
 	lines[#lines + 1] = "# file:line) and, when the word was emitted by a `mac_X(...)` component invocation,"
-	lines[#lines + 1] = "# the component's definition file:line. Used by dwarf_injection to synthesize"
-	lines[#lines + 1] = "# DW_TAG_inlined_subroutine instances for component step-into."
+	lines[#lines + 1] = "# the component's definition file:line + the per-word BODY line. Used by"
+	lines[#lines + 1] = "# dwarf_injection to synthesize DW_TAG_inlined_subroutine instances + per-word"
+	lines[#lines + 1] = "# line program rows for native source-level step into component bodies."
+
+	-- The cross-source component body index is passed in from M.run (one global lookup shared across every source's provenance file).
+	-- A per-source lookup would miss every component whose declaration is in another source (e.g. `gte_load_tri_verts` is declared in `lottes_tape.h` but invoked from `hello_gte_tape.c`).
 
 	for _, atom in ipairs(src.scan.atoms or {}) do
-		local stanza = emit_provenance_stanza(src, atom, wc, comp)
+		local stanza = emit_provenance_stanza(src, atom, wc, comp, comp_body_index)
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
 	for _, atom in ipairs(src.scan.raw_atoms or {}) do
-		local stanza = emit_provenance_stanza(src, atom, wc, comp)
+		local stanza = emit_provenance_stanza(src, atom, wc, comp, comp_body_index)
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
 
@@ -648,9 +707,44 @@ end
 
 local M = {}
 
+--- Build the cross-source component body index used by `render_provenance` to attribute each emitted `.word` to its actual line within the macro body.
+---
+--- Components are declared in one source (the header that contains `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`) 
+--- but invoked from many source files (every atom body that calls `mac_X(...)`).
+--- The body_offset + body_tokens + line_of live with the declaration source, so a per-source index would miss invocations from other sources.
+---
+--- The cross-source index is keyed by the bare component name (`gte_load_tri_verts`, NOT `ac_gte_load_tri_verts`) — `strip_mac_prefix_from_token` strips the `mac_` prefix
+--- from call-site identifiers and yields that exact bare name; matching it here keeps the lookup aligned with the `ctx.shared.components` map's keying convention.
+--- First declaration wins (subsequent redeclarations would collide; today's sources declare each component exactly once).
+--- @param ctx PassCtx
+--- @return table<string, table>  -- {[comp_name] = {body_off, body_tokens, line_of}}
+local function build_cross_source_component_body_index(ctx)
+	local index = {}
+	for _, src in ipairs(ctx.sources or {}) do
+		if src.scan and src.scan.atoms then
+			local line_of = src.scan.line_of
+			for _, atom in ipairs(src.scan.atoms) do
+				if atom.kind == "comp_bare" or atom.kind == "comp_proc" then
+					-- Prefer `atom.name` (stripped of `ac_` prefix); fall back to `raw_name`
+					-- only if the stripped name is absent (defensive — current scan-source always sets both).
+					local name = atom.name or atom.raw_name
+					if name and not index[name] then
+						index[name] = {
+							body_off    = atom.body_off,
+							body_tokens = atom.body_tokens,
+							line_of     = line_of,
+						}
+					end
+				end
+			end
+		end
+	end
+	return index
+end
+
 --- Pass entry: emit one `<out_root>/<basename>.atoms.sourcemap.txt` per source file that contains at least one `MipsAtom_(name)` / `MipsCode code_<name>` declaration.
 --- Also emits `<out_root>/<basename>.atoms.provenance.txt`:
---- per-.word provenance with `mac_X(...)` component resolution back to the component's definition file:line.
+--- per-.word provenance with `mac_X(...)` component resolution back to the component's definition file:line + the per-word body line.
 --- Optionally also emit `<ctx.out_root>/gdb_tape_atoms_runtime.gdb` when `ctx.flags.gdb_runtime` is true.
 --- @param ctx PassCtx
 --- @return PassResult
@@ -674,6 +768,12 @@ function M.run(ctx)
 	-- If absent, all words fall through as RAW (correct behavior — provenance is additive).
 	local comp = (ctx.shared and ctx.shared.components) or {}
 
+	-- Cross-source component body index.
+	-- Built ONCE so every source's provenance writer can resolve `mac_X(...)` invocations back to the macro's body tokens (regardless of which source declared the component).
+	-- Per-source copies were insufficient — the atom file (`hello_gte_tape.c`) does not contain the `MipsAtomComp_(...)` declarations, 
+	-- so the body data would be missing for every component invocation the atom file emitted.
+	local comp_body_index = build_cross_source_component_body_index(ctx)
+
 	-- Always emit the canonical text form (per-source).
 	for _, src in ipairs(ctx.sources) do
 		if src.scan then
@@ -689,7 +789,7 @@ function M.run(ctx)
 				-- (2) atoms.provenance.txt — per-.word provenance with `mac_X(...)` component resolution back to the component's definition file:line.
 				--     Consumed by `passes/dwarf_injection.lua` to synthesize `DW_TAG_inlined_subroutine` instances for source-level Step Into on component invocations.
 				local prov_path = ctx.out_root .. "/" .. basename .. ".atoms.provenance.txt"
-				local prov_body = render_provenance(src, wc, comp)
+				local prov_body = render_provenance(src, wc, comp, comp_body_index)
 
 				if not ctx.dry_run then
 					duffle.ensure_dir(duffle.dirname(sourcemap_path))

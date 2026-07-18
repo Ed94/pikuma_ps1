@@ -1,18 +1,12 @@
 --- passes/dwarf_injection.lua — Per-atom DWARF injection for tape-atom step-debug (F' + G').
 ---
---- Reads the post-link ELF directly 
---- (lfs + io.open; walks the ELF32 section header table to find 
---- 	`.debug_info` 
---- + `.debug_abbrev` 
---- + `.debug_str` 
---- + `.debug_line` 
---- + `.debug_aranges` 
---- + `.debug_rnglists`),
---- APPENDS synthetic DWARF line-program sequences for every `code_<name>` atom, EXTENDS the `.debug_aranges` and main-CU range tables with the atom ranges,
---- APPENDS a new compilation unit to `.debug_info` with per-atom `DW_TAG_subprogram` + per-wave-context-reg `DW_TAG_variable` entries
---- (so `R_PrimCursor` etc. appear as atom-scoped locals in VSCode's Variables pane).
---- Writes the new section data to `<out_root>/<basename>.dwarf_*.bin` (7 blobs total)
---- plus deterministic `<out_root>/<basename>.gdbinit` skip commands.
+--- Reads the post-link ELF directly (lfs + io.open; walks the ELF32 section header table to find
+--- `.debug_info` + `.debug_abbrev` + `.debug_str` + `.debug_line` + `.debug_aranges` + `.debug_rnglists`),
+--- APPENDS synthetic DWARF line-program sequences for every `code_<name>` atom, EXTENDS the `.debug_aranges`
+--- and main-CU range tables with the atom ranges, and APPENDS a new compilation unit to `.debug_info` with
+--- per-atom `DW_TAG_subprogram` + per-wave-context-reg `DW_TAG_variable` entries (so `R_PrimCursor` etc.
+--- appear as atom-scoped locals in VSCode's Variables pane). Writes the new section data to
+--- `<out_root>/<basename>.dwarf_*.bin` (7 blobs total) plus deterministic `<out_root>/<basename>.gdbinit` skip commands.
 ---
 --- The `build_psyq.ps1` post-link hook then splices those `.bin` files into a copy of the ELF via:
 ---   mipsel-none-elf-objcopy --update-section .debug_info=<bin>     <elf>
@@ -26,13 +20,11 @@
 --- Splice step runs from PowerShell — no Lua subprocess; no cmd /c parsing issues.
 --- objcopy's --update-section works fine in PowerShell even though Lua's `os.execute`/`io.popen` would mangle the `=` on Windows.)
 ---
---- Result: VSCode's source gutter follows per-stepi inside atom bodies (F'),
---- AND the Variables pane shows the wave-context regs as atom-scoped locals (G').
+--- Result: VSCode's source gutter follows per-stepi inside atom bodies (F'), AND the Variables pane shows the wave-context regs as atom-scoped locals (G').
 --- Native VSCode UX (gutter arrow + highlighted line + Run to Cursor + conditional BPs by source line + per-atom locals).
 --- No VSCode plugin, no Python, no pyelftools — pure Lua + objcopy.
 ---
---- **Conventions:** tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible.
+--- **Conventions:** tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Bootstrap
@@ -48,15 +40,25 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- (read_elf_sections, nm, source-map parser, LE byte r/w). `list_dir` lives in duffle.lua as a general I/O primitive (lifted out during F'').
 local elf_dwarf = require("elf_dwarf")
 
+-- word-counting helper shared with passes/atoms_source_map.lua.
+-- Used here to walk a component's body_tokens in lockstep with their word-count allocation
+-- when we propagate per-word body lines into each invocation's `body_lines` array.
+local word_count_eval = require("word_count_eval")
+local count_token_words = word_count_eval.count_token_words
+
 local lfs = require("lfs")
+
+-- File-scope LEB128 aliases; the helpers are available at module-load time so no forward-reference table is needed.
+local uleb128 = elf_dwarf.uleb128
+local sleb128 = elf_dwarf.sleb128
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- DWARF line-program opcodes + range-list entry encodings (per DWARF5 spec).
--- All values lifted from `elf_dwarf.DWARF_LINE_OPS` + `elf_dwarf.DWARF5_RNGLISTS`. 
--- Local aliases preserve the F' code's readability 
+-- All values lifted from `elf_dwarf.DWARF_LINE_OPS` + `elf_dwarf.DWARF5_RNGLISTS`.
+-- Local aliases preserve the F' code's readability
 -- (e.g. `DW_LNS_copy` reads better than `elf_dwarf.DWARF_LINE_OPS.DW_LNS_copy` in an emitter body).
 local DWARF_LINE_OPS      = elf_dwarf.DWARF_LINE_OPS
 local DWARF5_RNGLISTS     = elf_dwarf.DWARF5_RNGLISTS
@@ -78,34 +80,16 @@ local DW_RLE_start_length  = DWARF5_RNGLISTS.start_length
 -- The injector extends that unit rather than appending an unreferenced unit.
 local ATOM_SOURCE_FILE_INDEX = 11
 
--- Wave-context registers (per duffle.lua :: WAVE_CONTEXT_REGS). The MIPS register number is what DW_OP_regN uses as N.
---
---   R_PrimCursor = R_T7 = $15   →  DW_OP_reg15
---   R_FaceCursor = R_T4 = $12   →  DW_OP_reg12
---   R_VertBase   = R_T5 = $13   →  DW_OP_reg13
---   R_OtBase     = R_T6 = $14   →  DW_OP_reg14
---   R_TapePtr    = R_T8 = $24   →  DW_OP_reg24
---   R_AtomJmp    = R_T9 = $25   →  DW_OP_reg25
---
--- A register-resident variable uses DW_OP_regN (opcode 0x50 + N).
--- DW_OP_bregN instead describes a memory location addressed from a register;
--- it makes GDB dereference the atom register value rather than display it.
-local WAVE_CONTEXT_LOCATIONS = {
-	-- Names prefixed with `RR` to avoid collision with the C-level enum `{R_AtomJmp = 25, R_TapePtr = 24, R_InCursor = 12, R_PrimCursor = 15, ...}`
-	-- declared in the duffle headers (code/duffle/dsl.h or atom_dsl.h). 
-	-- Without the prefix, gdb's `print R_PrimCursor` resolves to the enum constant (= 15), not to this DWARF variable.
-	-- With `set print enum on` (gdb default for enum values), gdb displays the enum identifier, so the Watch panel shows
-	-- `R_PrimCursor = R_PrimCursor` instead of the register value.
-	{ name = "RR_PrimCursor", reg = 0x0F },   -- $15
-	{ name = "RR_FaceCursor", reg = 0x0C },   -- $12
-	{ name = "RR_VertBase",   reg = 0x0D },   -- $13
-	{ name = "RR_OtBase",     reg = 0x0E },   -- $14
-	{ name = "RR_TapePtr",    reg = 0x18 },   -- $24
-	{ name = "RR_AtomJmp",    reg = 0x19 },   -- $25
-}
+-- RR_<R_Name> debug-visible variables come from the merged register_alias_registry filtered to aliases whose code is a valid MIPS GPR 0..31
+-- (see collect_per_source_registries + by_alias in build_inserted_children).
+-- Names are prefixed with `RR` to avoid collision with the C-level enum (`{R_AtomJmp = 25, R_TapePtr = 24, R_PrimCursor = 15, ...}` declared in duffle headers);
+-- without the prefix, gdb's `print R_PrimCursor` resolves to the enum constant, not to this DWARF variable.
+-- With `set print enum on`, gdb displays the enum identifier, so the Watch panel would show `R_PrimCursor = R_PrimCursor` instead of the register value.
+-- Each RR_<R_Name>'s DW_OP_regN uses the alias's `code` as N.
+-- DW_OP_bregN would describe a memory location addressed from a register; 
+-- the breg form would make gdb dereference the atom register value rather than display it.
 
--- New abbreviation codes (100+ to avoid collision with gcc's existing
--- 1-60+ codes).
+-- New abbreviation codes (100+ to avoid collision with gcc's existing 1-60+ codes).
 local ABBREV_CU          = 0x64   -- 100: DW_TAG_compile_unit
 local ABBREV_SUBPROGRAM  = 0x65   -- 101: DW_TAG_subprogram
 local ABBREV_VARIABLE    = 0x66   -- 102: DW_TAG_variable (DW_AT_type = ref4 to U4; was missing pre-2026-07-13 → gdb resolved R_PrimCursor against the C-level enum, not the register)
@@ -122,118 +106,10 @@ local ABBREV_BIND_VAR_LOCLIST = 0x6D   -- 109: DW_TAG_variable no children + DW_
 
 -- DWARF5 §7.7.3 loclist opcodes.
 local DW_LLE_end_of_list    = 0x00
-local DW_LLE_start_length   = 0x06
+local DW_LLE_start_length   = 0x08
 local DW_OP_reg0            = 0x50   -- base reg op; regN = 0x50 + N
 local DW_OP_breg0           = 0x70   -- base breg op; bregN = 0x70 + N (SLEB offset)
 local MIPS_LOAD_DELAY_BYTES = 0x08 -- 1 load word + 1 BD-slot word
--- Late-binding table for forward references.
--- The loclist functions (defined below) use uleb128 + elf_dwarf which are not yet defined at this point. 
--- They look them up via this table at call time.
-local _late = { uleb128 = nil, elf_dwarf = nil }
-
--- Build the .debug_loclists section for every rbind atom. 
--- Returns the section bytes (DWARF5 layout: unit_length(4) + version=5(2) + address_size=4(1) + segment_size=0(1) + offset_entry_count=0(4) + DW_LLE entries; 
--- each atom contributes one loclist terminated by DW_LLE_end_of_list).
---
--- Per rbind atom we emit 2 loclist entries (tape → GPR split) using the last field's transition as the boundary. 
--- This is a conservative approximation that always reads the correct GPR value once the first load has retired (load_pc + 8).
--- A future task can refine to per-field transitions.
--- @param atom_table table[]  -- list of atoms with .rbind set
--- @return string  -- section bytes
-local function build_debug_loclists_section(atom_table)
-	-- Loclist header (per DWARF5 §7.7.3):
-	--   unit_length(4) + version(2) + address_size(1) + segment_size(1) + offset_entry_count(4)
-	-- All our entries are DW_LLE_start_length + addr(4) + length(ULEB) + expression terminated by DW_LLE_end_of_list (1 byte).
-	-- R_TapePtr is register 24 ($t8). R_<reg> maps via R_NAME_TO_INDEX above.
-	-- We compute the field-by-field transition: at each load_pc + 8, one more field has committed from tape memory to its destination GPR.
-	local tape_reg = R_NAME_TO_INDEX["R_TapePtr"]  -- = 24
-	if not tape_reg then tape_reg = 24 end  -- fallback if R_TapePtr isn't in the table
-	local parts = {}
-	for _, atom in ipairs(atom_table) do
-		if atom.rbind then
-			local fields   = atom.rbind.fields or {}
-			local regs     = atom.rbind.regs or {}
-			local n_fields = #fields
-			io.stderr:write(string.format("[loclists] %s: n_fields=%d, fields[1].name=%s offset=%s, regs[1]=%s\n",
-				atom.name, n_fields,
-				fields[1] and fields[1].name or "?",
-				fields[1] and tostring(fields[1].offset) or "?",
-				regs  [1] and (regs[1].field or "?") or "?"))
-			local last_load_pc = atom.addr + (n_fields - 1) * MIPS_BYTES_PER_WORD
-			local transition_pc = last_load_pc + MIPS_LOAD_DELAY_BYTES
-			-- Build the "all in tape" piece chain (one DW_OP_breg24 + offset + DW_OP_piece(4) per field).
-			local tape_pieces = {}
-			for _, f in ipairs(fields) do
-				local offset = f.offset or 0
-				local offset_sleb = elf_dwarf.sleb128(offset)
-				table.insert(tape_pieces, string.char(DW_OP_breg0 + tape_reg) .. offset_sleb .. string.char(DW_OP_piece) .. uleb128(4))
-			end
-			local tape_expr = table.concat(tape_pieces)
-			-- Build the "all in GPR" piece chain (one DW_OP_regN + DW_OP_piece(4) per field).
-			local gpr_pieces = {}
-			for _, pair in ipairs(regs) do
-				table.insert(gpr_pieces, string.char(DW_OP_reg0 + pair.reg) .. string.char(DW_OP_piece) .. uleb128(4))
-			end
-			local gpr_expr = table.concat(gpr_pieces)
-			-- Emit two DW_LLE_start_length entries + DW_LLE_end_of_list.
-			parts[#parts + 1] = string.char(DW_LLE_start_length)
-				.. elf_dwarf.write_u32_le(atom.addr)
-				.. uleb128(#tape_expr)
-				.. tape_expr
-			parts[#parts + 1] = string.char(DW_LLE_start_length)
-				.. elf_dwarf.write_u32_le(transition_pc)
-				.. uleb128(#gpr_expr)
-				.. gpr_expr
-			parts[#parts + 1] = string.char(DW_LLE_end_of_list)
-		end
-	end
-	-- Build the section header.
-	local body = table.concat(parts)
-	-- unit_length = 2 (version) + 1 (address_size) + 1 (segment_size) + 4 (offset_entry_count) + #body
-	local unit_length = 2 + 1 + 1 + 4 + #body
-	local header = elf_dwarf.write_u32_le(unit_length)
-		.. elf_dwarf.write_u16_le(5) -- version = 5
-		.. string.char(4)            -- address_size = 4
-		.. string.char(0)            -- segment_size = 0
-		.. elf_dwarf.write_u32_le(0) -- offset_entry_count = 0
-	return header .. body
-end
-
--- Compute the per-atom loclist offset within a .debug_loclists section that the caller will later pass to .debug_info
--- (DW_FORM_sec_offset is a 4-byte section-relative offset).
--- Returns a table {[atom_name] = offset_in_loclists}. 
--- The header is 12 bytes (unit_length(4) + version(2) + address_size(1) + segment_size(1) + offset_entry_count(4));
--- each loclist body is the sum of its DW_LLE entries (computed by replaying the same emission).
--- @param atom_table table[]  -- list of atoms with .rbind set
--- @return table  -- {[atom_name] = offset_in_section}
-local function compute_loclists_offsets(atom_table)
-	local offsets = {}
-	-- Header size = 4 (unit_length) + 2 (version) + 1 (address_size) + 1 (segment_size) + 4 (offset_entry_count)
-	local cursor = 4 + 2 + 1 + 1 + 4
-	for _, atom in ipairs(atom_table) do
-		if atom.rbind then
-			offsets[atom.name] = cursor
-			-- Each loclist body: 2 DW_LLE_start_length + 1 DW_LLE_end_of_list.
-			-- Per DW_LLE_start_length: 1 (opcode) + 4 (addr) + ULEB(length) + length bytes.
-			-- The length bytes are N pieces × (1 reg op + 1 piece op + 1 ULEB4) = 3N bytes for one-piece blocks
-			-- (tape: reg + SLEB + piece+4; GPR: reg + piece+4). 
-			-- For the all-tape form: N × (1 + 1 + 1) = 3N.
-			-- We compute the exact length for the current build.
-			local n_fields = #atom.rbind.fields
-			-- tape_expr: for each field, 1 (breg) + 1..4 (SLEB offset) + 1 (piece) + 1 (ULEB 4)
-			-- For our Binds_CubeTri / Binds_FloorTri, offsets are 0/4/8/12 (4 bytes ≤ 127, 1 SLEB byte).
-			-- So tape_expr = n_fields * 3 bytes.
-			local tape_expr_len = n_fields * 3
-			local tape_entry    = 1 + 4 + 1 + tape_expr_len
-			-- gpr_expr: for each field, 1 (reg op) + 1 (piece) + 1 (ULEB 4) = 3 bytes.
-			local gpr_expr_len = n_fields * 3
-			local gpr_entry    = 1 + 4 + 1 + gpr_expr_len
-			local body_len     = tape_entry + gpr_entry + 1  -- +1 for DW_LLE_end_of_list
-			cursor = cursor + body_len
-		end
-	end
-	return offsets
-end
 
 -- DWARF3/4/5 opcodes / attributes / forms (for the .debug_info synth).
 -- DW_TAG values are stable across DWARF3-5 per the standard's Table 7.1;
@@ -290,9 +166,8 @@ local function resolve_provenance_file_index(path)
 	if path == nil or path == "" then
 		error("[dwarf_injection] resolve_provenance_file_index: empty path")
 	end
-	-- Normalize backslashes → forward slashes (paths arrive with mixed separators from
-	-- the provenance file: forward slashes from Lua's io.lines; backslashes if the
-	-- input ever round-trips through Windows shell expansion).
+	-- Normalize backslashes → forward slashes (paths arrive with mixed separators from the provenance file: forward slashes from Lua's io.lines;
+	-- backslashes if the input ever round-trips through Windows shell expansion).
 	local normalized = path:gsub("\\", "/")
 	-- Take the last path component (the basename).
 	local basename = normalized:match("([^/]+)$") or normalized
@@ -325,40 +200,36 @@ local DW_ATE_unsigned        = 0x07   -- DWARF5 §7.8.1: DW_ATE_unsigned (used f
 local DW_LANG_C99            = 0x0C   -- = 12 (C99); use as a safe "C-like" placeholder
 -- (DW_LANG_Mips_Assembler = 0x8001 was used in the F', but we want this CU to look like a C TU so VSCode's Variables pane treats it as code.)
 
--- R_ alias → MIPS register number.
--- Subset covering every R_ name used in the source atoms.
--- Used to build the piece-chain location for bind_args (which field comes from which reg).
--- The wave-context entries match WAVE_CONTEXT_LOCATIONS above; the rest are the standard MIPS C-ABI register names.
-local R_NAME_TO_INDEX = {
-	["R_0"]  = 0,  ["R_AT"] = 1,  ["R_V0"] = 2,  ["R_V1"] = 3,
-	["R_A0"] = 4,  ["R_A1"] = 5,  ["R_A2"] = 6,  ["R_A3"] = 7,
-	["R_T0"] = 8,  ["R_T1"] = 9,  ["R_T2"] = 10, ["R_T3"] = 11,
-	["R_T4"] = 12, ["R_T5"] = 13, ["R_T6"] = 14, ["R_T7"] = 15,
-	["R_S0"] = 16, ["R_S1"] = 17,
-	["R_T8"] = 24, ["R_T9"] = 25,
-	-- Wave-context aliases (same encoding as R_T4..R_T7, R_T8..R_T9).
-	["R_PrimCursor"] = 15, ["R_FaceCursor"] = 12,
-	["R_VertBase"]   = 13, ["R_OtBase"]     = 14,
-	["R_TapePtr"]    = 24, ["R_AtomJmp"]    = 25,
-}
+-- R_<name> → MIPS GPR lookups go through the merged register_alias_registry
+-- (collected by collect_per_source_registries from ctx.sources[*].scan.register_alias_registry).
+-- Aliases without an `atom_reg` opt-in are absent from the registry, which means they are NOT debug-visible (no fallback GPR).
+-- See the precedence chain in build_inserted_children for the per-alias type resolution.
 
 -- Build the .debug_loclists section for every rbind atom.
--- Returns the section bytes (DWARF5 layout: unit_length(4) + version=5(2) + address_size=4(1)
--- + segment_size=0(1) + offset_entry_count=0(4) + DW_LLE entries; each atom contributes one loclist terminated by DW_LLE_end_of_list).
+-- Returns the section bytes (DWARF5 layout: unit_length(4) + version=5(2) + address_size=4(1) + segment_size=0(1) + offset_entry_count=0(4) + DW_LLE entries;
+-- each atom contributes one loclist terminated by DW_LLE_end_of_list).
 --
 -- Per rbind atom we emit 2 loclist entries (tape → GPR split) using the last field's transition as the boundary.
 -- This is a conservative approximation that always reads the correct GPR value once the first load has retired (load_pc + 8).
 -- A future task can refine to per-field transitions.
+--
+-- `tape_alias` (default: "R_TapePtr") names the wave-runtime pointer register whose value is the tape address.
+-- The GPR integer comes from the merged registry; if the alias is absent, this function fails loud 
+-- (the build was misconfigured; rbind atoms depend on R_TapePtr being in the registry for their piece-chain DW_OP_breg<N> location).
 -- @param atom_table table[]  -- list of atoms with .rbind set
--- @return string  -- section bytes
-local function build_debug_loclists_section(atom_table)
-	local uleb128    = _late.uleb128
-	local elf_dwarf  = _late.elf_dwarf
-	local tape_reg   = R_NAME_TO_INDEX["R_TapePtr"]  -- = 24
-	if not tape_reg then tape_reg = 24 end
+-- @param registries table    -- merged registries from collect_per_source_registries
+-- @return string             -- section bytes
+local function build_debug_loclists_section(atom_table, registries)
+	registries = registries or {}
+	-- R_TapePtr comes from the merged register_alias_registry (only present if the user opted it in via `#define atom_reg` in lottes_tape.h).
+	-- When absent we emit just the section terminator (a single DW_LLE_end_of_list byte);
+	-- the .debug_loclists section MUST not be empty for the linker, and `bind_args` will be emitted with no loclist PC range
+	-- (readelf will display it as having no .debug_loclists entries).
+	local tape_alias_entry = registries.register_alias_registry and registries.register_alias_registry["R_TapePtr"]
+	local tape_reg = tape_alias_entry and tape_alias_entry.code
 	local parts = {}
 	for _, atom in ipairs(atom_table) do
-		if atom.rbind then
+		if atom.rbind and tape_reg then
 			local fields        = atom.rbind.fields or {}
 			local regs          = atom.rbind.regs or {}
 			local n_fields      = #fields
@@ -483,6 +354,49 @@ local function collect_skip_over(ctx)
 	return skip_over
 end
 
+--- Merge the per-source scanner registries (register_alias_registry, type_name_registry, atom_views)
+--- into a single set of tables that downstream consumers can read from without re-iterating ctx.sources.
+---
+--- Every `R_*` lookup and per-atom type override resolution in this file goes through this merged table.
+--- Aliases without `atom_reg` adjacent are absent; the absence is treated as "not debug-visible" (see build_inserted_children for the precedence chain).
+---
+--- When two sources register the same key, the last-writer wins (later sources override earlier).
+--- Today only one source declares wave-context enums, so collisions are absent;
+--- future multi-source declarations would need a name-resolution rule (left as a follow-up).
+--- @param ctx DwarfInjectionCtx
+--- @return table  -- {
+---   register_alias_registry = {[R_Name]    = AliasEntry},
+---   type_name_registry      = {[T]         = TypeEntry},
+--- 	atom_views              = {[atom_name] = AtomViewEntry},
+--- }
+local function collect_per_source_registries(ctx)
+	local merged = {
+		register_alias_registry = {},
+		type_name_registry      = {},
+		atom_views              = {},
+		-- Per-atom atom_ctx declarations: atom_name -> {rbind_atom, ...}
+		-- (populated by scan_source from `atom_ctx(<atom_name>)` sub-calls inside `atom_info`)
+		atom_ctxs               = {},
+		-- Per-phase atom groups: phase_label -> {atoms = {atom_name1, ...}}
+		-- (populated by scan_source from `atom_phase(<label>)` sub-calls inside `atom_info`; cross-source merged)
+		atom_phases             = {},
+		-- Per-source already-resolved atom_infos (used by the precedence chain's ctx/phase steps)
+		atom_infos              = {},
+	}
+	for _, src in ipairs(ctx.sources or {}) do
+		local scan = src.scan
+		if scan then
+			for k, v in pairs(scan.register_alias_registry or {}) do merged.register_alias_registry[k] = v end
+			for k, v in pairs(scan.type_name_registry or {})      do merged.type_name_registry[k]      = v end
+			for k, v in pairs(scan.atom_views or {})              do merged.atom_views[k]              = v end
+			for k, v in pairs(scan.atom_ctxs or {})               do merged.atom_ctxs[k]               = v end
+			for k, v in pairs(scan.atom_phases or {})             do merged.atom_phases[k]             = v end
+			for _, ai in ipairs(scan.atom_infos or {})            do merged.atom_infos[#merged.atom_infos + 1] = ai end
+		end
+	end
+	return merged
+end
+
 --- Render deterministic debugger skip commands. Ordering is stable by category:
 --- exact atom symbols first (lexicographic), then exact component function names (lexicographic full command). 
 --- Atom commands come from the matched nm/source-map table so the emitted name is the actual ELF symbol.
@@ -520,15 +434,8 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 --
 -- Lifted to `elf_dwarf.uleb128` + `elf_dwarf.sleb128` (F'' refactor).
--- See those helpers for the bit-layout documentation + named constants
--- (LEB_CONT_BIT, LEB_DATA_MASK, SLEB_SIGN_BIT).
-
--- Local aliases so the line-program encoder (below) can keep its short names.
-local uleb128 = elf_dwarf.uleb128
--- Late-bind uleb128 + elf_dwarf into the loclist functions' lookup table.
-_late.uleb128   = uleb128
-_late.elf_dwarf = elf_dwarf
-local sleb128 = elf_dwarf.sleb128
+-- See those helpers for the bit-layout documentation + named constants (LEB_CONT_BIT, LEB_DATA_MASK, SLEB_SIGN_BIT).
+-- File-scope `local uleb128` + `local sleb128` aliases live near the module top so they're resolvable by every function below.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- DWARF line-program encoder
@@ -577,7 +484,7 @@ local function build_atom_sequence(atom)
 	local function set_file(file_index)     return string.char(DW_LNS_set_file)     .. uleb128(file_index)  end
 	local function advance_pc(bytes_delta)  return string.char(DW_LNS_advance_pc)   .. uleb128(bytes_delta) end
 	local function advance_line(line_delta) return string.char(DW_LNS_advance_line) .. sleb128(line_delta)  end
-	local function negate_stmt()             return string.char(DW_LNS_negate_stmt) end
+	local function negate_stmt()            return string.char(DW_LNS_negate_stmt) end
 	local function end_sequence()
 		-- size = 1 (just the sub_opcode byte, no payload)
 		return string.char(DW_LNS_extended)
@@ -640,11 +547,11 @@ local function build_atom_sequence(atom)
 	local function emit_row(file_idx, line, want_stmt)
 		if cur_file ~= file_idx then
 			parts[#parts + 1] = set_file(file_idx)
-			cur_file = file_idx
+			cur_file          = file_idx
 		end
 		if cur_line ~= line then
 			parts[#parts + 1] = advance_line(line - cur_line)
-			cur_line = line
+			cur_line          = line
 		end
 		set_statement_state(want_stmt)
 		parts[#parts + 1] = copy_op()
@@ -672,15 +579,19 @@ local function build_atom_sequence(atom)
 	emit_row(entry_1_call_file, entry_1_call_line, atom_is_stmt)
 
 	-- If entry 1 is the first word of a component invocation, emit the component-definition row at the same PC immediately after.
-	-- A selected component suppresses only this definition view;
-	-- a selected atom suppresses both rows and therefore never inverts state for nested component markers.
+	-- The def line is always a statement target unless the inv is explicitly skip-over (atom_dbg_skip_over);
+	-- the whole-atom skip path takes the early-return at line ~497 above so atom_is_stmt is irrelevant here.
+	-- For the body row, prefer `body_lines[1]`  (the actual source line of the first body word in the macro's expansion)
+	-- over `comp_line` (the macro signature line).
+	-- When `body_lines` is absent (the component was not indexed by the scan, e.g. an external macro), 
+	-- fall back to `comp_line` so the line program remains valid.
 	if inv1 and 1 == inv1.start_pos + 1 then
 		local comp_file_idx_1 = resolve_provenance_file_index(inv1.comp_file)
-		emit_row(comp_file_idx_1, inv1.comp_line, atom_is_stmt and not inv1.skip_over)
+		local body_line_1     = (inv1.body_lines and inv1.body_lines[1]) or inv1.comp_line
+		emit_row(comp_file_idx_1, body_line_1, not inv1.skip_over)
 	end
 
-	-- GDB 12 zero-instruction-prologue marker:
-	-- duplicate of the PRIMARY entry-1 emission (the call-site row).
+	-- GDB 12 zero-instruction-prologue marker: duplicate of the PRIMARY entry-1 emission (the call-site row).
 	-- We must explicitly restore the source state to (call_file, call_line) before emitting the duplicate,
 	-- otherwise the duplicate lands at whatever state we ended entry-1 in (the component row, if entry 1 is an invocation start), 
 	---which would attach the marker to the wrong source statement.
@@ -700,13 +611,21 @@ local function build_atom_sequence(atom)
 			-- First word of a component invocation: emit TWO rows at this PC.
 			-- 1) call-site row remains a statement target unless the whole atom is marked.
 			emit_row(call_file_idx, inv.call_line, atom_is_stmt)
-			-- 2) selected component-definition view is non-statement.
-			emit_row(resolve_provenance_file_index(inv.comp_file), inv.comp_line,
-				atom_is_stmt and not inv.skip_over)
+			-- 2) component body row at this PC.
+			-- Prefer `body_lines[1]` over `comp_line` so gdb's `step` lands on the macro's actual body line (not the signature line above `{ ... }`).
+			-- Fallback to `comp_line` when the component isn't indexed.
+			local body_file_idx = resolve_provenance_file_index(inv.comp_file)
+			local body_line_1   = (inv.body_lines and inv.body_lines[1]) or inv.comp_line
+			emit_row(body_file_idx, body_line_1, not inv.skip_over)
 		elseif inv then
-			-- Subsequent word of an invocation: single comp-definition row.
-			emit_row(resolve_provenance_file_index(inv.comp_file), inv.comp_line,
-				atom_is_stmt and not inv.skip_over)
+			-- Subsequent word of an invocation: 1-based offset into body_lines:
+			-- word 1 of the invocation corresponds to body_lines[1], word 2 -> body_lines[2], etc.
+			-- 1-based offset = idx - inv.start_pos (since idx = inv.start_pos + i for the i-th body word).
+			-- When `body_lines` is missing (older emitters / external macros), fall back to comp_line.
+			local body_file_idx = resolve_provenance_file_index(inv.comp_file)
+			local words_into    = idx - inv.start_pos  -- 1-based word position in invocation
+			local body_line_i   = (inv.body_lines and inv.body_lines[words_into]) or inv.comp_line
+			emit_row(body_file_idx, body_line_i, not inv.skip_over)
 		else
 			-- RAW word: single call-site row. emit_row restores is_stmt after a selected component range before exposing this adjacent row.
 			emit_row(call_file_idx, entry.line, atom_is_stmt)
@@ -729,7 +648,17 @@ end
 --- Cross-references nm symbols with source-map.txt entries; sorted by addr.
 --- Also consumes the provenance file to record per-component invocations.
 --- Each atom gains an `invocations` field with one entry per `mac_X(...)` call site:
----   `{comp_name, call_file, call_line, comp_file, comp_line, start_pos, end_pos}`.
+---   `{comp_name, call_file, call_line, comp_file, comp_line, start_pos, end_pos, body_lines}`.
+---
+--- `body_lines` is the per-word source line within the macro body
+--- (lottes_tape.h:N where N is the actual line of this `.word` in the macro expansion).
+--- Without this field, the line program emits `comp_line` for EVERY body word, 
+--- so gdb's `step` from a `mac_X(...)` call lands on the macro signature line and immediately 
+--- returns without traversing the body (since no PC reports a different line).
+---
+--- The data is computed by walking the component's pre-tokenized body in `ctx.sources[i].scan.atoms[j]`
+--- (the MipsAtomComp_/MipsAtomComp_Proc_ declaration).
+--- Atom labels (`atom_label(...)`) emit 0 `.word`s and are ignored (matching `passes/atoms_source_map.lua :: is_marker_token` + `count_marker_rest`).
 --- @param ctx DwarfInjectionCtx
 --- @param skip_over table  -- collect_skip_over(ctx) result
 --- @return table[]  -- list of {name, addr, size_bytes, words, entries, invocations, skip_over?}
@@ -766,6 +695,64 @@ local function build_atom_table(ctx, skip_over)
 		for name, prov_data in pairs(prov) do
 			prov_merged[name] = prov_data
 		end
+	end
+
+	-- Build a per-source component index keyed by the bare component name (e.g. `gte_load_tri_verts`, NOT `ac_gte_load_tri_verts`).
+	-- The bare name matches the provenance row's `comp_name` field (which is `strip_mac_prefix_from_token(tok)` — strips `mac_`, leaves the rest).
+	-- Each entry holds the data we need to walk the component body's tokens in lockstep with their word counts:
+	--   body_off    -- byte offset of the `{` (start of body) in the component's source file.
+	--   body_tokens -- list of {tok, rel} pairs; `rel` is the byte offset within the body.
+	--   line_of     -- closure resolving byte offsets in the component's source file to lines.
+	-- The data is consumed by `compute_invocation_body_lines` per invocation.
+	local component_index = {}
+	for _, src in ipairs(ctx.sources or {}) do
+		if src.scan and src.scan.atoms then
+			local line_of = src.scan.line_of
+			for _, atom in ipairs(src.scan.atoms) do
+				if atom.kind == "comp_bare" or atom.kind == "comp_proc" then
+					-- Prefer `atom.name` (stripped of `ac_` prefix); fall back to `raw_name`
+					-- only if `name` is missing (defensive; scan-source always sets both).
+					local name = atom.name or atom.raw_name
+					if name and not component_index[name] then
+						component_index[name] = {
+							body_off    = atom.body_off,
+							body_tokens = atom.body_tokens,
+							line_of     = line_of,
+							source_path = src.path,
+						}
+					end
+				end
+			end
+		end
+	end
+
+	-- Per-word line lookup for a component body: walk body_tokens, count each token's emitted .words via count_token_words, attribute that count the same source line.
+	-- Atom labels (atom_label/atom_offset) emit 0 .words; their lines are skipped to stay aligned with `passes/atoms_source_map.lua :: count_marker_rest`.
+	-- @param comp_name string  -- the bare name (e.g. `gte_load_tri_verts`)
+	-- @return table            -- list of source lines, 1-based by word position; empty if no data
+	local wc = (ctx.shared and ctx.shared.word_counts) or {}
+	local function compute_invocation_body_lines(comp_name)
+		local comp_idx = component_index[comp_name]
+		if not (comp_idx and comp_idx.body_tokens and comp_idx.line_of) then return {} end
+		local lines = {}
+		for _, bt in ipairs(comp_idx.body_tokens) do
+			local tok   = duffle.trim(bt.tok or "")
+			if tok ~= "" then
+				-- Match atoms_source_map.lua's marker check (no public export; duplicated for independence).
+				local leading = duffle.read_ident(tok, 1)
+				local words
+				if leading == "atom_label" or leading == "atom_offset" then
+					words = 0  -- markers emit 0 .words; do not advance the body line counter.
+				else
+					words = count_token_words(tok, wc)
+				end
+				if words > 0 then
+					local body_line = comp_idx.line_of(comp_idx.body_off + bt.rel)
+					for _ = 1, words do lines[#lines + 1] = body_line end
+				end
+			end
+		end
+		return lines
 	end
 
 	-- Cross-ref; keep atoms that exist in both.
@@ -808,6 +795,10 @@ local function build_atom_table(ctx, skip_over)
 								end_pos    = w.pos,
 								skip_over  = skip_over.components[component_skip_key(w.comp_file, w.comp_name)] ~= nil,
 							}
+							-- Capture the per-word body lines for THIS invocation, indexed by 1-based word position within the invocation. 
+							-- body_lines[1] is the line of the first body word (= the line of the first macro-body token, NOT the comp def line).
+							-- Downstream consumers (the line program emitter) fall back to comp_line when this is empty.
+							cur_inv.body_lines = compute_invocation_body_lines(w.comp_name)
 						end
 					else
 						-- RAW row: flush the current invocation.
@@ -852,64 +843,11 @@ end
 -- The atom body pops one field per `load_word(R_<reg>, R_TapePtr, O_(Binds_X,Field))`
 -- and the order of these load_word calls defines the (reg, field) pairing for the piece-chain DWARF location expression.
 --
--- We use the SourceScan payload populated by `passes/scan_source.lua` (the dep-closed upstream pass). 
+-- We use the SourceScan payload populated by `passes/scan_source.lua` (the dep-closed upstream pass).
 -- That pass walks each source once and populates `src.scan.atom_infos` (the atom_info sub-call parse) and `src.scan.binds` (the Binds_X struct field parse).
--- We re-walk the body for the (reg, field) pairing because the SourceScan pass doesn't preserve which R_<reg> receives which Binds_X.<field>.
 --
--- **Local Binds_X field re-parse**: the source-scan pass's `scan_binds_fields` only recognizes U4 fields;
--- The current source uses pointer types too (`V4_S2* FaceCursor`, `U4* OtBase`).
--- (don't change the shared scan-source pass), we re-parse the Binds_X typedef body locally with a more permissive rule: 
--- U4 field = 4 bytes; any pointer type (`*`-suffixed) = 4 bytes (MIPS32 pointer). Everything else = skip + advance.
-
---- Re-parse a Binds_X typedef body, returning {fields = {{name, offset}, ...}, bytes = N}.
---- Walks one ident at a time. A field declaration looks like:
----     U4 PrimCursor;        | M3_S2* transform;        | V4_S2* FaceCursor;       | U4* OtBase;
----   which tokenizes as: TYPE [WS+ *] WS+ FIELD SEMI
---- Where TYPE is `U4` (recognized), or TYPE + optional `*` (pointer, recognized).
---- Other type tokens (e.g. user-defined `Struct_(Foo)`) are skipped + we move on.
---- @param body string  -- the typedef body (between `{` and `}`)
---- @return table, integer  -- (fields, byte_count)
-local function reparse_binds_body(body)
-	local fields   = {}
-	local byte_off = 0
-	local pos      = 1
-	local body_len = #body
-	while pos <= body_len do
-		pos = duffle.skip_ws_and_cmt(body, pos)
-		if pos > body_len then break end
-		local type_ident, type_end = duffle.read_ident(body, pos)
-		if not type_ident then
-			pos = pos + 1
-		else
-			-- Scan past optional whitespace + `*` + whitespace.
-			-- Recognized field types: U4 (no *) OR any TYPE* (pointer, 4 bytes on MIPS32).
-			local p = duffle.skip_ws_and_cmt(body, type_end)
-			local is_pointer = false
-			local pointer_depth = 0
-			while p <= body_len and body:sub(p, p) == "*" do
-				is_pointer     = true
-				pointer_depth  = pointer_depth + 1
-				p = p + 1
-				p = duffle.skip_ws_and_cmt(body, p)
-			end
-			local field_pos              = duffle.skip_ws_and_cmt(body, p)
-			local field_ident, field_end = duffle.read_ident(body, field_pos)
-			-- A field is "recognized" if type is `U4` (no *) OR if it's a pointer.
-			if field_ident and (type_ident == "U4" or is_pointer) then
-				fields[#fields + 1] = {
-					name          = field_ident,
-					offset        = byte_off,
-					type_name     = type_ident,
-					pointer_depth = pointer_depth,
-				}
-				byte_off = byte_off + 0x04    -- 4 bytes per field on MIPS32
-			end
-			-- Advance past the field ident (or the type ident if no field was found).
-			pos = field_end or (type_end + 1)
-		end
-	end
-	return fields, byte_off
-end
+-- The prior local `reparse_binds_body` fallback (and the 2nd source walk inside `parse_rbind_atoms`) is REMOVED.
+-- parse_rbind_atoms consumes `scan.binds[i].fields` directly, which is populated by the scan-source pass with the typed-field record ({name, type_name, pointer_depth, offset, byte_size}).
 
 --- Find every `load_word(R_<reg>, R_TapePtr, O_(Binds_X, FieldName))` call in the atom body and return ordered (reg_index, field_name) pairs.
 ---
@@ -917,13 +855,19 @@ end
 ---   load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)),
 ---   load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)),
 ---   ...
---- @param body string  -- the atom body text (between { ... })
---- @param binds_name string  -- expected Binds_X name (skip pairs with mismatching binds)
---- @return table[]  -- list of {reg = <MIPS index>, field = <field name>}
-local function parse_body_load_pairs(body, binds_name)
+---
+--- The GPR for each `R_<reg>` is looked up in the merged register_alias_registry; aliases absent from the registry
+--- (no `atom_reg` opt-in) are silently skipped — the resulting rbind record will be incomplete and the atom will fail to bind a usable piece chain.
+--- This is intentional: silently falling back to a hardcoded GPR would mask the missing opt-in.
+--- @param body string       -- the atom body text (between { ... })
+--- @param binds_name string -- expected Binds_X name (skip pairs with mismatching binds)
+--- @param registries table  -- merged registries from collect_per_source_registries
+--- @return table[]          -- list of {reg = <MIPS index>, field = <field name>}
+local function parse_body_load_pairs(body, binds_name, registries)
 	local pairs    = {}
 	local pos      = 1
 	local body_len = #body
+	local reg_index_by_name = (registries and registries.register_alias_registry) or {}
 	while pos <= body_len do
 		-- Find the next "load_word" identifier.
 		pos = duffle.skip_ws_and_cmt(body, pos)
@@ -949,9 +893,10 @@ local function parse_body_load_pairs(body, binds_name)
 					local third_arg = duffle.trim(args[3])
 					-- Match O_(Binds_<X>, FieldName)
 					local b, f = third_arg:match("^O_%((Binds_[%w_]+)%s*,%s*(.-)%s*%)$")
-					if b and b == binds_name and R_NAME_TO_INDEX[reg_name] then
+					local alias_entry = reg_index_by_name[reg_name]
+					if b and b == binds_name and alias_entry and alias_entry.code then
 						pairs[#pairs + 1] = {
-							reg   = R_NAME_TO_INDEX[reg_name],
+							reg   = alias_entry.code,
 							field = duffle.trim(f),
 						}
 					end
@@ -975,52 +920,36 @@ end
 ---
 --- The `regs` list per atom is ordered: each entry is the MIPS reg index that holds the matching field in the source-order pop sequence.
 --- The piece chain uses (DW_OP_regN, DW_OP_piece, ULEB128(field_size)).
+---
+--- The 2nd source walk (the body-text `text:find("typedef Struct_(...)")` re-walk) is removed;
+--- per-source `scan.binds[i].fields` already carries the typed-field record after the scan-source generalization.
 --- @param ctx DwarfInjectionCtx
---- @param atom_table table[]  -- the cross-ref'd atom table from build_atom_table
---- @return table, table  -- (rbind_atoms, rbind_structs)
-local function parse_rbind_atoms(ctx, atom_table)
+--- @param atom_table table[]     -- the cross-ref'd atom table from build_atom_table
+--- @param registries table       -- merged registries from collect_per_source_registries
+--- @return table, table          -- (rbind_atoms, rbind_structs)
+local function parse_rbind_atoms(ctx, atom_table, registries)
+	registries = registries or {}
 	local rbind_atoms   = {}
 	local rbind_structs = {}
 
-	-- Index binds by struct name; RE-PARSE the body locally (local parser handles pointer types too; the scan-source pass's parser only handles U4).
-	local binds_body_by_name = {}
+	-- Index binds by struct name; consume `scan.binds[i].fields` directly (no body-text re-walk).
+	-- The scan-source pass emits each Binds_X's fields as {[type_name, pointer_depth, offset, byte_size, ...]} 
+	-- so this pass can build the rbind_structs entry without re-parsing.
+	local binds_by_name = {}
 	for _, src in ipairs(ctx.sources or {}) do
 		local scan = src.scan
 		if scan then
 			for _, b in ipairs(scan.binds or {}) do
-				binds_body_by_name[b.name] = b  -- need `b.body`; falls through to local reparse below
+				binds_by_name[b.name] = b
 			end
 		end
 	end
 
-	-- Re-parse each Binds_X body via the local reparser (U4 + pointer support).
-	-- The scan-source pass preserves the original body text under each entry's `line` field but doesn't re-emit the body;
-	-- so we re-walk the source file directly for each Binds_X typedef. (Future: ask scan_source to preserve body.)
-	for binds_name in pairs(binds_body_by_name) do
-		local body_text = nil
-		for _, src in ipairs(ctx.sources or {}) do
-			local text = src.text
-			if text then
-				-- Look for `typedef Struct_(<binds_name>)` in the source.
-				-- Plain search (4th arg = true) avoids Lua pattern metachar interpretation.
-				local needle = "typedef Struct_(" .. binds_name .. ")"
-				local s, e   = text:find(needle, 1, true)
-				if s then
-					-- Find the body between `{` and matching `}` after `e`.
-					local brace = text:find("{", e, true)
-					if brace then
-						local inner, _after = duffle.read_braces(text, brace)
-						body_text = inner
-						break
-					end
-				end
-			end
-		end
-		if body_text then
-			local fields, byte_count  = reparse_binds_body(body_text)
+	for binds_name, b in pairs(binds_by_name) do
+		if b.fields and b.bytes then
 			rbind_structs[binds_name] = {
-				bytes      = byte_count,
-				fields     = fields,
+				bytes      = b.bytes,
+				fields     = b.fields,
 				atom_names = {},
 			}
 		end
@@ -1052,11 +981,11 @@ local function parse_rbind_atoms(ctx, atom_table)
 			local struct = rbind_structs[ai.binds]
 			local body   = body_by_atom[atom_name]
 			if struct and body then
-				local pairs = parse_body_load_pairs(body, ai.binds)
+				local pairs = parse_body_load_pairs(body, ai.binds, registries)
 				if #pairs > 0 then
 					rbind_atoms[atom_name] = {
 						binds     = ai.binds,
-						fields    = struct.fields,   -- {name, offset} from local reparse
+						fields    = struct.fields,   -- {name, offset} from scan.binds
 						bytes     = struct.bytes,
 						regs      = pairs,           -- ordered list of {reg, field}
 						info_line = ai.info_line,
@@ -1109,7 +1038,7 @@ local function build_dwarf_line_section(existing, atom_table)
 		if unit_pos + 3 > #existing then return existing end
 		local unit_length =  elf_dwarf.read_u32_le(existing, unit_pos)
 		if    unit_length == elf_dwarf.ELF32.dw_dwarf32_terminator then return existing end
-		local unit_end    = unit_pos + 3 + unit_length
+		local unit_end    =  unit_pos + 3 + unit_length
 		if unit_end > #existing then return existing end
 		last_pos, last_length, last_end = unit_pos, unit_length, unit_end
 		unit_pos                        = unit_end + 1
@@ -1215,7 +1144,6 @@ end
 --- Current section shape (one DWARF32 table):
 ---   unit_length(4), version=5(2), address_size=4(1), segment_size=0(1),
 ---   offset_entry_count=0(4), start_length entries..., end_of_list(1).
----
 --- @param existing string
 --- @param atom_table table
 --- @return string
@@ -1387,9 +1315,9 @@ end
 --- The declaration's attr-spec list ends at the (0, 0) pair.
 ---
 --- Returns nil on truncated or malformed input.
---- @param existing string  -- the .debug_abbrev section bytes
+--- @param existing string      -- the .debug_abbrev section bytes
 --- @param table_start integer  -- 0-based offset of the table's first byte
---- @return integer|nil  -- 0-based offset of the table-terminator byte
+--- @return integer|nil         -- 0-based offset of the table-terminator byte
 local function find_abbrev_table_end(existing, table_start)
 	local pos     = table_start
 	local buf_len = #existing
@@ -1625,10 +1553,27 @@ local function build_new_abbrev()
 end
 
 --- Build the new strings to append to .debug_str. Each string is null-terminated.
---- The CU name + comp_dir + 6 per-atom register names all go into one new blob.
---- @param atom_table table[]  -- list of {name, addr, size_bytes, ...}
---- @return string, table  -- (new_strings_blob, map_of_name_to_offset_in_new_blob)
-local function build_new_strings(atom_table)
+-- The CU name + comp_dir + one entry per RR_<name> debug-visible alias all go into one new blob.
+-- Register names are sourced from the merged registry filtered to MIPS GPR 0..31
+-- (the same filter that build_inserted_children applies for the RR_<name> locals, so .debug_str entries stay in sync with .debug_info).
+-- @param atom_table  table[]   -- list of {name, addr, size_bytes, ...}
+-- @param registries  table    -- merged registries from collect_per_source_registries
+-- @return string, table        -- (new_strings_blob, map_of_name_to_offset_in_new_blob)
+
+--- Strip a leading "R_" prefix from an enum alias name.
+--- The .debug_str/.debug_info consumers display the local without the C-enum prefix (RR_PrimCursor, not RR_R_PrimCursor)
+--- because the C-level identifier `R_PrimCursor` would collide with the enum constant value 15 when the user runs `print R_PrimCursor` in gdb.
+--- @param r_name string  -- e.g. "R_PrimCursor"
+--- @return string        -- "PrimCursor" (or the input unchanged if it does not start with "R_")
+local function strip_r_prefix(r_name)
+	if #r_name >= 2 and r_name:byte(1) == 0x52 and r_name:byte(2) == 0x5F then  -- "R_"
+		return r_name:sub(3)
+	end
+	return r_name
+end
+
+local function build_new_strings(atom_table, registries)
+	registries = registries or {}
 	-- The CU name + comp_dir are the first two strings (offsets 0 and N1).
 	-- Then each unique atom name + each register name follows.
 	local strings = {}
@@ -1653,11 +1598,16 @@ local function build_new_strings(atom_table)
 		end
 	end
 
-	-- Register names (one per unique wave-context reg)
-	for _, loc in ipairs(WAVE_CONTEXT_LOCATIONS) do
-		if not map[loc.name] then
-			map[loc.name]         = #table.concat(strings)
-			strings[#strings + 1] = loc.name .. "\0"
+	-- Register names (one per unique debug-visible R_Name alias from the merged registry,
+	-- filtered to MIPS GPR 0..31 — the same filter that build_inserted_children applies
+	-- for the RR_<name> locals, so .debug_str entries stay in sync with .debug_info).
+	for r_name, alias in pairs(registries.register_alias_registry or {}) do
+		if alias.code and alias.code >= 0 and alias.code <= 31 then
+			local rr_name = "RR_" .. strip_r_prefix(r_name)
+			if not map[rr_name] then
+				map[rr_name]         = #table.concat(strings)
+				strings[#strings + 1] = rr_name .. "\0"
+			end
 		end
 	end
 
@@ -1708,15 +1658,37 @@ end
 --- Our inserted DIEs live in the main CU, so every ref4 = (target section offset) - main_cu_offset.
 --- Per-die section offsets are tracked via the running `next_offset` cursor (= section offset of the NEXT byte to emit).
 ---
---- @param main_cu_offset integer  -- 0-based section offset of the main CU's unit_length field
+--- @param main_cu_offset integer    -- 0-based section offset of the main CU's unit_length field
 --- @param main_cu_end_excl integer  -- 0-based section offset of the first byte AFTER the main CU
---- @param atom_table table[]  -- atoms (with atom.rbind set if rbind; atom.invocations set if mac_X(...) calls)
---- @param rbind_structs table  -- {[binds_name] = {bytes, fields, atom_names}}
---- @param loclists_offsets table  -- {[atom_name] = section-relative offset into the new .debug_loclists}
+--- @param atom_table table[]        -- atoms (with atom.rbind set if rbind; atom.invocations set if mac_X(...) calls)
+--- @param rbind_structs table       -- {[binds_name] = {bytes, fields, atom_names}}
+--- @param loclists_offsets table    -- {[atom_name] = section-relative offset into the new .debug_loclists}
+--- @param registries table          -- merged registries from collect_per_source_registries
 --- @return string  -- bytes to splice into the main CU just before its root terminator
-local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_table, rbind_structs, loclists_offsets)
-	rbind_structs = rbind_structs or {}
+local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_table, rbind_structs, loclists_offsets, registries)
+	rbind_structs    = rbind_structs    or {}
 	loclists_offsets = loclists_offsets or {}
+	registries       = registries       or {}
+
+	-- by_alias: the merged register_alias_registry filtered to aliases whose `code` is a valid MIPS GPR 0..31.
+	-- Aliases absent from the merged registry are not debug-visible and are skipped entirely (no fallback GPR).
+	local by_alias = {}
+	for r_name, alias in pairs(registries.register_alias_registry or {}) do
+		if alias.code and alias.code >= 0 and alias.code <= 31 then
+			by_alias[r_name] = alias
+		end
+	end
+
+	-- Build a name->atom lookup for fast rbind_atom resolution during the per-atom phase/ctx propagation.
+	-- Cheap (O(atom_table)) and built once.
+	local function build_atom_name_index(atoms)
+		local m = {}
+		for _, a in ipairs(atoms or {}) do
+			if a and a.name then m[a.name] = a end
+		end
+		return m
+	end
+	local atom_by_name_global = build_atom_name_index(atom_table)
 
 	-- We insert IMMEDIATELY BEFORE the main CU's root children-terminator (the last byte of the main CU).
 	-- The first emitted byte lives at section offset (main_cu_end_excl - 1).
@@ -1779,65 +1751,170 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	-- The displayed type name is the type_name (e.g. "V4_S2") because we use DW_FORM_string on the field type. 
 	-- gdb walks the chain and displays the name.
 	--
-	-- For each (type_name, depth), emit (depth) base_type DIEs forming a chain.
-	-- The outermost base_type's name is the type_name; the inner ones are named "ptr_<type>_<d>".
-	-- gdb shows the outermost name as the type.
+	-- For each (type_name, depth), emit a real structure_type with proper member layout,
+	-- then a single DW_TAG_pointer_type pointing at the structure_type. gdb's
+	-- `print *<var>` then expands the struct and lists its members (x, y, z, w for V4_S2; etc.).
 	--
-	-- (Full typedef + pointer_type chain with proper DW_TAG_pointer_type + byte_size=4 is a follow-up;
-	-- for now we use base_type entries which gdb can resolve.)
-	local type_chain_offsets = {}  -- { [type_name .. "|" .. depth] = section_offset (the OUTERMOST entry, the one referenced as the variable's type) }
-	-- For pointer_depth = 1, the chain is: [base_type "V4_S2" 4 bytes] [pointer_type → V4_S2].
-	-- For pointer_depth = 2, the chain is: [base_type "ptr_V4_S2_1"] [base_type "V4_S2"] [pointer_type → ptr_V4_S2_1].
-	-- The OUTERMOST pointer_type is what gdb shows as "<type> *" and is what the Locals panel uses to render the dereference affordance.
-	-- Build the chain bottom-up: emit the innermost base_type first, then each next-outer pointer_type, recording the offset of each.
-	-- The outermost is the last one emitted; type_chain_offsets stores its offset as the variable's DW_AT_type.
+	-- Hardcoded member-info table for the 6 typed views the prototype uses (V2_S2 / V3_S2 / V4_S2 / V2_S4 / V3_S4 / V4_S4).
+	-- Each row is {byte_size, members}, where each member is {name, offset, byte_size, type_name}.
+	-- `type_name` is the base type name from `type_name_registry`; "S2" / "S4" need a signed base_type emit too.
+	--
+	-- The table is small + explicit (no introspection of the struct types from production source)
+	-- because the prototype principle treats the typed-view struct layout as data, not derived state.
+	local STRUCT_MEMBER_TABLE = {
+		-- 2-element signed short vector (rare; placeholder for future use).
+		V2_S2 = { byte_size = 4, members = {
+			{ name = "x", offset = 0, byte_size = 2 },
+			{ name = "y", offset = 2, byte_size = 2 },
+		}},
+		-- 4-element signed short vector (the dominant face-cursor type).
+		V4_S2 = { byte_size = 8, members = {
+			{ name = "x", offset = 0, byte_size = 2 },
+			{ name = "y", offset = 2, byte_size = 2 },
+			{ name = "z", offset = 4, byte_size = 2 },
+			{ name = "w", offset = 6, byte_size = 2 },
+		}},
+		-- 3-element signed short vector (the floor face-cursor type; includes explicit pad byte to match math.h's S2 pad member).
+		V3_S2 = { byte_size = 8, members = {
+			{ name = "x",   offset = 0, byte_size = 2 },
+			{ name = "y",   offset = 2, byte_size = 2 },
+			{ name = "z",   offset = 4, byte_size = 2 },
+			{ name = "pad", offset = 6, byte_size = 2 },
+		}},
+		-- 2-element signed int vector.
+		V2_S4 = { byte_size = 8, members = {
+			{ name = "x", offset = 0, byte_size = 4 },
+			{ name = "y", offset = 4, byte_size = 4 },
+		}},
+		-- 3-element signed int vector.
+		V3_S4 = { byte_size = 16, members = {
+			{ name = "x",   offset = 0,  byte_size = 4 },
+			{ name = "y",   offset = 4,  byte_size = 4 },
+			{ name = "z",   offset = 8,  byte_size = 4 },
+			{ name = "pad", offset = 12, byte_size = 4 },
+		}},
+		-- 4-element signed int vector.
+		V4_S4 = { byte_size = 16, members = {
+			{ name = "x", offset = 0,  byte_size = 4 },
+			{ name = "y", offset = 4,  byte_size = 4 },
+			{ name = "z", offset = 8,  byte_size = 4 },
+			{ name = "w", offset = 12, byte_size = 4 },
+		}},
+	}
+	local S2_TYPE_BYTE_SIZE = 2  -- S2 = signed 16-bit (see dsl.h)
+	local S4_TYPE_BYTE_SIZE = 4  -- S4 = signed 32-bit (see dsl.h)
+
+	-- Pre-emit the signed base types (S2, S4) once if any typed view's member needs them.
+	-- We emit per-typed-view lazily below; build a member-base-type offset cache (idempotent).
+	local member_base_type_offsets = {}
+	local function ensure_member_base_type(tn, byte_size, encoding)
+		local key = tn .. "|" .. byte_size .. "|" .. encoding
+		if member_base_type_offsets[key] then return member_base_type_offsets[key] end
+		local off = next_offset
+		emit(uleb128(ABBREV_BASE_TYPE))
+		emit(tn .. "\0")
+		emit(string.char(byte_size))
+		emit(string.char(encoding))
+		member_base_type_offsets[key] = off
+		return off
+	end
+	-- Always emit S2 + S4 (the v*_S2 / v*_S4 family base types) once before any typed-view,
+	-- even if no atom currently declares a v*_S2 field, so future atoms pick them up without rewiring.
+	ensure_member_base_type("S2", S2_TYPE_BYTE_SIZE, 5)  -- DW_ATE_signed = 5
+	ensure_member_base_type("S4", S4_TYPE_BYTE_SIZE, 5)
+
+	local type_chain_offsets = {}
 	for _, tn in ipairs(sorted_typed_types) do
 		if tn ~= "U4" then
 			local depth = used_typed_views[tn]
-			-- First, emit the chain of base_types from innermost (d=1) to d=depth-1.
-			-- The innermost (d=1) carries the user's type_name (V4_S2); outer levels are placeholders named "ptr_<type>_<d>".
-			-- Each base_type is 4 bytes unsigned (a stand-in for the actual type).
-			local innermost_offset
-			local base_offsets = {}  -- base_offsets[d] = offset of the d-th level base_type (1-indexed)
-			for d = 1, depth do
-				local off = next_offset
-				base_offsets[d] = off
+			local type_info = STRUCT_MEMBER_TABLE[tn]
+			if not type_info then
+				-- Unknown typed view — fall back to a generic base_type to keep the wire valid
+				-- (gdb will render as the typename but `print *ptr` will only see the first 4 bytes).
+				-- This is the pre-Track-A behavior; preserved here for forward compatibility with future typed views not in our table.
+				local innermost_offset = next_offset
 				emit(uleb128(ABBREV_BASE_TYPE))
-				if d == 1 then
-					emit(tn .. "\0")  -- innermost: the user's type name
-				else
-					emit("ptr_" .. tn .. "_" .. (d-1) .. "\0")  -- inner: pointer-depth label
-				end
-				emit(string.char(4))                   -- byte_size = 4
+				emit(tn .. "\0")
+				emit(string.char(4))                   -- byte_size = 4 (legacy stand-in)
 				emit(string.char(DW_ATE_unsigned))     -- encoding = unsigned
-				innermost_offset = off
-			end
-			-- Now emit a DW_TAG_pointer_type (abbrev 9 in the duplicate) ON TOP of the chain.
-			-- The pointer_type's DW_AT_type ref4 points at the base_type it dereferences.
-			-- The outermost pointer_type is what the variable's DW_AT_type uses.
-			local outermost_offset = next_offset
-			emit(uleb128(9))  -- DW_TAG_pointer_type abbrev code (abbrev 9 in duplicate)
-			-- Abbrev 9's attributes: DW_AT_byte_size (implicit_const 4; no DIE bytes), DW_AT_type (ref4 → target). 
-			-- So the DIE bytes are just the 4-byte ref4 pointing at the base_type it dereferences.
-			-- The variable uses the OUTERMOST pointer_type. 
-			-- Inner pointer levels (for depth > 1) would chain pointer_type → pointer_type → ... → base_type. For the user's case (depth ≤ 1), one pointer_type suffices.
-			-- For depth > 1, we'd need intermediate pointer_type DIEs — emit depth-1 of them, each pointing at the next.
-			if depth == 1 then
-				-- Single pointer: target = innermost base_type
+				local outermost_offset = next_offset
+				emit(uleb128(9))  -- DW_TAG_pointer_type
 				emit(elf_dwarf.write_u32_le(ref4_of(innermost_offset)))
+				type_chain_offsets[tn .. "|" .. depth] = outermost_offset
 			else
-				-- depth > 1: emit (depth - 1) pointer_types, each pointing at the next.
-				-- The last pointer_type (outermost) becomes the variable's DW_AT_type.
-				-- The innermost pointer_type points at the innermost base_type.
-				-- For simplicity, emit depth pointer_types total, each pointing at the previous base_type or pointer_type. 
-				-- The outermost is what we return.
-				-- Actually, for the current build the only typed fields are at depth 1 (V4_S2* / V3_S2*). depth > 1 is not exercised. 
-				-- We can handle depth == 1 inline and defer depth > 1 to a future task.
-				error("typed-view: pointer_depth > 1 is not yet supported in this emission path")
+				-- Emit a proper structure_type DIE for this typed view.
+				local struct_offset = next_offset
+				emit(uleb128(ABBREV_STRUCT_TYPE))
+				emit(tn .. "\0")                                  -- DW_AT_name (struct_type has children, no name in abbrev 103 [DW_FORM_string only])
+				emit(uleb128(type_info.byte_size))                -- DW_AT_byte_size (DW_FORM_udata)
+				-- For each member, emit ABBREV_MEMBER (name + data_member_location + type ref4).
+				for _, m in ipairs(type_info.members) do
+					emit(uleb128(ABBREV_MEMBER))
+					emit(m.name .. "\0")
+					emit(uleb128(m.offset))
+					-- The member's type is S2 (for v*_S2 family) or S4 (for v*_S4 family), based on the member's byte_size.
+					local member_type_name, member_type_encoding
+					if m.byte_size == 2 then
+						member_type_name = "S2"
+						member_type_encoding = 5  -- DW_ATE_signed = 5
+					elseif m.byte_size == 4 then
+						member_type_name = "S4"
+						member_type_encoding = 5  -- DW_ATE_signed = 5
+					else
+						-- Unexpected byte_size; fall back to U4 (unsigned int) since U4 base type is already emitted
+						member_type_name = "U4"
+						member_type_encoding = 7  -- DW_ATE_unsigned = 7
+					end
+					local member_base_off = ensure_member_base_type(member_type_name, m.byte_size, member_type_encoding)
+					emit(elf_dwarf.write_u32_le(ref4_of(member_base_off)))  -- DW_AT_type ref4 → base_type
+				end
+				emit(string.char(0x00))                            -- end of structure_type's children
+				-- Emit a single DW_TAG_pointer_type (abbrev 9) pointing at the structure_type.
+				-- For depth > 1, we'd chain pointer_type → pointer_type → ... → structure_type; not exercised.
+				if depth == 1 then
+					local outermost_offset = next_offset
+					emit(uleb128(9))  -- DW_TAG_pointer_type
+					emit(elf_dwarf.write_u32_le(ref4_of(struct_offset)))  -- DW_AT_type → structure_type
+					type_chain_offsets[tn .. "|" .. depth] = outermost_offset
+				else
+					error("typed-view: pointer_depth > 1 is not yet supported in this emission path")
+				end
 			end
-			type_chain_offsets[tn .. "|" .. depth] = outermost_offset
 		end
 	end
+
+	-- 1b) Emit the void* fallback chain (used by step (f) of the per-RR_<R_Name> precedence chain).
+	-- One DW_TAG_base_type DIE named "void" + one DW_TAG_pointer_type pointing at it.
+	-- Unannotated RR_<R_X> locals reference the outermost pointer_type; gdb displays the value as `(void *) 0x...` 
+	-- (hex) per the prototype principle rather than `unsigned int`.
+	-- The void base_type is emitted BEFORE any other typed chain so its ref4 pointer remains stable.
+	-- Follow the SAME pattern as the typed-views chain above: capture the offset BEFORE the uleb tag
+	-- (this is the ref4 target), emit the DIE bytes, then emit the pointer_type pointing at the offset.
+	local void_chain_offset = next_offset
+	emit(uleb128(ABBREV_BASE_TYPE))
+	emit("void\0")                              -- DW_FORM_string (DW_AT_name)
+	emit(string.char(1))                        -- DW_FORM_data1  (DW_AT_byte_size = 1; DWARF's "void" base_type)
+	emit(string.char(DW_ATE_unsigned))          -- DW_FORM_data1  (DW_AT_encoding = unsigned; DWARF doesn't define a void encoding but gdb reads the name "void" off the DIE and renders it correctly as `(void *)` when wrapped in a pointer_type)
+	emit(uleb128(9))                            -- DW_TAG_pointer_type (abbrev 9; DW_AT_type = ref4 to its target)
+	emit(elf_dwarf.write_u32_le(ref4_of(void_chain_offset)))  -- 4-byte ref4: points at the void base_type's tag byte
+	-- type_chain_offsets["void|1"] is what step (f) of the per-RR_<R_Name> chain looks up.
+	type_chain_offsets["void|1"] = void_chain_offset  -- both the base_type offset and the pointer_type are emitted consecutively; the OUTERMOST is the pointer_type. The variable's DW_AT_type must reference the pointer_type, not the base_type. Patch below.
+	-- Capture the pointer_type's offset (the last-thing-emitted DIE start) and overwrite the lookup.
+	-- The pointer_type was emitted as: uleb(9) (1 byte) + 4-byte ref4 = 5 bytes. Its tag byte is at void_chain_offset + 8 (the base_type's 8 bytes: 1 tag + 5 name + 1 byte_size + 1 encoding).
+	local ptr_void_offset = void_chain_offset + 8
+	type_chain_offsets["void|1"] = ptr_void_offset
+
+	-- 1c) Emit the U4 * pointer chain (step (e) fallback for enum-site `atom_type(U4 *)`).
+	-- The chain is just one DW_TAG_pointer_type pointing at the pre-emitted "unsigned int" base_type at `base_type_section_offset`.
+	-- This is intentionally separate from the per-type typed-views chain (which emits V4_S2* / V3_S2* etc.)
+	-- because U4 is the C-side typedef alias for `unsigned int`, not a fresh struct;
+	-- reusing the pre-emitted base type keeps the wire consistent.
+	-- Once this chain is registered as `type_chain_offsets["U4|1"]`, step (e) of the per-RR_<R_Name> precedence chain will resolve `atom_type(U4 *)`
+	-- declarations on aliases like `R_PrimCursor` and `R_OtBase` to `U4 *` (gdb renders as `(unsigned int *)` with the value displayed in hex).
+	emit(uleb128(9))                                                 -- DW_TAG_pointer_type (abbrev 9; DW_AT_type = ref4 to its target)
+	emit(elf_dwarf.write_u32_le(ref4_of(base_type_section_offset)))  -- 4-byte ref4 → "unsigned int" base_type
+	local u4_chain_offset = next_offset - 5                          -- 1 (uleb tag) + 4 (ref4) = 5 bytes; capture the pointer_type's start offset
+	type_chain_offsets["U4|1"] = u4_chain_offset
 
 	-- 2) Emit one DW_TAG_structure_type per unique Binds_X.
 	local struct_section_offsets = {}
@@ -1888,9 +1965,9 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		local def = component_defs[comp_name]
 		abstract_offsets[comp_name] = next_offset
 		emit(uleb128(ABBREV_ABSTRACT_SUBPROGRAM))
-		emit("mac_" .. comp_name .. "\0")     -- DW_FORM_string (DW_AT_name)
-		emit(string.char(DW_INL_inlined))    -- DW_FORM_data1 (DW_AT_inline)
-		emit(string.char(0x01))               -- DW_FORM_data1 (DW_AT_external=1)
+		emit("mac_" .. comp_name .. "\0") -- DW_FORM_string (DW_AT_name)
+		emit(string.char(DW_INL_inlined)) -- DW_FORM_data1 (DW_AT_inline)
+		emit(string.char(0x01))           -- DW_FORM_data1 (DW_AT_external=1)
 		-- decl_file + decl_line resolve the abstract origin back to its definition site even when no inlined_subroutine instance maps to it.
 		emit(uleb128(resolve_provenance_file_index(def.def_file)))  -- DW_FORM_udata (DW_AT_decl_file)
 		emit(uleb128(def.def_line))                                 -- DW_FORM_udata (DW_AT_decl_line)
@@ -1902,19 +1979,25 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	--    gdb's symbol resolution picks our subprogram (it has low_pc/high_pc + children) over the gcc global for function-context lookups.
 	for _, atom in ipairs(atom_table) do
 		emit(uleb128(ABBREV_SUBPROGRAM))
-		emit(atom.name .. "\0")                  -- DW_FORM_string (DW_AT_name)
+		emit(atom.name .. "\0") -- DW_FORM_string (DW_AT_name)
 		emit(elf_dwarf.write_u32_le(atom.addr))
 		emit(elf_dwarf.write_u32_le(atom.addr + atom.size_bytes))
-		emit(atom.name .. "\0")                  -- DW_FORM_string (DW_AT_linkage_name; same as DW_AT_name for non-mangled C)
+		emit(atom.name .. "\0") -- DW_FORM_string (DW_AT_linkage_name; same as DW_AT_name for non-mangled C)
 
-		-- Per wave-context reg: DW_TAG_variable.
-		--   1. explicit per-atom register type annotation (atom_reg_types)
-		--   2. atom_view(Binds_X) field type (from the rbind regs → fields map)
-		--   3. semantic default (R_TapePtr → U4*, R_AtomJmp → MipsCode*,
-		--      cursor/base aliases → void*)
-		--   4. void* (unannotated)
-		-- For rbind atoms the precedence comes from the rbind regs/fields
-		-- (the load_word calls already mapped each R_<reg> to a Binds_X.<field> with a known type_name + pointer_depth).
+	-- Per debug-visible R_ alias (filtered to GPR 0..31 in `by_alias`): DW_TAG_variable.
+	-- Precedence chain (per atom, per RR_<R_Name>):
+	--   (a) per-atom callsite atom_type(R_X, <T>):  atom_views reg_type_overrides[atom_name][R_Name] — most specific; user explicit override for THIS atom only
+	--   (b) atom_ctx(<rbind_atom>):                 propagate THIS atom's declared rbind atom's Binds_* field types
+	--   (c) self-binding:                           atom.rbind.fields / regs (only when this atom IS the rbind atom for its Binds_*)
+	--   (d) atom_phase(<label>)-grouped:            first atom in source-order that shares this label AND has its own atom.rbind provides the Binds_* field types
+	--   (e) enum-site atom_type(<T>) default:       register_alias_registry[R_Name].default_type  (per-alias fallback declared in lottes_tape.h)
+	--   (f) void* fallback:                         the void_chain_offset built in section 1b; gdb renders `(void *) 0x...` (hex)
+	-- If (a)..(e) miss AND no alias registry entry exists for this R_Name, the emission is skipped for that alias entirely.
+		local atom_view_ctx_fields   = nil  -- populated by step (b); map field_name -> field entry
+		local reg_to_field_ctx       = nil  -- populated by step (b); map GPR index -> field name
+		local atom_view_phase_fields = nil  -- populated by step (d); map field_name -> field entry
+		local reg_to_field_phase     = nil  -- populated by step (d); map GPR index -> field name
+		-- atom-name -> atom lookup is precomputed once as atom_by_name_global.
 		local field_type_by_name = {}
 		if atom.rbind and atom.rbind.fields then
 			for _, f in ipairs(atom.rbind.fields) do
@@ -1929,31 +2012,96 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 				reg_to_field[pair.reg] = pair.field
 			end
 		end
-		-- Semantic defaults per register.
-		local SEMANTIC_DEFAULTS = {
-			[24] = { type_name = "U4", pointer_depth = 1 },  -- R_TapePtr (R_T8)
-			[25] = { type_name = "MipsCode", pointer_depth = 1 },  -- R_AtomJmp (R_T9)
-		}
-
-		for _, loc in ipairs(WAVE_CONTEXT_LOCATIONS) do
-			emit(uleb128(ABBREV_VARIABLE))
-			emit(loc.name .. "\0")         -- DW_FORM_string (DW_AT_name)
-			emit(reg_exprloc(loc.reg))     -- DW_FORM_exprloc (DW_OP_regN)
-			-- Resolve the type for this register.
-			local type_offset = base_type_section_offset  -- default: U4
-			local field_name = reg_to_field[loc.reg]
-			if field_name then
-				local f = field_type_by_name[field_name]
-				if    f and f.pointer_depth and f.pointer_depth > 0 then
-					local chain_offset = type_chain_offsets[f.type_name .. "|" .. f.pointer_depth]
-					if chain_offset then type_offset = chain_offset end
+		local atom_view = (registries.atom_views or {})[atom.name]
+		-- Build the atom-name lookup table once (cheap; O(atom_table)) so step (b) and step (d) can resolve rbind_atom names.
+		local atom_by_name = atom_by_name or (function() local m = {}; for _, a in ipairs(atom_table) do if a.name then m[a.name] = a end end; return m end)()
+		-- step (b) inputs: this atom's `atom_ctx(<rbind_atom>)` (resolved from the registries' atom_ctxs)
+		local this_ctx = registries.atom_ctxs and registries.atom_ctxs[atom.name]
+		if this_ctx and this_ctx.rbind_atom then
+			local rbind = atom_by_name_global[this_ctx.rbind_atom]
+			if rbind and rbind.rbind and rbind.rbind.fields then
+				atom_view_ctx_fields = {}
+				for _, f in ipairs(rbind.rbind.fields) do atom_view_ctx_fields[f.name] = f end
+				if rbind.rbind.regs then
+					reg_to_field_ctx = {}
+					for _, pair in ipairs(rbind.rbind.regs) do reg_to_field_ctx[pair.reg] = pair.field end
 				end
+			end
+		end
+		-- step (d) inputs: this atom's `atom_phase(<label>)`;
+		-- find the FIRST atom in the same phase group that has its own rbind and is in source-order (i.e., declared before this atom in any source file).
+		-- Find the per-atom_info entry that has phase == this atom's name.
+		local my_phase_label = nil
+		for _, ai in ipairs(registries.atom_infos or {}) do
+			if ai.atom_name == atom.name and ai.phase then
+				my_phase_label = ai.phase
+				break
+			end
+		end
+		if my_phase_label then
+			local group = (registries.atom_phases or {})[my_phase_label]
+			if group and group.atoms then
+				for _, group_atom_name in ipairs(group.atoms) do
+					if group_atom_name ~= atom.name then
+						local cand = atom_by_name_global[group_atom_name]
+						if cand and cand.rbind and cand.rbind.fields then
+							atom_view_phase_fields = {}
+							for _, f in ipairs(cand.rbind.fields) do atom_view_phase_fields[f.name] = f end
+							if cand.rbind.regs then
+								reg_to_field_phase = {}
+								for _, pair in ipairs(cand.rbind.regs) do reg_to_field_phase[pair.reg] = pair.field end
+							end
+							break
+						end
+					end
+				end
+			end
+		end
+
+		for r_name, alias in pairs(by_alias) do
+			local rr_name = "RR_" .. strip_r_prefix(r_name)
+			local alias_code = alias.code
+			emit(uleb128(ABBREV_VARIABLE))
+			emit(rr_name .. "\0")         -- DW_FORM_string (DW_AT_name)
+			emit(reg_exprloc(alias_code)) -- DW_FORM_exprloc (DW_OP_regN from registry code)
+			-- Resolve the type for this register via the 6-step precedence chain.
+			local type_offset = type_chain_offsets["void|1"]  -- step (f) fallback: void* (renders as hex)
+
+			-- step (a): per-atom callsite atom_type(R_X, <T>)
+			local override = atom_view and atom_view.reg_type_overrides and atom_view.reg_type_overrides[r_name]
+			if override and override.pointer_depth and override.pointer_depth > 0 then
+				local chain_offset = type_chain_offsets[override.type_name .. "|" .. override.pointer_depth]
+				if chain_offset then type_offset = chain_offset end
 			else
-				-- Not loaded from Binds_*: use the semantic default.
-				local def = SEMANTIC_DEFAULTS[loc.reg]
-				if def and def.pointer_depth and def.pointer_depth > 0 then
-					local chain_offset = type_chain_offsets[def.type_name .. "|" .. def.pointer_depth]
+				-- step (b): atom_ctx(<rbind_atom>) propagation
+				local ctx_field_name = reg_to_field_ctx and reg_to_field_ctx[alias_code]
+				local ctx_f          = ctx_field_name and atom_view_ctx_fields and atom_view_ctx_fields[ctx_field_name]
+				if ctx_f and ctx_f.pointer_depth and ctx_f.pointer_depth > 0 then
+					local chain_offset = type_chain_offsets[ctx_f.type_name .. "|" .. ctx_f.pointer_depth]
 					if chain_offset then type_offset = chain_offset end
+				else
+					-- step (c): self-bind (this atom is the rbind atom)
+					local field_name = reg_to_field[alias_code]
+					local f = field_name and field_type_by_name[field_name]
+					if f and f.pointer_depth and f.pointer_depth > 0 then
+						local chain_offset = type_chain_offsets[f.type_name .. "|" .. f.pointer_depth]
+						if chain_offset then type_offset = chain_offset end
+					else
+						-- step (d): atom_phase(<label>)-grouped propagation
+						local phase_field_name = reg_to_field_phase and reg_to_field_phase[alias_code]
+						local phase_f          = phase_field_name and atom_view_phase_fields and atom_view_phase_fields[phase_field_name]
+						if phase_f and phase_f.pointer_depth and phase_f.pointer_depth > 0 then
+							local chain_offset = type_chain_offsets[phase_f.type_name .. "|" .. phase_f.pointer_depth]
+							if chain_offset then type_offset = chain_offset end
+						else
+							-- step (e): enum-site atom_type(<T>) default on the registry entry
+							if alias.default_type and alias.default_depth and alias.default_depth > 0 then
+								local chain_offset = type_chain_offsets[alias.default_type .. "|" .. alias.default_depth]
+								if chain_offset then type_offset = chain_offset end
+							end
+							-- step (f): void* fallback (set as type_offset initial value above).
+						end
+					end
 				end
 			end
 			emit(elf_dwarf.write_u32_le(ref4_of(type_offset)))  -- DW_FORM_ref4 → type
@@ -2025,8 +2173,8 @@ local function build_debug_abbrev_section(existing, main_abbrev_offset)
 	if not table_end then return existing, nil end
 
 	-- Duplicate the main table declarations EXCLUDING its terminating 0 byte.
-	-- (1-indexed sub: existing:sub(main_abbrev_offset + 1, table_end) reads bytes
-	--  from 0-based [main_abbrev_offset .. table_end - 1].)
+	-- (1-indexed sub: existing:sub(main_abbrev_offset + 1, table_end)
+	-- reads bytes from 0-based [main_abbrev_offset .. table_end - 1].)
 	local main_table_dup = existing:sub(main_abbrev_offset + 1, table_end)
 	local new_abbrevs    = build_new_abbrev()  -- includes its own terminating 0
 
@@ -2038,9 +2186,10 @@ end
 --- Build the new .debug_str: existing strings + new strings appended.
 --- @param existing string  -- existing .debug_str bytes (verbatim)
 --- @param atom_table table[]
+--- @param registries table  -- merged registries from collect_per_source_registries
 --- @return string, integer, table  -- (new_str_bytes, new_strings_offset, string_map)
-local function build_debug_str_section(existing, atom_table)
-	local new_strings, string_map = build_new_strings(atom_table)
+local function build_debug_str_section(existing, atom_table, registries)
+	local new_strings, string_map = build_new_strings(atom_table, registries)
 	return existing .. new_strings, #existing, string_map
 end
 
@@ -2064,10 +2213,11 @@ end
 --- @param atom_table table[]
 --- @param rbind_structs table     -- {[binds_name] = {bytes, fields, atom_names}}
 --- @param loclists_offsets table  -- {[atom_name] = section-relative offset}
+--- @param registries table        -- merged registries from collect_per_source_registries
 --- @return string  -- the rebuilt .debug_info bytes
-local function build_debug_info_section(existing, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets)
+local function build_debug_info_section(existing, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets, registries)
 	-- 1) Build the inserted children bytes (just before the main CU's root terminator).
-	local inserted     = build_inserted_children(main_cu_start, main_cu_end_excl, atom_table, rbind_structs, loclists_offsets)
+	local inserted     = build_inserted_children(main_cu_start, main_cu_end_excl, atom_table, rbind_structs, loclists_offsets, registries)
 	local inserted_len = #inserted
 
 	-- 2) Patch main CU's unit_length += inserted_len.
@@ -2115,7 +2265,8 @@ local SECTION_BUILDERS = {
 	debug_info     = build_debug_info_section,
 	debug_str      = build_debug_str_section,
 	debug_loc      = function() return build_debug_loc_section() end,
-	debug_loclists = function() return build_debug_loclists_section({}) end,  -- placeholder; replaced per-run
+	-- debug_loclists is fed directly in M.run (it needs the merged registries for the R_TapePtr GPR lookup;
+	-- the SECTION_BUILDERS table cannot carry that context, so the dispatch is inlined in the per-run writers loop).
 }
 
 -- Per-section output path resolver (mirrors SECTION_BUILDERS).
@@ -2163,8 +2314,10 @@ function M.run(ctx)
 	elf_path = duffle.to_absolute_path(elf_path)
 
 	-- Read the existing DWARF sections directly (no subprocess; lfs + io.open + manual ELF32 section-header walk).
-	-- We need ALL 7 sections since the F' group (.debug_line, .debug_aranges, .debug_rnglists)
-	-- extends the existing sections + the G' group (.debug_info, .debug_abbrev, .debug_str, .debug_loc) appends a new compile unit.
+	-- We need all 8 sections: .debug_line / .debug_aranges / .debug_rnglists get extended
+	-- (additional rows appended to the existing unit), and .debug_info / .debug_abbrev / .debug_str / .debug_loc / .debug_loclists 
+	-- get spliced (the main CU's unit_length is patched;
+	-- no new compile unit is appended; debug_loc/debug_loclists may not exist in the source ELF so we add-section them on splice).
 	-- The dispatch (SECTION_BUILDERS) handles each.
 	local existing_sections = elf_dwarf.read_elf_sections(elf_path, {
 		".debug_line", ".debug_aranges", ".debug_rnglists",
@@ -2187,31 +2340,31 @@ function M.run(ctx)
 
 	-- Consume source-as-written skip associations from every scanned source,
 	-- then build the atom/provenance table with those generic selections.
-	local skip_over = collect_skip_over(ctx)
+	local skip_over  = collect_skip_over(ctx)
+	local registries = collect_per_source_registries(ctx)
 	local atom_table = build_atom_table(ctx, skip_over)
 	io.stderr:write(string.format("[dwarf_injection] matched %d atoms between nm + source-map\n", #atom_table))
 
 	-- Detect rbind atoms + index Binds_* struct fields (from ctx.sources[i].scan, populated by scan-source pass).
-	local _rbind_atoms, rbind_structs = parse_rbind_atoms(ctx, atom_table)
+	-- The merged registries are threaded through so parse_body_load_pairs resolves R_<reg> via register_alias_registry.
+	local _rbind_atoms, rbind_structs = parse_rbind_atoms(ctx, atom_table, registries)
 	local rbind_count = 0
 	for _ in pairs(_rbind_atoms) do rbind_count = rbind_count + 1 end
 	io.stderr:write(string.format("[dwarf_injection] matched %d rbind atoms across %d Binds_* structs\n",
 		rbind_count, (function() local n = 0; for _ in pairs(rbind_structs) do n = n + 1 end; return n end)()))
 
 	-- Write the .bin files. The build_psyq.ps1 post-link hook splices these into a copy of the ELF via objcopy --update-section.
-	--
 	-- Build order:
 	--   0. Validate .debug_info layout (crT CU + DWARF5 main CU + final 0 root terminator).
 	--      If validation fails, FAIL SAFELY by writing the existing sections verbatim (no malformed output, no synthetic CU append, no header patch).
 	--   1. Build new .debug_abbrev using the main CU's abbrev offset → returns the offset of the duplicate main table (= #existing_abbrev).
-	--   2. Build new .debug_info by splicing inserted children into the main CU (patches main CU's unit_length + debug_abbrev_offset; 
+	--   2. Build new .debug_info by splicing inserted children into the main CU (patches main CU's unit_length + debug_abbrev_offset;
 	--      preserves all original DIE bytes; does NOT append a synthetic CU).
 	--   3. Build .debug_line + .debug_aranges + .debug_rnglists.
 	--   4. Build .debug_loc (just a terminator).
 	--
-	-- .debug_str is left untouched in this slice: 
-	-- the inserted children use DW_FORM_string (inline) for all DW_AT_name values, so no new strings are required.
-	-- The existing strings table is preserved verbatim.
+	-- .debug_str now also receives the new RR_<R_Name> entries
+	-- (the prior "left untouched in this slice" claim is obsolete; the merged registry drives the strings table to keep .debug_str and .debug_info in sync).
 	local basename = ctx.basename or duffle.basename_no_ext(elf_path) or DEFAULT_BASENAME
 	if ctx.out_root and ctx.out_root ~= "" then
 		duffle.ensure_dir(ctx.out_root)
@@ -2223,10 +2376,11 @@ function M.run(ctx)
 		local main_cu_start, main_cu_end_excl, main_abbrev_offset = find_main_cu_layout(existing_info)
 		if not main_cu_start then
 			io.stderr:write("[dwarf_injection] layout validation failed; writing existing sections unchanged\n")
+			local existing_str = existing_sections[".debug_str"] or ""
 			local results_safe = {
 				{ name = "debug_info",     data = existing_info,       was = #existing_info },
 				{ name = "debug_abbrev",   data = existing_abbrev,     was = #existing_abbrev },
-				{ name = "debug_str",      data = existing_sections[".debug_str"] or "", was = #(existing_sections[".debug_str"] or "") },
+				{ name = "debug_str",      data = existing_str,                                                       was = #existing_str },
 				{ name = "debug_line",     data = build_dwarf_line_section    (existing_sections[".debug_line"] or "",     atom_table), was = #(existing_sections[".debug_line"]     or "") },
 				{ name = "debug_aranges",  data = build_dwarf_aranges_section (existing_sections[".debug_aranges"] or "",  atom_table), was = #(existing_sections[".debug_aranges"]  or "") },
 				{ name = "debug_rnglists", data = build_dwarf_rnglists_section(existing_sections[".debug_rnglists"] or "", atom_table), was = #(existing_sections[".debug_rnglists"] or "") },
@@ -2258,18 +2412,22 @@ function M.run(ctx)
 		local loclists_offsets = compute_loclists_offsets(atom_table)
 
 		-- Step 2: splice inserted children into the main CU (patches unit_length + abbrev_offset; no synthetic CU).
-		local new_info = build_debug_info_section(existing_info, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets)
+		local new_info  = build_debug_info_section(existing_info, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets, registries)
 
-		-- Step 3-5: independent sections (.debug_str left untouched — see comment above).
+		-- Step 2b: rebuild .debug_str now that we know which RR_<R_Name> entries
+		-- get emitted (this aligns with build_debug_info_section's by_alias loop).
+		local new_str, new_str_offset, string_map = build_debug_str_section(existing_sections[".debug_str"] or "", atom_table, registries)
+
+		-- Step 3-5: independent sections.
 		local results = {
 			{ name = "debug_abbrev",   data = new_abbrev,                                                                            was = #existing_abbrev },
 			{ name = "debug_info",     data = new_info,                                                                              was = #existing_info },
-			{ name = "debug_str",      data = existing_sections[".debug_str"] or "",                                                 was = #(existing_sections[".debug_str"]      or "") },
+			{ name = "debug_str",      data = new_str,                                                                               was = #(existing_sections[".debug_str"]      or "") },
 			{ name = "debug_line",     data = build_dwarf_line_section    (existing_sections[".debug_line"] or "",     atom_table),  was = #(existing_sections[".debug_line"]     or "") },
 			{ name = "debug_aranges",  data = build_dwarf_aranges_section (existing_sections[".debug_aranges"] or "",  atom_table),  was = #(existing_sections[".debug_aranges"]  or "") },
 			{ name = "debug_rnglists", data = build_dwarf_rnglists_section(existing_sections[".debug_rnglists"] or "", atom_table),  was = #(existing_sections[".debug_rnglists"] or "") },
 			{ name = "debug_loc",      data = build_debug_loc_section(),                                                             was = #(existing_sections[".debug_loc"]      or "") },
-			{ name = "debug_loclists", data = build_debug_loclists_section(atom_table),                                              was = 0 },
+			{ name = "debug_loclists", data = build_debug_loclists_section(atom_table, registries),                                 was = 0 },
 		}
 
 		local outputs = { gdbinit_output }

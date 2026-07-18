@@ -24,7 +24,7 @@
 			"osx": {
 				"gdbpath": "gdb"
 			},
-			"executable": "${workspaceRoot}/build/hello_psyq.elf",
+			"executable": "${workspaceRoot}/build/hello_gte.elf",
 			"setupCommands": [
 				{ "text": "set mi-async off" },
 				{ "text": "set remotetimeout 0" },
@@ -33,7 +33,7 @@
 			],
 			"autorun": [
 				"monitor reset shellhalt",
-				"load hello_psyq.elf",
+				"load hello_gte.elf",
 				"source scripts/gdb/gdb_tape_atoms.gdb",
 				"tbreak main",
 				"continue"
@@ -59,7 +59,7 @@
 			"osx": {
 				"gdbpath": "gdb"
 			},
-			"executable": "${workspaceRoot}/build/hello_gpu.elf",
+			"executable": "${workspaceRoot}/build/hello_gte.elf",
 			"setupCommands": [
 				{ "text": "set mi-async off" },
 				{ "text": "set remotetimeout 0" },
@@ -68,7 +68,7 @@
 			],
 			"autorun": [
 				"monitor reset shellhalt",
-				"load hello_gpu.elf",
+				"load hello_gte.elf",
 				"tbreak main",
 				"continue"
 			]

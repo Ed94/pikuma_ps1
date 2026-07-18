@@ -41,7 +41,7 @@ M.DW_TAG = {
 }
 
 M.DW_AT = {
-	name                 = 0x03,
+	name                  = 0x03,
 	low_pc                = 0x11,
 	high_pc               = 0x12,
 	language              = 0x13,
@@ -214,11 +214,9 @@ M.DWARF_LINE_OPS = {
 ---
 --- **Convention:** offsets are 1-indexed (matching Lua `string.sub`).
 ---
---- **Byte weights** are written as `0x100`, `0x10000`, `0x1000000` (i.e.
---- 2^8, 2^16, 2^24) so the LE byte positions are visually explicit:
+--- **Byte weights** are written as `0x100`, `0x10000`, `0x1000000` (i.e. 2^8, 2^16, 2^24) so the LE byte positions are visually explicit:
 --- byte 0 contributes its value directly; byte 1 is shifted left by 8
 --- (= 0x100); byte 2 by 16 (= 0x10000); byte 3 by 24 (= 0x1000000).
----
 --- @param buf string
 --- @param off integer  -- 1-indexed
 --- @return integer
@@ -238,9 +236,12 @@ function M.read_u16_le(buf, off)
 	return buf:byte(off) + buf:byte(off + 0x01) * 0x00000100
 end
 
--- Pure-Lua 5.3 LEB128 readers (no `bit` library). `2^shift` arithmetic matches
--- the existing F' parser. Offsets are 0-based; returns (value, next_pos).
-local function read_uleb128_at(buf, pos)
+-- Pure-Lua 5.3 LEB128 readers (no `bit` library). `2^shift` arithmetic matches the existing F' parser.
+-- Offsets are 0-based; returns (value, next_pos).
+-- Track A Task 10: promoted from `local function` to M.* exports so passes/dwarf_injection.lua
+-- can import them as file-scope locals per the 2nd-caller lift precedent
+-- (the uleb128 + sleb128 encoders were promoted the same way).
+function M.read_uleb128_at(buf, pos)
 	local value, shift = 0, 0
 	local len = #buf
 	while pos < len do
@@ -253,7 +254,7 @@ local function read_uleb128_at(buf, pos)
 	return nil, pos
 end
 
-local function read_sleb128_at(buf, pos)
+function M.read_sleb128_at(buf, pos)
 	local value, shift = 0, 0
 	local len = #buf
 	while pos < len do
@@ -270,30 +271,30 @@ local function read_sleb128_at(buf, pos)
 end
 
 -- Find the 0-based offset of the table-terminator byte (a single 0) for the abbrev table starting at `table_start`.
--- Returns nil on truncated input. Walks declaration headers 
--- (code, tag, has_children, attr/form pairs, DW_FORM_implicit_const constant) until it finds a 0 byte that follows a complete declaration. Mirrors dwarf_injection.lua :: find_abbrev_table_end.
-local function find_abbrev_table_end(table_bytes, table_start)
+-- Returns nil on truncated input. Walks declaration headers
+-- (code, tag, has_children, attr/form pairs, DW_FORM_implicit_const constant) until it finds a 0 byte that follows a complete declaration.
+function M.find_abbrev_table_end(table_bytes, table_start)
 	local pos, len = table_start, #table_bytes
-	if pos >= len or table_bytes:byte(pos + 1) == 0 then return pos end
+	if    pos >= len or table_bytes:byte(pos + 1) == 0 then return pos end
 	while pos < len do
-		local  _code, code_end = read_uleb128_at(table_bytes, pos)
+		local  _code, code_end = M.read_uleb128_at(table_bytes, pos)
 		if not _code then return nil end
 		pos = code_end
-		local  _tag, tag_end = read_uleb128_at(table_bytes, pos)
+		local  _tag, tag_end = M.read_uleb128_at(table_bytes, pos)
 		if not _tag then return nil end
 		pos = tag_end
 		if pos >= len then return nil end
 		pos = pos + 1   -- has_children byte
 		while pos < len do
-			local  attr, attr_end = read_uleb128_at(table_bytes, pos)
+			local  attr, attr_end = M.read_uleb128_at(table_bytes, pos)
 			if not attr then return nil end
 			pos = attr_end
-			local  form, form_end = read_uleb128_at(table_bytes, pos)
+			local  form, form_end = M.read_uleb128_at(table_bytes, pos)
 			if not form then return nil end
 			pos = form_end
 			if attr == 0 and form == 0 then break end
 			if form == DW_FORM_implicit_const then
-				local _c, ce = read_sleb128_at(table_bytes, pos)
+				local _c, ce = M.read_sleb128_at(table_bytes, pos)
 				if not _c then return nil end
 				pos = ce
 			end
@@ -317,31 +318,31 @@ end
 -- {code, tag, has_children, attrs={ {name, form}, ... }}.
 -- Stops at the table terminator.
 local function parse_abbrev_table(table_bytes, table_start)
-	local table_end = find_abbrev_table_end(table_bytes, table_start)
+	local table_end = M.find_abbrev_table_end(table_bytes, table_start)
 	if not table_end then return nil, "no terminator" end
 	local decls = {}
 	local pos = table_start
 	while pos < table_end do
-		local  code, code_end = read_uleb128_at(table_bytes, pos)
+		local  code, code_end = M.read_uleb128_at(table_bytes, pos)
 		if not code then return nil, "truncated code" end
 		pos = code_end
-		local  tag, tag_end = read_uleb128_at(table_bytes, pos)
+		local  tag, tag_end = M.read_uleb128_at(table_bytes, pos)
 		if not tag then return nil, "truncated tag" end
 		pos = tag_end
 		local has_children = table_bytes:byte(pos + 1)
 		pos = pos + 1
 		local attrs = {}
 		while true do
-			local  attr, attr_end = read_uleb128_at(table_bytes, pos)
+			local  attr, attr_end = M.read_uleb128_at(table_bytes, pos)
 			if not attr then return nil, "truncated attr" end
 			pos = attr_end
-			local form, form_end = read_uleb128_at(table_bytes, pos)
+			local form, form_end = M.read_uleb128_at(table_bytes, pos)
 			if not form then return nil, "truncated form" end
 			pos = form_end
 			if attr == 0 and form == 0 then break end
 			attrs[#attrs + 1] = { name = attr, form = form }
 			if form == DW_FORM_implicit_const then
-				local  _c, ce = read_sleb128_at(table_bytes, pos)
+				local  _c, ce = M.read_sleb128_at(table_bytes, pos)
 				if not _c then return nil, "truncated const" end
 				pos = ce
 			end
@@ -366,7 +367,7 @@ local function read_form_value(buf, str_buf, pos, form)
 		-- DW_FORM_strp: 4-byte offset into .debug_str.
 		local strp_off = M.read_u32_le(buf, pos + 1)
 		return read_c_string_at(str_buf, strp_off), pos + 4
-	elseif form == M.DW_FORM.udata then return read_uleb128_at(buf, pos)
+	elseif form == M.DW_FORM.udata then return M.read_uleb128_at(buf, pos)
 	elseif form == M.DW_FORM.data1 then return buf:byte(pos + 1), pos + 1
 	elseif form == M.DW_FORM.data2 then return M.read_u16_le(buf, pos + 1), pos + 2
 	elseif form == M.DW_FORM.data4 then return M.read_u32_le(buf, pos + 1), pos + 4
@@ -379,7 +380,7 @@ local function read_form_value(buf, str_buf, pos, form)
 		return 1, pos
 	elseif form == M.DW_FORM.exprloc then
 		-- DW_FORM_exprloc: ULEB byte count + that many bytes of DW_OP_*.
-		local  len, ne = read_uleb128_at(buf, pos)
+		local  len, ne = M.read_uleb128_at(buf, pos)
 		if not len then return nil, pos end
 		return nil, ne + len
 	elseif form == DW_FORM_implicit_const then
@@ -392,8 +393,7 @@ local function read_form_value(buf, str_buf, pos, form)
 	end
 end
 
--- Index the .debug_info + .debug_abbrev sections of an existing ELF and collect one entry 
--- per "interesting" type DIE in the FIRST compilation unit. 
+-- Index the .debug_info + .debug_abbrev sections of an existing ELF and collect one entry per "interesting" type DIE in the FIRST compilation unit. 
 -- The index supports typed-views:
 --   index = {
 --     by_name = { ["V4_S2"]      = {kind="structure_type", die_offset, byte_size, fields={...}},
@@ -435,7 +435,7 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 			local unit_end = pos + 4 + ul
 			if    unit_end > #info then break end
 			local unit_abbrev = M.read_u32_le(info, pos + 9)
-			if unit_abbrev == abbrev_offset then
+			if    unit_abbrev == abbrev_offset then
 				cu_start    = pos
 				cu_end_excl = unit_end
 				break
@@ -455,12 +455,12 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 	-- Root DIE is the compile_unit; skip past it.
 	if pos_cursor >= cu_end_excl then return nil, "no DIE bytes" end
 	local root_decl_code
-	root_decl_code, pos_cursor = read_uleb128_at(info, pos_cursor)
+	root_decl_code, pos_cursor = M.read_uleb128_at(info, pos_cursor)
 	if not root_decl_code then return nil, "truncated root DIE code" end
 	local  root_decl = abbrev_by_code[root_decl_code]
 	if not root_decl then return nil, "unknown root DIE abbrev" end
 	-- Skip root DIE attributes.
-	for _, attr in ipairs(root_decl.attrs) do
+	for     _, attr in ipairs(root_decl.attrs) do
 		local _, ne = read_form_value(info, str_buf, pos_cursor, attr.form)
 		if not ne then return nil, "truncated root attr" end
 		pos_cursor = ne
@@ -502,7 +502,7 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 		local die_encoding   = nil
 		local die_type_ref   = nil
 		for ai, attr in ipairs(decl.attrs) do
-			local before = pos
+			local before  = pos
 			local val, ne = read_form_value(info, str_buf, pos, attr.form)
 			if not ne then
 				return nil, "truncated DIE attr"
@@ -510,8 +510,7 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 			pos = ne
 			if attr.name == M.DW_AT.name then
 				die_name = val
-			elseif attr.name == M.DW_AT.byte_size and
-			       (decl.tag == M.DW_TAG.base_type or decl.tag == M.DW_TAG.structure_type) then
+			elseif attr.name == M.DW_AT.byte_size and (decl.tag == M.DW_TAG.base_type or decl.tag == M.DW_TAG.structure_type) then
 				die_byte_size = val
 			elseif attr.name == M.DW_AT.encoding and decl.tag == M.DW_TAG.base_type then
 				die_encoding = val
@@ -539,9 +538,9 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 				local v, ne = read_form_value(info, str_buf, pos, a.form)
 				if not ne then return nil, "truncated member attr" end
 				pos = ne
-				if a.name == M.DW_AT.name then mname = v
-				elseif a.name == M.DW_AT.type then mtype_ref = v
-				elseif a.name == M.DW_AT.data_member_location then moffset = v end
+				if     a.name == M.DW_AT.name                 then mname     = v
+				elseif a.name == M.DW_AT.type                 then mtype_ref = v
+				elseif a.name == M.DW_AT.data_member_location then moffset   = v end
 			end
 			fields[#fields + 1] = { name = mname, type_offset = mtype_ref, offset = moffset }
 		end
@@ -575,7 +574,7 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 					end
 				end
 				-- Find the terminator (0 byte) of this table.
-				local  term = find_abbrev_table_end(abbrev, scan_pos)
+				local  term = M.find_abbrev_table_end(abbrev, scan_pos)
 				if not term then break end
 				scan_pos = term + 1
 				::continue::
@@ -594,11 +593,12 @@ function M.index_main_cu_types(info, abbrev, str_buf, abbrev_offset, cu_start)
 		local die_name, die_byte_size, die_encoding, die_type_ref, pos_after_attrs
 		= read_result[1], read_result[2], read_result[3], read_result[4], read_result[5]
 		n_visited = n_visited + 1
-		local is_type = (decl.tag == M.DW_TAG.base_type
-		             or decl.tag == M.DW_TAG.structure_type
-		             or decl.tag == M.DW_TAG.typedef
-		             or decl.tag == M.DW_TAG.pointer_type
-		             or decl.tag == M.DW_TAG.const_type)
+		local is_type = (
+		     decl.tag == M.DW_TAG.base_type
+			or decl.tag == M.DW_TAG.structure_type
+			or decl.tag == M.DW_TAG.typedef
+			or decl.tag == M.DW_TAG.pointer_type
+			or decl.tag == M.DW_TAG.const_type)
 
 		local member_fields = nil
 		pos_cursor = pos_after_attrs
@@ -716,7 +716,6 @@ end
 
 --- Return a 4-byte little-endian byte string for `value`.
 --- Caller concatenates with `..` if composing multi-word blobs.
----
 --- **Byte weights** written as `0x100` etc. (see `M.read_u32_le` for rationale).
 --- @param value integer  -- 0 ≤ value ≤ 0xFFFFFFFF
 --- @return string
@@ -857,7 +856,6 @@ end
 --- - We filter on STB_GLOBAL (high nibble of st_info = 1) to match `nm`'s default (external symbols only). STB_WEAK excluded.
 --- - We strip the `code_` prefix to match the previous `read_nm` output. 
 --- - `st_size > 0` filter excludes undefined/imported symbols.
----
 --- @param elf_path Path
 --- @return table<string, {integer, integer}>
 function M.read_nm(elf_path)

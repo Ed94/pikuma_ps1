@@ -8,7 +8,7 @@
 ---   - **C-language scanner** (`skip_ws_and_cmt`, `skip_str_or_cmt`, `read_ident`, `read_parens`, `read_braces`, `read_brackets`, `read_balanced`, `scan_to_char`, `split_top_level_commas`).
 ---   - **Word-count loader** (`load_word_counts` for `WORD_COUNT(...)` metadata files).
 ---   - **Line lookup** (`LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping).
----   - **Domain tables** (`WAVE_CONTEXT_REGS`, `TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`, `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
+---   - **Domain tables** (`TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`, `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
 ---   - **Process-bootstrap helper** (`setup_package_path`replaces the 8-line `arg[0]`-resolution boilerplate duplicated across 7 entry scripts)
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex.
@@ -74,21 +74,14 @@ local BYTE_DIGIT_9 = 0x39       -- '9'
 -- Section -1: Bootstrap (path-setup at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Path setup is done by `scripts/duffle_paths.lua`, which derives the repo
--- root from `debug.getinfo(1, "S").source` (NO subprocess, ~0ms) and
--- then calls `require("duffle")`. The prior `io.popen("git rev-parse ...")`
--- approach in this section was removed during F'' because:
---
---   1. Every entry script + every passes script now uses
---      `dofile("duffle_paths.lua")` (14 call sites; verified via grep).
---      The `find_repo_root` / `setup_package_path` defined here was dead
---      code in practice.
+-- Path setup is done by `scripts/duffle_paths.lua`, which derives the repo root from `debug.getinfo(1, "S").source` (NO subprocess, ~0ms) and then calls `require("duffle")`.
+-- The prior `io.popen("git rev-parse ...")` approach in this section was removed during F'' because:
+--   1. Every entry script + every passes script now uses `dofile("duffle_paths.lua")` (14 call sites; verified via grep).
+--      The `find_repo_root` / `setup_package_path` defined here was dead code in practice.
 --   2. `git rev-parse` costs ~100-180ms per subprocess spawn on Windows.
---      `debug.getinfo` is <1ms. There's no reason to keep the slow path
---      even as a "fallback".
+--      `debug.getinfo` is <1ms. There's no reason to keep the slow path even as a "fallback".
 --
--- If a future use case ever needs to load `duffle.lua` WITHOUT going
--- through `duffle_paths.lua`, set `package.path` manually before `require`.
+-- If a future use case ever needs to load `duffle.lua` WITHOUT going through `duffle_paths.lua`, set `package.path` manually before `require`.
 -- See `docs/guide_metaprogram_ssdl.md` §"I/O primitives" for the pattern.
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -434,8 +427,7 @@ function M.skip_preprocessor_line(s, pos)
 	return scan + 1
 end
 
--- Split a brace-body into top-level comma-separated tokens. Honors nested
--- parens/braces/brackets and skips strings/comments.
+-- Split a brace-body into top-level comma-separated tokens. Honors nested parens/braces/brackets and skips strings/comments.
 --
 -- FIX (2026-07-09): split at top-level NEWLINES and SEMICOLONS too, AND emit a token break after a top-level comment/string. 
 -- Previous behavior glued the macro call after a comment into the same token, so `word_count_of_token` only saw the 
@@ -694,13 +686,6 @@ end
 -- Section 7: domain tables
 -- ════════════════════════════════════════════════════════════════════════════
 
-M.WAVE_CONTEXT_REGS = {
-	["R_PrimCursor"] = { alias = "R_T7", size = 4, role = "output cursor (prim arena)" },
-	["R_FaceCursor"] = { alias = "R_T4", size = 4, role = "input cursor (face array)" },
-	["R_VertBase"]   = { alias = "R_T5", size = 4, role = "base pointer (vertex array)" },
-	["R_OtBase"]     = { alias = "R_T6", size = 4, role = "base pointer (ordering table)" },
-}
-
 -- The annotation DSL has been reduced to a single annotation macro:
 --   atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
 -- All phase / region / cadence / async / resource / group tokens have been dropped.
@@ -713,8 +698,7 @@ M.TAPE_ATOM_MACROS = {
 -- GTE pipeline-fill latency table.
 --
 -- For each `gte_cmdw_*` macro in code/duffle/gte.h, the minimum number of consecutive COP2 "nop" words that MUST appear
--- before the command issues so that any preceding `lwc2`/`swc2`/C2 state writes have retired before the GTE starts
--- reading its input registers.
+-- before the command issues so that any preceding `lwc2`/`swc2`/C2 state writes have retired before the GTE starts reading its input registers.
 --
 -- The check (`scripts/passes/static_analysis.lua :: check_gte_pipeline_fill`) walks each atom body,
 -- counts the consecutive nop words before every `gte_cmdw_*` invocation, and reports a finding if the count is below this minimum.

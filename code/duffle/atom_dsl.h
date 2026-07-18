@@ -63,10 +63,18 @@
 /* ============================================================================
  * atom_reads(...) / atom_writes(...)
  *
- * Used during the static analysis pass of the metaprogram to do 
+ * Used during the static analysis pass of the metaprogram to do
  * ============================================================================*/
 #define atom_reads(...)  (__VA_ARGS__)
 #define atom_writes(...) (__VA_ARGS__)
+
+/* ----------------------------------------------------------------------------
+ * atom_reg (per-enum opt-in marker for the DWARF register-alias registry)
+ *
+ * The bare `atom_reg` token adjacent to an enum entry in mips.h / lottes_tape.h flags that alias as debug-visible for scan_source's register_alias_registry.
+ * The C preprocessor strips it to a comment so no runtime symbol is created; the Lua scanner reads the bare token.
+ * ----------------------------------------------------------------------------*/
+#define atom_reg /* atom_reg: opt the preceding enum entry into the DWARF registry */
 
 /* ============================================================================
  *   atom_info :
@@ -84,11 +92,37 @@
 /* ----------------------------------------------------------------------------
  * DEBUG SOURCE-STEP MARKERS
  *
- * Place atom_dbg_skip_over() before a MipsAtom_, MipsAtomComp_, or MipsAtomComp_Proc_. 
+ * Place atom_dbg_skip_over() before a MipsAtom_, MipsAtomComp_, or MipsAtomComp_Proc_.
  * The following declaration kind determines whether the marker selects a whole atom or a component inline view.
  * The source scanner associates the marker with that declaration; placement diagnostics are handled by the annotation pass.
  * ----------------------------------------------------------------------------*/
 #define atom_dbg_skip_over() /* atom_dbg_skip_over: skip the following atom or component source view */
+
+/* ----------------------------------------------------------------------------
+ * Typed-view annotations (Registry for DWARF RR_<R_X> chain resolution)
+ *   atom_type(<T>) -- overloaded:
+ *      (a) enum-site default: `R_Foo = R_Tn, atom_reg atom_type(T)` 
+ *      Sets the per-alias default typed view in the register_alias_registry.
+ *      Consumed by the DWARF chain step (e) when no per-atom atom_ctx / atom_phase / atom_type callsite provides a stronger resolution.
+ *      (b) callsite override: `atom_reads(R_Foo atom_type(T), ...)` Overrides the per-alias default for THIS atom only.
+ *      Last-write-wins per R_Name; conflict -> error.
+ *   atom_ctx(<atom_name>) -- atom-info sub-call:
+ *       Propagate another atom's atom.rbind.fields (its Binds_* typed fields) into THIS atom's typed-view resolution.
+ *       The named atom must be an rbind atom (have `atom_bind(Binds_X)` in its `atom_info`).
+ *       Used as the escape hatch when atom_phase is not the natural correlation.
+ *   atom_phase(<label>) -- atom-info sub-call: 
+ *       Free-form C-identifier label for grouping atoms.
+ *       Within a phase, the FIRST atom in source-order that owns its own atom.rbind provides 
+ *       the Binds_* field types used by all other atoms in the same phase.
+ *       The preferred correlation mechanism; atom_ctx is the escape hatch for non-natural cases.
+ *
+ * All three expand to C comments
+ * (the bare-token convention matching `atom_reg` and `atom_dbg_skip_over`).
+ * The Lua scanner reads the bare tokens in source-as-written; the C preprocessor strips them.
+ * ----------------------------------------------------------------------------*/
+#define atom_type(T)        /* atom_type: associate <T> with the preceding enum entry (enum site) or this register (atom-info site) */
+#define atom_ctx(atom_name) /* atom_ctx: propagate <atom_name>'s Binds_* field types into this atom's typed views */
+#define atom_phase(label)   /* atom_phase: tag this atom with <label> for grouped typed-view resolution */
 
 /* ----------------------------------------------------------------------------
  * atom_bind(Binds_X) -- rbind sub-call of atom_info

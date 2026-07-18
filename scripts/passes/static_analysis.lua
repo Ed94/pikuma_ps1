@@ -1,13 +1,22 @@
 --- passes/static_analysis.lua — Per-atom static-analysis checks.
 ---
---- The 5 checks currently shipped:
----   1. **GTE pipeline-fill** — every `gte_cmdw_*` invocation must be preceded by the minimum number of `nop` words
----      (per `duffle.GTE_PIPELINE_LATENCY`) so the COP2 pipeline latency is fully retired before the command issues.
----   2. **mac_yield uniformity** — every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
----   3. **ABI handoff** — every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
----   4. **GPU port-store shape** — per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` +
----      `mac_insert_ot_tag_X` words must equal the GP0 cmd's expected packet size.
----   5. **per-atom cycle budget** — sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
+--- The 9 checks currently shipped:
+---   Per-atom rules:
+---     1. **GTE pipeline-fill** — every `gte_cmdw_*` invocation must be preceded by the minimum number of `nop` words
+---        (per `duffle.GTE_PIPELINE_LATENCY`) so the COP2 pipeline latency is fully retired before the command issues.
+---     2. **mac_yield uniformity** — every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
+---     3. **ABI handoff** — every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
+---     4. **GPU port-store shape** — per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` +
+---        `mac_insert_ot_tag_X` words must equal the GP0 cmd's expected packet size.
+---     5. **per-atom cycle budget** — sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
+---   Per-source rules (registry-driven, added 2026-07-16):
+---     6. **enum_alias_membership** — every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`,
+---        `atom_rtype(...)`, `atom_reads`, or `atom_writes` must be in `scan.register_alias_registry`. Missing -> warning.
+---     7. **atom_rtype_consistency** — every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`. Missing -> error.
+---     8. **binds_no_substruct_deref** — every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body
+---        must reference a leaf scalar (pointer-to-struct counts as leaf; nested struct members do NOT). Missing -> warning (build continues).
+---     9. **reads_writes_alias_membership** — distinct check name duplicating #6's reads/writes coverage so the report can
+---        attribute failures to a precedence class. Missing -> warning (build continues).
 ---
 --- The orchestrator (`ps1_meta.lua`) wires this module in via the PASSES table:
 ---   `["static-analysis"] = { module = "passes.static_analysis", kind = "validation", deps = {"word-counts", "components"},
@@ -24,7 +33,7 @@
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -503,8 +512,8 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	local saw_format = false
 	local saw_prim_write = false
 
-	-- Reads from tc_entry fields pre-computed by classify_tokens (R3 lift). Eliminates 4 per-token
-	-- string matches (mac_format_X_color + mac_gte_store_<shape> + mac_insert_ot_tag_<shape> + R_PrimCursor)
+	-- Reads from tc_entry fields pre-computed by classify_tokens (R3 lift).
+	-- Eliminates 4 per-token string matches (mac_format_X_color + mac_gte_store_<shape> + mac_insert_ot_tag_<shape> + R_PrimCursor)
 	for tok_idx = 1, #tokens do
 		local tc_entry = tc[tok_idx]
 		local shape    = tc_entry.mac_format_shape
@@ -628,7 +637,7 @@ local function analyze_atom_paths(atom)
 				end
 			end
 			-- For literal-offset branches (label == false), the taken path would jump to a non-tracked address; conservatively omit.
-			-- Return (succ, nil) -- the second value is the terminator marker (nil = not a terminator).
+			-- Return (succ, nil), the second value is the terminator marker (nil = not a terminator).
 			return succ, nil
 		end
 		-- Normal token: just the next one
@@ -733,20 +742,272 @@ local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Check #6: enum_alias_membership (Track A Task 13)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Every R_X referenced from a debug-visible surface — atom_dbg_reg_default, atom_reg_types, atom_rtype sub-entries, atom_reads, atom_writes;
+-- MUST be present in `pipe_ctx.register_alias_registry`.
+-- The registry is the source-derived answer to "is this R_X a real, opt-in alias?"
+-- (populated by scan_source's `parse_enum_aliases` from `enum { R_X = N atom_reg }` declarations).
+-- Per-source rule (called once per source via the CHECK_RULES dispatch).
+-- Signature matches the per_source shape established by check_semantic_reg_defaults.
+--
+-- Severity: WARNING (build continues).
+-- The rule is intentionally permissive because the production `code/duffle/` and `code/gte_hello/`
+-- sources use R_* aliases in atom_reads / atom_writes that may not yet be opted in via the 
+-- bare `atom_reg` marker. R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase ARE opted in (lottes_tape.h Task 21).
+-- Raw C-ABI aliases like R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle:
+-- no auto-include of wave-context; explicit opt-in only). Warnings keep the build green
+-- and surface the migration gap so users see which atoms still need opt-in registration.
+local function check_enum_alias_membership(_src, pipe_ctx, findings)
+	local reg_registry = pipe_ctx.register_alias_registry or {}
+
+	-- (a) atom_dbg_reg_default(R_X, T) -- pipe_ctx.types.
+	--     source_line is on every entry; emit the diagnostic against the default declaration's own line so the report's
+	--     "Findings by atom" section can attribute the failure to the marker location.
+	for reg, def in pairs(pipe_ctx.types or {}) do
+		if not reg_registry[reg] then
+			findings[#findings + 1] = {
+				atom  = "", line = def.source_line or 0,
+				check = "enum_alias_membership", kind = "warning",
+				msg   = string.format(
+					"atom_dbg_reg_default at line %d references unknown register %q (not in register_alias_registry)",
+					def.source_line or 0, reg),
+			}
+		end
+	end
+
+	-- (b) atom_reg_types(R_X, T) + (c) atom_rtype(R_X, T) sub-entries both populate `ai.reg_type_overrides` (Track A Task 5 merge).
+	--     (d) atom_reads(R_X) + (e) atom_writes(R_X) populate the reads/writes arrays.
+	--     All four are checked against the same registry; the per-rule dispatch iterates `ai` once and covers all three locations
+	--     so we don't re-walk atom_infos for each sub-check.
+	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
+		local info_line = ai.info_line or 0
+		local atom_name = ai.atom_name or ""
+		if ai.reg_type_overrides then
+			for reg in pairs(ai.reg_type_overrides) do
+				if not reg_registry[reg] then
+					findings[#findings + 1] = {
+						atom  = atom_name, line = info_line,
+						check = "enum_alias_membership", kind = "warning",
+						msg   = string.format(
+							"atom '%s' at line %d has reg_type_overrides for %q; the alias is not in register_alias_registry",
+							atom_name, info_line, reg),
+					}
+				end
+			end
+		end
+		for _, reg in ipairs(ai.reads or {}) do
+			if not reg_registry[reg] then
+				findings[#findings + 1] = {
+					atom  = atom_name, line = info_line,
+					check = "enum_alias_membership", kind = "warning",
+					msg   = string.format(
+						"atom '%s' at line %d has atom_reads for %q; the alias is not in register_alias_registry",
+						atom_name, info_line, reg),
+				}
+			end
+		end
+		for _, reg in ipairs(ai.writes or {}) do
+			if not reg_registry[reg] then
+				findings[#findings + 1] = {
+					atom  = atom_name, line = info_line,
+					check = "enum_alias_membership", kind = "warning",
+					msg   = string.format(
+						"atom '%s' at line %d has atom_writes for %q; the alias is not in register_alias_registry",
+						atom_name, info_line, reg),
+				}
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Check #7: atom_type_consistency (Track A Task 13; legacy alias atom_rtype_consistency)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Every `reg_type_overrides[R_X].type_name` (populated by BOTH `atom_reg_types(R_X, <type>)`
+-- and `atom_type(R_X, <type>)` sub-entries inside atom_reads/atom_writes — legacy `atom_rtype` is
+-- accepted as a transparent alias) MUST resolve to a `type_name_registry` entry.
+-- The registry is the source-derived answer to "is this type name declared in this translation unit?"
+-- (populated by `typedef Struct_(...)`, `typedef Enum_(...)`, `typedef ... TSet_(...)` declarations).
+-- Missing type names are errors (the build stops) so the user adds the typedef before re-running.
+-- Per-source rule.
+local function check_atom_rtype_consistency(_src, pipe_ctx, findings)
+	local type_registry = pipe_ctx.type_name_registry or {}
+	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
+		local info_line = ai.info_line or 0
+		local atom_name = ai.atom_name or ""
+		if ai.reg_type_overrides then
+			for reg, ov in pairs(ai.reg_type_overrides) do
+				if not ov.type_name or not type_registry[ov.type_name] then
+					findings[#findings + 1] = {
+						atom  = atom_name, line = info_line,
+						check = "atom_rtype_consistency", kind = "error",
+						msg   = string.format(
+							"atom '%s' at line %d reg_type_overrides[%q] uses unknown type %q (not in type_name_registry)",
+							atom_name, info_line, reg, tostring(ov.type_name)),
+					}
+				end
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Check #8: binds_no_substruct_deref (Track A Task 13)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- For every `load_word(R_A, R_B, O_(<Type>, <Field>))` and matching `store_word(...)` call in every atom body,
+-- the `<Field>` MUST resolve to a leaf scalar of `<Type>`. A "leaf scalar" is:
+--   * a non-struct field with `pointer_depth >= 1` (pointer-to-struct IS a leaf — the field is a pointer; the pointee is unrelated), OR
+--   * a non-struct field whose type_name resolves to a typedef / enum / builtin in `type_name_registry`.
+-- A nested struct member (pointer_depth == 0 AND type_name resolves to a `kind = "struct"` registry entry) is NOT a leaf scalar and is flagged.
+-- The check also flags fields whose Type has no `fields` table (typedefs and enums don't have fields — any Field reference against them is bogus)
+-- and fields whose name doesn't appear in the resolved Type's fields array.
+--
+-- Walks every atom's pre-computed `paths.tok_class`
+-- (set by `classify_tokens` once per atom in validate()) and uses the `o_arg1` / `o_arg2` captures instead of re-matching the token string.
+-- Resolution consults `pipe_ctx.type_name_registry`
+-- (Binds_* structs are registered there by scan_source's `register_struct_type`, so a unified lookup works for both Binds_* and non-Binds structs).
+--
+-- Severity: warning (build continues) — this catches a category of bugs
+-- (passing a struct by value through the tape payload) where the symptom is runtime corruption, not a compile error.
+-- Look up a field by name in a type's `fields` array. Returns the matching field entry, or nil if not found.
+-- Extracted to keep check_binds_no_substruct_deref's nesting depth <= 5 (the project convention; this is the 5th nesting level:
+-- function -> for-atom -> for-token -> if-load/store -> if-type-resolves -> [helper]).
+local function find_field_by_name(type_entry, field_name)
+	for _, f in ipairs(type_entry.fields or {}) do
+		if f.name == field_name then return f end
+	end
+	return nil
+end
+
+-- True iff a (field, type_registry) pair is a leaf scalar (safe to dereference as a tape-payload field).
+-- Pointer-to-X is always leaf; non-pointer struct members are NOT leaf.
+local function is_field_leaf(field, type_registry)
+	if field.pointer_depth and field.pointer_depth > 0 then
+		return true
+	end
+	local ftype_entry = type_registry[field.type_name]
+	if ftype_entry and ftype_entry.kind == "struct" then
+		return false
+	end
+	return true
+end
+
+local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
+	local type_registry = pipe_ctx.type_name_registry or {}
+	for _, a in ipairs(pipe_ctx.atoms or {}) do
+		local tc           = a.paths and a.paths.tok_class or {}
+		local tokens       = a.paths and a.paths.tokens or {}
+		local line_in_body = a.paths and a.paths.line_in_body or {}
+		for ti = 1, #tokens do
+			local tc_entry = tc[ti]
+			if (tc_entry.is_load_word or tc_entry.is_store_word)
+				and tc_entry.o_arg1 and tc_entry.o_arg2 then
+				local type_name  = tc_entry.o_arg1
+				local field_name = tc_entry.o_arg2
+				local body_line  = a.line + (line_in_body[tokens[ti].rel] or 0)
+
+				local type_entry = type_registry[type_name]
+				if not type_entry or not type_entry.fields then
+					findings[#findings + 1] = {
+						atom  = a.name, line = body_line,
+						check = "binds_no_substruct_deref", kind = "warning",
+						msg   = string.format(
+							"atom '%s' at line %d O_(%s, %s) refers to type %q which has no fields table in type_name_registry",
+							a.name, body_line, type_name, field_name, type_name),
+					}
+				else
+					local field = find_field_by_name(type_entry, field_name)
+					if not field then
+						findings[#findings + 1] = {
+							atom  = a.name, line = body_line,
+							check = "binds_no_substruct_deref", kind = "warning",
+							msg   = string.format(
+								"atom '%s' at line %d O_(%s, %s) does not resolve to a field of %s",
+								a.name, body_line, type_name, field_name, type_name),
+						}
+					elseif not is_field_leaf(field, type_registry) then
+						findings[#findings + 1] = {
+							atom  = a.name, line = body_line,
+							check = "binds_no_substruct_deref", kind = "warning",
+							msg   = string.format(
+								"atom '%s' at line %d O_(%s, %s) dereferences a non-pointer struct field of type %q; nested struct members are forbidden",
+								a.name, body_line, type_name, field_name, field.type_name),
+						}
+					end
+				end
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Check #9: reads_writes_alias_membership (Track A Task 13)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- For every `atom_reads(R_X)` and `atom_writes(R_X)` entry in every `atom_infos` entry, the `R_X` MUST be present in `pipe_ctx.register_alias_registry`.
+-- This DUPLICATES `enum_alias_membership`'s coverage of the reads/writes arrays;
+-- the distinct check name is intentional so the report can attribute the failure to a precedence-class (warnings vs errors) — the production reads/writes
+-- paths are intentionally permissive at the warning level even when the registry-driven check is strict at the error level.
+-- Per-source rule. Severity: warning (build continues).
+local function check_reads_writes_alias_membership(_src, pipe_ctx, findings)
+	local reg_registry = pipe_ctx.register_alias_registry or {}
+	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
+		local info_line = ai.info_line or 0
+		local atom_name = ai.atom_name or ""
+		for _, reg in ipairs(ai.reads or {}) do
+			if not reg_registry[reg] then
+				findings[#findings + 1] = {
+					atom  = atom_name, line = info_line,
+					check = "reads_writes_alias_membership", kind = "warning",
+					msg   = string.format(
+						"atom '%s' at line %d atom_reads for %q; the alias is not in register_alias_registry",
+						atom_name, info_line, reg),
+				}
+			end
+		end
+		for _, reg in ipairs(ai.writes or {}) do
+			if not reg_registry[reg] then
+				findings[#findings + 1] = {
+					atom  = atom_name, line = info_line,
+					check = "reads_writes_alias_membership", kind = "warning",
+					msg   = string.format(
+						"atom '%s' at line %d atom_writes for %q; the alias is not in register_alias_registry",
+						atom_name, info_line, reg),
+				}
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- CHECK_RULES — data-driven check dispatch (Muratori: data over control flow)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Each rule is a table entry: { name, per_atom }.
--- `per_atom(atom, pipe_ctx, findings)` runs once per atom inside validate()'s single loop.
--- Adding a new check = 1 row here + 1 check_* function. No validate() edit required.
+-- Each rule is a table entry: { name, <dispatch> }.
+-- Dispatch shapes:
+--   per_atom(atom, pipe_ctx, findings)          — runs once per atom inside validate()'s single loop
+--   post(pipe_ctx, findings)                    — runs once after all per-atom calls complete
+--   per_macro(macro, wc, findings)              — runs once per TAPE_WORDS / _Pragma macro declaration
+--   per_skip_marker(marker, pipe_ctx, findings) — runs once per src.scan.skip_over.markers entry
+--   per_source(src, pipe_ctx, findings)         — runs once per source AFTER the per-atom loop completes
+--                                                 (added for the registry-driven rule set; same CHECK_RULES table — no parallel dispatch)
+-- Adding a new check = 1 row here + 1 check_* function. validate() is updated only to invoke the per_source dispatch loop (the per_atom dispatch loop never changes).
 -- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
 
 local CHECK_RULES = {
-	{ name = "gte_pipeline_fill",     per_atom = check_gte_pipeline_fill     },
-	{ name = "mac_yield_uniformity",  per_atom = check_mac_yield_uniformity  },
-	{ name = "abi_handoff",           per_atom = check_abi_handoff           },
-	{ name = "gpu_portstore_shape",   per_atom = check_gpu_portstore_shape   },
-	{ name = "per_atom_cycle_budget", per_atom = check_per_atom_cycle_budget },
+	{ name = "gte_pipeline_fill",            per_atom   = check_gte_pipeline_fill            },
+	{ name = "mac_yield_uniformity",         per_atom   = check_mac_yield_uniformity         },
+	{ name = "abi_handoff",                  per_atom   = check_abi_handoff                  },
+	{ name = "gpu_portstore_shape",          per_atom   = check_gpu_portstore_shape          },
+	{ name = "per_atom_cycle_budget",        per_atom   = check_per_atom_cycle_budget        },
+	{ name = "enum_alias_membership",        per_source = check_enum_alias_membership        },
+	{ name = "atom_rtype_consistency",       per_source = check_atom_rtype_consistency       },
+	{ name = "binds_no_substruct_deref",     per_source = check_binds_no_substruct_deref     },
+	{ name = "reads_writes_alias_membership",per_source = check_reads_writes_alias_membership},
 }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -770,17 +1031,28 @@ local function validate(ctx, src)
 	-- pipe_ctx: the cross-atom shared state for the per-atom pipeline (Fleury "expose structure").
 	-- Pre-allocated here, mutated by each per-atom check call below.
 	-- Replaces the per-check local tables that used to live inside each check_* function body.
-	--   info_by_atom  — atom_name -> atom_info (built once; check_abi_handoff reads it)
-	--   binds_index   — Binds_X -> binds struct (built once; check_abi_handoff reads it)
-	--   unknown_seen  — macro_name -> first atom line (accumulated across atoms; check_per_atom_cycle_budget dedups)
+	--   info_by_atom             — atom_name -> atom_info (built once; check_abi_handoff reads it)
+	--   binds_index              — Binds_X -> binds struct (built once; check_abi_handoff reads it)
+	--   unknown_seen             — macro_name -> first atom line (accumulated across atoms; check_per_atom_cycle_budget dedups)
+	--   atoms                    — full atom list (used by check_binds_no_substruct_deref's per-source body walk)
+	--   types                    — R_X -> default-type info from atom_dbg_reg_default (check_enum_alias_membership source a)
+	--   atom_infos_list          — flat list of atom_info entries (checks #6/#7/#9 iterate it)
+	--   register_alias_registry  — R_X -> {name, code, has_atom_reg, source_line} from parse_enum_aliases
+	--   type_name_registry       — T -> {name, kind, fields, ...} from parse_typedef_binds
+	-- All registry fields are READ from src.scan (the dep-closed scan-source payload); this pass never re-parses.
 	local info_by_atom = {}
 	for _, info in ipairs(atom_infos) do
 		info_by_atom[info.atom_name] = info
 	end
 	local pipe_ctx = {
-		info_by_atom  = info_by_atom,
-		binds_index   = binds_index,
-		unknown_seen  = {},
+		info_by_atom            = info_by_atom,
+		binds_index             = binds_index,
+		unknown_seen            = {},
+		atoms                   = atoms,
+		types                   = scan.types or {},
+		atom_infos_list         = atom_infos or {},
+		register_alias_registry = scan.register_alias_registry or {},
+		type_name_registry      = scan.type_name_registry or {},
 	}
 
 	-- THE per-atom pipeline. ONE iteration of atoms; the 5 check_* functions + analyze_atom_paths
@@ -788,6 +1060,7 @@ local function validate(ctx, src)
 	-- Plex move: every piece of state derived from an atom body lives on `atom.paths` (the per-atom mega-struct);
 	-- readers (analyze_atom_paths, the 5 checks, the renderers) all consume `atom.paths`, not the raw `atoms` list.
 	-- Stage 1B: each check_* now takes `(atom, ...)` instead of `(atoms, findings)` — no more single-atom `{a}` shim.
+	-- Per-source rules run once after this loop completes (no parallel dispatch table).
 	local findings = {}
 	for _, a in ipairs(atoms) do
 		a.paths                  = a.paths or {}
@@ -798,11 +1071,18 @@ local function validate(ctx, src)
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a)
 
-		-- Run all checks on this one atom via the CHECK_RULES data table (Muratori: data over control flow).
+		-- Run all per-atom checks on this one atom via the CHECK_RULES data table (Muratori: data over control flow).
 		-- Adding a new check = 1 row in CHECK_RULES; this loop never needs editing.
 		for _, rule in ipairs(CHECK_RULES) do
-			rule.per_atom(a, pipe_ctx, findings)
+			if rule.per_atom then rule.per_atom(a, pipe_ctx, findings) end
 		end
+	end
+
+	-- Per-source dispatch. Run once per source AFTER the per-atom loop;
+	-- consults pipe_ctx's cross-atom registries (register_alias_registry, type_name_registry).
+	-- Same CHECK_RULES table; no parallel dispatch table.
+	for _, rule in ipairs(CHECK_RULES) do
+		if rule.per_source then rule.per_source(src, pipe_ctx, findings) end
 	end
 
 	local errors   = {}

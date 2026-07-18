@@ -3,7 +3,7 @@
 --- Validates `MipsAtom_(name) atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...)) { ... }` declarations in source files.
 --- Also reads: `Binds_*` struct declarations (`typedef Struct_(Binds_X) { ... };`)
 ---
---- Source scanning: done ONCE upstream by `duffle.scan_source()` (ps1_meta.lua pre-scans each source and stashes the result in `src.scan`). 
+--- Source scanning: done ONCE upstream by `duffle.scan_source()` (ps1_meta.lua pre-scans each source and stashes the result in `src.scan`).
 ---
 --- Writes:
 ---   - `<ctx.out_root>/<dir_basename>.errors.h` — one per module, with `#error` directives on findings (the C compile will surface the error)
@@ -21,30 +21,9 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 local write_file     = duffle.write_file
 local ensure_dir     = duffle.ensure_dir
 
--- Domain tables (single source of truth in duffle.lua).
-local WAVE_CONTEXT_REGS = duffle.WAVE_CONTEXT_REGS
-
-local function is_wave_context_reg(n) return WAVE_CONTEXT_REGS[n] ~= nil  end
-
--- Closed sets. atom_dbg_reg_default and atom_reg_types MUST target one of these registers;
--- atom_view MUST reference a real Binds_* struct.
-local SEMANTIC_DEFAULT_REGS = {
-	["R_TapePtr"] = true, ["R_AtomJmp"] = true,
-	["R_PrimCursor"] = true, ["R_FaceCursor"] = true,
-	["R_VertBase"] = true, ["R_OtBase"] = true,
-}
-
-local COMPUTE_REG_PREFIX = "R_"
-local COMPUTE_REG_RE =   -- permits R_T0..R_T3 + caller-trash (not wave-context)
-	"^R_T[0-3]$"
-
--- Compute-register types are restricted to byte-width primitives.
--- Pointer depth is also bounded typed pointer chains live in the Binds_* struct, not in a per-atom override.
-local ALLOWED_COMPUTE_TYPES = {
-	["U4"] = true, ["S4"] = true,
-	["U2"] = true, ["S2"] = true,
-	["U1"] = true, ["S1"] = true,
-}
+-- The annotation pass now consults the source-derived registries built by scan_source:
+--   * pipe_ctx.register_alias_registry — for atom_dbg_reg_default(R_X, ...) and atom_reg_types(R_X, ...) member-identity checks
+--   * pipe_ctx.type_name_registry      — for atom_dbg_reg_default(<T>, ...) and atom_reg_types(<T>, ...) type-identity checks
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
@@ -179,50 +158,6 @@ local function check_binds_struct_exists(a, pipe_ctx, findings)
 	}
 end
 
---- Check: Binds_* struct fields must correspond to known wave-context registers.
---- Also checks that all `atom_writes(...)` entries are wave-context registers.
---- @param a AtomAnnotation
---- @param pipe_ctx PipeCtx
---- @param findings Findings
-local function check_binds_field_wave_context(a, pipe_ctx, findings)
-	if not (a.binds and pipe_ctx.binds_index[a.binds]) then return end
-	local bs = pipe_ctx.binds_index[a.binds]
-
-	for _, f in ipairs(bs.fields) do
-		local candidate = "R_" .. f.name
-		if not is_wave_context_reg(candidate) then
-			findings.warnings[#findings.warnings + 1] = {
-				line = bs.line,
-				msg  = string.format("%s field '%s' doesn't match a known wave-context register (candidate '%s')", a.binds, f.name, candidate),
-			}
-		end
-	end
-
-	for _, w in ipairs(a.writes) do
-		if not is_wave_context_reg(w) then
-			findings.warnings[#findings.warnings + 1] = {
-				line = a.line,
-				msg  = string.format("%s writes '%s' which is not a known wave-context register", a.name, w),
-			}
-		end
-	end
-end
-
---- Check: atom_reads(...) entries should be wave-context registers (or R_TapePtr for rbind).
---- @param a AtomAnnotation
---- @param pipe_ctx PipeCtx
---- @param findings Findings
-local function check_reads_wave_context(a, pipe_ctx, findings)
-	for _, r in ipairs(a.reads) do
-		if not is_wave_context_reg(r) and r ~= "R_TapePtr" then
-			findings.warnings[#findings.warnings + 1] = {
-				line = a.line,
-				msg  = string.format("atom '%s' reads '%s' which is not a known wave-context register", a.name, r),
-			}
-		end
-	end
-end
-
 --- Check: TAPE_WORDS(mac_X, N) ↔ WORD_COUNT(mac_X, N) drift.
 --- Three outcomes: missing (error), mismatch (error), match (info).
 --- @param m MacroEntry
@@ -250,28 +185,14 @@ local function check_macro_word_drift(m, wc, findings)
 	}
 end
 
----- Check: atom_dbg_reg_default(R_X, <type>) must target a wave-context register and the type name must be a recognized C type 
---- (we currently allow the types actually used in the codebase; pointer depth must be 0 or 1).
---- Also detects duplicate defaults for the same register.
+--- Check: atom_dbg_reg_default(R_X, <type>) must target a register declared as a debug-visible alias in `pipe_ctx.register_alias_registry`,
+--- with a type name found in `pipe_ctx.type_name_registry`.
+--- Pointer depth is still bounded to 0 or 1. Duplicate defaults are still detected.
 --- @param _src SourceFile        -- unused (kept for the per_source shape)
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
--- Known type names accepted in atom_dbg_reg_default and the Binds_*-via-atom_view resolution path.
-local KNOWN_REG_DEFAULT_TYPES = {
-	["U4"] = true, ["S4"] = true,
-	["U2"] = true, ["S2"] = true,
-	["U1"] = true, ["S1"] = true,
-	["MipsCode"] = true, ["MipsAtom"] = true,
-	["V2_S2"] = true, ["V2_S4"] = true,
-	["V3_S2"] = true, ["V3_S4"] = true,
-	["V4_S2"] = true, ["V4_S4"] = true,
-	["M3_S2"] = true,
-	["void"] = true,
-}
-
 local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
-	-- Detect duplicate defaults using the ordered occurrence list (the
-	-- out.types hash only retains the last declaration).
+	-- Detect duplicate defaults using the ordered occurrence list (the out.types hash only retains the last declaration).
 	local seen_first_line = {}
 	for _, occ in ipairs(pipe_ctx.type_occurrences or {}) do
 		if seen_first_line[occ.reg] == nil then
@@ -285,12 +206,14 @@ local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
 			}
 		end
 	end
+	local reg_registry  = pipe_ctx.register_alias_registry or {}
+	local type_registry = pipe_ctx.type_name_registry      or {}
 	for reg, def in pairs(pipe_ctx.types or {}) do
-		if not SEMANTIC_DEFAULT_REGS[reg] then
+		if not reg_registry[reg] then
 			findings.errors[#findings.errors + 1] = {
 				line = def.source_line,
 				msg  = string.format(
-					"atom_dbg_reg_default at line %d references unknown register %q; expected one of R_TapePtr, R_AtomJmp, R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase",
+					"atom_dbg_reg_default at line %d references unknown register %q (not in register_alias_registry)",
 					def.source_line, reg),
 			}
 		end
@@ -302,39 +225,43 @@ local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
 					def.source_line, reg, def.pointer_depth or -1),
 			}
 		end
-		if not def.type_name or not KNOWN_REG_DEFAULT_TYPES[def.type_name] then
+		if not def.type_name or not type_registry[def.type_name] then
 			findings.errors[#findings.errors + 1] = {
 				line = def.source_line,
 				msg  = string.format(
-					"atom_dbg_reg_default at line %d for %q uses unknown type %q (allowed: byte-width primitives, V*_S*, M3_S2, MipsCode, void)",
+					"atom_dbg_reg_default at line %d for %q uses unknown type %q (not in type_name_registry)",
 					def.source_line, reg, tostring(def.type_name)),
 			}
 		end
 	end
 end
 
---- Check: atom_reg_types(R_X, <type>) entries must point to a compute register
---- (R_T0..R_T3) with a recognized fundamental type.
+--- Check: atom_reg_types(R_X, <type>) entries must point to a register declared in `pipe_ctx.register_alias_registry`, with a type name found in `pipe_ctx.type_name_registry`. 
+--- The alias ident `R_<n>` now encodes the GPR identity only for entries that are explicitly opted in via the bare `atom_reg` marker.
+--- R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle: no auto-include of wave-context; explicit opt-in only). 
+--- The check fires for any R_T0..R_T3 reference that hasn't been opted in via `#define atom_reg`.
 --- @param _src SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_atom_reg_types(_src, pipe_ctx, findings)
+	local reg_registry  = pipe_ctx.register_alias_registry or {}
+	local type_registry = pipe_ctx.type_name_registry      or {}
 	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
 		if ai.reg_type_overrides then
 			for reg, ov in pairs(ai.reg_type_overrides) do
-				if not reg:match(COMPUTE_REG_RE) then
+				if not reg_registry[reg] then
 					findings.errors[#findings.errors + 1] = {
 						line = ai.info_line,
 						msg  = string.format(
-							"atom '%s' has atom_reg_types for %q; compute-register types are restricted to R_T0..R_T3",
-							ai.atom_name, reg),
+							"atom '%s' has atom_reg_types for %q; compute-register types are restricted to opt-in aliases (%q not in register_alias_registry)",
+							ai.atom_name, reg, reg),
 					}
 				end
-				if not ov.type_name or not ALLOWED_COMPUTE_TYPES[ov.type_name] then
+				if not ov.type_name or not type_registry[ov.type_name] then
 					findings.errors[#findings.errors + 1] = {
 						line = ai.info_line,
 						msg  = string.format(
-							"atom '%s' atom_reg_types for %q uses unknown compute type %q (allowed: U1/U2/U4/S1/S2/S4)",
+							"atom '%s' atom_reg_types for %q uses unknown compute type %q (not in type_name_registry)",
 							ai.atom_name, reg, tostring(ov.type_name)),
 					}
 				end
@@ -397,16 +324,14 @@ local function check_binds_no_duplicate_fields(_src, pipe_ctx, findings)
 end
 
 -- Check: skip-over markers must satisfy shape + placement constraints.
---- Walks the priority list once; at most one error is appended per marker so that
---- a single source-level defect does not cascade into multiple findings.
+--- Walks the priority list once; at most one error is appended per marker so that a single source-level defect does not cascade into multiple findings.
 --- Priority order (first defect wins):
 ---   1. has_parens == false         -> requires parentheses: marker()
 ---   2. args  ~= ""                 -> takes no arguments
 ---   3. superseded_by_marker_line   -> duplicate marker (cite superseding line)
 ---   4. pending + no target_kind    -> dangling (no following declaration)
----   5. unsupported target_kind      -> marker precedes an unrelated declaration
---- Valid markers before whole-atom / bare-component / proc-component declarations
---- emit no error and remain in src.scan.skip_over.atoms / .components.
+---   5. unsupported target_kind     -> marker precedes an unrelated declaration
+--- Valid markers before whole-atom / bare-component / proc-component declarations emit no error and remain in src.scan.skip_over.atoms / .components.
 --- @param marker SkipOverMarker
 --- @param _pipe_ctx PipeCtx     -- unused today; kept for plex-shape consistency with per_annot
 --- @param findings Findings
@@ -460,30 +385,62 @@ local function check_skip_marker(marker, _pipe_ctx, findings)
 	end
 end
 
+--- Migration warning emitted alongside the new registry-membership check.
+---
+--- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase
+--- are the wave-context aliases opted in via `#define atom_reg` in lottes_tape.h (Task 21).
+--- Any source referencing an R_X that's NOT in the registry will trip the new check; a single pass-level info entry
+--- (emitted only when at least one such rejection lands in this source) tells users where to look.
+---
+--- Track A Task 13 added the proper `enum_alias_membership` per_source rule;
+--- this is the stop-gap until users migrate off raw C-ABI register names.
+--- @param _src SourceFile
+--- @param pipe_ctx PipeCtx
+--- @param findings Findings
+local function check_wave_context_migration(_src, pipe_ctx, findings)
+	if not (pipe_ctx.types and next(pipe_ctx.types)) then return end
+	if not (pipe_ctx.atom_infos_list) then return end
+	local reg_registry = pipe_ctx.register_alias_registry or {}
+	for _, ai in ipairs(pipe_ctx.atom_infos_list) do
+		if ai.reg_type_overrides then
+			for reg, _ in pairs(ai.reg_type_overrides) do
+				if not reg_registry[reg] then
+					findings.warnings[#findings.warnings + 1] = {
+						line = 0,
+						msg  = "wave-context removed; opt in via #define atom_reg in mips.h "
+							.. "(every R_<alias> that should be visible to the annotation pass "
+							.. "must be enum-declared with the bare atom_reg marker; see Track A Task 21)",
+					}
+					return
+				end
+			end
+		end
+	end
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHECK_RULES — data-driven check dispatch (the plex pattern)
 -- ════════════════════════════════════════════════════════════════════════════
 --
 -- Each rule entry picks one of four "shapes" of dispatch:
---   per_annot(annot, pipe_ctx, findings)        — runs once per AtomAnnotation
---   post(pipe_ctx, findings)                    — runs once after all per_annot calls complete (full-corpus aggregation)
---   per_macro(macro, wc, findings)              — runs once per TAPE_WORDS / _Pragma macro declaration
---   per_skip_marker(marker, pipe_ctx, findings) — runs once per src.scan.skip_over.markers entry
+--   per_annot(annot, pipe_ctx, findings)        -- runs once per AtomAnnotation
+--   post(pipe_ctx, findings)                    -- runs once after all per_annot calls complete (full-corpus aggregation)
+--   per_macro(macro, wc, findings)              -- runs once per TAPE_WORDS / _Pragma macro declaration
+--   per_skip_marker(marker, pipe_ctx, findings) -- runs once per src.scan.skip_over.markers entry
 --
 -- Adding a new check = 1 row here + 1 function above. The `validate()` dispatch loop never needs editing.
 
 local CHECK_RULES = {
 	{ name = "atom_decl_exists",          per_annot       = check_atom_decl_exists          },
 	{ name = "binds_struct_exists",       per_annot       = check_binds_struct_exists       },
-	{ name = "binds_field_wave_context",  per_annot       = check_binds_field_wave_context  },
-	{ name = "reads_wave_context",        per_annot       = check_reads_wave_context        },
 	{ name = "unique_annotation",         post            = check_unique_annotation         },
 	{ name = "macro_word_drift",          per_macro       = check_macro_word_drift          },
-	{ name = "skip_marker_validation",    per_skip_marker = check_skip_marker              },
+	{ name = "skip_marker_validation",    per_skip_marker = check_skip_marker               },
 	{ name = "semantic_reg_defaults",     per_source      = check_semantic_reg_defaults     },
 	{ name = "atom_reg_types",            per_source      = check_atom_reg_types            },
 	{ name = "atom_view_layout",          per_source      = check_atom_view_layout          },
 	{ name = "binds_no_duplicate_fields", per_source      = check_binds_no_duplicate_fields },
+	{ name = "wave_context_migration",    per_source      = check_wave_context_migration    },
 }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -536,15 +493,19 @@ local function validate(ctx, src)
 	end
 
 	local pipe_ctx = {
-		atom_index      = {},
-		binds_index     = {},
-		annot_counts    = {},
-		types           = scan.types or {},
-		type_occurrences = scan.type_occurrences or {},
-		atom_views      = scan.atom_views or {},
-		seen_defaults   = seen_defaults,
-		atom_infos_list = atom_infos_list,
-		binds_list      = scan.binds or {},
+		atom_index               = {},
+		binds_index              = {},
+		annot_counts             = {},
+		types                    = scan.types or {},
+		type_occurrences         = scan.type_occurrences or {},
+		atom_views               = scan.atom_views or {},
+		seen_defaults            = seen_defaults,
+		atom_infos_list          = atom_infos_list,
+		binds_list               = scan.binds or {},
+		-- Project the source-derived registries from the scan payload so per_source checks consult them instead of the deleted
+		-- SEMANTIC_DEFAULT_REGS / KNOWN_REG_DEFAULT_TYPES / etc.
+		register_alias_registry  = scan.register_alias_registry or {},
+		type_name_registry       = scan.type_name_registry or {},
 	}
 	for _, a in ipairs(atoms)      do pipe_ctx.atom_index [a.name] = a end
 	for _, b in ipairs(scan.binds) do pipe_ctx.binds_index[b.name] = b end
@@ -691,8 +652,7 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Per-DIRECTORY (per-module) aggregation. Group sources by `src.dir`,
-	-- validate every source in the dir, then emit ONE errors.h per dir.
+	-- Per-DIRECTORY (per-module) aggregation. Group sources by `src.dir`, validate every source in the dir, then emit ONE errors.h per dir.
 	-- `ctx.by_dir` is pre-computed in build_ctx (shared across all passes).
 	local by_dir = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
 

@@ -32,16 +32,16 @@ typedef Slice_MipsCode MipsAtom;
 
 /* Register aliases */
 enum {
-	R_AtomJmp    = R_T9,
-	R_TapePtr    = R_T8,  /* The Instruction Stream Pointer */
-	R_InCursor   = R_T4,  /* Input data cursor */
+	R_AtomJmp    = R_T9 atom_reg,  /* debug-visible; tape yield handshake scratch */
+	R_TapePtr    = R_T8 atom_reg,  /* The Instruction Stream Pointer */
+	R_InCursor   = R_T4,
 
-	R_PrimCursor = R_T7,  /* VRAM output cursor (primitive buffer) */
-	R_FaceCursor = R_T4,  /* Input data cursor (indices/faces) */
-	R_VertBase   = R_T5,  /* Base address of the vertex array */
-	R_OtBase     = R_T6,  /* Base address of the Ordering Table */
+	R_PrimCursor = R_T7 atom_reg atom_type(U4 *),    /* VRAM output cursor (primitive buffer) */
+	R_FaceCursor = R_T4 atom_reg atom_type(V4_S2 *), /* Cube face-index cursor (V4_S2*); floor context switches to V3_S2* via atom_phase */
+	R_VertBase   = R_T5 atom_reg atom_type(V3_S2 *), /* Base address of the vertex array */
+	R_OtBase     = R_T6 atom_reg atom_type(U4 *),    /* Base address of the Ordering Table */
 
-/* Stringification codes for the GCC inline assembler clobber lists */
+/* Stringification codes for the GCC inline assembler clobber lists. */
 #define R_TapePtr_Code     R_T8_Code
 #define R_InCursor_Code    R_T4_Code
 

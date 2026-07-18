@@ -22,7 +22,7 @@ typedef Struct_(Binds_CubeTri) {
 	V3_S2* VertBase;
 	U4*    OtBase;
 };
-internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri)
+internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri), atom_phase(cube_g4)
 ,	atom_reads(R_TapePtr)
 ,	atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 ){
@@ -37,7 +37,7 @@ internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri)
 
  // cube_g4_face — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
 internal
-MipsAtom_(cube_g4_face) atom_info(
+MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
 		atom_writes(R_PrimCursor, R_FaceCursor)
 ){
@@ -90,7 +90,7 @@ typedef Struct_(Binds_FloorTri) {
 	U4*    OtBase;
 };
 internal
-MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri)
+MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri), atom_phase(floor_f3)
 	, atom_reads(R_TapePtr)
 	, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 ){
@@ -105,7 +105,7 @@ MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri)
 
 internal
 atom_dbg_skip_over()
-MipsAtom_(floor_f3_face) atom_info(
+MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 	, atom_writes(R_PrimCursor, R_FaceCursor)
 ) {
