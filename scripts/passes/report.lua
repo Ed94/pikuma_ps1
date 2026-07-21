@@ -16,7 +16,6 @@
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; extraction target (`duffle.setup_package_path()`).
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works

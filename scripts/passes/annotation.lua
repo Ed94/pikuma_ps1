@@ -148,7 +148,7 @@ end
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_binds_struct_exists(a, pipe_ctx, findings)
-	if not a.binds then return end
+	if not a.binds                   then return end
 	if pipe_ctx.binds_index[a.binds] then return end
 	findings.warnings[#findings.warnings + 1] = {
 		line = a.line,
@@ -164,7 +164,7 @@ end
 --- @param wc table<string, integer> -- the shared word-count table (from ctx.shared.word_counts)
 --- @param findings Findings
 local function check_macro_word_drift(m, wc, findings)
-	local declared = wc[m.name]
+	local  declared = wc[m.name]
 	if not declared then
 		findings.errors[#findings.errors + 1] = {
 			line = m.line,
@@ -392,8 +392,7 @@ end
 --- Any source referencing an R_X that's NOT in the registry will trip the new check; a single pass-level info entry
 --- (emitted only when at least one such rejection lands in this source) tells users where to look.
 ---
---- Track A Task 13 added the proper `enum_alias_membership` per_source rule;
---- this is the stop-gap until users migrate off raw C-ABI register names.
+--- This check is a stop-gap until users migrate off raw C-ABI register names.
 --- @param _src SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -409,7 +408,7 @@ local function check_wave_context_migration(_src, pipe_ctx, findings)
 						line = 0,
 						msg  = "wave-context removed; opt in via #define atom_reg in mips.h "
 							.. "(every R_<alias> that should be visible to the annotation pass "
-							.. "must be enum-declared with the bare atom_reg marker; see Track A Task 21)",
+							.. "must be enum-declared with the bare atom_reg marker)",
 					}
 					return
 				end

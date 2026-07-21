@@ -9,7 +9,6 @@
 ---   - **Word-count loader** (`load_word_counts` for `WORD_COUNT(...)` metadata files).
 ---   - **Line lookup** (`LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping).
 ---   - **Domain tables** (`TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`, `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
----   - **Process-bootstrap helper** (`setup_package_path`replaces the 8-line `arg[0]`-resolution boilerplate duplicated across 7 entry scripts)
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex.
 
@@ -137,10 +136,8 @@ local lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  en
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 1: character classification (byte-based for hot loops)
 -- ════════════════════════════════════════════════════════════════════════════
--- Two APIs:
---   is_space(c), is_alpha(c), etc. — accept a single-char STRING (legacy)
---   is_space_byte(b), is_alpha_byte(b), etc. — accept a single-byte INTEGER
--- The byte-based versions are 5-10x faster in tight loops because they avoid the string allocation per s:sub(pos, pos) call.
+-- Byte-based versions (accept a single-byte INTEGER).
+-- Used in all hot loops because they avoid the string allocation per s:sub(pos, pos) call.
 
 -- Whitespace characters per C locale.
 function M.is_space_byte(b) return b == BYTE_SPACE or b == BYTE_TAB or b == BYTE_NEWLINE or b == BYTE_CR or b == BYTE_VT  or b == BYTE_FF end
@@ -231,6 +228,7 @@ end
 -- Section 3: I/O primitives
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- TODO(Ed): Review - Convert to use lfs, or remove if not utilized.
 function M.read_file(path)
 	local  f = io.open(path, "r")
 	if not f then error("Cannot open " .. path) end
@@ -238,18 +236,20 @@ function M.read_file(path)
 	return content
 end
 
+-- TODO(Ed): Review - Convert to use lfs, or remove if not utilized.
 function M.write_file(path, content)
 	local  f = io.open(path, "w")
 	if not f then error("Cannot write " .. path) end
 	f:write(content); f:close()
 end
 
+-- TODO(Ed): Review - Convert to use lfs, or remove if not utilized.
 -- Write content to disk in binary mode so LF line endings are preserved on Windows
 -- (text mode would convert LF -> CRLF, breaking byte-identical diffs against git-tracked gen/*.h files which are stored as LF).
 -- @param path string
 -- @param content string
 function M.write_file_lf(path, content)
-	local f = io.open(path, "wb")
+	local  f = io.open(path, "wb")
 	if not f then error("Cannot write " .. path) end
 	f:write(content); f:close()
 end
@@ -274,8 +274,7 @@ end
 -- Normalizes forward slashes to backslashes on Windows.
 -- Used for byte-identical emit: the // Source: comment line uses the absolute path.
 --
--- The CWD is memoized on first call (one lfs.currentdir() per process — ~0ms).
--- Without the cache, calling this per-source in the components pass added ~1.5s to a 30-source build.
+-- The CWD is memoized on first call.
 -- @param path string
 -- @return string
 local _absolute_path_cache = {}
@@ -288,11 +287,10 @@ function M.to_absolute_path(path)
 		_absolute_path_cache[path] = result
 		return result
 	end
-	-- lfs.currentdir() is ~0ms vs io.popen("cd") at ~50ms per call on Windows.
-	local cwd = lfs.currentdir()
+	local  cwd = lfs.currentdir()
 	if not cwd then _absolute_path_cache[path] = path; return path end
 	cwd = cwd:gsub("/", "\\")
-	local tail = (path:gsub("/", "\\"))
+	local tail   = (path:gsub("/", "\\"))
 	local result = cwd .. "\\" .. tail
 	_absolute_path_cache[path] = result
 	return result
@@ -396,15 +394,11 @@ function M.scan_to_char(s, target, start)
 	local target_byte = target:byte()
 	local pos = start
 	while pos <= #s do
-		local c = s:byte(pos)
-		if      c == target_byte then return pos end
-		-- scan: ... <target found> | <skipping to target>
-		if      c == BYTE_OPEN_PAREN  then local _, a = M.read_balanced(s, "(", ")", pos); pos = a
-			-- scan: ... ( <balanced> ) ...
-		elseif  c == BYTE_OPEN_BRACE  then local _, a = M.read_balanced(s, "{", "}", pos); pos = a
-			-- scan: ... { <balanced> } ...
-		elseif  c == BYTE_OPEN_BRACK  then local _, a = M.read_balanced(s, "[", "]", pos); pos = a
-			-- scan: ... [ <balanced> ] ...
+		local   c = s:byte(pos)
+		if      c == target_byte      then return pos end                                          -- scan: ... <target found> | <skipping to target>
+		if      c == BYTE_OPEN_PAREN  then local _, a = M.read_balanced(s, "(", ")", pos); pos = a -- scan: ... ( <balanced> ) ...
+		elseif  c == BYTE_OPEN_BRACE  then local _, a = M.read_balanced(s, "{", "}", pos); pos = a -- scan: ... { <balanced> } ...
+		elseif  c == BYTE_OPEN_BRACK  then local _, a = M.read_balanced(s, "[", "]", pos); pos = a -- scan: ... [ <balanced> ] ...
 		else
 			local nx = M.skip_str_or_cmt(s, pos)
 			pos      = (nx > pos) and nx or (pos + 1)
@@ -520,12 +514,11 @@ function M.split_top_level_commas(body)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Section 4b: tokenize_body + build_body_line_index (shared, memoized)
+-- Section 4: tokenize_body + build_body_line_index (shared, memoized)
 -- ════════════════════════════════════════════════════════════════════════════
 
-local _tokenize_body_cache        = {}
-local _tokenize_body_simple_cache = {}
-local _body_line_index_cache      = {}
+local _tokenize_body_cache   = {}
+local _body_line_index_cache = {}
 
 --- Tokenize the body inner-text into a flat list of `{tok, rel}` pairs.
 --- `tok` is the trimmed token string; `rel` is the byte offset within `body`.
@@ -535,12 +528,12 @@ local _body_line_index_cache      = {}
 function M.tokenize_body(body)
 	if _tokenize_body_cache[body] ~= nil then return _tokenize_body_cache[body] end
 	local out = {}
-	local len     = #body
-	local rel     = 1
+	local len = #body
+	local rel = 1
 	while rel <= len do
 		local ws_end = M.skip_ws_and_cmt(body, rel)
 		if ws_end > rel then rel = ws_end end
-		if rel > len then break end
+		if rel    > len then break end
 
 		local scan = rel
 		while scan <= len do
@@ -575,21 +568,6 @@ function M.tokenize_body(body)
 	return out
 end
 
---- Tokenize the body into a flat list of trimmed string tokens (preserves comments).
---- Uses `split_top_level_commas` (which appends trailing comments to the previous token)
---- so the components pass can emit `/* Words: ... */` comments in the .macs.h output.
---- Memoized on body string (R7 lift; mirror of M.tokenize_body's memoization).
---- @param body string
---- @return string[]
-function M.tokenize_body_simple(body)
-	if _tokenize_body_simple_cache[body] ~= nil then return _tokenize_body_simple_cache[body] end
-	local tokens = M.split_top_level_commas(body)
-	local out = {}
-	for i = 1, #tokens do out[i] = M.trim(tokens[i]) end
-	_tokenize_body_simple_cache[body] = out
-	return out
-end
-
 --- Build a line-index: count `\n` chars from offset 1 up to the offset; that count + 1 is the line number (1-based).
 --- Memoized on the body string.
 --- @param body string
@@ -597,7 +575,7 @@ end
 function M.build_body_line_index(body)
 	if _body_line_index_cache[body] ~= nil then return _body_line_index_cache[body] end
 	local index = {}
-	local len = #body
+	local len   = #body
 	local newline_count = 0
 	for pos = 1, len do
 		if pos > 1 then
@@ -619,13 +597,40 @@ end
 --- @param tok string
 --- @return integer|nil
 function M.find_marker_call_end(tok)
-	local ident, after = M.read_ident(tok, 1)
+	local  ident, after = M.read_ident(tok, 1)
 	if not ident then return nil end
 	if ident ~= "atom_label" and ident ~= "atom_offset" then return nil end
 	local paren_pos = M.skip_ws_and_cmt(tok, after)
 	if tok:sub(paren_pos, paren_pos) ~= "(" then return nil end
 	local _, close = M.read_parens(tok, paren_pos)
 	return close
+end
+
+--- True iff `tok` is an atom-label or atom-offset marker call.
+--- Sibling helper to M.find_marker_call_end; uses the same string constants.
+--- @param tok string
+--- @return boolean
+function M.is_marker_token(tok)
+	local  leading = M.read_ident(tok, 1)
+	return leading == "atom_label" or leading == "atom_offset"
+end
+
+--- Count words contributed by the non-marker portion of `tok` (after the marker's closing `)`).
+--- Returns 0 if `tok` isn't a marker call or has no trailing content.
+---
+--- TODO(Ed): Review this "not imported" assertion. Why do we have this if its not imported or is it actually?
+--- `count_token_words_fn` is passed in (not imported) to keep this module free of pass-module dependencies.
+--- Both call sites already import `word_count_eval.count_token_words`; they pass it as the 3rd arg.
+--- @param tok string
+--- @param word_counts table
+--- @param count_token_words_fn fun(tok: string, wc: table): integer
+--- @return integer
+function M.count_marker_rest(tok, word_counts, count_token_words_fn)
+	local marker_end = M.find_marker_call_end(tok)
+	if not marker_end or marker_end >= #tok then return 0 end
+	local rest = M.trim(tok:sub(marker_end))
+	if rest == "" then return 0 end
+	return count_token_words_fn(rest, word_counts)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -703,13 +708,12 @@ M.TAPE_ATOM_MACROS = {
 -- The check (`scripts/passes/static_analysis.lua :: check_gte_pipeline_fill`) walks each atom body,
 -- counts the consecutive nop words before every `gte_cmdw_*` invocation, and reports a finding if the count is below this minimum.
 --
--- PRE-FILL vs POST-FILL: this table models PRE-cmdw nops (retiring preceding C2 writes),
--- NOT the post-cmdw input-latch window. 
+-- PRE-FILL vs POST-FILL: this table models PRE-cmdw nops (retiring preceding C2 writes).
 -- The PSX-SPX pipeline timings doc (`docs/psx-spx/docs/gtepipelinetimings.md`) measures a DIFFERENT number:
 -- the smallest N nops between `cop2` and `mtc2` to a specific input register at which the write no longer affects the output.
 -- For nearly all instructions, inputs latch in the first 0-4 cycles — the GTE snapshots its input register file early and works
---  from internal pipeline storage afterward. The documented total cycle count is NOT the "do not touch inputs" window;
--- the actual read window is much shorter.
+--  from internal pipeline storage afterward. 
+-- The documented total cycle count is NOT the "do not touch inputs" window; the actual read window is much shorter.
 --
 -- The `gte_rtpt()` / `gte_nclip()` wrapper macros in gte.h emit the pre-cmd nops internally (asm_words(nop, nop, ...)),
 -- but THOSE WRAPPERS ARE NOT USED INSIDE ATOM BODIES in this codebase.
@@ -934,7 +938,7 @@ M.INSTRUCTION_LATENCY = {
 	["gte_nclip"]                                    = 8,   -- alias for nclip
 	["gte_avsz3"]                                    = 5,
 	["gte_avsz4"]                                    = 6,
-	-- Legacy single-cycle store helpers (gte_stotz, gte_stsxy3 are 1 cycle)
+	-- Single-cycle store helpers (gte_stotz, gte_stsxy3 are 1 cycle)
 	["gte_stotz"]           = 1,
 	["gte_stsxy3"]          = 1,
 	-- High-level GTE helpers (gte_load_v0/v1/v2 do multiple lwc2s)

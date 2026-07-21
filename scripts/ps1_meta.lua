@@ -100,18 +100,19 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 -- PASSES table (data, not code) — the orchestrator's dep graph
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- All passes always run (no mtime gate). 
+-- TODO(Ed): Not all passes should run, dwarf-injection and passes dependent on post-compile + link SHOULD NOT NEED TO BE ALWAYS RUN.
+
 local PASSES = {
 	["scan-source"] = {
 		module = "passes.scan_source",
-		kind   = "shared",
-		deps   = {},
+		kind   = "shared", deps = {},
 		desc   = "Walk each source once; produce the fat SourceScan payload for downstream passes",
 		out    = {},
 	},
 	["word-counts"] = {
 		module = "passes.word_count_eval",
-		kind   = "shared",
-		deps   = {},
+		kind   = "shared", deps = {},
 		desc   = "Build the shared metadata table (metadata.h + .macs.h)",
 		out    = {},
 	},
@@ -143,7 +144,7 @@ local PASSES = {
 		module = "passes.static_analysis",
 		kind   = "validation",
 		deps   = {"scan-source", "word-counts", "components"},
-		desc   = "[FUTURE] GTE pipeline-fill, mac_yield uniformity, etc.",
+		desc   = "Static analysis: GTE pipeline-fill, mac_yield uniformity, ABI handoff, GPU port-store shape, per-atom cycle budget, type consistency",
 		out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } },
 	},
 	["atoms-source-map"] = {
@@ -225,7 +226,7 @@ end
 
 -- Per-flag handlers. Each handler takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it). 
 -- Returning nil + os.exit() handles termination flags (--help). 
--- This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep  and made the dispatch logic hard to scan.
+-- This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep and made the dispatch logic hard to scan.
 local FLAG_HANDLERS = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -247,7 +248,7 @@ PASS_FLAGS (pick one or more, or use --all):
   --offsets             Generate <module>/gen/<basename>.offsets.h
   --atoms-source-map    Generate <basename>.atoms.sourcemap.txt per source
   --dwarf-injection     Inject per-atom .debug_line + .debug_aranges (post-link, requires --elf)
-  --static-analysis     [FUTURE] GTE pipeline-fill, mac_yield uniformity
+  --static-analysis     Static analysis: GTE pipeline-fill, mac_yield, ABI handoff, cycle budget
   --report              Render per-project summary
   --all                 Equivalent to all 6 flags above (default)
 
@@ -292,13 +293,22 @@ FLAG_HANDLERS["--out-root"]     = function(args, argv, arg_idx) args.out_root   
 FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx) args.project_root               = argv[arg_idx + 1]; return arg_idx + 1 end
 
 -- Per-pass stash flags. Read by `passes/atoms_source_map.lua` to opt into the post-link gdb-runtime emission.
--- Same shape as the existing per-flag handlers:
--- mutates `args.flags` (which propagates into `ctx.flags`).
-FLAG_HANDLERS["--gdb-runtime"]  = function(args) args.flags                       = args.flags or {}; args.flags.gdb_runtime = true end
-FLAG_HANDLERS["--elf"]          = function(args, argv, arg_idx) args.flags       = args.flags or {}; args.flags.elf_path  = argv[arg_idx + 1]; return arg_idx + 1 end
--- F' track: enable DWARF injection (default OFF; opt-in via .vscode/launch.json or ps1_meta CLI).
+-- Same shape as the existing per-flag handlers. mutates `args.flags` (which propagates into `ctx.flags`).
+FLAG_HANDLERS["--gdb-runtime"]  = function(args) args.flags                = args.flags or {}; args.flags.gdb_runtime = true end
+FLAG_HANDLERS["--elf"]          = function(args, argv, arg_idx) args.flags = args.flags or {}; args.flags.elf_path    = argv[arg_idx + 1]; return arg_idx + 1 end
+-- Enable DWARF injection (default OFF)
 FLAG_HANDLERS["--dwarf-injection"] = function(args)
+	args.flags                 = args.flags or {}
+	args.flags.dwarf_injection = true
+	args.requested_set[#args.requested_set + 1] = "dwarf-injection"
+end
+-- Batch post-link pass: gdb-runtime + dwarf-injection in a single Lua invocation.
+-- Sets the same flags as --gdb-runtime + --dwarf-injection but only requires one luajit cold start
+-- (~50-100ms saved per build vs two separate invocations).
+-- Also requires --elf (same as the two individual flags).
+FLAG_HANDLERS["--post-link"]      = function(args)
 	args.flags = args.flags or {}
+	args.flags.gdb_runtime     = true
 	args.flags.dwarf_injection = true
 	args.requested_set[#args.requested_set + 1] = "dwarf-injection"
 end
@@ -380,6 +390,7 @@ end
 local function build_ctx(args)
 	local sources = {}
 	for _, path in ipairs(args.sources) do
+		-- TODO(Ed): io.open?? why not lfs?
 		local  f = io.open(path, "r")
 		if not f then
 			io.stderr:write("ps1_meta: cannot open --source " .. path .. "\n")
@@ -427,11 +438,17 @@ end
 -- Topological sort (Kahn's algorithm + cycle detection)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Compute the dep-closure of `requested_set`: include every pass name transitively required by the requested set.
+--- Topologically sort the requested pass set, augmented with all transitive deps.
+--- Detects cycles and errors out with details.
 --- @param passes table<string, PassDescriptor>
 --- @param requested_set string[]
---- @return table<string, boolean>  -- set of pass names needed (including transitive deps)
-local function dep_closure(passes, requested_set)
+--- @return string[]  -- execution order
+---
+--- Implementation note: the 4 algorithm phases (dep-closure, in-degree, ready-queue, sort) are inlined as 3 small blocks within this function. 
+--- Each was a 1-caller helper; the 2-caller rule doesn't apply, so inlining produces a single readable function
+--- (plex: small patterns → shared, but only when shared; here they're not).
+local function topo_sort(passes, requested_set)
+	-- Phase 1: dep-closure. Include every pass name transitively required by `requested_set`.
 	local needed = {}
 	for _, name in ipairs(requested_set) do needed[name] = true end
 	local changed = true
@@ -450,23 +467,8 @@ local function dep_closure(passes, requested_set)
 			end
 		end
 	end
-	return needed
-end
 
---- Count entries in a hash table (Lua's `#t` doesn't work for hash tables).
---- @param t table
---- @return integer
-local function count_entries(t)
-	local n = 0
-	for _ in pairs(t) do n = n + 1 end
-	return n
-end
-
---- Compute in-degrees for the Kahn sort: for each pass in `needed`, the number of its deps that are also in `needed`.
---- @param passes table<string, PassDescriptor>
---- @param needed table<string, boolean>
---- @return table<string, integer>
-local function compute_in_degrees(passes, needed)
+	-- Phase 2: in-degrees for Kahn's algorithm. For each pass in `needed`, the number of its deps that are also in `needed`.
 	local in_degree = {}
 	for name, _ in pairs(needed) do in_degree[name] = 0 end
 	for name, _ in pairs(needed) do
@@ -476,65 +478,41 @@ local function compute_in_degrees(passes, needed)
 			end
 		end
 	end
-	return in_degree
-end
 
---- Seed the Kahn ready queue with passes whose in-degree is 0, sorted alphabetically for deterministic execution order.
--- @param in_degree table<string, integer>
---- @return string[]
-local function seed_ready_queue(in_degree)
+	-- Phase 3: seed the ready queue with passes whose in-degree is 0, sorted alphabetically for deterministic order.
 	local ready = {}
 	for name, deg in pairs(in_degree) do
 		if deg == 0 then ready[#ready + 1] = name end
 	end
 	table.sort(ready)
-	return ready
-end
 
--- (internal) Pop the next ready pass, decrement the in-degree of every remaining pass that depended on it
--- (inserting newly-zero-degree passes back into the ready queue), and append to `order`. Keeps `ready` sorted.
--- @param passes table<string, PassDescriptor>
--- @param needed table<string, boolean>
--- @param in_degree table<string, integer>
--- @param ready string[]
--- @param order string[]
-local function process_next_ready(passes, needed, in_degree, ready, order)
-	local just_finished = table.remove(ready, 1)
-	order[#order + 1] = just_finished
-	for name, _ in pairs(needed) do
-		if name ~= just_finished then
-			for _, dep in ipairs(passes[name].deps) do
-				if dep == just_finished then
-					in_degree[name] = in_degree[name] - 1
-					if in_degree[name] == 0 then
-						ready[#ready + 1] = name
-						table.sort(ready)
+	-- Phase 4: drain the ready queue. For each popped pass, decrement the in-degree of every remaining pass that depended on it.
+	-- Newly-zero-degree passes are inserted back into the ready queue (kept sorted).
+	local order = {}
+	while #ready > 0 do
+		local just_finished = table.remove(ready, 1)
+		order[#order + 1] = just_finished
+		for name, _ in pairs(needed) do
+			if name ~= just_finished then
+				for _, dep in ipairs(passes[name].deps) do
+					if dep == just_finished then
+						in_degree[name] = in_degree[name] - 1
+						if in_degree[name] == 0 then
+							ready[#ready + 1] = name
+							table.sort(ready)
+						end
 					end
 				end
 			end
 		end
 	end
-end
 
---- Topologically sort the requested pass set, augmented with all transitive deps.
---- Detects cycles and errors out with details.
---- @param passes table<string, PassDescriptor>
---- @param requested_set string[]
---- @return string[]  -- execution order
-local function topo_sort(passes, requested_set)
-	local needed    = dep_closure(passes, requested_set)
-	local in_degree = compute_in_degrees(passes, needed)
-	local ready     = seed_ready_queue(in_degree)
-
-	local order = {}
-	while #ready > 0 do
-		process_next_ready(passes, needed, in_degree, ready, order)
-	end
-
-	-- Cycle detection: if order doesn't include all needed passes, some are stuck with in_degree > 0
+	-- Cycle detection: if `order` doesn't include all needed passes, some are stuck with in_degree > 0
 	-- (the cycle closed on itself before Kahn could process them).
-	-- Without this check, a fully-closed cycle (e.g. A -> B -> A) would silently return an emspty order list, leaving the orchestrator to dispatch nothing.
-	if #order ~= count_entries(needed) then
+	-- Without this check, a fully-closed cycle (e.g. A -> B -> A) would silently return an empty order list, leaving the orchestrator to dispatch nothing.
+	local needed_count = 0
+	for _ in pairs(needed) do needed_count = needed_count + 1 end  -- count hash entries; Lua's #t doesn't work
+	if #order ~= needed_count then
 		for name, deg in pairs(in_degree) do
 			if deg > 0 then
 				error("dependency cycle detected involving pass '" .. name .. "'")
@@ -561,7 +539,7 @@ local function render_dep_graph(passes, requested, closed)
 
 	add("[ps1_meta] Resolved dependency order (closed under deps):")
 	for pass_idx, name in ipairs(closed) do
-		local p = passes[name]
+		local p        = passes[name]
 		local deps_str = (#p.deps == 0) and "(no deps)" or
 			"(deps: " .. table.concat(p.deps, ", ") .. ")"
 		add(string.format("  %d. %-22s %-45s [%s]",
@@ -577,7 +555,7 @@ local function render_dep_graph(passes, requested, closed)
 	-- Compute which passes feed which other passes (reverse of deps).
 	local feeds = {}  -- feeds[X] = list of passes that X feeds into
 	for _, name in ipairs(closed) do feeds[name] = {} end
-	for name, p in pairs(passes) do
+	for name, p in pairs(passes)  do
 		for _, dep in ipairs(p.deps) do
 			if feeds[dep] then feeds[dep][#feeds[dep] + 1] = name end
 		end
@@ -586,7 +564,7 @@ local function render_dep_graph(passes, requested, closed)
 	-- Layout: source -> scan_source -> word-counts -> {components, annotation, offsets, static-analysis} -> report
 	-- Outputs are listed under each pass.
 	local outputs_for = function(name)
-		local p = passes[name]
+		local  p = passes[name]
 		if not p or not p.out or #p.out == 0 then return "" end
 		local outs = {}
 		for _, o in ipairs(p.out) do outs[#outs + 1] = o.path_template end
@@ -663,6 +641,7 @@ local function dispatch_passes(ctx, order)
 	local had_errors = false
 	for _, pass_name in ipairs(order) do
 		local pass   = PASSES[pass_name]
+		io.stderr:write(string.format("[ps1_meta] %-22s running\n", pass_name))
 		local mod    = require(pass.module)
 		local result = mod.run(ctx)
 

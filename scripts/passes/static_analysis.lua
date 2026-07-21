@@ -11,8 +11,8 @@
 ---     5. **per-atom cycle budget** — sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
 ---   Per-source rules (registry-driven, added 2026-07-16):
 ---     6. **enum_alias_membership** — every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`,
----        `atom_rtype(...)`, `atom_reads`, or `atom_writes` must be in `scan.register_alias_registry`. Missing -> warning.
----     7. **atom_rtype_consistency** — every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`. Missing -> error.
+---        `atom_type(...)`, `atom_reads`, or `atom_writes` must be in `scan.register_alias_registry`. Missing -> warning.
+---     7. **atom_type_consistency** — every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`. Missing -> error.
 ---     8. **binds_no_substruct_deref** — every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body
 ---        must reference a leaf scalar (pointer-to-struct counts as leaf; nested struct members do NOT). Missing -> warning (build continues).
 ---     9. **reads_writes_alias_membership** — distinct check name duplicating #6's reads/writes coverage so the report can
@@ -92,8 +92,7 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field errors   table[]
 --- @field warnings table[]
 
---- @alias AtomName    string  -- lower_snake_case atom name
---- @alias MacroName   string  -- lower_snake_case macro identifier
+--- @alias AtomName    string  -- lower_snake_case atom nameMacroName   string  -- lower_snake_case macro identifier
 --- @alias CheckName   string  -- "gte_pipeline_fill" | "mac_yield_uniformity" | "abi_handoff" | "gpu_port_store_shape" | "per_atom_cycle_budget"
 
 --- @class AtomBody
@@ -709,7 +708,6 @@ local function analyze_atom_paths(atom)
 	-- Mutate the pre-allocated `atom.paths` slot in place (caller owns the table).
 	-- Mega-struct move: a single source of truth for all per-atom path-analysis data,
 	-- instead of returning a fresh table that would just get copied onto 5 atom fields.
-	-- If a caller ever DIDN'T pre-allocate (legacy code path), fall back to a fresh slot.
 	local p = atom.paths or {}
 	p.cycles_min     = cycles_min
 	p.cycles_max     = cycles_max
@@ -742,10 +740,10 @@ local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #6: enum_alias_membership (Track A Task 13)
+-- Check #6: enum_alias_membership
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Every R_X referenced from a debug-visible surface — atom_dbg_reg_default, atom_reg_types, atom_rtype sub-entries, atom_reads, atom_writes;
+-- Every R_X referenced from a debug-visible surface — atom_dbg_reg_default, atom_reg_types, atom_type sub-entries, atom_reads, atom_writes;
 -- MUST be present in `pipe_ctx.register_alias_registry`.
 -- The registry is the source-derived answer to "is this R_X a real, opt-in alias?"
 -- (populated by scan_source's `parse_enum_aliases` from `enum { R_X = N atom_reg }` declarations).
@@ -777,7 +775,7 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 		end
 	end
 
-	-- (b) atom_reg_types(R_X, T) + (c) atom_rtype(R_X, T) sub-entries both populate `ai.reg_type_overrides` (Track A Task 5 merge).
+	-- (b) atom_reg_types(R_X, T) + (c) atom_type(R_X, T) sub-entries both populate `ai.reg_type_overrides`.
 	--     (d) atom_reads(R_X) + (e) atom_writes(R_X) populate the reads/writes arrays.
 	--     All four are checked against the same registry; the per-rule dispatch iterates `ai` once and covers all three locations
 	--     so we don't re-walk atom_infos for each sub-check.
@@ -823,17 +821,16 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #7: atom_type_consistency (Track A Task 13; legacy alias atom_rtype_consistency)
+-- Check #7: atom_type_consistency
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Every `reg_type_overrides[R_X].type_name` (populated by BOTH `atom_reg_types(R_X, <type>)`
--- and `atom_type(R_X, <type>)` sub-entries inside atom_reads/atom_writes — legacy `atom_rtype` is
--- accepted as a transparent alias) MUST resolve to a `type_name_registry` entry.
+-- and `atom_type(R_X, <type>)` sub-entries inside atom_reads/atom_writes) MUST resolve to a `type_name_registry` entry.
 -- The registry is the source-derived answer to "is this type name declared in this translation unit?"
 -- (populated by `typedef Struct_(...)`, `typedef Enum_(...)`, `typedef ... TSet_(...)` declarations).
 -- Missing type names are errors (the build stops) so the user adds the typedef before re-running.
 -- Per-source rule.
-local function check_atom_rtype_consistency(_src, pipe_ctx, findings)
+local function check_atom_type_consistency(_src, pipe_ctx, findings)
 	local type_registry = pipe_ctx.type_name_registry or {}
 	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
 		local info_line = ai.info_line or 0
@@ -843,7 +840,7 @@ local function check_atom_rtype_consistency(_src, pipe_ctx, findings)
 				if not ov.type_name or not type_registry[ov.type_name] then
 					findings[#findings + 1] = {
 						atom  = atom_name, line = info_line,
-						check = "atom_rtype_consistency", kind = "error",
+						check = "atom_type_consistency", kind = "error",
 						msg   = string.format(
 							"atom '%s' at line %d reg_type_overrides[%q] uses unknown type %q (not in type_name_registry)",
 							atom_name, info_line, reg, tostring(ov.type_name)),
@@ -855,7 +852,7 @@ local function check_atom_rtype_consistency(_src, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #8: binds_no_substruct_deref (Track A Task 13)
+-- Check #8: binds_no_substruct_deref
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- For every `load_word(R_A, R_B, O_(<Type>, <Field>))` and matching `store_word(...)` call in every atom body,
@@ -945,7 +942,7 @@ local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #9: reads_writes_alias_membership (Track A Task 13)
+-- Check #9: reads_writes_alias_membership
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- For every `atom_reads(R_X)` and `atom_writes(R_X)` entry in every `atom_infos` entry, the `R_X` MUST be present in `pipe_ctx.register_alias_registry`.
@@ -1005,7 +1002,7 @@ local CHECK_RULES = {
 	{ name = "gpu_portstore_shape",          per_atom   = check_gpu_portstore_shape          },
 	{ name = "per_atom_cycle_budget",        per_atom   = check_per_atom_cycle_budget        },
 	{ name = "enum_alias_membership",        per_source = check_enum_alias_membership        },
-	{ name = "atom_rtype_consistency",       per_source = check_atom_rtype_consistency       },
+	{ name = "atom_type_consistency",        per_source = check_atom_type_consistency        },
 	{ name = "binds_no_substruct_deref",     per_source = check_binds_no_substruct_deref     },
 	{ name = "reads_writes_alias_membership",per_source = check_reads_writes_alias_membership},
 }

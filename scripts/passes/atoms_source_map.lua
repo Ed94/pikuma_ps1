@@ -36,9 +36,8 @@
 ---
 --- Marker calls (`atom_label(...)`, `atom_offset(...)`) emit 0 `.word`s. 
 --- They share the same walking convention as `passes/offsets.lua :: scan_atom_body`: 
---- markers do NOT advance the word-offset counter, but if a marker is bundled on the same token with a
---- trailing instruction (e.g. `atom_label(foo) load_half_u(...)`), 
---- the trailing instruction's word count is added. This matches `offsets.lua :: count_marker_rest`.
+--- Markers do NOT advance the word-offset counter, but if a marker is bundled on the same token with a trailing instruction 
+--- (e.g. `atom_label(foo) load_half_u(...)`), the trailing instruction's word count is added. This matches `offsets.lua :: count_marker_rest`.
 ---
 --- **Conventions:** tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -84,68 +83,6 @@ local OFFSET_MARKER = "atom_offset"
 -- Helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
---- True iff the leading identifier of `tok` is a marker call (`atom_label` / `atom_offset`).
---- Mirrors `passes/offsets.lua :: is_marker_token` (which is file-local there).
---- @param tok string
---- @return boolean
-local function is_marker_token(tok)
-	local leading = duffle.read_ident(tok, 1)
-	return leading == LABEL_MARKER or leading == OFFSET_MARKER
-end
-
---- Count words contributed by the non-marker portion of `tok` (after the marker's closing `)`).
---- Mirrors offsets.lua:182 `count_marker_rest`. 
---- Returns 0 if there's no trailing content after the marker call.
---- @param tok string
---- @param wc table
---- @return integer
-local function count_marker_rest(tok, wc)
-	local marker_end = duffle.find_marker_call_end(tok)
-	if not marker_end or marker_end >= #tok then return 0 end
-	local rest = duffle.trim(tok:sub(marker_end))
-	if rest == "" then return 0 end
-	return count_token_words(rest, wc)
-end
-
---- Compute per-word entries for an atom. 
---- Shared between the canonical text form and the gdb-runtime form.
----
---- Returns a list of `{pos, line, text}` entries + the total word count.
---- Markers contribute 0 entries (the marker call emits 0 `.word`s).
---- @param atom table   -- one entry of scan.atoms / scan.raw_atoms
---- @param src  table   -- SourceFile (has .scan with .line_of(), .path)
---- @param wc   table   -- shared.word_counts
---- @return table[], integer
-local function compute_word_entries(atom, src, wc)
-	local entries = {}
-	local pos     = 0
-	for _, t in ipairs(atom.body_tokens) do
-		local tok = t.tok
-		local rel = t.rel
-
-		local words
-		if is_marker_token(tok) then
-			words = count_marker_rest(tok, wc)
-		else
-			words = count_token_words(tok, wc)
-		end
-
-		if words > 0 then
-			-- Source line for THIS token = line containing byte offset `atom.body_off + rel`.
-			-- `src.scan.line_of(...)` is O(log N) via LineIndex.
-			local line = src.scan.line_of(atom.body_off + rel)
-			-- Flatten newlines + tabs in TEXT to spaces so each WORD entry fits on one physical line.
-			-- The gdb Python parser (or our pure-gdb parser) does line-based splits; multi-line TEXT would break it.
-			local text = duffle.trim(tok):gsub("[\t\r\n]+", " ")
-			for _ = 1, words do
-				entries[#entries + 1] = { pos = pos, line = line, text = text }
-				pos = pos + 1
-			end
-		end
-	end
-	return entries, pos
-end
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Provenance emission
 -- ════════════════════════════════════════════════════════════════════════════
@@ -155,7 +92,7 @@ local MAC_PREFIX     = "mac_"
 local MAC_PREFIX_LEN = 4
 
 --- Strip the `mac_` prefix from a token's leading identifier.
---- Returns nil if the identifier doesn't start with `mac_` 
+--- Returns nil if the identifier doesn't start with `mac_`
 --- (so non-component tokens like `load_half_u`, `nop2`, `gte_cmdw_*` fall through cleanly).
 --- @param tok string
 --- @return string|nil
@@ -168,25 +105,48 @@ local function strip_mac_prefix_from_token(tok)
 	return nil
 end
 
---- Compute per-word provenance entries for an atom. Mirrors `compute_word_entries` but additionally classifies each emitted `.word` as either:
----   - `RAW`     — emitted by a direct instruction token (no component provenance)
----   - `MACRO X` — emitted by a `mac_X(...)` component invocation, with the component's definition file:line resolved from `ctx.shared.components`.
----
---- Returns a list of `{pos, line, text, comp_name, comp_line, comp_path, body_line}` entries + the total word count.
---- `comp_name` is nil for RAW rows. `body_line` is the line of THIS specific word in the macro body (component source file, not the caller's source);
---- it differs from `comp_line` (= the macro signature line) for every body word whose macro-body token is on a different physical line.
---- `body_line` is `nil` for RAW rows and for component words whose component declaration could not be indexed (older pass combinations / external macros).
----
---- The per-word body-line lookup mirrors `passes/dwarf_injection.lua :: compute_invocation_body_lines`:
---- walk the component's pre-tokenized body in lockstep with `count_token_words` and attribute the source line via `src.scan.line_of(...)` to each emitted `.word`.
---- Atom labels (`atom_label(...)`) emit 0 `.word`s and are skipped to stay aligned with the macro-side word-counting contract.
---- @param atom table  -- one entry of scan.atoms / scan.raw_atoms
---- @param src  table  -- SourceFile (has .scan with .line_of(), .path)
---- @param wc   table  -- shared.word_counts
---- @param comp table  -- shared.components map: bare_name -> {name=, line=, path=, kind=}
---- @param comp_body_index table  -- per-source component body index: bare_name -> {body_off, body_tokens, line_of}
+--- Fetch the per-word body lines for a `mac_X(...)` invocation.
+--- Walks the component's pre-tokenized body in lockstep with `count_token_words` and attributes each emitted `.word`
+--- to a source line via `idx.line_of(...)`. 
+--- Atom labels (`atom_label(...)`) emit 0 `.word`s and are skipped.
+--- @param bare string|nil          -- the bare component name (e.g. `gte_load_tri_verts`)
+--- @param comp_body_index table
+--- @param wc table
+--- @return table|nil                -- list of source lines, 1-based by word position
+local function fetch_body_lines(bare, comp_body_index, wc)
+	if not (bare and comp_body_index) then return nil end
+	local idx = comp_body_index[bare]
+	if not (idx and idx.body_tokens and idx.line_of) then return nil end
+	local lines = {}
+	for _, bt in ipairs(idx.body_tokens) do
+		local bt_tok = duffle.trim(bt.tok or "")
+		if bt_tok ~= "" then
+			local leading = duffle.read_ident(bt_tok, 1)
+			local bt_words
+			if leading == "atom_label" or leading == "atom_offset" then
+				bt_words = 0
+			else
+				bt_words = count_token_words(bt_tok, wc)
+			end
+			if bt_words > 0 then
+				local body_line = idx.line_of(idx.body_off + bt.rel)
+				for _ = 1, bt_words do lines[#lines + 1] = body_line end
+			end
+		end
+	end
+	return lines
+end
+
+--- Unified per-word entry walker. `mode` is "sourcemap" (3 fields) or "provenance" (8 fields including component + body-line lookup).
+--- Returns (entries, total_words). Markers contribute 0 entries.
+--- @param atom table
+--- @param src  table
+--- @param wc   table
+--- @param mode string           -- "sourcemap" | "provenance"
+--- @param comp table|nil        -- shared.components map (provenance only)
+--- @param comp_body_index table|nil  -- per-source body index (provenance only)
 --- @return table[], integer
-local function compute_provenance_entries(atom, src, wc, comp, comp_body_index)
+local function compute_word_entries(atom, src, wc, mode, comp, comp_body_index)
 	local entries = {}
 	local pos     = 0
 	for _, t in ipairs(atom.body_tokens) do
@@ -194,70 +154,46 @@ local function compute_provenance_entries(atom, src, wc, comp, comp_body_index)
 		local rel = t.rel
 
 		local words
-		if is_marker_token(tok) then
-			words = count_marker_rest(tok, wc)
+		if duffle.is_marker_token(tok) then
+			words = duffle.count_marker_rest(tok, wc, count_token_words)
 		else
 			words = count_token_words(tok, wc)
 		end
 
-		-- Resolve component provenance for this token (if any).
-		local comp_name = nil
-		local comp_line = nil
-		local comp_path = nil
-		local comp_kind = nil
-		local bare      = strip_mac_prefix_from_token(tok)
-		if bare and comp and comp[bare] then
-			comp_name = bare
-			comp_line = comp[bare].line
-			comp_path = comp[bare].path
-			comp_kind = comp[bare].kind
-		end
-
-		-- Per-word body lines: lazily allocate from the indexed component body the first time we see a `mac_X(...)` call to a given component.
-		-- We allocate ONE full body_lines vector per (call) and consume it sequentially; 
-		-- if a single atom calls the same component more than once, each call refetches its own vector. 
-		-- (Today no atom calls the same `mac_X(...)` twice, but the refetch keeps the semantics correct even if that changes.)
-		local body_lines = nil
-		local function fetch_body_lines()
-			if not (bare and comp_body_index) then return nil end
-			local idx = comp_body_index[bare]
-			if not (idx and idx.body_tokens and idx.line_of) then return nil end
-			local lines = {}
-			for _, bt in ipairs(idx.body_tokens) do
-				local bt_tok = duffle.trim(bt.tok or "")
-				if bt_tok ~= "" then
-					local leading = duffle.read_ident(bt_tok, 1)
-					local bt_words
-					if leading == "atom_label" or leading == "atom_offset" then
-						bt_words = 0
-					else
-						bt_words = count_token_words(bt_tok, wc)
-					end
-					if bt_words > 0 then
-						local body_line = idx.line_of(idx.body_off + bt.rel)
-						for _ = 1, bt_words do lines[#lines + 1] = body_line end
-					end
-				end
+		-- Provenance-only: resolve component + body_lines (one fetch per token).
+		local comp_name, comp_line, comp_path, comp_kind
+		local body_lines
+		if mode == "provenance" then
+			local bare = strip_mac_prefix_from_token(tok)
+			if bare and comp and comp[bare] then
+				comp_name = bare
+				comp_line = comp[bare].line
+				comp_path = comp[bare].path
+				comp_kind = comp[bare].kind
 			end
-			return lines
+			if comp_name then body_lines = fetch_body_lines(bare, comp_body_index, wc) end
 		end
 
 		if words > 0 then
 			local line = src.scan.line_of(atom.body_off + rel)
 			local text = duffle.trim(tok):gsub("[\t\r\n]+", " ")
-			-- Fetch body_lines ONCE per token (one mac_X(...) call exhausts N body words).
-			if comp_name then body_lines = fetch_body_lines() end
 			for i = 1, words do
-				entries[#entries + 1] = {
-					pos       = pos,
-					line      = line,
-					text      = text,
-					comp_name = comp_name,
-					comp_line = comp_line,
-					comp_path = comp_path,
-					comp_kind = comp_kind,
-					body_line = body_lines and body_lines[i],
-				}
+				local entry
+				if mode == "provenance" then
+					entry = {
+						pos       = pos,
+						line      = line,
+						text      = text,
+						comp_name = comp_name,
+						comp_line = comp_line,
+						comp_path = comp_path,
+						comp_kind = comp_kind,
+						body_line = body_lines and body_lines[i],
+					}
+				else  -- "sourcemap" (default)
+					entry = { pos = pos, line = line, text = text }
+				end
+				entries[#entries + 1] = entry
 				pos = pos + 1
 			end
 		end
@@ -282,7 +218,7 @@ end
 local function emit_provenance_stanza(src, atom, wc, comp, comp_body_index)
 	local lines    = {}
 	local rel_path = src.path:gsub("\\", "/")
-	local entries, total = compute_provenance_entries(atom, src, wc, comp, comp_body_index)
+	local entries, total = compute_word_entries(atom, src, wc, "provenance", comp, comp_body_index)
 
 	-- ATOM header line with placeholder total (patched after we know it).
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
@@ -465,7 +401,6 @@ end
 ---
 --- Each command is a static sequence of `printf` / `tbreak` / `if ... end` blocks.
 --- The Lua pass emits N atoms' worth of lines — no runtime iteration. 
---- With 7 atoms + ~200 word entries, the runtime file is ~2000 lines, all auto-generated, no human edit ever.
 --- @param lines   table  -- output line buffer (mutated in place)
 --- @param matched table  -- list of atom records from `build_atom_table`
 local function append_gdb_commands(lines, matched)
@@ -595,8 +530,7 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = ""
 
 	-- ── show_c2 ──
-	-- GTE data regs (COP2). pcsx-redux's gdb stub doesn't expose COP2 (only
-	-- 72 regs: 32 GPR + COP0 + FPR).
+	-- GTE data regs (COP2). pcsx-redux's gdb stub doesn't expose COP2 (only 72 regs: 32 GPR + COP0 + FPR).
 	--   curl http://localhost:8080/api/v1/lua/gte
 	-- We keep the command definition as a stub that points the user at the plugin.
 	lines[#lines + 1] = "define show_c2"
@@ -713,8 +647,9 @@ local M = {}
 --- but invoked from many source files (every atom body that calls `mac_X(...)`).
 --- The body_offset + body_tokens + line_of live with the declaration source, so a per-source index would miss invocations from other sources.
 ---
---- The cross-source index is keyed by the bare component name (`gte_load_tri_verts`, NOT `ac_gte_load_tri_verts`) — `strip_mac_prefix_from_token` strips the `mac_` prefix
---- from call-site identifiers and yields that exact bare name; matching it here keeps the lookup aligned with the `ctx.shared.components` map's keying convention.
+--- The cross-source index is keyed by the bare component name (`gte_load_tri_verts`, NOT `ac_gte_load_tri_verts`)
+--- `strip_mac_prefix_from_token` strips the `mac_` prefix from call-site identifiers and yields that exact bare name;
+--- matching it here keeps the lookup aligned with the `ctx.shared.components` map's keying convention.
 --- First declaration wins (subsequent redeclarations would collide; today's sources declare each component exactly once).
 --- @param ctx PassCtx
 --- @return table<string, table>  -- {[comp_name] = {body_off, body_tokens, line_of}}

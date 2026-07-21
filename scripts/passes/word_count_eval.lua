@@ -15,7 +15,6 @@
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Note: this boilerplate is duplicated in 6 other entry scripts; extraction target (`duffle.setup_package_path()`).
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
@@ -27,9 +26,6 @@ local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
-
--- Windows separator char — used by `fname:match` to recognize `.macs.h` files.
-local PATH_SEP_BACKSLASH = "\\"
 
 -- Required native extension: lfs (LuaFileSystem). Built by `update_deps.ps1` to
 -- `toolchain/lfs/lfs.dll` and wired into package.cpath by `scripts/duffle_paths.lua`.

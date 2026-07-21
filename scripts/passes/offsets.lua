@@ -172,32 +172,6 @@ local function scan_for_atom_markers(token, at_pos, labels, branches)
 	end
 end
 
--- (internal) Count words emitted by the rest of `tok` after a marker call
--- (the marker call itself emits 0 words, but the source pattern may bundle the marker with the next instruction on the same line,
--- separated by no top-level comma).
--- Returns the word count contributed by that rest.
--- @param tok string
--- @param word_counts table
--- @return integer
-local function count_marker_rest(tok, word_counts)
-	-- duffle.find_marker_call_end returns the position PAST the closing `)` of the marker call
-	-- (or nil if `tok` isn't a marker call). Canonical impl in duffle.lua is faster than the
-	-- file-local copy that used to live here (byte-indexed, no `tok:sub` per char).
-	local marker_end = duffle.find_marker_call_end(tok)
-	if not marker_end or marker_end >= #tok then return 0 end
-	local rest = duffle.trim(tok:sub(marker_end))
-	if rest == "" then return 0 end
-	return count_token_words(rest, word_counts)
-end
-
--- (internal) Is this token a marker call (`atom_label` or `atom_offset`)?
--- @param tok string
--- @return boolean
-local function is_marker_token(tok)
-	local leading_ident = duffle.read_ident(tok, 1)
-	return leading_ident == LABEL_MARKER or leading_ident == OFFSET_MARKER
-end
-
 --- Scan an atom body for labels + branches, count total words.
 --- Returns (labels, branches, total_words).
 --- @param body string
@@ -214,10 +188,10 @@ local function scan_atom_body(body_tokens, word_counts)
 	local branches = {}
 	for _, t in ipairs(body_tokens) do
 		local tok = t.tok
-		if is_marker_token(tok) then
+		if duffle.is_marker_token(tok) then
 			-- Marker call: record at the current pos, do NOT advance pos.
 			scan_for_atom_markers(tok, pos, labels, branches)
-			pos = pos + count_marker_rest(tok, word_counts)
+			pos = pos + duffle.count_marker_rest(tok, word_counts, count_token_words)
 		else
 			local words = count_token_words(tok, word_counts)
 			scan_for_atom_markers(tok, pos, labels, branches)

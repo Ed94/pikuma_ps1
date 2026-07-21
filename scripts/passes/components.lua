@@ -96,16 +96,24 @@ local GEN_SUBDIR      = "gen"
 local M = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Function-args extraction (precedes MipsAtomComp_Proc_ invocations)
+-- Back-walk helpers (composed into the 2 entry points below: find_function_args_for + preceding_comment_block)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Find the LAST occurrence of `name + "("` in `source[1..before_pos]`.
--- Returns the position of the open paren, or nil if not found.
--- @param source string
--- @param name string
--- @param before_pos integer
--- @return integer|nil
-local function find_last_name_open_paren(source, name, before_pos)
+--- Find the args of the function declaration that immediately precedes a `MipsAtomComp_Proc_` invocation of the given name.
+--- Returns the args string (e.g., `"U4 off, U4 code, U1 r, U1 g, U1 b"`) or nil if no function declaration is found.
+---
+--- Convention: function form is
+---   `FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })`
+--- We find the LAST occurrence of `"ac_X("` before `before_pos` and extract the args from inside the parens.
+--- We then verify the preceding context ends with `MipsAtom`
+--- (the function-decl keyword with possible qualifiers between).
+---
+--- @param source string
+--- @param name string
+--- @param before_pos integer
+--- @return string|nil
+local function find_function_args_for(source, name, before_pos)
+	-- Find the LAST occurrence of `name + "("` in `source[1..before_pos]`.
 	local name_open  = name .. "("
 	local last_idx   = nil
 	local scan_pos   = 1
@@ -117,24 +125,6 @@ local function find_last_name_open_paren(source, name, before_pos)
 		last_idx = found
 		scan_pos = found + #name_open
 	end
-	return last_idx
-end
-
---- Find the args of the function declaration that immediately precedes a `MipsAtomComp_Proc_` invocation of the given name.
---- Returns the args string (e.g., `"U4 off, U4 code, U1 r, U1 g, U1 b"`) or nil if no function declaration is found.
----
---- Convention: function form is
----   `FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })`
---- We find the LAST occurrence of `"ac_X("` before `before_pos` and extract the args from inside the parens.
---- We then verify the preceding context ends with `MipsAtom` 
---- (the function-decl keyword with possible qualifiers between).
----
---- @param source string
---- @param name string
---- @param before_pos integer
---- @return string|nil
-local function find_function_args_for(source, name, before_pos)
-	local  last_idx = find_last_name_open_paren(source, name, before_pos)
 	if not last_idx then return nil end
 
 	-- Verify the preceding context ends with "MipsAtom" (with possible qualifiers between).
@@ -153,100 +143,11 @@ local function find_function_args_for(source, name, before_pos)
 	return inner
 end
 
--- ════════════════════════════════════════════════════════════════════════════
--- Preceding-comment-block extraction
--- ════════════════════════════════════════════════════════════════════════════
-
--- Skip whitespace (space/tab/newline/CR) backward from `pos`, returning the position of the first non-whitespace char.
--- @param source string
--- @param pos integer
--- @return integer
-local function skip_ws_backward(source, pos)
-	local back = pos - 1
-	while back > 0 do
-		local ch = source:sub(back, back)
-		if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" then
-			back = back - 1
-		else
-			break
-		end
-	end
-	return back
-end
-
--- Find the opening `/*` for a block comment whose `*/` ends at `close_pos`.
--- Returns the position of `/`, or nil if not found.
--- @param source string
--- @param close_pos integer  -- position of the closing `*` of `*/`
--- @return integer|nil
-local function find_block_comment_open(source, close_pos)
-	local prefix  = source:sub(1, close_pos - 1)
-	local open_at = nil
-	for scan = #prefix - 1, 1, -1 do
-		if prefix:sub(scan, scan + 1) == "/*" then
-			open_at = scan
-			break
-		end
-	end
-	return open_at
-end
-
--- Walk back from `open_at` over leading spaces + tabs to include the indentation before the `/*` in the captured comment.
--- @param source string
--- @param open_at integer
--- @return integer
-local function extend_left_over_indent(source, open_at)
-	local start = open_at
-	while start > 1 do
-		local ch = source:sub(start - 1, start - 1)
-		if ch == " " or ch == "\t" then
-			start = start - 1
-		else
-			break
-		end
-	end
-	return start
-end
-
--- Walk back from `line_end` to the start of the source line (the most recent `\n` or position 1).
--- @param source string
--- @param line_end integer
--- @return integer
-local function find_line_start(source, line_end)
-	local start = line_end
-	while start > 1 and source:sub(start - 1, start - 1) ~= "\n" do
-		start = start - 1
-	end
-	return start
-end
-
--- (internal) Capture one `/* ... */` block comment whose closing `*/`
--- ends at `close_end_pos`. Returns (block_text, new_scan_pos) where `new_scan_pos`
--- is where to continue scanning for more comments, or nil if no block comment was found.
-local function capture_block_comment(source, close_end_pos)
-	local  open_at = find_block_comment_open(source, close_end_pos)
-	if not open_at then return nil end
-	local block_start = extend_left_over_indent(source, open_at)
-	return source:sub(block_start, close_end_pos), block_start
-end
-
--- (internal) Capture one `// ...` line comment ending at `line_end_pos`.
--- Returns (comment_text, new_scan_pos) or nil if the line is not a `//` comment.
-local function capture_line_comment(source, line_end_pos)
-	local line_start = find_line_start(source, line_end_pos)
-	local line       = source:sub(line_start, line_end_pos)
-	if line:sub(1, 2) == "//" then
-		return line, line_start - 1
-	end
-	return nil
-end
-
 --- Find the contiguous comment block immediately preceding `pos` in `source`.
 --- Returns the comment text (with the `/* */` or `//` markers preserved) or an empty string if no comment is adjacent.
 ---
 --- Used to copy signature comments from the source declaration (`MipsAtomComp_` / `MipsAtomComp_Proc_` / function decl)
 --- over to the generated `mac_X` macro, so LSP/IntelliSense displays the args doc.
----
 --- @param source string
 --- @param pos integer
 --- @return string
@@ -254,22 +155,59 @@ local function preceding_comment_block(source, pos)
 	local scan_pos = pos
 	local pieces   = {}
 	while true do
-		local non_ws = skip_ws_backward(source, scan_pos)
-		if    non_ws == 0 then break end
+		-- Skip whitespace (space/tab/newline/CR) backward from `scan_pos`,
+		-- returning the position of the first non-whitespace char.
+		local non_ws = scan_pos - 1
+		while non_ws > 0 do
+			local ch = source:sub(non_ws, non_ws)
+			if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" then
+				non_ws = non_ws - 1
+			else
+				break
+			end
+		end
+		if non_ws == 0 then break end
 
 		local is_block_close = non_ws >= 2 and source:sub(non_ws - 1, non_ws) == "*/"
 		local is_line_end    = source:sub(non_ws, non_ws) == "\n" or source:sub(non_ws, non_ws) == "\r"
 
 		if is_block_close then
-			local  block_text, new_scan_pos = capture_block_comment(source, non_ws)
-			if not block_text then break end
-			table.insert(pieces, 1, block_text)
-			scan_pos = new_scan_pos
+			-- Find the opening `/*` for a block comment whose `*/` ends at `non_ws`.
+			-- Walk back from `non_ws` over `/*` candidates.
+			local prefix  = source:sub(1, non_ws - 1)
+			local open_at = nil
+			for scan = #prefix - 1, 1, -1 do
+				if prefix:sub(scan, scan + 1) == "/*" then
+					open_at = scan
+					break
+				end
+			end
+			if not open_at then break end
+			-- Walk back from `open_at` over leading spaces + tabs to include the indentation before the `/*`.
+			local block_start = open_at
+			while block_start > 1 do
+				local ch = source:sub(block_start - 1, block_start - 1)
+				if ch == " " or ch == "\t" then
+					block_start = block_start - 1
+				else
+					break
+				end
+			end
+			table.insert(pieces, 1, source:sub(block_start, non_ws))
+			scan_pos = block_start
 		elseif is_line_end then
-			local  line_text, new_scan_pos = capture_line_comment(source, non_ws)
-			if not line_text then break end
-			table.insert(pieces, 1, line_text)
-			scan_pos = new_scan_pos
+			-- Walk back from `non_ws` to the start of the source line (the most recent `\n` or position 1).
+			local line_start = non_ws
+			while line_start > 1 and source:sub(line_start - 1, line_start - 1) ~= "\n" do
+				line_start = line_start - 1
+			end
+			local line = source:sub(line_start, non_ws)
+			if line:sub(1, 2) == "//" then
+				table.insert(pieces, 1, line)
+				scan_pos = line_start - 1
+			else
+				break
+			end
 		else
 			break
 		end
@@ -281,42 +219,6 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 -- Argument-name extraction
 -- ════════════════════════════════════════════════════════════════════════════
-
--- Walk `trimmed` backward from `pos` over trailing whitespace / asterisks / brackets, 
--- returning the position of the first non-trailer character (i.e. the end of the identifier).
--- @param trimmed string
--- @param pos integer
--- @return integer
-local function trim_trailer_back(trimmed, pos)
-	local back = pos
-	while back > 0 do
-		local ch = trimmed:sub(back, back)
-		if ch == " " or ch == "\t" or ch == "*" or ch == "]" or ch == "[" then
-			back = back - 1
-		else
-			break
-		end
-	end
-	return back
-end
-
--- Walk `trimmed` backward from `pos` over identifier chars (alnum + `_`),
--- returning the position just before the identifier starts.
--- @param trimmed string
--- @param pos integer
--- @return integer
-local function trim_ident_back(trimmed, pos)
-	local back = pos
-	while back > 0 do
-		local ch = trimmed:sub(back, back)
-		if duffle.is_alnum(ch) or ch == "_" then
-			back = back - 1
-		else
-			break
-		end
-	end
-	return back
-end
 
 --- Extract just the parameter NAMES from a function-args string (stripping type annotations). E.g.,
 ---   `"U4 off, U4 code, U1 r, U1 g, U1 b"`  ->  `{"off", "code", "r", "g", "b"}`
@@ -331,9 +233,29 @@ local function extract_arg_names(args_str)
 	for _, tok in ipairs(tokens) do
 		local trimmed = duffle.trim(tok)
 		if trimmed ~= "" then
-			local ident_end   = trim_trailer_back(trimmed, #trimmed)
-			local ident_start = trim_ident_back(trimmed, ident_end) + 1
-			local name        = trimmed:sub(ident_start, ident_end)
+			-- Find the identifier at the end: walk back over trailers (whitespace + `*` + `[]`),
+			-- then walk back over the identifier chars (alnum + `_`).
+			-- Plex: inlined the 2 single-caller helpers (no 2-caller rule met).
+			local ident_end = #trimmed
+			while ident_end > 0 do
+				local ch = trimmed:sub(ident_end, ident_end)
+				if ch == " " or ch == "\t" or ch == "*" or ch == "]" or ch == "[" then
+					ident_end = ident_end - 1
+				else
+					break
+				end
+			end
+			local ident_start = ident_end
+			while ident_start > 0 do
+				local ch = trimmed:sub(ident_start, ident_start)
+				if duffle.is_alnum(ch) or ch == "_" then
+					ident_start = ident_start - 1
+				else
+					break
+				end
+			end
+			ident_start = ident_start + 1
+			local name = trimmed:sub(ident_start, ident_end)
 			if name ~= "" then names[#names + 1] = name end
 		end
 	end
@@ -513,13 +435,6 @@ local function split_comment_lines(s)
 	return out
 end
 
---- Split an atom body by top-level commas; drop empty tokens.
---- @param body string
---- @return string[]
-local function tokens_from_body(body)
-	return duffle.tokenize_body_simple(body)
-end
-
 --- Determine the macro signature: function-args list (function form) or variadic-ignored (bare form).
 --- @param args_str string|nil
 --- @return string
@@ -569,7 +484,8 @@ local function build_component_lines(c, counts)
 		end
 	end
 
-	local tokens = tokens_from_body(c.body)
+	local tokens = duffle.split_top_level_commas(c.body)
+	for i = 1, #tokens do tokens[i] = duffle.trim(tokens[i]) end
 	local sig    = signature_from_args(c.args)
 	-- Direct lookup against the per-source precomputed `counts` table (built once by count_all_components).
 	local n      = counts[c.name]
@@ -605,7 +521,7 @@ local function header_boilerplate(src)
 		"// Component atoms (MipsAtomComp_(ac_*)) -> macro variants (mac_*)",
 		"",
 		-- Self-contained: define WORD_COUNT if not already defined.
-		-- We use the same definition here so the auto-generated entries below expand 
+		-- We use the same definition here so the auto-generated entries below expand
 		-- to compile-time constants whether the metadata file is included first or not.
 		"#ifndef WORD_COUNT",
 		"#define WORD_COUNT(name, count)  enum { words_##name = (count) };",
@@ -616,7 +532,7 @@ end
 
 -- Compute the output path for one source's `.macs.h` file.
 -- The pre-rework convention uses the *directory* basename
--- (not the source file basename) — e.g. `code/duffle/lottes_tape.h` produces `code/duffle/gen/duffle.macs.h`.
+-- (not the source file basename) e.g. `code/duffle/lottes_tape.h` produces `code/duffle/gen/duffle.macs.h`.
 -- This matches what the C codebase #includes.
 -- @param src SourceFile
 -- @return string  -- the output directory
