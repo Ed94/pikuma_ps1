@@ -321,7 +321,7 @@ function ps1-meta { param(
 		[Parameter(Mandatory=$true)][string[]]$sources,
 		[Parameter(Mandatory=$true)][string]$metadata,
 		[string]$out_root = (join-path $path_build 'gen'),
-		[string[]]$passes = @('--all'),
+		[string[]]$passes = @('--pre-link'),
 		[string[]]$extra_args = @()
 	)
 	$script = join-path $path_scripts 'ps1_meta.lua'
@@ -386,8 +386,6 @@ function build-gte_hello {
 	make-binary $elf $exe
 
 	# Post-link: gdb-runtime + dwarf-injection in a single Lua invocation (one luajit cold start).
-	# The metaprogram's per-pass mtime gate skips every pass whose outputs are up-to-date relative to inputs;
-	# on warm cache this is ~5-10ms (was 130-150ms for a fresh subprocess).
 	ps1-meta -sources $atom_sources -metadata $path_atom_metadata `
 		-out_root (join-path $path_build 'gen') `
 		-passes @('--post-link') `

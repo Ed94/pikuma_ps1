@@ -618,9 +618,17 @@ end
 --- Count words contributed by the non-marker portion of `tok` (after the marker's closing `)`).
 --- Returns 0 if `tok` isn't a marker call or has no trailing content.
 ---
---- TODO(Ed): Review this "not imported" assertion. Why do we have this if its not imported or is it actually?
---- `count_token_words_fn` is passed in (not imported) to keep this module free of pass-module dependencies.
---- Both call sites already import `word_count_eval.count_token_words`; they pass it as the 3rd arg.
+--- `count_token_words_fn` is injected by the caller rather than imported here because the
+--- dependency arrow already points the other way: `passes/offsets.lua` and
+--- `passes/atoms_source_map.lua` both `require("word_count_eval")` and pass its
+--- `count_token_words` as the 3rd argument to this function, while `word_count_eval`
+--- itself loads `duffle` via `duffle_paths.lua` (see `passes/word_count_eval.lua` near
+--- the top of the file) and calls `duffle.trim` / `duffle.read_ident` /
+--- `duffle.skip_ws_and_cmt` from `M.count_token_words`. Importing `word_count_eval`
+--- from this module would reverse that direction and form a recursive require cycle.
+--- The callback keeps the marker-syntax helpers (`find_marker_call_end`,
+--- `is_marker_token`, this function) shared in `duffle` without making the foundational
+--- utility depend on a pass module.
 --- @param tok string
 --- @param word_counts table
 --- @param count_token_words_fn fun(tok: string, wc: table): integer

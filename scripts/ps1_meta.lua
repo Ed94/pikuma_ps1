@@ -17,10 +17,25 @@
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Bootstrap: load `duffle_paths.lua` via `arg[0]` (this script's own path).
--- That single statement: (a) sets `package.path` + `package.cpath` (via cached `git rev-parse`),
--- (b) at the bottom returns `require("duffle")`. So the dofile's return value is the duffle module.
-local duffle = dofile((arg[0]:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
+-- Bootstrap: load `duffle_paths.lua` via this script's own path.
+-- Use `arg[0]` when this file is the entry script (`arg[0]` ends in
+-- "ps1_meta.lua"); fall back to `debug.getinfo(1, "S").source` when this
+-- file is being dofile()'d or require()'d (in which case `arg[0]` is the
+-- *caller's* path, not ours).
+--
+-- That single statement: (a) sets `package.path` + `package.cpath`
+-- (via cached `git rev-parse`), (b) at the bottom returns `require("duffle")`.
+-- So the dofile's return value is the duffle module.
+local _is_entry_script = arg and arg[0] and arg[0]:match("ps1_meta%.lua$") ~= nil
+local _bootstrap_src
+if _is_entry_script then
+	_bootstrap_src = arg[0]
+else
+	-- debug.getinfo(1, "S").source returns "@<path>" for the current chunk;
+	-- strip the leading "@" so the directory match works in both cases.
+	_bootstrap_src = debug.getinfo(1, "S").source:sub(2)
+end
+local duffle = dofile((_bootstrap_src:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -49,6 +64,8 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 --- @field module string       -- module name passed to require()
 --- @field kind   string       -- "shared" | "header-output" | "validation" | "report"
 --- @field deps   string[]     -- names of upstream passes
+--- @field groups string[]?    -- OPTIONAL build-phase groups this pass is a root of
+---                             -- (e.g. { "pre-link" }, { "post-link" }); absent ⇒ dependency-only
 --- @field desc   string       -- human description (used by --help + ASCII graph)
 --- @field out    PassOutput[] -- output paths (used by --dry-run + report)
 
@@ -100,8 +117,15 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 -- PASSES table (data, not code) — the orchestrator's dep graph
 -- ════════════════════════════════════════════════════════════════════════════
 
--- All passes always run (no mtime gate). 
--- TODO(Ed): Not all passes should run, dwarf-injection and passes dependent on post-compile + link SHOULD NOT NEED TO BE ALWAYS RUN.
+-- Build-phase groups: each PASSES row may declare membership in one or more
+-- named groups via `groups = { ... }`. The CLI flags --pre-link and
+-- --post-link request the *roots* of their group; topo_sort then closes
+-- transitive dependencies from those roots, and dispatch_passes runs every
+-- pass in the resulting closure without phase-filtering.
+--
+-- A row without a `groups` entry is dependency-only: it runs only when a
+-- transitive dep requests it, but it remains directly requestable through
+-- its explicit CLI flag (e.g. --atoms-source-map, --scan-source).
 
 local PASSES = {
 	["scan-source"] = {
@@ -137,6 +161,7 @@ local PASSES = {
 		module = "passes.offsets",
 		kind   = "header-output",
 		deps   = {"scan-source", "word-counts", "components"},
+		groups = { "pre-link" },
 		desc   = "Compute branch offsets for atom_label / atom_offset",
 		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.offsets.h" } },
 	},
@@ -161,6 +186,7 @@ local PASSES = {
 		module = "passes.dwarf_injection",
 		kind   = "shared",
 		deps   = {"scan-source", "atoms-source-map"},
+		groups = { "post-link" },
 		desc   = "Inject per-atom .debug_line + .debug_aranges (F') + per-atom .debug_info subprogram + per-wave-context-reg .debug_info variables (G') into the ELF (post-link; writes 7 section .bin blobs plus one deterministic .gdbinit sidecar). (rbind composite) reads ctx.sources[i].scan to find atom_bind(Binds_X) atoms + their Binds_X struct fields; emits per-Binds_X DW_TAG_structure_type DIEs + per-rbind-atom DW_TAG_variable 'bind_args' DIEs with piece-chain DW_OP_bregN/DW_OP_piece location expressions.",
 		out    = {
 			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_line.bin"     },
@@ -177,10 +203,55 @@ local PASSES = {
 		module = "passes.report",
 		kind   = "report",
 		deps   = {"annotation", "static-analysis"},
+		groups = { "pre-link" },
 		desc   = "Render the per-project summary",
 		out    = { { kind = "report", path_template = "<out_root>/annotation_validation.txt" } },
 	},
 }
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Phase-root selection: derive the sorted set of roots belonging to a named
+-- build-phase group, then append them to `args.requested_set`. topo_sort
+-- closes the transitive deps from there; dispatch_passes runs every resolved
+-- pass without phase-filtering.
+-- ────────────────────────────────────────────────────────────────────────────
+
+--- @param group_name string  -- the build-phase group ("pre-link" | "post-link")
+--- @return string[]          -- sorted root pass names belonging to that group
+local function roots_for_group(group_name)
+	local names = {}
+	for name, pass in pairs(PASSES) do
+		if pass.groups then
+			for _, g in ipairs(pass.groups) do
+				if g == group_name then
+					names[#names + 1] = name
+					break
+				end
+			end
+		end
+	end
+	table.sort(names)
+	return names
+end
+
+--- Append every root belonging to `group_name` to `args.requested_set`.
+--- Errors loudly if no PASSES row declares the group, so a typo'd or
+--- future-removed group name cannot silently fall through to pre-link
+--- (or any other default) and dispatch nothing.
+--- @param args ParsedArgs
+--- @param group_name string
+local function request_roots_for_group(args, group_name)
+	local roots = roots_for_group(group_name)
+	if #roots == 0 then
+		error(string.format(
+			"ps1_meta: build-phase group %q has zero roots in PASSES; "
+			.. "check PASSES rows for a `groups = { %q }` field",
+			group_name, group_name))
+	end
+	for _, name in ipairs(roots) do
+		args.requested_set[#args.requested_set + 1] = name
+	end
+end
 
 -- Pass-kind taxonomy: which kinds stop the build on errors?
 local PASS_KIND_STOP_ON_ERROR = {
@@ -191,6 +262,13 @@ local PASS_KIND_STOP_ON_ERROR = {
 }
 
 -- Closed set of CLI flags -> pass names.
+-- Per-pass flags (e.g. --word-counts) live here; phase flags (--pre-link,
+-- --post-link, --all) live in FLAG_HANDLERS because they own side effects
+-- or invoke group-derivation logic. --dwarf-injection is *also* a per-pass
+-- opt-in flag, but its selection + opt-in state are both owned by the
+-- explicit FLAG_HANDLERS entry below (it sets args.flags.dwarf_injection
+-- and appends "dwarf-injection" to requested_set), so it is intentionally
+-- absent from this table.
 local PASS_FLAG_TO_NAME = {
 	["--word-counts"]       = "word-counts",
 	["--components"]        = "components",
@@ -198,28 +276,20 @@ local PASS_FLAG_TO_NAME = {
 	["--offsets"]           = "offsets",
 	["--static-analysis"]   = "static-analysis",
 	["--atoms-source-map"]  = "atoms-source-map",
-	["--dwarf-injection"]   = "dwarf-injection",
 	["--report"]            = "report",
 	["--scan-source"]       = "scan-source",
 	["--all"]               = ALL_PASSES_SENTINEL,
 }
 
-local ALL_PASS_NAMES = {
-	"scan-source",
-	"word-counts",
-	"components",
-	"annotation",
-	"offsets",
-	"static-analysis",
-	"atoms-source-map",
-	"dwarf-injection",
-	"report",
-}
-
---- Append every pass name to args.requested_set. Used by --all and by the "default to --all if no pass flags were given" fallback.
+--- Append every pass name to args.requested_set. Names are derived from
+--- PASSES (no parallel name list); used by --all and by any caller that
+--- wants the full closure.
 --- @param args ParsedArgs
 local function request_all_passes(args)
-	for _, n in ipairs(ALL_PASS_NAMES) do
+	local names = {}
+	for name in pairs(PASSES) do names[#names + 1] = name end
+	table.sort(names)
+	for _, n in ipairs(names) do
 		args.requested_set[#args.requested_set + 1] = n
 	end
 end
@@ -241,16 +311,28 @@ ps1_meta.lua - Tape-atom metaprogram orchestrator
 USAGE:
   ps1_meta.lua [PASS_FLAGS] [COMMON_FLAGS]
 
-PASS_FLAGS (pick one or more, or use --all):
-  --word-counts         Load metadata.h + scan for existing .macs.h
-  --components          Generate <module>/gen/<basename>.macs.h
-  --validate            Run atom annotation DSL validation
-  --offsets             Generate <module>/gen/<basename>.offsets.h
-  --atoms-source-map    Generate <basename>.atoms.sourcemap.txt per source
-  --dwarf-injection     Inject per-atom .debug_line + .debug_aranges (post-link, requires --elf)
-  --static-analysis     Static analysis: GTE pipeline-fill, mac_yield, ABI handoff, cycle budget
-  --report              Render per-project summary
-  --all                 Equivalent to all 6 flags above (default)
+PASS_FLAGS:
+  Pick a phase or one-or-more individual passes:
+    --pre-link            [phase; default] Run the pre-link group + transitive deps.
+                         The root set is data-driven from each PASSES row's
+                         `groups` field; no parallel name list is maintained.
+    --post-link           [phase] Run the post-link group + transitive deps.
+                         Requires --elf. Sets --gdb-runtime and --dwarf-injection
+                         opt-in flags as well.
+    --all                 Select every row of the PASSES table. Pass-local opt-in
+                         guards remain active, so --dwarf-injection still requires
+                         --elf and --gdb-runtime still requires a runtime emission.
+  Or pick any subset:
+    --scan-source         Scan sources into the fat SourceScan payload
+    --word-counts         Load metadata.h + scan for existing .macs.h
+    --components          Generate <module>/gen/<basename>.macs.h
+    --validate            Run atom annotation DSL validation
+    --offsets             Generate <module>/gen/<basename>.offsets.h
+    --atoms-source-map    Generate <basename>.atoms.sourcemap.txt per source
+    --dwarf-injection     [opt-in] Select the post-link dwarf-injection pass + set the
+                         opt-in flag. Requires --elf.
+    --static-analysis     Static analysis: GTE pipeline-fill, mac_yield, ABI handoff, cycle budget
+    --report              Render per-project summary
 
 COMMON_FLAGS:
   --source FILE         Source file to process (repeatable)
@@ -258,7 +340,6 @@ COMMON_FLAGS:
   --out-root DIR        Output root for reports (default: build/gen)
   --project-root DIR    Project root for .macs.h scan (default: dirname(metadata))
   --gdb-runtime         Also emit <out_root>/gdb_tape_atoms_runtime.gdb (post-link, requires --elf)
-  --dwarf-injection     Opt in to DWARF injection (writes <basename>.dwarf_*.bin blobs for objcopy splice; requires --elf)
   --elf PATH            Path to linked .elf (for --gdb-runtime / --dwarf-injection)
   --dry-run             Print dep order + ASCII graph; exit 0 without running
   --verbose             Print per-pass debug output
@@ -270,7 +351,9 @@ EXIT CODES:
   2  Metaprogram internal error
 
 EXAMPLE:
-  ps1_meta.lua --all --metadata metadata.h --source code/foo.c --source code/bar.c
+  ps1_meta.lua --pre-link  --metadata metadata.h --source code/foo.c --source code/bar.c
+  ps1_meta.lua --post-link --metadata metadata.h --source code/foo.c --source code/bar.c --elf build/hello_gte.elf
+  ps1_meta.lua --all       --metadata metadata.h --source code/foo.c --source code/bar.c
 ]])
 end
 
@@ -296,21 +379,31 @@ FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx) args.project_roo
 -- Same shape as the existing per-flag handlers. mutates `args.flags` (which propagates into `ctx.flags`).
 FLAG_HANDLERS["--gdb-runtime"]  = function(args) args.flags                = args.flags or {}; args.flags.gdb_runtime = true end
 FLAG_HANDLERS["--elf"]          = function(args, argv, arg_idx) args.flags = args.flags or {}; args.flags.elf_path    = argv[arg_idx + 1]; return arg_idx + 1 end
--- Enable DWARF injection (default OFF)
+-- Enable DWARF injection (default OFF). Opts in to the post-link pass and
+-- sets the flag in one shot — the explicit handler below owns both
+-- selection and opt-in state, so --dwarf-injection is intentionally absent
+-- from PASS_FLAG_TO_NAME.
 FLAG_HANDLERS["--dwarf-injection"] = function(args)
 	args.flags                 = args.flags or {}
 	args.flags.dwarf_injection = true
 	args.requested_set[#args.requested_set + 1] = "dwarf-injection"
 end
--- Batch post-link pass: gdb-runtime + dwarf-injection in a single Lua invocation.
--- Sets the same flags as --gdb-runtime + --dwarf-injection but only requires one luajit cold start
--- (~50-100ms saved per build vs two separate invocations).
--- Also requires --elf (same as the two individual flags).
+-- Build-phase flags: --pre-link and --post-link request the roots of their
+-- declared groups (see roots_for_group). topo_sort closes transitive deps
+-- from those roots; dispatch_passes runs every pass in the resolved
+-- closure without phase-filtering.
+FLAG_HANDLERS["--pre-link"] = function(args)
+	request_roots_for_group(args, "pre-link")
+end
+-- Batch post-link phase: gdb-runtime + dwarf-injection in one luajit cold
+-- start. Sets the same opt-in flags as --gdb-runtime + --dwarf-injection
+-- and selects the post-link build-phase group.
+-- --elf is required; parse_args enforces it after all flags are parsed.
 FLAG_HANDLERS["--post-link"]      = function(args)
 	args.flags = args.flags or {}
 	args.flags.gdb_runtime     = true
 	args.flags.dwarf_injection = true
-	args.requested_set[#args.requested_set + 1] = "dwarf-injection"
+	request_roots_for_group(args, "post-link")
 end
 
 -- G' (atom locals) is now consolidated into --dwarf-injection; no separate flag.
@@ -355,8 +448,10 @@ local function parse_args(argv)
 		pos = pos + 1
 	end
 
-	-- Default: --all if no explicit pass flags.
-	if #args.requested_set == 0 then request_all_passes(args) end
+	-- Default: --pre-link if no explicit pass flags were given. The first
+	-- invocation of a build is always pre-link, so this avoids silently
+	-- also invoking post-link work in builds without an ELF artifact.
+	if #args.requested_set == 0 then request_roots_for_group(args, "pre-link") end
 
 	-- Defaults: project_root = dirname(metadata).
 	if args.metadata and not args.project_root then
@@ -373,6 +468,20 @@ local function parse_args(argv)
 	end
 	if #args.sources == 0 then
 		io.stderr:write("ps1_meta: at least one --source FILE is required\n")
+		os.exit(EXIT_INTERNAL_ERROR)
+	end
+
+	-- Post-link opt-ins (--gdb-runtime, --dwarf-injection) write output that
+	-- depends on the linked ELF. Without --elf the metaprogram can't satisfy
+	-- those requests, so refuse loud and early. This covers the explicit
+	-- --post-link batch, --dwarf-injection by itself, and --gdb-runtime by
+	-- itself.
+	local flags      = args.flags or {}
+	local elf_path   = flags.elf_path
+	local has_elf    = type(elf_path) == "string" and #elf_path > 0
+	local post_links = flags.gdb_runtime or flags.dwarf_injection
+	if post_links and not has_elf then
+		io.stderr:write("ps1_meta: --elf PATH is required for post-link output\n")
 		os.exit(EXIT_INTERNAL_ERROR)
 	end
 
@@ -531,10 +640,9 @@ end
 --- Render the dep graph as ASCII art. Output width capped at 78 columns.
 --- Falls back to the simpler "Resolved dependency order" list only if graph width exceeds terminal width.
 --- @param passes table<string, PassDescriptor>
---- @param requested string[]  -- originally-requested passes (subset of closed)
 --- @param closed string[]     -- dep-closed execution order
 --- @return string
-local function render_dep_graph(passes, requested, closed)
+local function render_dep_graph(passes, closed)
 	local lines = {}
 	local function add(s) lines[#lines + 1] = s end
 
@@ -549,50 +657,203 @@ local function render_dep_graph(passes, requested, closed)
 	add("")
 
 	-- Data-driven ASCII graph built from the actual PASSES table.
-	-- Shows the source -> scan_source -> pass chain. Each pass is shown once; edges are "feeds into" arrows based on deps.
+	-- Kahn layers determine the row of each box; each pass becomes a 4-row
+	-- box (top border, name, kind+output-count, bottom border). Boxes in
+	-- the same layer are rendered side-by-side; layers are connected by a
+	-- 'v' marker row whose 'v' chars are centered under each box, indicating
+	-- the downward 'feeds into' direction.
+	--
+	-- Layout invariants enforced here:
+	--   * MAX_GRAPH_WIDTH = 78 cols: no emitted line exceeds this. The
+	--     "simplest" way to stay under the budget is to limit each sub-row
+	--     to MAX_BOXES_PER_ROW = 3 boxes; for the canonical 9-row PASSES
+	--     table the largest layer has 3 boxes, so no wrap engages today.
+	--     If a future layer grows past 3 boxes, the layer is split into
+	--     adjacent sub-rows (each ending in its own 'v'-marker row).
+	--   * No silent truncation: per-layer box width is computed from the
+	--     layer's widest content (max(name length, kind-suffix length))
+	--     plus a 1-char leading + 1-char trailing padding + 2 wall chars.
+	--     Long names widen the box; they are NEVER truncated.
+	--   * Collision-safety: every PASSES row has a unique name, kind, and
+	--     out-list, so two distinct passes cannot produce visually identical
+	--     boxes.
 	add("[ps1_meta] Pass graph (read top-to-bottom; edges = 'feeds into'):")
 	add("")
 
-	-- Compute which passes feed which other passes (reverse of deps).
-	local feeds = {}  -- feeds[X] = list of passes that X feeds into
-	for _, name in ipairs(closed) do feeds[name] = {} end
-	for name, p in pairs(passes)  do
-		for _, dep in ipairs(p.deps) do
-			if feeds[dep] then feeds[dep][#feeds[dep] + 1] = name end
+	-- Compute Kahn layer per pass: layer L = max(deps' layer) + 1, layer 0
+	-- for deps-less passes. Repeated sweeps until every pass in `closed` is
+	-- assigned (handles forward refs that resolve on the second pass).
+	local pass_layer, max_layer = {}, 0
+	local sorted_closed = {}
+	for _, name in ipairs(closed) do sorted_closed[#sorted_closed + 1] = name end
+	table.sort(sorted_closed)
+	local function assign_layers()
+		local assigned_count = 0
+		for _, name in ipairs(sorted_closed) do
+			if pass_layer[name] == nil then
+				local p = passes[name]
+				local max_dep, ready = -1, true
+				for _, dep in ipairs(p.deps) do
+					if pass_layer[dep] == nil then ready = false; break end
+					if pass_layer[dep] > max_dep then max_dep = pass_layer[dep] end
+				end
+				if ready then
+					pass_layer[name] = max_dep + 1
+					if pass_layer[name] > max_layer then max_layer = pass_layer[name] end
+					assigned_count = assigned_count + 1
+				end
+			end
+		end
+		return assigned_count
+	end
+	while assign_layers() > 0 do end
+	-- Defensive invariant: any unresolved pass is a bug. topo_sort already
+	-- errors on cycles before this point, so reaching here means a logic
+	-- error in the renderer (or a synthetic call that bypassed topo_sort).
+	-- Surface the failure loudly with the offending names; never silently
+	-- place unresolved passes at layer 0 (which would corrupt the graph).
+	local unresolved = {}
+	for _, name in ipairs(sorted_closed) do
+		if pass_layer[name] == nil then unresolved[#unresolved + 1] = name end
+	end
+	if #unresolved > 0 then
+		error("render_dep_graph: unresolved Kahn layer for pass(es): "
+			.. table.concat(unresolved, ", ")
+			.. "; topo_sort should have caught this earlier")
+	end
+
+	-- Bucket passes by layer; sort each bucket alphabetically for stability.
+	local layers = {}
+	for i = 0, max_layer do layers[i] = {} end
+	for _, name in ipairs(sorted_closed) do
+		layers[pass_layer[name]][#layers[pass_layer[name]] + 1] = name
+	end
+	for i = 0, max_layer do table.sort(layers[i]) end
+
+	-- Layout constants. Boxes in the same layer share the same width
+	-- (computed as the layer's widest content + padding + walls).
+	local MAX_GRAPH_WIDTH   = 78
+	local MAX_BOXES_PER_ROW = 3
+	local GAP               = 3
+
+	local function pad_right(s, width)
+		if #s >= width then return s:sub(1, width) end
+		return s .. string.rep(" ", width - #s)
+	end
+
+	-- Compute the box width (in chars, including both walls) for a layer.
+	-- The interior is the wider of (a) the longest pass name + 1 leading
+	-- space and (b) the longest "<kind> <N>" suffix + 1 leading space.
+	-- Then add 2 for the wall chars.
+	--
+	-- Why +1 (not +2): the +1 formula means the layer's max-content row
+	-- has 0 padding before the right wall (the `|` is immediately after
+	-- the content). This is the collision-safe widening policy the task
+	-- requires — long names widen the box and never get trailing padding.
+	-- Shorter passes in the same layer get trailing padding to fill the
+	-- interior to the layer's uniform width; they never get truncated.
+	local function box_w_for_layer(bucket)
+		local max_content = 0
+		for _, name in ipairs(bucket) do
+			local p        = passes[name]
+			local out_n    = #(p.out or {})
+			local kind_suf = string.format("%s %d>", p.kind, out_n)
+			if #name     > max_content then max_content = #name     end
+			if #kind_suf > max_content then max_content = #kind_suf end
+		end
+		-- Interior = 1 leading space + max_content + 0 trailing (the
+		-- trailing `|` IS the right boundary); walls = 2.
+		return max_content + 3
+	end
+
+	-- Render one pass as a 4-row box at the given box_w. The interior is
+	-- always padded to fit exactly; no string is ever truncated.
+	local function render_box(name, box_w)
+		local p        = passes[name]
+		local out_n    = #(p.out or {})
+		local kind_suf = string.format("%s %d>", p.kind, out_n)
+		local interior = box_w - 2
+		local border   = "+" .. string.rep("-", interior) .. "+"
+		return {
+			border,
+			"|" .. pad_right(" " .. name,     interior) .. "|",
+			"|" .. pad_right(" " .. kind_suf, interior) .. "|",
+			border,
+		}
+	end
+
+	-- Join a single row (1..4) across all boxes in a sub-row, with GAP
+	-- spaces between adjacent boxes.
+	local function join_row(box_rows, row_idx)
+		local parts = {}
+		for i, b in ipairs(box_rows) do
+			parts[#parts + 1] = b[row_idx]
+			if i < #box_rows then parts[#parts + 1] = string.rep(" ", GAP) end
+		end
+		return table.concat(parts)
+	end
+
+	-- 'v' marker row beneath a sub-row: one 'v' centered under each box.
+	local function v_marker_row(box_rows)
+		local total = 0
+		local centers = {}
+		for i, b in ipairs(box_rows) do
+			local w = #b[1]  -- box width = length of the top border row
+			local center = total + math.floor(w / 2)
+			centers[#centers + 1] = center
+			total = total + w + GAP
+		end
+		-- total now includes a trailing GAP we don't want; trim it.
+		total = total - GAP
+		local s = string.rep(" ", total)
+		for _, c in ipairs(centers) do
+			s = s:sub(1, c) .. "v" .. s:sub(c + 2)
+		end
+		return s
+	end
+
+	-- Render a single sub-row (a contiguous chunk of a layer's bucket).
+	-- Emits the 4 box rows + an empty line + the 'v' marker row + an
+	-- empty line, EXCEPT the very last sub-row of the very last layer
+	-- omits the trailing 'v' marker (nothing flows below it).
+	local function render_subrow(bucket_chunk, is_last_subrow, is_last_layer)
+		local box_w = box_w_for_layer(bucket_chunk)
+		local boxes = {}
+		for _, name in ipairs(bucket_chunk) do boxes[#boxes + 1] = render_box(name, box_w) end
+		add(join_row(boxes, 1))  -- top borders
+		add(join_row(boxes, 2))  -- names
+		add(join_row(boxes, 3))  -- kind + output-count
+		add(join_row(boxes, 4))  -- bottom borders
+		-- 'v' marker row beneath this sub-row connects downward to the
+		-- next sub-row of the same layer (if any) OR to the next layer.
+		-- Skip the trailing 'v' only on the very last sub-row of the
+		-- final layer, where nothing flows below it.
+		if not is_last_subrow or not is_last_layer then
+			add("")
+			add(v_marker_row(boxes))
+			add("")
 		end
 	end
 
-	-- Layout: source -> scan_source -> word-counts -> {components, annotation, offsets, static-analysis} -> report
-	-- Outputs are listed under each pass.
-	local outputs_for = function(name)
-		local  p = passes[name]
-		if not p or not p.out or #p.out == 0 then return "" end
-		local outs = {}
-		for _, o in ipairs(p.out) do outs[#outs + 1] = o.path_template end
-		return table.concat(outs, ", ")
+	for layer_idx = 0, max_layer do
+		local bucket   = layers[layer_idx]
+		local is_last  = (layer_idx == max_layer)
+		-- Split the layer into sub-rows of at most MAX_BOXES_PER_ROW boxes.
+		-- With a 20-char box width (the canonical case: name "static-analysis"
+		-- is 15 chars, suffix "header-output 2>" is 16 chars) and GAP=3,
+		-- 3 boxes per sub-row = 3*20 + 2*3 = 66 cols + a 'v' row of 66 cols;
+		-- well within MAX_GRAPH_WIDTH. A 4th box would push to 4*20 + 3*3 = 89,
+		-- which is why MAX_BOXES_PER_ROW = 3 (wrap when >3).
+		local chunk_size = math.min(MAX_BOXES_PER_ROW, #bucket)
+		if chunk_size < 1 then chunk_size = 1 end
+		for chunk_start = 1, #bucket, chunk_size do
+			local chunk_end = math.min(chunk_start + chunk_size - 1, #bucket)
+			local chunk = {}
+			for i = chunk_start, chunk_end do chunk[#chunk + 1] = bucket[i] end
+			local is_last_subrow = (chunk_end == #bucket)
+			render_subrow(chunk, is_last_subrow, is_last)
+		end
 	end
-
-	add("   +-----------+   +-------------------+    +-----------------+")
-	add("   |  source   |-->|  scan_source      |--->|   word-counts   |")
-	add("   |  files    |   | (scan_source.lua) |    |   (load)        |")
-	add("   +-----------+   +-------------------+    +-----------------+")
-	add("                          (single walk)         |")
-	add("                                                |")
-	add("        +-------------------+-------------------+-----------+")
-	add("        v                   v                   v           v")
-	add("   +--------------+   +--------------+   +--------------+   +---------------+")
-	add("   | components   |   | annotation   |   |   offsets    |   |static-analysis|")
-	add("   +--------------+   +--------------+   +--------------+   +---------------+")
-	add("   |<src>/gen/    |   |build/gen/    |   |<src>/gen/    |   |build/gen/     |")
-	add("   |<base>.macs.h |   |<base>.errors |   |<base>.offsets|   |<base>.static  |")
-	add("   |   (header)   |   |  .h          |   |  .h          |   |  _analysis    |")
-	add("   +------+-------+   |  +annot.txt  |   |  (header)    |   |  .txt         |")
-	add("          |           +--+-----------+   +--------------+   +------+--------+")
-	add("          v              v                                         v")
-	add("   +------+----------------+  +------+-------+                     |")
-	add("   |offsets|static-analysis|  |report|       |<--------------------+")
-	add("   |       |               |  +------+-------+")
-	add("   +-------+---------------+")
 
 	return table.concat(lines, "\n") .. "\n"
 end
@@ -666,7 +927,7 @@ local function main(argv)
 
 		-- --dry-run: print dep order + ASCII graph, exit OK.
 		if args.dry_run then
-			io.write(render_dep_graph(PASSES, requested, closed))
+			io.write(render_dep_graph(PASSES, closed))
 			os.exit(EXIT_OK)
 		end
 
@@ -682,4 +943,20 @@ local function main(argv)
 	os.exit(EXIT_OK)
 end
 
-main({...})
+-- Module export for in-process consumers (tests that dofile this script).
+-- The closure above, `render_dep_graph`, and the canonical `PASSES` table
+-- are exposed so a test can render the graph for synthetic PASSES tables
+-- without spawning a subprocess. The conditional `main(...)` call below
+-- only fires when this file is invoked as the entry script (arg[0] ends
+-- in "ps1_meta.lua"); in dofile() mode (test's arg[0] does not match),
+-- main() is skipped and the chunk returns `_M` to the caller.
+local _M = {
+	render_dep_graph = render_dep_graph,
+	PASSES           = PASSES,
+}
+
+if arg and arg[0] and arg[0]:match("ps1_meta%.lua$") then
+	main({...})
+end
+
+return _M
