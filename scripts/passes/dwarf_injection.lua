@@ -295,21 +295,42 @@ local function build_debug_loclists_section(atom_table, registries)
 	return header .. body
 end
 
+-- Compute the size of one tape piece for an atom's struct field offset.
+-- The piece is: DW_OP_bregN(1) + sleb128(offset)(1..5) + DW_OP_piece(1) + uleb128(4)(1).
+-- Sleb128(0) is 1 byte; sleb128(63) is 1 byte; sleb128(64) is 2 bytes; ...; sleb128(2^28) is 5 bytes.
+-- 4 = U4_BYTE_SIZE: each field is sizeof(uint32_t) on MIPS32.
+-- @param offset integer  -- the field's offset within the struct (0..2^32-1)
+-- @return integer        -- encoded size in bytes (4 for offsets < 64, 5 for offsets 64..8191, ..., 8 for > 2^28)
+local function tape_piece_size(offset)
+	return 1 + elf_dwarf.sleb128_size(offset) + 1 + elf_dwarf.uleb128_size(U4_BYTE_SIZE)
+end
+
 -- Compute the per-atom loclist offset within a .debug_loclists section.
 -- @param atom_table table[]  -- list of atoms with .rbind set
 -- @return table  -- {[atom_name] = offset_in_section}
 local function compute_loclists_offsets(atom_table)
+	local LOCLIST_ENTRY_HEADER_SIZE = 1 + 4 + 1  -- DW_LLE_start_length(1) + addr(4) + uleb_length(1)
 	local offsets = {}
-	local cursor  = 4 + 2 + 1 + 1 + 4
+	-- Loclist unit header (DWARF5 §7.7.2): unit_length(4) + version(2) + address_size(1) + segment_size(1) + offset_entry_count(4) = 12 bytes.
+	-- The unit_length itself is not counted in the unit_length value, so the body starts at byte 12.
+	local cursor = 4 + 2 + 1 + 1 + 4  -- = 12
 	for _, atom in ipairs(atom_table) do
 		if atom.rbind then
 			offsets[atom.name] = cursor
 			local n_fields = #atom.rbind.fields
-			local tape_expr_len = n_fields * 3
-			local gpr_expr_len  = n_fields * 3
-			local tape_entry    = 1 + 4 + 1 + tape_expr_len
-			local gpr_entry     = 1 + 4 + 1 + gpr_expr_len
-			local body_len      = tape_entry + gpr_entry + 1
+			-- Sum the actual size of each tape piece based on the field's offset, not an assumed constant.
+			-- The expression below mirrors what build_debug_loclists_section produces:
+			--   1 (DW_LLE_start_length) + 4 (PC) + 1 (uleb length prefix) + sum(tape_piece_size(field.offset))
+			--   + 1 (DW_LLE_start_length) + 4 (transition_pc) + 1 (uleb length prefix) + n_fields * 3 (gpr pieces)
+			--   + 1 (DW_LLE_end_of_list)
+			local tape_pieces_size = 0
+			for _, f in ipairs(atom.rbind.fields or {}) do
+				tape_pieces_size = tape_pieces_size + tape_piece_size(f.offset or 0)
+			end
+			local gpr_pieces_size   = n_fields * 3  -- each gpr piece: DW_OP_regN(1) + DW_OP_piece(1) + uleb(4)(1) = 3 bytes
+			local tape_entry = LOCLIST_ENTRY_HEADER_SIZE + tape_pieces_size
+			local gpr_entry  = LOCLIST_ENTRY_HEADER_SIZE + gpr_pieces_size
+			local body_len   = tape_entry + gpr_entry + 1  -- +1 for DW_LLE_end_of_list
 			cursor = cursor + body_len
 		end
 	end
@@ -1078,7 +1099,10 @@ end
 --- @param atom_table table
 --- @return string
 local function build_dwarf_aranges_section(existing, atom_table)
-	if #existing < 12 then return existing end  -- header sanity
+	if #existing < 12 then
+		io.stderr:write("[dwarf_injection] WARN: .debug_aranges section too short (" .. #existing .. " bytes) to contain a unit header; passing through unchanged\n")
+		return existing
+	end  -- header sanity
 
 	-- .debug_aranges can contain multiple compilation units (CUs).
 	-- gcc-mips-elf emits one CU per .text section TU.
@@ -1105,6 +1129,7 @@ local function build_dwarf_aranges_section(existing, atom_table)
 		local ul = elf_dwarf.read_u32_le(existing, i)
 		if    ul == elf_dwarf.ELF32.dw_dwarf32_terminator then
 			-- DWARF64 marker - not supported.
+			io.stderr:write("[dwarf_injection] WARN: .debug_aranges contains a DWARF64 marker (0xFFFFFFFF); the 64-bit extension is not supported by this metaprogram; passing through unchanged\n")
 			return existing
 		end
 
@@ -1137,8 +1162,10 @@ local function build_dwarf_aranges_section(existing, atom_table)
 	end
 
 	if not is_last_unit then
-		-- Malformed or no terminator found; append a new unit at the end.
-		-- For now, return existing unchanged to avoid making it worse.
+		-- Malformed: walked past the end of the section without finding a unit whose end aligns with #existing.
+		-- This means a unit's length field overruns the section, or there is no terminator on the last unit.
+		-- For now, return existing unchanged to avoid making it worse; warn so the user can investigate.
+		io.stderr:write("[dwarf_injection] WARN: .debug_aranges layout is malformed (no unit's end aligned with section end at " .. #existing .. " bytes); passing through unchanged\n")
 		return existing
 	end
 
@@ -2419,5 +2446,11 @@ function M.run(ctx)
 	end
 	return { outputs = {}, errors = {}, warnings = {} }
 end
+
+-- Test-only re-exports: keep the module's main M table lean while letting scratch
+-- tests drive the real emission and offset computation paths.
+M.compute_loclists_offsets_for_test     = compute_loclists_offsets
+M.build_debug_loclists_section_for_test = build_debug_loclists_section
+M.tape_piece_size_for_test              = tape_piece_size
 
 return M

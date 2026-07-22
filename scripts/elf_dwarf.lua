@@ -389,10 +389,97 @@ local function read_form_value(buf, str_buf, pos, form)
 		-- The constant is declared in the abbrev; no value bytes in the DIE.
 		return nil, pos
 	elseif form == M.DW_FORM.ref_sig8 then
-		return M.read_u32_le(buf, pos), pos + 8
+		-- DW_FORM_ref_sig8 (DWARF5 §7.4.2): an 8-byte value identifying a type
+		-- by signature. The low 4 bytes (LE) are the type signature (content hash);
+		-- the high 4 bytes (LE) are a CU-relative offset into the matching type unit.
+		-- Consumers use the low 4 to look up the type unit (see M.find_type_unit_by_signature)
+		-- then the high 4 to resolve the specific type within it.
+		-- Return the low 4 as the primary value to preserve the (value, next_pos) shape;
+		-- the high 4 is exposed via M.read_ref_sig8 (which returns both halves).
+		local _, _, next_pos = M.read_ref_sig8(buf, pos)
+		return M.read_u32_le(buf, pos), next_pos
 	else
 		return nil, pos
 	end
+end
+
+--- Read a `DW_FORM_ref_sig8` value at 0-based offset `pos` from `buf`.
+--- Returns the low 4 bytes (LE) as `low`, the high 4 bytes (LE) as `high`, and
+--- the cursor position after the 8-byte value as `next_pos`.
+--- Callers that need the full type-unit + type-offset pair
+--- (e.g. to resolve a type identifier embedded as a signature)
+--- should use this directly rather than going through `read_form_value`,
+--- which only exposes the low 4 bytes to preserve its existing (value, next_pos) return shape.
+--- @param buf string
+--- @param pos integer  -- zero-based wire offset
+--- @return integer  -- low 4 bytes (LE), the type signature
+--- @return integer  -- high 4 bytes (LE), the offset within the matching type unit
+--- @return integer  -- cursor after the 8-byte value
+function M.read_ref_sig8(buf, pos)
+	return M.read_u32_le(buf, pos), M.read_u32_le(buf, pos + 4), pos + 8
+end
+
+-- DWARF5 §7.5.6 (Type Entries).
+-- Walk all units in `info` and return the 0-based offset of the first unit
+-- whose `DW_AT_type_signature` (8-byte value at the end of the unit header) equals `target_sig`.
+-- The signature is interpreted as two 32-bit halves (low/high) per the read_ref_sig8 contract;
+-- we match both halves (i.e. the 8-byte value as a whole). Returns nil if no matching unit exists.
+--
+-- Unit header layout (from pos 0):
+--   unit_length(4) + version(2) + unit_type(1) + address_size(1) + debug_abbrev_offset(4)
+--   -- followed by type_unit_specific fields:
+--   type_signature(8) + type_offset(4)
+-- The type_signature is at byte offset 8 of the body (right after debug_abbrev_offset).
+-- @param info string  -- the .debug_info section bytes
+-- @param target_sig_lo integer  -- low 4 bytes (LE) of the desired signature
+-- @param target_sig_hi integer  -- high 4 bytes (LE) of the desired signature
+-- @return integer|nil, integer|nil  -- unit offset, type_offset within the unit
+function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
+	local pos = 0
+	local section_len = #info
+	while pos + 4 < section_len do
+		local unit_length = M.read_u32_le(info, pos)
+		if unit_length == 0xFFFFFFFF then
+			return nil, nil  -- DWARF64 not supported
+		end
+		-- unit_length is the body size, NOT including the 4-byte unit_length field itself.
+		local body_start = pos + 4
+		local body_end   = body_start + unit_length
+		if body_end > section_len then
+			return nil, nil  -- malformed
+		end
+		-- Per DWARF5 §7.5.6, the type_unit (DW_UT_type = 0x02) body layout is:
+		--   0:  version (2)
+		--   2:  unit_type (1) -- DW_UT_type = 0x02
+		--   3:  address_size (1)
+		--   4:  debug_abbrev_offset (4)
+		--   8:  type_signature (8)
+		--   16: type_offset (4)
+		--   20: <children>
+		if body_end - body_start >= 20 then
+			-- read_ref_sig8 / write_u32_le / etc. are 1-indexed (string:byte);
+			-- pos / body_start / body_end are 0-based wire offsets, so the
+			-- 1-indexed byte at 0-based wire offset X is string:byte(X + 1).
+			-- Per DWARF5 §7.5.6, the type_unit body is laid out as:
+			--   byte 0-1: version (2)
+			--   byte 2:   unit_type (1) -- DW_UT_type = 0x02
+			--   byte 3:   address_size (1)
+			--   byte 4-7: debug_abbrev_offset (4)
+			--   byte 8-15: type_signature (8)
+			--   byte 16-19: type_offset (4)
+			local unit_type = info:byte(body_start + 2 + 1)  -- 0-based +2 = unit_type in 1-indexed
+			if unit_type == 0x02 then  -- DW_UT_type
+				local sig_lo, sig_hi, _ = M.read_ref_sig8(info, body_start + 8)  -- 0-based +8 = type_signature in 1-indexed
+				if sig_lo == target_sig_lo and sig_hi == target_sig_hi then
+					local type_offset = M.read_u32_le(info, body_start + 16)  -- 0-based +16 = type_offset in 1-indexed
+					return pos, type_offset
+				end
+			end
+		end
+		-- Advance to the next unit (the 4-byte unit_length + the body).
+		pos = body_end
+	end
+	return nil, nil
 end
 
 --- Return a 4-byte little-endian byte string for `value`.
@@ -663,6 +750,44 @@ function M.sleb128(n)
 		bytes[#bytes + 1] = string.char(b)
 	end
 	return table.concat(bytes)
+end
+
+--- ULEB128 byte-length: number of bytes the encoder M.uleb128 would produce for `n`.
+--- Used by callers that need to size a buffer before encoding (e.g. compute_loclists_offsets
+--- needs the encoded length of an `uleb128(4)` for a `DW_OP_piece + uleb128(U4_BYTE_SIZE)` tail).
+--- @param n integer  -- non-negative
+--- @return integer  -- 1..5 for n in [0, 2^32)
+function M.uleb128_size(n)
+	assert(n >= 0, "uleb128_size requires non-negative input")
+	if n == 0 then return 1 end
+	local bytes = 1
+	while n >= 0x80 do
+		n = (n - (n % (LEB_DATA_MASK + 1))) / (LEB_DATA_MASK + 1)  -- arithmetic shift right by 7
+		bytes = bytes + 1
+	end
+	return bytes
+end
+
+--- SLEB128 byte-length: number of bytes the encoder M.sleb128 would produce for `n`.
+--- Used by callers that need to size a buffer before encoding.
+--- (e.g. compute_loclists_offsets needs the encoded length of an `sleb128(field.offset)` in a tape piece).
+--- Handles the signed DWARF5 termination: positive terminator if (n == 0) and bit 6 of last byte is unset;
+--- negative terminator if (n == -1) and bit 6 of last byte is set.
+--- @param n integer  -- any integer (negative allowed)
+--- @return integer
+function M.sleb128_size(n)
+	local more = true
+	local bytes = 0
+	local v = n
+	while more do
+		local b = v % (LEB_DATA_MASK + 1) -- extract low 7 bits
+		v = (v - b) / (LEB_DATA_MASK + 1) -- arithmetic shift right by 7
+		if     v == 0  and b <  SLEB_SIGN_BIT then more = false end  -- positive terminator
+		if     v == -1 and b >= SLEB_SIGN_BIT then more = false end  -- negative terminator
+		if more then b = b + LEB_CONT_BIT end
+		bytes = bytes + 1
+	end
+	return bytes
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
