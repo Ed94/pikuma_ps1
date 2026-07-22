@@ -390,7 +390,8 @@ end
 local function build_ctx(args)
 	local sources = {}
 	for _, path in ipairs(args.sources) do
-		-- TODO(Ed): io.open?? why not lfs?
+		-- lfs handles path metadata and directories, not file-content streams.
+		-- Keep this io.open local so this entry point preserves its tailored diagnostic and exit path below.
 		local  f = io.open(path, "r")
 		if not f then
 			io.stderr:write("ps1_meta: cannot open --source " .. path .. "\n")

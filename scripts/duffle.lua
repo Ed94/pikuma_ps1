@@ -228,7 +228,9 @@ end
 -- Section 3: I/O primitives
 -- ════════════════════════════════════════════════════════════════════════════
 
--- TODO(Ed): Review - Convert to use lfs, or remove if not utilized.
+-- File contents intentionally use io.open below. LuaFileSystem handles path
+-- metadata, directory iteration, the current directory, and mkdir; it does not
+-- expose file-content read/write streams.
 function M.read_file(path)
 	local  f = io.open(path, "r")
 	if not f then error("Cannot open " .. path) end
@@ -236,14 +238,12 @@ function M.read_file(path)
 	return content
 end
 
--- TODO(Ed): Review - Convert to use lfs, or remove if not utilized.
 function M.write_file(path, content)
 	local  f = io.open(path, "w")
 	if not f then error("Cannot write " .. path) end
 	f:write(content); f:close()
 end
 
--- TODO(Ed): Review - Convert to use lfs, or remove if not utilized.
 -- Write content to disk in binary mode so LF line endings are preserved on Windows
 -- (text mode would convert LF -> CRLF, breaking byte-identical diffs against git-tracked gen/*.h files which are stored as LF).
 -- @param path string

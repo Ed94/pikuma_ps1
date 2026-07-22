@@ -1035,24 +1035,24 @@ local function build_dwarf_line_section(existing, atom_table)
 
 	-- Walk DWARF32 line units and retain the final unit's bounds.
 	-- The main C CU points at this final unit (DW_AT_stmt_list = 0x5b in today's ELF).
-	local unit_pos, last_pos, last_length, last_end = 1, nil, nil, nil
-	while unit_pos <= #existing do
-		if unit_pos + 3 > #existing then return existing end
-		local unit_length =  elf_dwarf.read_u32_le(existing, unit_pos)
+	local unit_pos, last_pos, last_length, last_end = 0, nil, nil, nil
+	while unit_pos < #existing do
+		if unit_pos + 4 > #existing then return existing end
+		local unit_length = elf_dwarf.read_u32_le(existing, unit_pos)
 		if    unit_length == elf_dwarf.ELF32.dw_dwarf32_terminator then return existing end
-		local unit_end    =  unit_pos + 3 + unit_length
-		if unit_end > #existing then return existing end
-		last_pos, last_length, last_end = unit_pos, unit_length, unit_end
-		unit_pos                        = unit_end + 1
+		local unit_end_excl = unit_pos + 4 + unit_length
+		if unit_end_excl > #existing then return existing end
+		last_pos, last_length, last_end = unit_pos, unit_length, unit_end_excl
+		unit_pos                        = unit_end_excl
 	end
-	if unit_pos ~= #existing + 1 or not last_pos then return existing end
+	if unit_pos ~= #existing or not last_pos then return existing end
 
 	local new_length       = last_length + #appended
 	local new_length_bytes = elf_dwarf.write_u32_le(new_length)
 
-	return existing:sub(1, last_pos - 1)
+	return existing:sub(1, last_pos)
 		.. new_length_bytes
-		.. existing:sub(last_pos + 4, last_end)
+		.. existing:sub(last_pos + 5, last_end)
 		.. appended
 end
 
@@ -1091,10 +1091,10 @@ local function build_dwarf_aranges_section(existing, atom_table)
 	-- Walk all units and emit each one (preserving existing structure).
 	-- For the LAST unit, replace the terminator with my entries + new term.
 	local result       = {}
-	local i            = 1  -- 1-indexed
+	local i            = 0  -- zero-based wire offset
 	local is_last_unit = false
 
-	while i <= #existing do
+	while i < #existing do
 		-- Read this unit's length.
 		local ul = elf_dwarf.read_u32_le(existing, i)
 		if    ul == elf_dwarf.ELF32.dw_dwarf32_terminator then
@@ -1103,8 +1103,8 @@ local function build_dwarf_aranges_section(existing, atom_table)
 		end
 
 		local unit_start = i
-		local unit_end   = i + 3 + ul  -- last byte of unit content
-		is_last_unit = (unit_end == #existing)
+		local unit_end_excl = i + 4 + ul
+		is_last_unit = (unit_end_excl == #existing)
 
 		if is_last_unit then
 			-- The old terminator is replaced by entries + a new terminator, so net section growth (and unit_length growth) is entries only.
@@ -1113,7 +1113,7 @@ local function build_dwarf_aranges_section(existing, atom_table)
 			local new_ul_bytes = elf_dwarf.write_u32_le(new_ul)
 			-- Emit everything EXCEPT the last 8 bytes (terminator).
 			result[#result + 1] = new_ul_bytes
-				.. existing:sub(i + 4, unit_end - elf_dwarf.DWARF4_ARANGES.terminator_size)
+				.. existing:sub(i + 5, unit_end_excl - elf_dwarf.DWARF4_ARANGES.terminator_size)
 			-- Append my atom entries.
 			for _, atom in ipairs(atom_table) do
 				local a    = atom.addr
@@ -1124,10 +1124,10 @@ local function build_dwarf_aranges_section(existing, atom_table)
 			result[#result + 1] = string.rep("\0", elf_dwarf.DWARF4_ARANGES.terminator_size)
 		else
 			-- Emit this unit unchanged.
-			result[#result + 1] = existing:sub(unit_start, unit_end)
+			result[#result + 1] = existing:sub(unit_start + 1, unit_end_excl)
 		end
 
-		i = unit_end + 1
+		i = unit_end_excl
 	end
 
 	if not is_last_unit then
@@ -1150,12 +1150,12 @@ end
 --- @param atom_table table
 --- @return string
 local function build_dwarf_rnglists_section(existing, atom_table)
-	if #existing < elf_dwarf.DWARF5_RNGLISTS.first_entry_offset or #atom_table == 0 then return existing end
+	if #existing <= elf_dwarf.DWARF5_RNGLISTS.first_entry_offset or #atom_table == 0 then return existing end
 
 	local unit_length        = elf_dwarf.read_u32_le(existing, elf_dwarf.DWARF5_RNGLISTS.unit_length_offset)
 	local version            = elf_dwarf.read_u16_le(existing, elf_dwarf.DWARF5_RNGLISTS.version_offset)
-	local address_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.addr_size_offset)
-	local segment_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.seg_size_offset)
+	local address_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.addr_size_offset + 1)
+	local segment_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.seg_size_offset + 1)
 	local offset_entry_count = elf_dwarf.read_u32_le(existing, elf_dwarf.DWARF5_RNGLISTS.offset_count_offset)
 
 	if unit_length + 4 ~= #existing
@@ -1251,8 +1251,7 @@ end
 --   4. Patch the main CU's debug_abbrev_offset to the duplicate.
 --   5. Insert our DIEs as children of the main CU (just before its root terminator).
 --
--- All offsets in this section are 0-based (matching the user's "section offset 0x24" convention).
--- When reading via elf_dwarf.read_u32_le (1-indexed), call with `pos + 1`.
+-- All binary coordinates in this section are zero-based wire offsets. Direct Lua string APIs add `+ 1` at the boundary.
 --
 -- Pure-Lua 5.3 LEB decoders (no `bit` library; `2^shift` arithmetic matches elf_dwarf.lua's 
 -- "math.floor(/16) instead of bit.rshift for LuaJIT 2.1 compat" comment at line 352).
@@ -1289,7 +1288,7 @@ local function find_main_cu_layout(existing)
 	local main_cu_start     = nil
 	local main_cu_end_excl  = nil
 	while pos + 4 <= buf_len do
-		local unit_length   = elf_dwarf.read_u32_le(existing, pos + 1)
+		local unit_length   = elf_dwarf.read_u32_le(existing, pos)
 		if    unit_length  == DWARF32_TERMINATOR then return nil end
 		local unit_end_excl = pos + 4 + unit_length
 		if unit_end_excl > buf_len then return nil end
@@ -1308,10 +1307,10 @@ local function find_main_cu_layout(existing)
 	--   [7]      address_size
 	--   [8..11]  debug_abbrev_offset
 	local hdr          = main_cu_start + 4
-	local version      = elf_dwarf.read_u16_le(existing, hdr + 1)
-	local unit_type    = existing:byte(hdr + 3)
-	local address_size = existing:byte(hdr + 4)
-	local abbrev_off   = elf_dwarf.read_u32_le(existing, hdr + 5)
+	local version      = elf_dwarf.read_u16_le(existing, hdr)
+	local unit_type    = existing:byte(hdr + 2 + 1)
+	local address_size = existing:byte(hdr + 3 + 1)
+	local abbrev_off   = elf_dwarf.read_u32_le(existing, hdr + 4)
 	if version ~= DW_VERSION_5 or unit_type ~= DW_UT_compile or address_size ~= 4 then
 		return nil
 	end
@@ -2167,7 +2166,7 @@ local function build_debug_info_section(existing, main_cu_start, main_cu_end_exc
 	local inserted_len = #inserted
 
 	-- 2) Patch main CU's unit_length += inserted_len.
-	local old_unit_length       = elf_dwarf.read_u32_le(existing, main_cu_start + 1)
+	local old_unit_length       = elf_dwarf.read_u32_le(existing, main_cu_start)
 	local new_unit_length       = old_unit_length + inserted_len
 	local new_unit_length_bytes = elf_dwarf.write_u32_le(new_unit_length)
 

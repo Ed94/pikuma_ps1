@@ -104,50 +104,47 @@ M.MIPS_BYTES_PER_WORD = 0x04
 -- ----------------------------------------------------------------------------
 -- ELF32 (System V ABI gABI v1.2)
 -- ----------------------------------------------------------------------------
--- All offsets are 1-INDEXED (matching Lua string.sub convention), 
--- expressed in hex so they map directly to the wire-format byte positions in the binary file. 
--- To compute the 0-indexed file offset, subtract 1.
---
--- Example: e_shoff_offset = 0x21 means the 4-byte e_shoff field starts at 
--- string.sub byte 0x21 (= 33 in 1-indexed), i.e. file offset 0x20 (= 32).
+--- **Wire-offset contract:** format offsets, fixed-width reader offsets, LEB/parser cursors,
+--- and section-relative values are zero-based wire offsets. Only Lua string APIs receive
+--- a `+ 1` conversion at their boundary (`byte`, `sub`, and `find`).
+---
+--- ELF/DWARF field offsets are expressed in hex so they map directly to the
+--- zero-based byte positions in the binary file.
 
--- TODO(Ed): I don't like baking the 1-index offset here. It should be "handled"
--- by a wrapper read/write function or inline as + 1 offset for lua index addressing compensation.
--- change this unless its just better to deal with this grime here than at the addressing site.
 
 --- spec: System V ABI gABI v1.2 §"ELF Header" (Table 1) + §"Section Header Table"
 M.ELF32 = {
-	magic_offset          = 0x01,         -- 4-byte magic "\127ELF" at file offset 0x00
+	magic_offset          = 0x00,         -- 4-byte magic "\127ELF" at file offset 0x00
 	magic                 = "\127ELF",
-	class_offset          = 0x05,         -- 1-byte; 1 = ELF32, 2 = ELF64
+	class_offset          = 0x04,         -- 1-byte; 1 = ELF32, 2 = ELF64
 	class_elf32           = 1,
-	endian_offset         = 0x06,         -- 1-byte; 1 = little-endian, 2 = big-endian
+	endian_offset         = 0x05,         -- 1-byte; 1 = little-endian, 2 = big-endian
 	endian_little         = 1,
 	header_bytes          = 0x34,         -- spec: gABI v1.2 §"ELF Header" — ELF32 header is 52 bytes total
-	e_shoff_offset        = 0x21,         -- 4-byte LE; section-header table file offset
-	e_shentsize_offset    = 0x2F,         -- 2-byte LE; section-header entry size in bytes
-	e_shnum_offset        = 0x31,         -- 2-byte LE; number of section headers
-	e_shstrndx_offset     = 0x33,         -- 2-byte LE; index of section-name string table
+	e_shoff_offset        = 0x20,         -- 4-byte LE; section-header table file offset
+	e_shentsize_offset    = 0x2E,         -- 2-byte LE; section-header entry size in bytes
+	e_shnum_offset        = 0x30,         -- 2-byte LE; number of section headers
+	e_shstrndx_offset     = 0x32,         -- 2-byte LE; index of section-name string table
 	sh_size_bytes         = 0x28,         -- spec: gABI v1.2 §"Section Header Table" — each entry is 40 bytes
-	sh_name_offset        = 0x01,         -- 4-byte LE; offset into .shstrtab
-	sh_type_offset        = 0x05,         -- 4-byte LE; section type (SHT_*)
-	sh_offset_offset      = 0x11,         -- 4-byte LE; section's file offset
-	sh_size_offset        = 0x15,         -- 4-byte LE; section's size in bytes
+	sh_name_offset        = 0x00,         -- 4-byte LE; offset into .shstrtab
+	sh_type_offset        = 0x04,         -- 4-byte LE; section type (SHT_*)
+	sh_offset_offset      = 0x10,         -- 4-byte LE; section's file offset
+	sh_size_offset        = 0x14,         -- 4-byte LE; section's size in bytes
 	dw_dwarf32_terminator = 0xFFFFFFFF,   -- spec: DWARF4 spec §7.4 — 32-bit DWARF initial-length terminator
 }
 
 -- ----------------------------------------------------------------------------
 -- DWARF4 .debug_aranges (per DWARF5 spec §7.4 — Address Range Table)
 -- ----------------------------------------------------------------------------
--- All offsets are 1-INDEXED (matching Lua string.sub convention), in hex.
+-- All offsets are zero-based wire offsets.
 
 --- spec: DWARF5 spec §7.4 (Address Range Table) — 32-bit DWARF form
 M.DWARF4_ARANGES = {
-	unit_length_offset = 0x01,    -- 4-byte LE; length of unit body (excludes these 4 bytes)
-	version_offset     = 0x05,    -- 2-byte LE; expected = 2
-	cu_offset_offset   = 0x07,    -- 4-byte LE; CU DIE offset in .debug_info
-	addr_size_offset   = 0x0B,    -- 1-byte;  expected = 4 (32-bit MIPS)
-	seg_size_offset    = 0x0C,    -- 1-byte;  expected = 0
+	unit_length_offset = 0x00,    -- 4-byte LE; length of unit body (excludes these 4 bytes)
+	version_offset     = 0x04,    -- 2-byte LE; expected = 2
+	cu_offset_offset   = 0x06,    -- 4-byte LE; CU DIE offset in .debug_info
+	addr_size_offset   = 0x0A,    -- 1-byte;  expected = 4 (32-bit MIPS)
+	seg_size_offset    = 0x0B,    -- 1-byte;  expected = 0
 	entry_size         = 0x08,    -- 4-byte addr + 4-byte length (per §7.4)
 	terminator_size    = 0x08,    -- 8 zero bytes (per §7.4 end-of-list marker)
 	version_expected   = 2,
@@ -158,16 +155,16 @@ M.DWARF4_ARANGES = {
 -- ----------------------------------------------------------------------------
 -- DWARF5 .debug_rnglists (per DWARF5 spec §2.17 + §7.21)
 -- ----------------------------------------------------------------------------
--- All offsets are 1-INDEXED (matching Lua string.sub convention), in hex.
+-- All offsets are zero-based wire offsets.
 
 --- spec: DWARF5 spec §2.17 + §7.21 (Range List Table) — 32-bit DWARF form
 M.DWARF5_RNGLISTS = {
-	unit_length_offset    = 0x01,    -- 4-byte LE
-	version_offset        = 0x05,    -- 2-byte LE; expected = 5
-	addr_size_offset      = 0x07,    -- 1-byte;  expected = 4
-	seg_size_offset       = 0x08,    -- 1-byte;  expected = 0
-	offset_count_offset   = 0x09,    -- 4-byte LE; expected = 0
-	first_entry_offset    = 0x0D,
+	unit_length_offset    = 0x00,    -- 4-byte LE
+	version_offset        = 0x04,    -- 2-byte LE; expected = 5
+	addr_size_offset      = 0x06,    -- 1-byte;  expected = 4
+	seg_size_offset       = 0x07,    -- 1-byte;  expected = 0
+	offset_count_offset   = 0x08,    -- 4-byte LE; expected = 0
+	first_entry_offset    = 0x0C,
 	end_of_list           = 0x00,    -- spec: DWARF5 §7.7 — DW_RLE_end_of_list byte value
 	start_length          = 0x07,    -- spec: DWARF5 §7.7 — DW_RLE_start_length byte value
 	version_expected      = 5,
@@ -211,32 +208,34 @@ M.DWARF_LINE_OPS = {
 -- I/O helpers: little-endian byte read/write
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Read a 4-byte little-endian unsigned integer from `buf` at 1-indexed offset `off`.
---- Equivalent to `string.unpack("<I4", buf, off)` but avoids the table-return shape + works under LuaJIT 2.1
+--- Read a 4-byte little-endian unsigned integer from `buf` at zero-based wire offset `off`.
+--- Equivalent to `string.unpack("<I4", buf, off + 1)` but avoids the table-return shape + works under LuaJIT 2.1
 --- (which has partial `string.unpack` coverage).
 ---
---- **Convention:** offsets are 1-indexed (matching Lua `string.sub`).
+--- **Convention:** `off` is a zero-based wire offset; `+ 1` is applied only at the `string.byte` boundary.
 ---
 --- **Byte weights** are written as `0x100`, `0x10000`, `0x1000000` (i.e. 2^8, 2^16, 2^24) so the LE byte positions are visually explicit:
 --- byte 0 contributes its value directly; byte 1 is shifted left by 8
 --- (= 0x100); byte 2 by 16 (= 0x10000); byte 3 by 24 (= 0x1000000).
 --- @param buf string
---- @param off integer  -- 1-indexed
+--- @param off integer  -- zero-based wire offset
 --- @return integer
 function M.read_u32_le(buf, off)
-	return buf:byte(off)
-		+ buf:byte(off + 0x01) * 0x00000100
-		+ buf:byte(off + 0x02) * 0x00010000
-		+ buf:byte(off + 0x03) * 0x01000000
+	local byte_off = off + 1
+	return buf:byte(byte_off)
+		+ buf:byte(byte_off + 0x01) * 0x00000100
+		+ buf:byte(byte_off + 0x02) * 0x00010000
+		+ buf:byte(byte_off + 0x03) * 0x01000000
 end
 
---- Read a 2-byte little-endian unsigned integer from `buf` at 1-indexed offset `off`.
---- (1-indexed convention; matches `M.read_u32_le`.)
+--- Read a 2-byte little-endian unsigned integer from `buf` at zero-based wire offset `off`.
+--- (`off` is zero-based; `+ 1` is applied only at the `string.byte` boundary.)
 --- @param buf string
---- @param off integer  -- 1-indexed
+--- @param off integer  -- zero-based wire offset
 --- @return integer
 function M.read_u16_le(buf, off)
-	return buf:byte(off) + buf:byte(off + 0x01) * 0x00000100
+	local byte_off = off + 1
+	return buf:byte(byte_off) + buf:byte(byte_off + 0x01) * 0x00000100
 end
 
 -- Pure-Lua 5.3 LEB128 readers (no `bit` library). `2^shift` arithmetic matches the existing parser.
@@ -362,23 +361,23 @@ end
 -- The caller decides whether to interpret that as a section offset.
 local function read_form_value(buf, str_buf, pos, form)
 	if form == M.DW_FORM.addr then
-		return M.read_u32_le(buf, pos + 1), pos + 4
+		return M.read_u32_le(buf, pos), pos + 4
 	elseif form == M.DW_FORM.string then
 		local s = read_c_string_at(buf, pos)
 		return s, pos + #s + 1
 	elseif form == M.DW_FORM.strp then
 		-- DW_FORM_strp: 4-byte offset into .debug_str.
-		local strp_off = M.read_u32_le(buf, pos + 1)
+		local strp_off = M.read_u32_le(buf, pos)
 		return read_c_string_at(str_buf, strp_off), pos + 4
 	elseif form == M.DW_FORM.udata then return M.read_uleb128_at(buf, pos)
 	elseif form == M.DW_FORM.data1 then return buf:byte(pos + 1), pos + 1
-	elseif form == M.DW_FORM.data2 then return M.read_u16_le(buf, pos + 1), pos + 2
-	elseif form == M.DW_FORM.data4 then return M.read_u32_le(buf, pos + 1), pos + 4
-	elseif form == M.DW_FORM.ref4  then return M.read_u32_le(buf, pos + 1), pos + 4
+	elseif form == M.DW_FORM.data2 then return M.read_u16_le(buf, pos), pos + 2
+	elseif form == M.DW_FORM.data4 then return M.read_u32_le(buf, pos), pos + 4
+	elseif form == M.DW_FORM.ref4  then return M.read_u32_le(buf, pos), pos + 4
 	elseif form == M.DW_FORM.sec_offset then
 		-- DW_FORM_sec_offset: 4-byte offset (size depends on DWARF version;
 		-- on DWARF5 32-bit it's always 4 bytes).
-		return M.read_u32_le(buf, pos + 1), pos + 4
+		return M.read_u32_le(buf, pos), pos + 4
 	elseif form == M.DW_FORM.flag_present then
 		return 1, pos
 	elseif form == M.DW_FORM.exprloc then
@@ -390,7 +389,7 @@ local function read_form_value(buf, str_buf, pos, form)
 		-- The constant is declared in the abbrev; no value bytes in the DIE.
 		return nil, pos
 	elseif form == M.DW_FORM.ref_sig8 then
-		return M.read_u32_le(buf, pos + 1), pos + 8
+		return M.read_u32_le(buf, pos), pos + 8
 	else
 		return nil, pos
 	end
@@ -423,7 +422,7 @@ end
 --- Read the named sections from a post-link ELF32 by walking the ELF32 section-header table directly
 --- (no subprocess; lfs only for the existence check). Returns `{[name] = bytes_or_empty_string, ...}`.
 ---
---- **Convention:** offsets from `M.ELF32` (1-indexed for string.sub).
+--- **Convention:** ELF/DWARF offsets are zero-based wire offsets. Direct Lua string APIs add `+ 1` at the boundary.
 --- Every requested name has an entry in the returned dict;
 --- missing sections have an empty string (NOT nil) so callers can do `sections[".debug_x"] or ""` for the missing case.
 ---
@@ -465,17 +464,17 @@ function M.read_elf_sections(elf_path, section_names)
 	end
 
 	-- Sanity-check magic + class + endianness.
-	if header:sub(M.ELF32.magic_offset, M.ELF32.magic_offset + 0x03) ~= M.ELF32.magic then
+	if header:sub(M.ELF32.magic_offset + 1, M.ELF32.magic_offset + 0x04) ~= M.ELF32.magic then
 		io.stderr:write("[elf_dwarf.read_elf_sections] not an ELF file\n")
 		f:close()
 		return result
 	end
-	if header:byte(M.ELF32.class_offset) ~= M.ELF32.class_elf32 then
-		io.stderr:write(string.format("[elf_dwarf.read_elf_sections] not ELF32 (class=%d)\n", header:byte(M.ELF32.class_offset)))
+	if header:byte(M.ELF32.class_offset + 1) ~= M.ELF32.class_elf32 then
+		io.stderr:write(string.format("[elf_dwarf.read_elf_sections] not ELF32 (class=%d)\n", header:byte(M.ELF32.class_offset + 1)))
 		f:close()
 		return result
 	end
-	if header:byte(M.ELF32.endian_offset) ~= M.ELF32.endian_little then
+	if header:byte(M.ELF32.endian_offset + 1) ~= M.ELF32.endian_little then
 		io.stderr:write("[elf_dwarf.read_elf_sections] not little-endian; unsupported\n")
 		f:close()
 		return result
@@ -530,7 +529,8 @@ end
 --- Returns a map `{name -> {addr, size_bytes}}` for every `code_<name>` symbol.
 ---
 --- **Conventions:**
---- - ELF32 symtab entry = 16 bytes (`st_name:4 + st_value:4 + st_size:4 + st_info:1 + st_other:1 + st_shndx:2`). 1-indexed for Lua string.sub.
+--- - ELF32 symtab entry = 16 bytes (`st_name:4 + st_value:4 + st_size:4 + st_info:1 + st_other:1 + st_shndx:2`); offsets within each entry are zero-based wire offsets.
+--- - Direct Lua `string.byte`/`string.sub`/`string.find` boundaries receive `+ 1`.
 --- - We filter on STB_GLOBAL (high nibble of st_info = 1) to match `nm`'s default (external symbols only). STB_WEAK excluded.
 --- - We strip the `code_` prefix to match the previous `read_nm` output. 
 --- - `st_size > 0` filter excludes undefined/imported symbols.
@@ -549,31 +549,31 @@ function M.read_nm(elf_path)
 	end
 
 	-- Iterate the 16-byte ELF32 symtab entries.
-	-- Each entry (1-indexed): st_name at 1, st_value at 5, st_size at 9, st_info at 13, st_other at 14, st_shndx at 15.
+	-- Each entry (zero-based): st_name at 0, st_value at 4, st_size at 8, st_info at 12, st_other at 13, st_shndx at 14.
 	local SYM_ENTRY_BYTES = 0x10
-	local SYM_ST_NAME     = 0x01
-	local SYM_ST_VALUE    = 0x05
-	local SYM_ST_SIZE     = 0x09
-	local SYM_ST_INFO     = 0x0D
+	local SYM_ST_NAME     = 0x00
+	local SYM_ST_VALUE    = 0x04
+	local SYM_ST_SIZE     = 0x08
+	local SYM_ST_INFO     = 0x0C
 	local n_syms = #symtab / SYM_ENTRY_BYTES
 	for i = 0, n_syms - 1 do
-		local entry_off  = i * SYM_ENTRY_BYTES + 1     -- 1-indexed
-		local st_info    = symtab:byte(entry_off + SYM_ST_INFO - 1)
+		local entry_off  = i * SYM_ENTRY_BYTES
+		local st_info    = symtab:byte(entry_off + SYM_ST_INFO + 1)
 		-- High nibble = binding (STB_LOCAL=0, STB_GLOBAL=1, STB_WEAK=2).
 		-- Use math.floor(/16) instead of bit.rshift for LuaJIT 2.1 compat
 		-- (LuaJIT's `>>` is 5.3+, but math.floor(x/16) works on all versions).
 		local binding    = math.floor(st_info / 16)
 		if binding == 0 or binding == 1 then            -- STB_LOCAL or STB_GLOBAL
-			local st_size   = M.read_u32_le(symtab, entry_off + SYM_ST_SIZE  - 1)
+			local st_size   = M.read_u32_le(symtab, entry_off + SYM_ST_SIZE)
 			if st_size > 0 then
-				local st_name_off = M.read_u32_le(symtab, entry_off + SYM_ST_NAME  - 1)
+				local st_name_off = M.read_u32_le(symtab, entry_off + SYM_ST_NAME)
 				-- Extract the name from .strtab (null-terminated C string).
 				local name_end = strtab:find("\0", st_name_off + 1, true) or (st_name_off + 1)
 				local name     = strtab:sub(st_name_off + 1, name_end - 1)
 				-- Filter: keep all symbol-table symbols (atoms emit their name as the bare `<name>` since the `code_` prefix was removed from the MipsAtom_ macro).
 				-- The atoms_source_map pass already filters out non-atom symbols via the source-map.txt cross-ref.
 				if name and #name > 0 then
-					local st_value = M.read_u32_le(symtab, entry_off + SYM_ST_VALUE - 1)
+					local st_value = M.read_u32_le(symtab, entry_off + SYM_ST_VALUE)
 					addrs[name] = { st_value, st_size }
 				end
 			end
