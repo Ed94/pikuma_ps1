@@ -108,6 +108,11 @@ local ABBREV_INLINED_SUBROUTINE  = 0x6C   -- 108: DW_TAG_inlined_subroutine with
 -- Bind_args uses DW_FORM_sec_offset → .debug_loclists for PC-ranged liveness 
 -- (each field transitions from tape memory to GPR at load_pc + 8 = MIPS I load-delay slot boundary).
 local ABBREV_BIND_VAR_LOCLIST = 0x6D   -- 109: DW_TAG_variable no children + DW_AT_type = ref4 + DW_AT_location = sec_offset
+-- Typed-view pointer_type (for the synthetic V4_S2* / V3_S2* / U4* / void* chains).
+-- MUST be a fresh abbrev code in the appended table — emitting uleb128(9) collides with GCC's
+-- existing abbrev 9 (a pointer_type that carries DW_AT_byte_size + DW_AT_type), so gdb misparses
+-- our 4-byte ref4 as (byte_size, type[0..2]) and lands the cursor mid-attribute.
+local ABBREV_TYPED_VIEW_POINTER = 0x6E   -- 110: DW_TAG_pointer_type no children + DW_AT_type = ref4 (typed-view / U4 / void chain)
 
 -- DWARF5 §7.7.3 loclist opcodes.
 local DW_LLE_end_of_list    = 0x00
@@ -134,6 +139,7 @@ local DW_TAG_variable        = 0x34
 local DW_TAG_structure_type  = 0x13
 local DW_TAG_member          = 0x0D
 local DW_TAG_base_type       = 0x24
+local DW_TAG_pointer_type    = 0x0F
 -- Component step-into.
 local DW_TAG_inlined_subroutine = 0x1D
 
@@ -1444,11 +1450,18 @@ local function build_new_abbrev()
 	  .. attr(DW_AT_location, DW_FORM_sec_offset)
 	  .. attr(DW_AT_type,     DW_FORM_ref4))
 
+	-- Typed-view pointer_type: DW_TAG_pointer_type, DW_AT_type = ref4 (no DW_AT_byte_size; the
+	-- chain target carries the byte size via the base_type or struct_type we point at).
+	-- MUST be in the appended table — see ABBREV_TYPED_VIEW_POINTER above.
+	local abbrev_typed_view_pointer = abbrev(ABBREV_TYPED_VIEW_POINTER, DW_TAG_pointer_type, false,  -- DW_CHILDREN_no
+		attr(DW_AT_type, DW_FORM_ref4))
+
 	return abbrev_cu .. abbrev_subprogram .. abbrev_variable
 		.. abbrev_struct_type .. abbrev_member .. abbrev_bind_var .. abbrev_base_type
 		.. abbrev_abstract_subprogram .. abbrev_inlined_subroutine
 		.. abbrev_bind_var_loclists
-		.. string.char(DW_LLE_end_of_list)  -- section terminator (the loclist-unit end marker per DWARF5 §7.7.3)
+		.. abbrev_typed_view_pointer
+		.. string.char(0x00)  -- abbrev table terminator (DWARF5 §7.5.3)
 end
 
 
@@ -1629,14 +1642,14 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 
 
 	-- 1) Emit the base_type DIE first (member ref4s reference it).
-	-- (Use a local alias for S.next_offset; the rest of the function body still
-	-- uses the bare name `next_offset` from the previous unrefactored version).
-	local next_offset = S.next_offset
-	local base_type_section_offset = next_offset
+	local base_type_section_offset = S.next_offset
 	emit(uleb128(ABBREV_BASE_TYPE))
 	emit("unsigned int\0")                   -- DW_FORM_string (DW_AT_name)
 	emit(string.char(4))                     -- DW_FORM_data1  (DW_AT_byte_size)
 	emit(string.char(DW_ATE_unsigned))       -- DW_FORM_data1  (DW_AT_encoding)
+	-- (The function body below reads S.next_offset directly via the `next_offset` function;
+	-- the old code used a stale local snapshot that stayed at base_type_section_offset.)
+	local function next_offset() return S.next_offset end
 
 	-- Typed local views.
 	-- For each unique (type_name, pointer_depth) pair across all rbind atom fields, emit a synthetic type chain.
@@ -1736,7 +1749,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	local function ensure_member_base_type(tn, byte_size, encoding)
 		local key = tn .. "|" .. byte_size .. "|" .. encoding
 		if member_base_type_offsets[key] then return member_base_type_offsets[key] end
-		local off = next_offset
+		local off = next_offset()
 		emit(uleb128(ABBREV_BASE_TYPE))
 		emit(tn .. "\0")
 		emit(string.char(byte_size))
@@ -1757,18 +1770,18 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			if not type_info then
 				-- Unknown typed view — fall back to a generic 4-byte unsigned base_type to keep the wire valid
 				-- (gdb will render as the typename but `print *ptr` will only see the first 4 bytes).
-				local innermost_offset = next_offset
+				local innermost_offset = next_offset()
 				emit(uleb128(ABBREV_BASE_TYPE))
 				emit(tn .. "\0")
 				emit(string.char(U4_BYTE_SIZE))        -- byte_size = 4 (fallback for unknown types)
 				emit(string.char(DW_ATE_unsigned))     -- encoding = unsigned
-				local outermost_offset = next_offset
-				emit(uleb128(9))  -- DW_TAG_pointer_type
+				local outermost_offset = next_offset()
+				emit(uleb128(ABBREV_TYPED_VIEW_POINTER))  -- DW_TAG_pointer_type (abbrev 110; NOT 9)
 				emit(elf_dwarf.write_u32_le(ref4_of(innermost_offset)))
 				type_chain_offsets[tn .. "|" .. depth] = outermost_offset
 			else
 				-- Emit a proper structure_type DIE for this typed view.
-				local struct_offset = next_offset
+				local struct_offset = next_offset()
 				emit(uleb128(ABBREV_STRUCT_TYPE))
 				emit(tn .. "\0")                   -- DW_AT_name (struct_type has children, no name in abbrev 103 [DW_FORM_string only])
 				emit(uleb128(type_info.byte_size)) -- DW_AT_byte_size (DW_FORM_udata)
@@ -1794,11 +1807,11 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 					emit(elf_dwarf.write_u32_le(ref4_of(member_base_off)))  -- DW_AT_type ref4 → base_type
 				end
 				emit(string.char(DIE_CHILDREN_TERMINATOR)) -- end of structure_type's children (DWARF5 §7.5.3)
-				-- Emit a single DW_TAG_pointer_type (abbrev 9) pointing at the structure_type.
+				-- Emit a single DW_TAG_pointer_type (abbrev 110, NOT 9) pointing at the structure_type.
 				-- For depth > 1, we'd chain pointer_type → pointer_type → ... → structure_type; not exercised.
 				if depth == 1 then
-					local outermost_offset = next_offset
-					emit(uleb128(9))  -- DW_TAG_pointer_type
+					local outermost_offset = next_offset()
+					emit(uleb128(ABBREV_TYPED_VIEW_POINTER))  -- DW_TAG_pointer_type (abbrev 110; NOT 9)
 					emit(elf_dwarf.write_u32_le(ref4_of(struct_offset)))  -- DW_AT_type → structure_type
 					type_chain_offsets[tn .. "|" .. depth] = outermost_offset
 				else
@@ -1815,12 +1828,12 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	-- The void base_type is emitted BEFORE any other typed chain so its ref4 pointer remains stable.
 	-- Follow the SAME pattern as the typed-views chain above: capture the offset BEFORE the uleb tag
 	-- (this is the ref4 target), emit the DIE bytes, then emit the pointer_type pointing at the offset.
-	local void_chain_offset = next_offset
+	local void_chain_offset = next_offset()
 	emit(uleb128(ABBREV_BASE_TYPE))
 	emit("void\0")                              -- DW_FORM_string (DW_AT_name)
 	emit(string.char(1))                        -- DW_FORM_data1  (DW_AT_byte_size = 1; DWARF's "void" base_type)
 	emit(string.char(DW_ATE_unsigned))          -- DW_FORM_data1  (DW_AT_encoding = unsigned; DWARF doesn't define a void encoding but gdb reads the name "void" off the DIE and renders it correctly as `(void *)` when wrapped in a pointer_type)
-	emit(uleb128(9))                            -- DW_TAG_pointer_type (abbrev 9; DW_AT_type = ref4 to its target)
+	emit(uleb128(ABBREV_TYPED_VIEW_POINTER))  -- DW_TAG_pointer_type (abbrev 110; NOT 9; void chain target)
 	emit(elf_dwarf.write_u32_le(ref4_of(void_chain_offset)))  -- 4-byte ref4: points at the void base_type's tag byte
 	-- type_chain_offsets["void|1"] is what step (f) of the per-RR_<R_Name> chain looks up.
 	type_chain_offsets["void|1"] = void_chain_offset  -- both the base_type offset and the pointer_type are emitted consecutively; the OUTERMOST is the pointer_type. The variable's DW_AT_type must reference the pointer_type, not the base_type. Patch below.
@@ -1836,9 +1849,9 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	-- reusing the pre-emitted base type keeps the wire consistent.
 	-- Once this chain is registered as `type_chain_offsets["U4|1"]`, step (e) of the per-RR_<R_Name> precedence chain will resolve `atom_type(U4 *)`
 	-- declarations on aliases like `R_PrimCursor` and `R_OtBase` to `U4 *` (gdb renders as `(unsigned int *)` with the value displayed in hex).
-	emit(uleb128(9))                                                 -- DW_TAG_pointer_type (abbrev 9; DW_AT_type = ref4 to its target)
+	emit(uleb128(ABBREV_TYPED_VIEW_POINTER))                            -- DW_TAG_pointer_type (abbrev 110; NOT 9; U4 chain target)
 	emit(elf_dwarf.write_u32_le(ref4_of(base_type_section_offset)))  -- 4-byte ref4 → "unsigned int" base_type
-	local u4_chain_offset = next_offset - 5                          -- 1 (uleb tag) + 4 (ref4) = 5 bytes; capture the pointer_type's start offset
+	local u4_chain_offset = next_offset() - 5                          -- 1 (uleb tag) + 4 (ref4) = 5 bytes; capture the pointer_type's start offset
 	type_chain_offsets["U4|1"] = u4_chain_offset
 
 	-- 2) Emit one DW_TAG_structure_type per unique Binds_X.
@@ -1848,7 +1861,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	table.sort(sorted_struct_names)
 	for _, binds_name in ipairs(sorted_struct_names) do
 		local struct = rbind_structs[binds_name]
-		struct_section_offsets[binds_name] = next_offset
+		struct_section_offsets[binds_name] = next_offset()
 
 		emit(uleb128(ABBREV_STRUCT_TYPE))
 		emit(binds_name .. "\0")    -- DW_FORM_string (DW_AT_name)
@@ -1888,7 +1901,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	local DW_INL_inlined = 0x01
 	for _, comp_name in ipairs(sorted_comp_names) do
 		local def = component_defs[comp_name]
-		abstract_offsets[comp_name] = next_offset
+		abstract_offsets[comp_name] = next_offset()
 		emit(uleb128(ABBREV_ABSTRACT_SUBPROGRAM))
 		emit("mac_" .. comp_name .. "\0") -- DW_FORM_string (DW_AT_name)
 		emit(string.char(DW_INL_inlined)) -- DW_FORM_data1 (DW_AT_inline)
