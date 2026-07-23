@@ -99,8 +99,13 @@ typedef Struct_(Ent_Floor) {
 	A2_V3_S2 faces;
 };
 
-enum { scratchpad_size = 1024, };
+enum { 
+	Scratchpad_Len = 1024, 
+	MemTape_Len    = 512,
+};
 typedef Struct_(SMemory) {
+	U4 MemTape[MemTape_Len];
+
 	DoubleBuffer            screen_buf;
 	A2_OrderingTable_Buffer ordering_tbl;
 	PrimitiveArena          primitives;
@@ -207,6 +212,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	A2_S2 p;    //???
 	S4 flag; //????
 
+	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
+
 	// Draw Cube
 	if (0)
 	{
@@ -259,8 +266,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
 
-		LP_ U4 mem_temp_tape[512];
-		TapeBuilder tb = tb_make(slice_ut_arr(mem_temp_tape)); tb_scope(& tb) {
+		tb.used = 0; tb_scope(& tb) {
 			tb_emit(& tb, rbind_cube_g4_face);
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(smem.cube.faces));
@@ -344,12 +350,11 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
 
-		// TODO(Ed): We should do a bounds check beforehand to confirm pa can hold all tris.
+		// TODO(Ed): We should do a bounds check beforehand to confirm pa can hold all tris?
 		// The tape atoms in-flight should not need to care.
 
 		// Prepare the tape. (Push protocol to tape)
-		LP_ U4 mem_temp_tape[512];
-		TapeBuilder tb = tb_make(slice_ut_arr(mem_temp_tape)); tb_scope(& tb) {
+		tb.used = 0; tb_scope(& tb) {
 			tb_emit(& tb, set_gte_world);
 				tb_data(& tb, u4_(& smem.tform_world));
 
@@ -367,7 +372,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data(& tb, u4_(& pa->used));
 				tb_data(& tb, prim_base);
 		}
-
 		tape_run(tb_slice(tb));// Fire off the tape.
 
 		// C-side state (pa->used) has already been updated by the tape!
@@ -394,7 +398,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		B1* prim_cursor = (B1*)r_(pa->buf)[smem.active_buf_id] + pa->used;
 		tape_run(tb_slice(tb));
 		pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[smem.active_buf_id];
-		smem.floor.rot.y += 5;
 	}
 }
 

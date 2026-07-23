@@ -15,9 +15,9 @@ enum {
     atom_offset_bounds_chk_cube_g4_face_exit = _atom_offset_bounds_chk_cube_g4_face_exit,
 };
 
-// --- atom: floor_f3_face (66 words) ---
+// --- atom: floor_f3_face (58 words) ---
 
-#define _atom_offset_culling_floor_f3_face_exit       29
+#define _atom_offset_culling_floor_f3_face_exit       25
 #define _atom_offset_bounds_chk_floor_f3_face_exit    13
 
 enum {

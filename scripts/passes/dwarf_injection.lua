@@ -904,7 +904,6 @@ end
 ---
 --- Pre-tokenized: `body_tokens` is the scan-source pass's pre-split list of top-level
 --- statements (each entry is a single `load_word(...)` call or other statement).
---- Plex: prepass move — use the pre-computed data instead of re-walking the body text.
 --- @param body_tokens table[]  -- the atom's pre-tokenized body statements (from atom.body_tokens)
 --- @param binds_name string    -- expected Binds_X name (skip pairs with mismatching binds)
 --- @param registries table     -- merged registries from collect_per_source_registries
@@ -1540,8 +1539,7 @@ local function build_new_strings(atom_table, registries)
 	-- Register names (one per unique debug-visible R_Name alias from the merged registry,
 	-- filtered to MIPS GPR 0..31 — the same filter that build_inserted_children applies
 	-- for the RR_<name> locals, so .debug_str entries stay in sync with .debug_info).
-	-- Plex: Lua's pairs() is non-deterministic; sort the alias names first so the emitted
-	-- .debug_str bytes are byte-identical across runs.
+	-- Lua's pairs() is non-deterministic; sort the alias names first so the emitted$ .debug_str bytes are byte-identical across runs.
 	local sorted_alias_names = {}
 	for r_name, alias in pairs(registries.register_alias_registry or {}) do
 		if alias.code and alias.code >= 0 and alias.code <= 31 then
@@ -1648,7 +1646,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	local insertion_start = main_cu_end_excl - 1
 
 	-- Closure state: bytes + next_offset + the typed-view/structure/abstract offset caches.
-	-- All step-emitters mutate this state in place. Plex: Fleury expose structure over interface.
+	-- All step-emitters mutate this state in place.
 	local S = {
 		bytes                     = {},
 		next_offset               = insertion_start,  -- 0-based section offset of the NEXT byte to emit
@@ -1658,7 +1656,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		member_base_type_offsets  = {},  -- {[tn.."|"..byte_size.."|"..encoding] = section_offset}
 		base_type_section_offset  = nil, -- set by emit_unsigned_int_base_type
 	}
-	-- Plex helpers.
+	
 	local function emit(s)
 		S.bytes[#S.bytes + 1] = s
 		S.next_offset       = S.next_offset + #s
@@ -2023,7 +2021,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			end
 		end
 
-		-- 5-step precedence chain. Plex: data table; the dispatch loop runs the first step that yields a non-nil offset.
+		-- 5-step precedence chain. The dispatch loop runs the first step that yields a non-nil offset.
 		-- Each step returns the type's section offset or nil if it missed.
 		-- Adding a step = 1 row in the table + 1 function. The 5-level nested if/else is gone.
 		-- Per-atom precomputed state is captured in upvalues: atom_view, reg_to_field_ctx, atom_view_ctx_fields,
@@ -2068,7 +2066,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			end,
 		}
 
-		-- Plex: iterate `by_alias` in sorted order (Lua's pairs() is non-deterministic;
+		-- Iterate `by_alias` in sorted order (Lua's pairs() is non-deterministic;
 		-- sorting ensures byte-identical DWARF output across builds).
 		for _, r_name in ipairs(by_alias_order) do
 			local alias = by_alias[r_name]

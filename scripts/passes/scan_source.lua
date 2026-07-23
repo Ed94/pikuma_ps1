@@ -706,7 +706,7 @@ local function scan_skip_qualifiers(source, pos)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Track A helpers: enum / atom_reg / R_*_Code parsing
+-- enum / atom_reg / R_*_Code parsing
 -- ════════════════════════════════════════════════════════════════════════════
 --
 -- The parser walks `enum { <body> }` declarations and emits one AliasEntry per R_* entry whose value is followed by a bare `atom_reg` token.
@@ -804,7 +804,7 @@ local function parse_enum_int_literal(text, start)
 end
 
 -- Returns true iff `name` matches the `R_*_Code` ident pattern (R, _, <anything>, _Code).
--- Uses byte checks for the fixed bytes per the Track A spec.
+-- Uses byte checks for the fixed bytes.
 local function is_r_code_macro(name)
 	if not name or #name < 6 then return false end
 	if name:byte(1) ~= BYTE_R          then return false end
@@ -1581,7 +1581,7 @@ local DECL_PARSERS = {
 	typedef                    = parse_typedef_binds,
 	_Pragma                    = parse_pragma_macro,
 	pragma                     = parse_pragma_dummy,
-	-- Track A: `enum [<tag>] { <body> }` populates `out.register_alias_registry`.
+	-- `enum [<tag>] { <body> }` populates `out.register_alias_registry`.
 	enum                       = parse_enum,
 }
 
@@ -1612,20 +1612,20 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		types      = {},
 		atom_views = {},
 		line_of    = line_of,
-		-- Track A: source-derived register-alias registry (atom_reg opt-in entries).
+		-- Source-derived register-alias registry (atom_reg opt-in entries).
 		-- Keys are full R_* idents (never stripped); see parse_enum / parse_enum_body.
 		register_alias_registry = {},
-		-- Track A: source-derived type-name registry. 
+		-- Source-derived type-name registry. 
 		-- Populated from `typedef Struct_(...)`, `typedef Enum_(...)`, `typedef <type> <alias>`, and `typedef <type> TSet_(<name>)` declarations. 
 		-- The propagation pass at the end of `scan_source()` resolves byte_size via the builtin map, 
 		-- typedef chain walking (cycle-guarded, depth <= 8), and struct field sums.
 		-- See `propagate_type_sizes()` below.
 		type_name_registry = {},
-		-- Track A: shared `R_*_Code -> integer code` registry 
+		-- Shared `R_*_Code -> integer code` registry 
 		-- (passed in from M.run pass 1; same reference so preprocessor intercept writes are visible to the enum-value resolver).
 		-- Stripped from `src.scan` before return.
 		_code_macros       = code_macros or {},
-		-- Track A: shared raw RHS body table (passed in from M.run pass 1a;
+		-- Shared raw RHS body table (passed in from M.run pass 1a;
 		-- same reference so preprocessor intercept writes are visible to the cross-source chain walker in resolve_code_macro_value).
 		-- Stripped from `src.scan` before return.
 		_code_macro_bodies = code_macro_bodies or {},
@@ -1642,8 +1642,7 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		-- _Pragma is an operator (not a directive) — it doesn't start with #.
 		local pp_pos = duffle.skip_preprocessor_line(source, pos)
 		if pp_pos then
-			-- Track A intercept: resolve `#define R_*_Code <int-or-symbol>`
-			-- into the shared `_code_macros` registry before skipping the line.
+			-- Resolve `#define R_*_Code <int-or-symbol>` into the shared `_code_macros` registry before skipping the line.
 			try_extract_code_macro(source, pos, out._code_macros, out._code_macro_bodies)
 			pos = pp_pos
 		else

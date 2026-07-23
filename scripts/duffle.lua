@@ -14,8 +14,7 @@
 
 local M = {}
 
--- Required native extension: lfs (LuaFileSystem). Built by `update_deps.ps1` to
--- `toolchain/lfs/lfs.dll` and wired into package.cpath by `scripts/duffle_paths.lua`.
+-- Required native extension: lfs (LuaFileSystem). Built by `update_deps.ps1` to `toolchain/lfs/lfs.dll` and wired into package.cpath by `scripts/duffle_paths.lua`.
 -- If lfs is missing, `require` throws — fail loud per the build-tool convention.
 local lfs = require("lfs")
 
@@ -228,7 +227,7 @@ end
 -- Section 3: I/O primitives
 -- ════════════════════════════════════════════════════════════════════════════
 
--- File contents intentionally use io.open below. LuaFileSystem handles path
+-- File contents intentionally use io.open below. LuaFileSystem handles path 
 -- metadata, directory iteration, the current directory, and mkdir; it does not
 -- expose file-content read/write streams.
 function M.read_file(path)
@@ -618,17 +617,13 @@ end
 --- Count words contributed by the non-marker portion of `tok` (after the marker's closing `)`).
 --- Returns 0 if `tok` isn't a marker call or has no trailing content.
 ---
---- `count_token_words_fn` is injected by the caller rather than imported here because the
---- dependency arrow already points the other way: `passes/offsets.lua` and
---- `passes/atoms_source_map.lua` both `require("word_count_eval")` and pass its
---- `count_token_words` as the 3rd argument to this function, while `word_count_eval`
---- itself loads `duffle` via `duffle_paths.lua` (see `passes/word_count_eval.lua` near
---- the top of the file) and calls `duffle.trim` / `duffle.read_ident` /
---- `duffle.skip_ws_and_cmt` from `M.count_token_words`. Importing `word_count_eval`
+--- `count_token_words_fn` is injected by the caller rather than imported here because the dependency arrow already points the other way:
+--- `passes/offsets.lua` and `passes/atoms_source_map.lua` both `require("word_count_eval")` and pass its `count_token_words` as the 3rd argument to this function,
+--- while `word_count_eval` itself loads `duffle` via `duffle_paths.lua` (see `passes/word_count_eval.lua` near the top of the file)
+--- and calls `duffle.trim` / `duffle.read_ident` / `duffle.skip_ws_and_cmt` from `M.count_token_words`. Importing `word_count_eval` 
 --- from this module would reverse that direction and form a recursive require cycle.
---- The callback keeps the marker-syntax helpers (`find_marker_call_end`,
---- `is_marker_token`, this function) shared in `duffle` without making the foundational
---- utility depend on a pass module.
+--- The callback keeps the marker-syntax helpers (`find_marker_call_end`, `is_marker_token`, this function)
+--- shared in `duffle` without making the foundational utility depend on a pass module.
 --- @param tok string
 --- @param word_counts table
 --- @param count_token_words_fn fun(tok: string, wc: table): integer
@@ -699,79 +694,238 @@ end
 -- Section 7: domain tables
 -- ════════════════════════════════════════════════════════════════════════════
 
--- The annotation DSL has been reduced to a single annotation macro:
---   atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
+-- The annotation DSL has been reduced to a single annotation macro: atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
 -- All phase / region / cadence / async / resource / group tokens have been dropped.
--- They may be reintroduced later as optional sub-calls of atom_info; 
--- for now, the parser only recognizes atom_info + its three sub-calls (atom_bind, atom_reads, atom_writes).
+-- They may be reintroduced later as optional sub-calls of atom_info;
+-- For now, the parser only recognizes atom_info + its three sub-calls (atom_bind, atom_reads, atom_writes).
 M.TAPE_ATOM_MACROS = {
 	["atom_info"] = { kind = "info", binds = false },
 }
 
--- GTE pipeline-fill latency table.
+-- GTE command-alias resolution table.
 --
--- For each `gte_cmdw_*` macro in code/duffle/gte.h, the minimum number of consecutive COP2 "nop" words that MUST appear
--- before the command issues so that any preceding `lwc2`/`swc2`/C2 state writes have retired before the GTE starts reading its input registers.
+-- Maps each GTE command macro that may appear in source to its CANONICAL short form.
+-- Both forms resolve to the same PSX-SPX-documented pipeline semantics; the canonical
+-- name is the only one that appears in `GTE_COMMAND_INPUTS` and the per-check producer / consumer reports.
+-- Aliases resolve exactly once; unknown idents (e.g. an MVMVA with a custom `(sf, mx, v, cv, lm)` payload that is not on this list)
+-- are reported as "command unknown" by the check, not silently treated as 0-cycle.
 --
--- The check (`scripts/passes/static_analysis.lua :: check_gte_pipeline_fill`) walks each atom body,
--- counts the consecutive nop words before every `gte_cmdw_*` invocation, and reports a finding if the count is below this minimum.
---
--- PRE-FILL vs POST-FILL: this table models PRE-cmdw nops (retiring preceding C2 writes).
--- The PSX-SPX pipeline timings doc (`docs/psx-spx/docs/gtepipelinetimings.md`) measures a DIFFERENT number:
--- the smallest N nops between `cop2` and `mtc2` to a specific input register at which the write no longer affects the output.
--- For nearly all instructions, inputs latch in the first 0-4 cycles — the GTE snapshots its input register file early and works
---  from internal pipeline storage afterward. 
--- The documented total cycle count is NOT the "do not touch inputs" window; the actual read window is much shorter.
---
--- The `gte_rtpt()` / `gte_nclip()` wrapper macros in gte.h emit the pre-cmd nops internally (asm_words(nop, nop, ...)),
--- but THOSE WRAPPERS ARE NOT USED INSIDE ATOM BODIES in this codebase.
--- Every MipsAtom_(name) body uses raw `nop2, gte_cmdw_<X>, ...` form instead — that `nop2,` is the pre-fill this check validates.
--- So values here reflect the source-level convention, NOT the wrapper-internal pre-fill.
---
--- Cycle counts from PSX-SPX `docs/psx-spx/docs/geometrytransformationenginegte.md`:
---   cmd      PSX-SPX cycles  min pre-nops  rationale
---   rtps         15              2         8c per perspective divide + 6c for IR1..4 + mac write
---   rtpt         23              2         3x rtps worth of pipeline depth (per-vertex pipeline fill)
---   nclip         8              2         MAC0 write + 5c for sign computation
---   avsz3         5              2         5c to compute average + write OTZ (all inputs latch at N=0)
---   avsz4         6              2         avsz3 + 1c extra for 4th vertex
---   mvmva         8              2         IR1..4 write + matrix work (8c regardless of mx/v/cv selection)
---   op            6              0         cross product; output to IR1..3 only (atomic 6c calc, no pre-fill needed)
---
--- The pre-nop values (2 for most commands) are conservative: PSX-SPX pipeline timings show most inputs latch at N=0-1
--- relative to a preceding mtc2, but 2 nops is the gte.h convention for retiring preceding lwc2/swc2 + C2 state.
--- OP is set to 0 because it's a short atomic op with no input that needs a long retire window.
---
--- Aliases are listed separately because source code may use either the alias or the canonical name.
-M.GTE_PIPELINE_LATENCY = {
-	-- Minimum number of consecutive `nop` words that must appear IMMEDIATELY BEFORE a `gte_cmdw_<X>` invocation
-	-- to retire any preceding `lwc2` / `swc2` / pre-existing C2 state writes before the GTE pipeline starts reading
-	-- from V0/V1/V2 or MAC0..3 / OTZ / IR0..3 at the command's issue cycle.
-	--
-	-- Values are from the doxygen comments in code/duffle/gte.h and cross-checked against
-	-- PSX-SPX `docs/psx-spx/docs/geometrytransformationenginegte.md` (cycle counts) and
-	-- `docs/psx-spx/docs/gtepipelinetimings.md` (input-latch boundaries).
+-- Source conventions (per `code/duffle/gte.h`): The C source ships both short canonical macros
+-- (`gte_cmdw_rtps`, `gte_cmdw_rtpt`, `gte_cmdw_nclip`, `gte_cmdw_avsz3`, `gte_cmdw_avsz4`, `gte_cmdw_mvmva`, `gte_cmdw_op`)
+-- and human-readable aliases (`gte_cmdw_rotate_translate_perspective_*`, `gte_cmdw_avg_sort_z3`, etc.).
+-- Every alias row maps source ident -> canonical short ident.
+M.GTE_COMMAND_ALIASES = {
+	-- Canonical -> canonical (identity).
+	["gte_cmdw_rtps"]                              = "gte_cmdw_rtps",
+	["gte_cmdw_rtpt"]                              = "gte_cmdw_rtpt",
+	["gte_cmdw_nclip"]                             = "gte_cmdw_nclip",
+	["gte_cmdw_mvmva"]                             = "gte_cmdw_mvmva",
+	["gte_cmdw_op"]                                = "gte_cmdw_op",
+	["gte_cmdw_avsz3"]                             = "gte_cmdw_avsz3",
+	["gte_cmdw_avsz4"]                             = "gte_cmdw_avsz4",
+	-- Aliases -> canonical.
+	["gte_cmdw_rotate_translate_perspective_single"] = "gte_cmdw_rtps",
+	["gte_cmdw_rotate_translate_perspective_triple"] = "gte_cmdw_rtpt",
+	["gte_cmdw_avg_sort_z3"]                       = "gte_cmdw_avsz3",
+	["gte_cmdw_avg_sort_z4"]                       = "gte_cmdw_avsz4",
+	["gte_cmdw_outer_product"]                     = "gte_cmdw_op",
+	["gte_cmdw_wedge"]                             = "gte_cmdw_op",
+	-- Bare-name aliases (no `gte_cmdw_` prefix; used in atom bodies directly):
+	-- gte_avg_sort_z3 / gte_avg_sort_z4 are the duffle-side aliases for AVSZ3/4.
+	-- alias-to-canonical resolution lives in `check_gte_write_retire` (via
+	-- `M.GTE_COMMAND_ALIASES`); see static_analysis.lua :: check_gte_write_retire.
+	["gte_avg_sort_z3"]                            = "gte_cmdw_avsz3",
+	["gte_avg_sort_z4"]                            = "gte_cmdw_avsz4",
+}
 
-	-- Canonical macros (from code/duffle/gte.h)
-	["gte_cmdw_rtps"]   = 2,  -- RTPS: 15 cycles (PSX-SPX)
-	["gte_cmdw_rtpt"]   = 2,  -- RTPT: 23 cycles (PSX-SPX)
-	["gte_cmdw_nclip"]  = 2,  -- NCLIP: 8 cycles (PSX-SPX)
-	["gte_cmdw_op"]     = 0,  -- OP: 6 cycles, atomic (PSX-SPX)
-	["gte_cmdw_mvmva"]  = 2,  -- MVMVA: 8 cycles (PSX-SPX)
-	["gte_cmdw_avsz3"]  = 2,  -- AVSZ3: 5 cycles (PSX-SPX)
-	["gte_cmdw_avsz4"]  = 2,  -- AVSZ4: 6 cycles (PSX-SPX)
+-- GTE command input-set table.
+--
+-- For each canonical command, the set of C2 registers whose recent CPU-to-COP2 write
+-- must retire before the command can issue. Per PSX-SPX `docs/psx-spx/docs/cpuspecifications.md:407-419`:
+--   * A store to COP2 registers (mtc2/ctc2) has a delay of 2..3 clock cycles.
+--   * In most cases the delay is 2 cycles; special cases like writes to IRGB
+--     (which additionally affect IR1/IR2/IR3) take 3 cycles.
+--   * "Store delays are counted in numbers of clock cycles (not in numbers of opcodes).
+--    For 3 cycle delay, one must usually insert 3 cached opcodes (or one uncached opcode)."
+--
+-- Per PSX-SPX `docs/psx-spx/docs/gtepipelinetimings.md` 
+-- (the per-instruction input-latch measurement, which is the SAME phenomenon modeled from the command side), the values are: 
+--   rtps:  every data register, every control register (RT/TR/OFX/OFY/H/DQA/DQB)
+--   rtpt:  same superset (rtpt reads V0..V2, the RT matrix, the TR vector, OFX/OFY, H, DQA, DQB)
+--   nclip: SXY0, SXY1, SXY2 (no RT/TR/OFX inputs)
+--   mvmva: variable (depends on the chosen mx / v / cv selector); treated conservatively as the union of all RT + TR + BK + IR columns (the data inputs the command can read).
+--   op:    IR1, IR2, IR3 (cross-product output, atomic; consumers treat as fan-out only)
+--   avsz3/avsz4: SZ0..SZ3 + ZSF3/ZSF4
+--
+-- We model the data-register + control-register superset. 
+-- Per PSX-SPX `gtepipelinetimings.md`, every relevant input is in this set;
+-- the per-input latching values listed there are the SAME number's command-side view
+-- (a recent mtc2/ctc2 to that register must retire the same number of cycles before the command issues).
+-- Anything not in the set is safe to clobber immediately after a prior command.
+M.GTE_COMMAND_INPUTS = {
+	-- RTPS / RTPT: every data + every rotation/translation control + screen offset + projection.
+	["gte_cmdw_rtps"] = {
+		-- Data register file (entire)
+		"C2_VXY0", "C2_VZ0", "C2_VXY1", "C2_VZ1", "C2_VXY2", "C2_VZ2",
+		"C2_RGB",  "C2_OTZ",
+		"C2_IR0",  "C2_IR1",  "C2_IR2", "C2_IR3",
+		"C2_SZ0",  "C2_SZ1",  "C2_SZ2", "C2_SZ3",
+		-- Rotation matrix (RT) + translation (TR).
+		"gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13",
+		"gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23",
+		"gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33",
+		"gte_cr_TRX",  "gte_cr_TRY",  "gte_cr_TRZ",
+		-- Screen offset + projection plane distance.
+		"gte_cr_OFX",   "gte_cr_OFY",   "gte_cr_H",
+		-- Depth queuing parameters (consumed by the depth-cue path inside the perspective op).
+		"gte_cr_DQA",   "gte_cr_DQB",
+	},
+	["gte_cmdw_rtpt"] = {
+		-- Same superset as rtps; rtpt repeats rtps three times, so every rtps input also applies here.
+		"C2_VXY0", "C2_VZ0", "C2_VXY1", "C2_VZ1", "C2_VXY2", "C2_VZ2",
+		"C2_RGB",  "C2_OTZ",
+		"C2_IR0",  "C2_IR1",  "C2_IR2", "C2_IR3",
+		"C2_SZ0",  "C2_SZ1",  "C2_SZ2", "C2_SZ3",
+		"gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13",
+		"gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23",
+		"gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33",
+		"gte_cr_TRX",  "gte_cr_TRY",  "gte_cr_TRZ",
+		"gte_cr_OFX",   "gte_cr_OFY",   "gte_cr_H",
+		"gte_cr_DQA",   "gte_cr_DQB",
+	},
+	-- NCLIP: reads SXY0/SXY1/SXY2 only (per PSX-SPX gtepipelinetimings.md §12.6).
+	["gte_cmdw_nclip"] = {
+		"C2_SXY0", "C2_SXY1", "C2_SXY2",
+	},
+	-- MVMVA: variable (depends on the chosen mx / v / cv selector).
+	--  We Conservatively treats the command's input set as the union of every potential matrix + translation + background-color input.
+	-- Any recent write to one of these registers must retire.
+	["gte_cmdw_mvmva"] = {
+		"C2_VXY0", "C2_VZ0", "C2_VXY1", "C2_VZ1", "C2_VXY2", "C2_VZ2",
+		"C2_IR1",  "C2_IR2",  "C2_IR3",
+		"gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13",
+		"gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23",
+		"gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33",
+		"gte_cr_TRX",  "gte_cr_TRY",  "gte_cr_TRZ",
+	},
+	-- OP (outer product): atomic, no inputs that need retiring (the command reads IR1..IR3 but they are local accumulators not driven by the CPU).
+	-- The dependency window is the IRGB fan-out (3 cycles) on the OUTPUT side, not the input side.
+	["gte_cmdw_op"] = {},
+	-- AVSZ3 / AVSZ4: read SZ0..SZ3 + ZSF3/ZSF4.
+	["gte_cmdw_avsz3"] = {
+		"C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3",
+		"gte_cr_ZSF3",
+	},
+	["gte_cmdw_avsz4"] = {
+		"C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3",
+		"gte_cr_ZSF4",
+	},
+}
 
-	-- Aliases (must have the same value as their canonical target)
-	["gte_cmdw_rotate_translate_perspective_single"] = 2,
-	["gte_cmdw_rotate_translate_perspective_triple"] = 2,
-	["gte_cmdw_avg_sort_z4"]                         = 2,
+-- COP2 write-retire slot table.
+--
+-- Number of cached instruction slots required for a recent CPU-to-COP2 write to retire before the next dependent command can issue.
+-- Per PSX-SPX `cpuspecifications.md:407-419` and `gtepipelinetimings.md`
+-- (every per-input N for a recent mtc2/ctc2, with two cached instructions being the common case and three for IRGB / ORGB writes).
+--
+-- The model is intentionally small:
+--   cpu_to_cop2 -- default for any mtc2 / ctc2 / lwc2 / swc2 to a COP2 register
+--   cpu_to_irgb -- override for writes to the IRGB / ORGB control registers (the documented 3-cycle fan-out)
+--
+-- The downstream check (`check_gte_write_retire`) resolves the per-event class from the C2 destination
+-- and the write kind (gte_mv_to_data_r vs. gte_mv_to_ctrl_r + control-register index).
+-- A future pass can introduce command-specific per-input-N tables; the structural place to add them is here.
+M.COP2_WRITE_RETIRE_SLOTS = {
+	cpu_to_cop2 = 2,
+	cpu_to_irgb = 3,
+}
 
-	-- Outer product aliases (same canonical op, 0 pre-fill nops).
-	-- gte_cmdw_op            = canonical GTE-internal short form
-	-- gte_cmdw_outer_product = NOCASH / SDK-readable form
-	-- gte_cmdw_wedge         = geometric-algebra (exterior-product) form
-	["gte_cmdw_outer_product"] = 0,
-	["gte_cmdw_wedge"]         = 0,
+-- Operand-class table for the COP2->GPR load-delay check.
+--
+-- Maps each emitting-token ident to the SET of GPR operand positions it READS (not writes).
+-- Covers the current encoder vocabulary (`code/duffle/mips.h` + `code/duffle/gte.h`);
+-- expand by adding rows here as new encoders land.
+--
+-- Semantics:
+--   * A "GPR operand position" is the textual slot in the macro's argument list,
+--     1-based; e.g. `load_word(rt, base, off)` has positional operands 1 (rt), 2 (base), 3 (off);
+--     The table reads operands 1 + 2 + 3 to find what GPRs the macro touches.
+--   * The check tracks one entry per destination GPR per MFC2/CFC2 event.
+--     A subsequent event is considered a "use" iff any of its READ operand positions reference that destination GPR's ident (e.g. `R_T0`).
+--   * Branch delay slots are out of scope (MIPS control-flow; tracked separately).
+M.OPERAND_READ_POSITIONS = {
+	-- CPU ALU with one or two GPR operands. Reads every GPR operand.
+	["add_ui"]                 = {1, 2},
+	["add_ui_self"]            = {1},
+	["add_si"]                 = {1, 2},
+	["add_u"]                  = {1, 2, 3},
+	["add_u_self"]             = {1, 2},
+	["sub_s"]                  = {1, 2, 3},
+	["sub_u"]                  = {1, 2, 3},
+	["and_i"]                  = {1, 2},
+	["and_u"]                  = {1, 2, 3},
+	["or_i"]                   = {1, 2},
+	["or_i_self"]              = {1},
+	["or_u"]                   = {1, 2, 3},
+	["or_u_self"]              = {1, 2},
+	["xor_i"]                  = {1, 2},
+	["xor_u"]                  = {1, 2, 3},
+	["slt_s"]                  = {1, 2, 3},
+	["slt_u"]                  = {1, 2, 3},
+	["slt_si"]                 = {1, 2},
+	["slt_ui"]                 = {1, 2},
+	["mult_s"]                 = {1, 2},
+	["mult_u"]                 = {1, 2},
+	["div_s"]                  = {1, 2},
+	["div_u"]                  = {1, 2},
+	-- Shifts: shift_lleft(rd, rt, shamt); the rt operand is the value, rd is dest.
+	["shift_lleft"]            = {1, 2},
+	["shift_lright"]           = {1, 2},
+	["shift_aright"]           = {1, 2},
+	["shift_lleft_self"]       = {1},
+	-- Loads: load_word(rt, base, off); the rt operand is the destination (so it's WRITTEN, not read) and base + off are non-GPR operands.
+	-- Treat load_* as NOT reading any GPR operand position (the rt WRITE is not a read for our purposes).
+	-- The single operand in the table for `load_*` is `rt`, but the check treats it as a write, so we leave the read-positions table empty.
+	["load_word"]              = {},
+	["load_half_u"]            = {},
+	["load_byte_u"]            = {},
+	["load_half"]              = {},
+	["load_byte"]              = {},
+	["load_upper_i"]           = {},
+	["load_ui"]                = {},
+	-- Stores write to memory; base + rt operands are non-read for load-delay purposes.
+	["store_word"]             = {},
+	["store_half"]             = {},
+	["store_byte"]             = {},
+	-- Branches read rs (+ rt for beq/bne). The branch delay slot is out of scope.
+	["branch_equal"]           = {1, 2},
+	["branch_ne"]              = {1, 2},
+	["branch_le_zero"]         = {1},
+	["branch_lt_zero"]         = {1},
+	["branch_ge_zero"]         = {1},
+	["branch_gt_zero"]         = {1},
+	-- Jumps / link: jr / jalr read rs only (the target). RD is the destination link.
+	["jump_reg"]               = {1},
+	["jump_link"]              = {1},
+	["call_reg"]               = {1},
+	["call_addr"]              = {},
+	["jump"]                   = {},
+	-- mask_upper is a 2-word macro: shift_lleft then shift_lright. The first reads rt.
+	["mask_upper"]             = {1, 2},
+	-- move from/to HI/LO.
+	["mov_from_high"]          = {},
+	["mov_from_low"]           = {},
+	["mov_to_high"]            = {1},
+	["mov_to_low"]             = {1},
+	-- GTE transfers / loads / stores / commands: the relevant table values live in the check itself
+	-- (gte_mv_to_* writes its rt operand, gte_mv_from_* writes its rt operand, and `gte_*` commands are atomic-from-the-CPU-POV once they issue. 
+	-- They don't trigger load-delay violations because the CPU holds until the command completes).
+	["gte_mv_from_data_r"]     = {},
+	["gte_mv_from_ctrl_r"]     = {},
+	["gte_mv_to_data_r"]       = {},
+	["gte_mv_to_ctrl_r"]       = {},
+	["gte_lw"]                 = {},
+	["gte_sw"]                 = {},
 }
 
 -- GP0 packet sizes (total words including the 1-word tag) per GP0 cmd byte.
@@ -885,13 +1039,13 @@ M.INSTRUCTION_LATENCY = {
 	["set_lt_u"]            = 1,  ["set_lt_ui"]   = 1,
 	["set_lt_s"]            = 1,  ["set_lt_si"]   = 1,
 	-- Multiply / divide (no hardware multiplier; software via inline asm)
-	["mult_u"]              = 12, ["mult_s"]              = 12,
-	["div_u"]               = 35, ["div_s"]               = 35,
+	["mult_u"]              = 12, ["mult_s"]      = 12,
+	["div_u"]               = 35, ["div_s"]       = 35,
 	-- Loads (1 cycle + load-delay slot; the delay is typically absorbed by
 	-- the next instruction in a well-pipelined sequence, so we count 1)
 	["load_word"]           = 1,
-	["load_half_u"]         = 1,  ["load_half"]           = 1,
-	["load_byte_u"]         = 1,  ["load_byte"]           = 1,
+	["load_half_u"]         = 1,  ["load_half"]   = 1,
+	["load_byte_u"]         = 1,  ["load_byte"]   = 1,
 	["load_upper_i"]        = 1,
 	-- 2-word loads (lui + ori) used for >16-bit immediates
 	["load_imm"]            = 2,
@@ -922,9 +1076,9 @@ M.INSTRUCTION_LATENCY = {
 	["gte_mv_from_ctrl_r"]  = 1,
 	["gte_lw"]              = 1,  ["gte_lwc2"]           = 1,
 	["gte_sw"]              = 1,  ["gte_swc2"]           = 1,
-	-- COP2 commands (intrinsic cycles per PSX-SPX, EXCLUDING the 2 pre-cmd nops that
-	-- the source typically emits as `nop2, gte_cmdw_X`; those nops are counted
-	-- separately via the `nop2` entry above)
+	-- COP2 commands (intrinsic cycles per PSX-SPX, 
+	-- EXCLUDING the 2 pre-cmd nops that the source typically emits as `nop2, gte_cmdw_X`; 
+	-- those nops are counted separately via the `nop2` entry above)
 	["gte_cmdw_rtpt"]          = 23,  -- RTPT: 23 cycles (PSX-SPX)
 	["gte_cmdw_rtps"]          = 15,  -- RTPS: 15 cycles (PSX-SPX)
 	["gte_cmdw_nclip"]         = 8,   -- NCLIP: 8 cycles (PSX-SPX)
@@ -955,8 +1109,7 @@ M.INSTRUCTION_LATENCY = {
 	["gte_load_v2"]         = 2,
 	["gte_load_v0v1v2"]     = 6,
 	-- mac_* helpers (cycle cost = sum of the expanded instructions)
-	-- mac_yield transfers control; cycle budget is 0 (the next atom
-	-- absorbs the cost).
+	-- mac_yield transfers control; cycle budget is 0 (the next atom absorbs the cost).
 	["mac_yield"]                                = 0,
 	["mac_pack_color_word"]                      = 3,  -- lui + ori + sw
 	["mac_format_f3_color"]                      = 3,  -- = mac_pack_color_word
@@ -982,5 +1135,245 @@ M.INSTRUCTION_LATENCY = {
 -- The static-analysis pass adds 1 cycle per unknown token and emits a "new macro; update INSTRUCTION_LATENCY"
 -- advisory so the cycle budget stays accurate as the codebase grows.
 M.UNKNOWN_INSTRUCTION_CYCLES = 1
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Section 8: Cross-source component-body index + word-event expansion
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Two pure helpers that supersede the per-pass local component-body builders (`atoms_source_map.build_cross_source_component_body_index`)
+-- and provide the shared, memoized "semantic emitted-word event stream" every downstream pass can read from without re-walking the pre-tokenized bodies.
+
+--- @class ComponentBodyEntry
+--- @field body_tokens    table        -- pre-tokenized {{tok=string, rel=integer}, ...}
+--- @field body_off       integer      -- byte offset of body[1] in `source`
+--- @field line_of        fun(pos:integer):integer  -- byte-offset → 1-based line number in `source`
+--- @field source         string       -- absolute path of the source containing the declaration
+--- @field declaration    integer      -- 1-based line number of the MipsAtomComp_(ac_X) declaration
+--- @field kind           string       -- "comp_bare" | "comp_proc"
+
+--- @class WordEvent
+--- @field word           integer      -- 0-based word index across the entire expansion (root atom + recursed bodies)
+--- @field ident          string       -- leading identifier of the emitting token (for nop2 → "nop")
+--- @field args           string[]     -- top-level comma-split args of the emitting token (trimmed)
+--- @field source         string       -- where the token is defined (component source for recursed; atom source for root)
+--- @field line           integer      -- source line of the token (within `source`)
+--- @field call_source    string       -- always the ROOT atom's source path (preserved across recursion)
+--- @field call_line      integer      -- root atom's call-site line (preserved across recursion)
+
+--- @class WordEventError
+--- @field kind           string       -- "cycle" (currently the only error kind)
+--- @field msg            string       -- deterministic human-readable description
+--- @field source         string       -- path of the source containing the offending token
+--- @field line           integer      -- 1-based line of the offending token within `source`
+
+--- Build (and memoize) the cross-source component-body index keyed by the BARE component name (`gte_load_tri_verts`, NOT `ac_gte_load_tri_verts`).
+---
+--- Components are declared in one source (the header holding `MipsAtomComp_(ac_X)` or `MipsAtomComp_Proc_(ac_X, { ... })`) but invoked from any source that calls `mac_X(...)`. 
+--- Body-offsets + body_tokens + line_of live with the declaration, so a per-source index misses invocations from other sources
+--- (this is the bug class that motivated moving the index to duffle).
+---
+--- Only `comp_bare` / `comp_proc` declarations contribute (a `mac_X(...)` invocation can only resolve to one of those).
+--- First declaration wins; subsequent redeclarations would collide, but today's sources declare each component exactly once.
+---
+--- The memoized table is stored at `ctx.shared.component_body_index` so callers can detect "already built" without re-scanning every source. Idempotent:
+--- safe to call from multiple passes within the same build.
+--- @param ctx table -- the PassCtx; reads `ctx.sources` + writes `ctx.shared.component_body_index`
+--- @return table<string, ComponentBodyEntry>
+function M.get_component_body_index(ctx)
+	local shared = ctx.shared or {}
+	if shared.component_body_index ~= nil then return shared.component_body_index end
+	local index = {}
+	for _, src in ipairs(ctx.sources or {}) do
+		if src.scan and src.scan.atoms then
+			local line_of = src.scan.line_of
+			for _, atom in ipairs(src.scan.atoms) do
+				if atom.kind == "comp_bare" or atom.kind == "comp_proc" then
+					-- Prefer `atom.name` (the bare identifier, stripped of `ac_`); fall back to `raw_name`
+					-- only if the stripped name is absent (defensive — current scan-source always sets both).
+					local name = atom.name or atom.raw_name
+					if name and not index[name] then
+						index[name] = {
+							body_tokens = atom.body_tokens,
+							body_off    = atom.body_off,
+							line_of     = line_of,
+							source      = src.path,
+							declaration = atom.line,
+							kind        = atom.kind,
+						}
+					end
+				end
+			end
+		end
+	end
+	shared.component_body_index = index
+	ctx.shared  = shared
+	return index
+end
+
+-- ASCII byte constants used by split_top_level_args (kept local to keep Section 8 self-contained).
+local E_BYTE_OPEN_PAREN  = 0x28
+local E_BYTE_OPEN_BRACE  = 0x7B
+local E_BYTE_OPEN_BRACK  = 0x5B
+local E_BYTE_DQUOTE      = 0x22
+local E_BYTE_SQUOTE      = 0x27
+local E_BYTE_COMMA       = 0x2C
+
+-- Map an open-delimiter byte to its matching close string for read_balanced.
+local E_OPEN_CLOSE = {
+	[E_BYTE_OPEN_PAREN] = ")",
+	[E_BYTE_OPEN_BRACE] = "}",
+	[E_BYTE_OPEN_BRACK] = "]",
+}
+
+-- Split the INSIDE of a `f(...)` call on top-level commas.
+-- Honors nested parens / braces / brackets and skips strings / comments.
+-- Returns a list of trimmed argument strings in source order.
+-- (Mirrors split_top_level_commas but for paren-body args; intentionally distinct so a caller's brace-body split isn't confused with an arg list.)
+-- @param inner string
+-- @return string[]
+local function split_top_level_args(inner)
+	local args = {}
+	if not inner or inner == "" then return args end
+	local pos   = 1
+	local len   = #inner
+	local start = 1
+	while pos <= len do
+		local c     = inner:byte(pos)
+		local close = E_OPEN_CLOSE[c]
+		if close then
+			local _, after = M.read_balanced(inner, string.char(c), close, pos)
+			pos = after
+		elseif c == E_BYTE_DQUOTE or c == E_BYTE_SQUOTE then
+			pos = M.skip_str_or_cmt(inner, pos)
+		elseif c == E_BYTE_COMMA then
+			args[#args + 1] = M.trim(inner:sub(start, pos - 1))
+			start = pos + 1
+			pos   = pos + 1
+		else
+			pos = pos + 1
+		end
+	end
+	if start <= len then args[#args + 1] = M.trim(inner:sub(start, len)) end
+	return args
+end
+
+-- Extract the leading identifier + top-level args list from a token string.
+-- Returns (ident, args). For tokens without a `(...)` call, args is `{}`.
+-- @param tok string
+-- @return string, string[]
+local function token_ident_and_args(tok)
+	local ident, after = M.read_ident(tok, 1)
+	if not ident then return "?", {} end
+	local paren_pos = M.skip_ws_and_cmt(tok, after)
+	if tok:sub(paren_pos, paren_pos) ~= "(" then return ident, {} end
+	local inner = M.read_parens(tok, paren_pos)
+	if not inner then return ident, {} end
+	return ident, split_top_level_args(inner)
+end
+
+-- The macro-name prefix that marks a `mac_X(...)` component invocation.
+local E_MAC_PREFIX     = "mac_"
+local E_MAC_PREFIX_LEN = 4
+
+--- Expand a body entry into the flat sequence of emitted machine-word events.
+---
+--- Semantics (one event per emitted machine word):
+---   * **Direct one-word encoders** (`load_word`, `add_ui`, `nop`, `gte_lw`, ...): one event with `ident` = leading ident, `args` = parsed top-level args.
+---   * **`nop2`** (2-word pseudo-instruction): two events, BOTH with `ident = "nop"` so the canonical "this slot is a no-op" semantic is visible to downstream analyses.
+---   * **Any other N-word token** in `word_counts` (e.g. `mask_upper` = 2, `load_imm_2w` = 2): N events sharing the same `ident` + `args` so useful CPU words retire slots in the cycle budget.
+---   * **Known `mac_X(...)` calls**: recursively expand the indexed component body, including nested components. Every event from the expansion carries:
+---     - `source` / `line` = the COMPONENT'S source path + the line of the token within the component body (i.e. "definition site").
+---     - `call_source` / `call_line` = the ROOT atom's source path + call-site line, PRESERVED across recursion (nested-nested events still point at the original root, not at an intermediate component).
+---   * **Unknown `mac_X`** (not in `component_index`): fall back to `word_counts[ident]` if present; otherwise emit exactly one opaque event so the cycle budget still accounts for the word.
+---   * **Marker tokens** (`atom_label(...)` / `atom_offset(...)`): zero events (they are pure metaprogram hints, not emitted machine words).
+---
+--- Cycle protection: a per-expansion `visiting` set tracks components currently on the expansion stack; a re-entry produces a deterministic `{kind = "cycle", ...}` error and aborts that branch (does NOT hang, does NOT recurse).
+---
+--- Pure: does NOT mutate `body_entry`, `component_index`, or `word_counts`. Memoization is the caller's responsibility (callers that want it precomputed for many atoms should memoize `word_events` / `word_event_errors` per atom).
+--- @param body_entry       table        -- `{body_tokens, body_off, line_of, source, declaration}` (declaration = root atom's atom.line)
+--- @param component_index  table        -- the bare-name → ComponentBodyEntry map from M.get_component_body_index
+--- @param word_counts      table        -- macro name → emitted-word count (from `ctx.shared.word_counts`)
+--- @return WordEvent[], WordEventError[]
+function M.expand_word_events(body_entry, component_index, word_counts)
+	local events = {}
+	local errors = {}
+
+	-- `word_idx` is 0-based across the entire expansion (root atom body + every recursed component body).
+	-- Each emitted machine word consumes one slot.
+	local word_idx = 0
+
+	local root_call_source = body_entry.source
+	local root_call_line   = body_entry.declaration or 0
+
+	local function expand(tokens, body_off, line_of, def_source, call_source, call_line, visiting)
+		for _, bt in ipairs(tokens) do
+			local tok = M.trim(bt.tok or "")
+			if tok ~= "" then
+				local ident, args = token_ident_and_args(tok)
+				local tok_line    = (line_of and line_of(body_off + bt.rel)) or 0
+
+				if ident == "atom_label" or ident == "atom_offset" then
+					-- Marker: zero events.
+				else
+					-- Strip the `mac_` prefix to look up the component by its BARE name.
+					local bare = nil
+					if ident:sub(1, E_MAC_PREFIX_LEN) == E_MAC_PREFIX then
+						bare = ident:sub(E_MAC_PREFIX_LEN + 1)
+					end
+
+					if bare and component_index and component_index[bare] then
+						if visiting[bare] then
+							-- Cycle: this component is already on the expansion stack.
+							errors[#errors + 1] = {
+								kind   = "cycle",
+								msg    = string.format("component cycle detected involving %q", bare),
+								source = def_source,
+								line   = tok_line,
+							}
+						else
+							visiting[bare] = true
+							local inner = component_index[bare]
+							-- `call_source` / `call_line` (the ROOT atom site) are PRESERVED — we do NOT
+							-- update them when recursing. Nested events keep pointing at the original root atom.
+							expand(inner.body_tokens, inner.body_off, inner.line_of,
+								inner.source, call_source, call_line, visiting)
+							visiting[bare] = nil
+						end
+					else
+						-- Direct token (or unknown `mac_X` falling back). Emit `n` events.
+						local n = 1
+						if word_counts and word_counts[ident] then n = word_counts[ident] end
+						local out_ident = (ident == "nop2") and "nop" or ident
+						for _ = 1, n do
+							word_idx = word_idx + 1
+							events[#events + 1] = {
+								word        = word_idx - 1,
+								ident       = out_ident,
+								args        = args,
+								source      = def_source,
+								line        = tok_line,
+								call_source = call_source,
+								call_line   = call_line,
+							}
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- Initial call: the root atom body. `def_source` and `call_source` both start at the atom's source;
+	-- `call_line` starts at the atom's declaration line (every event from the root body inherits this).
+	expand(
+		body_entry.body_tokens,
+		body_entry.body_off or 0,
+		body_entry.line_of,
+		body_entry.source,
+		root_call_source,
+		root_call_line,
+	{})
+
+	return events, errors
+end
 
 return M

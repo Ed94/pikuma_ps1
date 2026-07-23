@@ -1,26 +1,38 @@
 --- passes/static_analysis.lua — Per-atom static-analysis checks.
 ---
---- The 9 checks currently shipped:
----   Per-atom rules:
----     1. **GTE pipeline-fill** — every `gte_cmdw_*` invocation must be preceded by the minimum number of `nop` words
----        (per `duffle.GTE_PIPELINE_LATENCY`) so the COP2 pipeline latency is fully retired before the command issues.
----     2. **mac_yield uniformity** — every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
----     3. **ABI handoff** — every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
----     4. **GPU port-store shape** — per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` +
----        `mac_insert_ot_tag_X` words must equal the GP0 cmd's expected packet size.
----     5. **per-atom cycle budget** — sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
----   Per-source rules (registry-driven, added 2026-07-16):
----     6. **enum_alias_membership** — every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`,
----        `atom_type(...)`, `atom_reads`, or `atom_writes` must be in `scan.register_alias_registry`. Missing -> warning.
----     7. **atom_type_consistency** — every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`. Missing -> error.
----     8. **binds_no_substruct_deref** — every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body
----        must reference a leaf scalar (pointer-to-struct counts as leaf; nested struct members do NOT). Missing -> warning (build continues).
----     9. **reads_writes_alias_membership** — distinct check name duplicating #6's reads/writes coverage so the report can
----        attribute failures to a precedence class. Missing -> warning (build continues).
+--- Per-atom rules:
+---   1. gte_write_retire: Every `gte_mv_to_data_r` / `gte_mv_to_ctrl_r` (CPU-to-COP2 write) must retire the documented slot count
+---      (`duffle.COP2_WRITE_RETIRE_SLOTS`: 2 slots default, 3 slots for writes to `gte_cr_IRGB` / `gte_cr_ORGB`)
+---      before any subsequent `gte_cmdw_*` consumes one of the command's input registers (`duffle.GTE_COMMAND_INPUTS`).
+---      The check walks `atom.paths.word_events` (the semantic emitted-word stream). Every emitted machine word
+---      (including CPU ALU, branch, GTE transfer, `nop`/`nop2` half, and `mac_X(...)`-expanded words) counts as one retired slot.
+---   2. cop2_gpr_load_delay: Every `gte_mv_from_data_r` / `gte_mv_from_ctrl_r` (COP2-to-GPR read) requires 1 retired slot
+---      before the destination GPR can be used as an operand of the next instruction.
+---      The check walks `atom.paths.word_events` and consults `duffle.OPERAND_READ_POSITIONS` to classify which emitted tokens read each GPR operand position.
+---      Branch delay slots are out of scope (separate MIPS control-flow concern).
+---   3. mac_yield uniformity: Every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
+---   4. Binding handoff: Every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
+---   5. GPU Port-Store Shape: Per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` + `mac_insert_ot_tag_X` words
+---      must equal the GP0 cmd's expected packet size.
+---   6. Per-Atom Cycle Budget: Sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
+---
+--- Per-source rules (registry-driven):
+---   7. enum_alias_membership: Every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`, `atom_type(...)`, `atom_reads`, or `atom_writes`
+---      must be in `scan.register_alias_registry`.
+---   8. atom_type_consistency: Every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`.
+---   9. binds_no_substruct_deref: Every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body must reference a leaf scalar (pointer-to-struct counts as leaf;
+---      nested struct members do NOT).
+---  10. reads_writes_alias_membership: Distinct check name duplicating #7's reads/writes coverage so the report can attribute failures to a precedence class.
 ---
 --- The orchestrator (`ps1_meta.lua`) wires this module in via the PASSES table:
----   `["static-analysis"] = { module = "passes.static_analysis", kind = "validation", deps = {"word-counts", "components"},
----     out = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } } }`
+---   `["static-analysis"] = {
+---       module = "passes.static_analysis",
+---       kind   = "diagnostic",
+---       deps   = {"word-counts", "components"},
+---       out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } }
+---     }
+--- `kind = "diagnostic"` keeps every finding visible in the report; the orchestrator does not exit non-zero
+--- on static-analysis errors. Annotation and header-output validation remain build-stopping.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible.
 
@@ -122,7 +134,7 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field total_cycles integer -- sum of token cycle costs
 
 -- ════════════════════════════════════════════════════════════════════════════
--- classify_tokens — per-token classification (the plex's pre-computed data layer)
+-- classify_tokens — per-token classification
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- ONE forward pass over the token list produces a flat table of per-token classifications. 
@@ -250,54 +262,208 @@ local function classify_tokens(tokens)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #1: GTE pipeline-fill
--- ════════════════════════════════════════════════════════════════════════════
+-- Check #1: GTE CPU→C2 write retirement (producer/consumer scoreboard).
+--
+-- Reads `atom.paths.word_events` (the semantic emitted-word stream from `duffle.expand_word_events`).
+-- Every `gte_mv_to_data_r` / `gte_mv_to_ctrl_r` event stages a write into a pending-writes queue;
+-- Every `gte_cmdw_*` event intersects its command input set against the still-pending queue.
+-- A write that has not retired its documented slot count (`M.COP2_WRITE_RETIRE_SLOTS.cpu_to_cop2`, override for writes to gte_cr_IRGB / gte_cr_ORGB) is reported as an `error`.
+--
+-- Convention: every emitted instruction slot — CPU ALU, branch, GTE transfer, GTE command, `nop`, `mask_upper` half, and every word expanded from a `mac_X(...)` component;
+-- Counts as one retired slot.
+-- This replaces the prior literal-NOP-prefix heuristic; the canonical `nop2` is the conservative fallback for callers that haven't modeled their producer/consumer pairs.
+-- ─────────────────────────────────────────────────────────────────────────
 
--- Check a single gte_cmdw_* token for pipeline-fill compliance.
--- Uses the pre-computed `tok_class` entry (nop_prefix replaces the backward walk; ident replaces the per-token match).
-local function check_one_gte_cmdw(atom, tc_entry, ti, line_in_body, findings)
-	local ident = tc_entry.ident
-	if not ident:match("^gte_cmdw_") then return end
+-- Return true iff `reg_ident` is an IRGB/ORGB write that requires the 3-cycle fan-out.
+local function is_irgb_destination(reg_ident)
+	return reg_ident == "gte_cr_IRGB" or reg_ident == "gte_cr_ORGB"
+end
 
-	local variant = ident:match("^gte_cmdw_(.+)$")
-	local need    = duffle.GTE_PIPELINE_LATENCY[ident]
-	local line    = atom.line + line_in_body[atom.paths.tokens[ti].rel]
+-- Look up the alias → canonical mapping.
+-- Defaults to the input ident so MVMVA variants + unknown idents surface as `command_unknown` warnings rather than being silently treated as 0-cycle.
+local function canonical_command(ident)
+	local aliases = duffle.GTE_COMMAND_ALIASES or {}
+	return aliases[ident] or ident
+end
 
-	if need == nil then
-		findings[#findings + 1] = {
-			atom  = atom.name,
-			line  = line,
-			check = "gte_pipeline_fill",
-			kind  = "warning",
-			msg   = string.format(
-				"%s at line %d uses `gte_cmdw_%s` but that macro is not in duffle.GTE_PIPELINE_LATENCY -- add a min_nops entry",
-				atom.name, line, variant),
-		}
-	elseif  need > 0 then
-		local have = tc_entry.nop_prefix
-		if    have < need then
+local function push_write(pending, reg_ident, slots, source_path, line)
+	pending[#pending + 1] = {
+		reg    = reg_ident,
+		slots  = slots,
+		source = source_path,
+		line   = line,
+	}
+end
+
+local function retire_writes(pending, max_elapsed)
+	-- Walk pending in FIFO order; advance their slot counters; remove any whose counter has met or exceeded the required retire window.
+	-- The walk index advances monotonically; once a pending entry's `elapsed >= required` the slot is freed and the next pending entry can retire on the same cycle.
+	local out = {}
+	for i = 1, #pending do
+		pending[i].elapsed = (pending[i].elapsed or 0) + max_elapsed
+		if pending[i].elapsed < pending[i].slots then
+			out[#out + 1] = pending[i]
+		end
+	end
+	return out
+end
+
+local function check_gte_write_retire(atom, pipe_ctx, findings)
+	local events = atom.paths.word_events
+	if not events or #events == 0 then return end
+	local pending = {}
+	local inputs  = duffle.GTE_COMMAND_INPUTS or {}
+	local slots_def = duffle.COP2_WRITE_RETIRE_SLOTS or { cpu_to_cop2 = 2, cpu_to_irgb = 3 }
+
+	for _, ev in ipairs(events) do
+		-- Every non-write slot retires pending writes by 1.
+		if ev.ident == "gte_mv_to_data_r" or ev.ident == "gte_mv_to_ctrl_r" then
+			local dest_reg = ev.args and ev.args[2] or nil
+			if dest_reg then
+				local required = is_irgb_destination(dest_reg) and slots_def.cpu_to_irgb or slots_def.cpu_to_cop2
+				push_write(pending, dest_reg, required, ev.source, ev.line)
+			end
+			-- Advance pre-existing writes by 1 (this very slot counts).
+			pending = retire_writes(pending, 1)
+		elseif ev.ident == "gte_cmdw_rtps"  or ev.ident == "gte_cmdw_rtpt" or ev.ident == "gte_cmdw_nclip"
+			or   ev.ident == "gte_cmdw_mvmva" or ev.ident == "gte_cmdw_op"
+			or   ev.ident == "gte_cmdw_avsz3" or ev.ident == "gte_cmdw_avsz4"
+			or   duffle.GTE_COMMAND_ALIASES[ev.ident] ~= nil
+			then
+			-- A dependent GTE command stalls until in-flight commands complete (hardware interlock).
+			-- We still retire all pending writes by 1 for the slot this command occupies, then check the still-pending writes against the command's input set.
+			-- If the command reads a register whose write is still pending, that is a true hazard.
+			pending = retire_writes(pending, 1)
+			local canonical = canonical_command(ev.ident)
+			local cmd_inputs = inputs[canonical]
+			if cmd_inputs == nil then
+				findings[#findings + 1] = {
+					atom  = atom.name,
+					line  = ev.line,
+					check = "gte_write_retire",
+					kind  = "warning",
+					msg   = string.format("%s at line %d uses `%s` but the canonical command is not in GTE_COMMAND_INPUTS -- add an entry (or confirm the alias)"
+						, atom.name, ev.line, ev.ident
+					),
+				}
+			else
+				for _, pw in ipairs(pending) do
+					-- Check intersection with the command's input set.
+					for _, in_reg in ipairs(cmd_inputs) do
+						if pw.reg == in_reg then
+							findings[#findings + 1] = {
+								atom  = atom.name,
+								line  = ev.line,
+								check = "gte_write_retire",
+								kind  = "error",
+								msg   = string.format("%s at line %d: recent %s at %s:%d has not retired (need %d slot(s); %s reads %s at slot %d)"
+									, atom.name, ev.line, pw.reg, pw.source, pw.line, pw.slots, ev.ident, in_reg, pw.slapsed or 0
+								),
+							}
+							break  -- one finding per pending write per command
+						end
+					end
+				end
+			end
+			-- A command does NOT introduce a new pending CPU→C2 write
+			-- (the command writes its RESULT registers, which are not subject to the CPU-side retire window).
+			-- We leave `pending` as-is after the input-set check so the next event sees the post-retire state.
+		else
+			-- Plain CPU word / branch / GTE transfer read / nop2 half / etc.
+			pending = retire_writes(pending, 1)
+		end
+	end
+
+	-- (Surface expansion-cycle diagnostics as informational findings, not errors.)
+	local errors = atom.paths.word_event_errors or {}
+	for _, e in ipairs(errors) do
+		if e.kind == "cycle" then
 			findings[#findings + 1] = {
 				atom  = atom.name,
-				line  = line,
-				check = "gte_pipeline_fill",
-				kind  = "error",
-				msg   = string.format(
-					"%s at line %d needs %d nop word%s immediately BEFORE `gte_cmdw_%s`; only %d found",
-					atom.name, line, need, need == 1 and "" or "s", variant, have),
+				line  = e.line,
+				check = "gte_write_retire",
+				kind  = "info",
+				msg   = string.format("%s at line %d: %s", atom.name, e.line, e.msg),
 			}
 		end
 	end
 end
 
---- Per-atom: check every `gte_cmdw_*` for pipeline-fill compliance.
---- Uses the pre-computed `atom.paths.tok_class` — nop_prefix (forward-pass pre-compute)
---- replaces the old backward walk; ident replaces the per-token `tok:match` classification.
-local function check_gte_pipeline_fill(atom, pipe_ctx, findings)
-	local tc           = atom.paths.tok_class
-	local line_in_body = atom.paths.line_in_body
-	local tn           = #atom.paths.tokens
-	for ti = 1, tn do
-		check_one_gte_cmdw(atom, tc[ti], ti, line_in_body, findings)
+-- ─────────────────────────────────────────────────────────────────────────
+-- Check #1b: COP2→GPR load delay (mfc2 / cfc2 → first GPR consumer).
+--
+-- Reads `atom.paths.word_events`. Every `gte_mv_from_data_r` / `gte_mv_from_ctrl_r` stages a destination GPR + 1 remaining slot.
+-- A subsequent event that READS from that GPR (per the OPERAND_READ_POSITIONS table + operand-position rules)
+-- within the same instruction slot emits a finding with `kind = "error"`.
+--
+-- Branch delay slots + BD-slot absorption are out of scope (separate MIPS control-flow concern).
+-- ─────────────────────────────────────────────────────────────────────────
+
+-- Return the textual ident of the GPR read at `pos` in the macro's argument list, or nil if the operand is not a GPR.
+-- Operands that are numeric literals (e.g. `0`, `4`, `0xFFFF`) or type keywords (`U4`, `C2_VZ2`) are not GPR reads.
+local function operand_gpr_at(ev, pos)
+	local op = ev.args and ev.args[pos] or nil
+	if not op then return nil end
+	if op:sub(1, 2) == "0x" or op:sub(1, 2) == "0X" then return nil end
+	if op:match("^%d") then return nil end  -- numeric literal
+	if op == "true" or op == "false" then return nil end
+	-- Strip any trailing whitespace; the operator scanner already trims, but be defensive against raw args.
+	return op:match("^%s*(%S+)%s*$")
+end
+
+local function check_cop2_gpr_load_delay(atom, pipe_ctx, findings)
+	local events = atom.paths.word_events
+	if not events or #events == 0 then return end
+	local pending = {}  -- { gpr = "R_T0", line = N, source = path, slots = 1 }
+
+	for _, ev in ipairs(events) do
+		if ev.ident == "gte_mv_from_data_r" or ev.ident == "gte_mv_from_ctrl_r" then
+			local dst = ev.args and ev.args[1] or nil
+			if dst then
+				pending[#pending + 1] = {
+					gpr    = dst,
+					slots  = 1,
+					source = ev.source,
+					line   = ev.line,
+				}
+			end
+			-- The transfer itself counts as one slot (the destination GPR is updated after the next instruction), so the existing pending list advances.
+			for i = 1, #pending do pending[i].slots = pending[i].slots - 1 end
+			local next_pending = {}
+			for _, p in ipairs(pending) do
+				if p.slots > 0 then next_pending[#next_pending + 1] = p end
+			end
+			pending = next_pending
+		else
+			-- Resolve read positions for this emitting token.
+			local read_pos = duffle.OPERAND_READ_POSITIONS and duffle.OPERAND_READ_POSITIONS[ev.ident]
+			if read_pos then
+				for _, pw in ipairs(pending) do
+					for _, pos in ipairs(read_pos) do
+						local op = operand_gpr_at(ev, pos)
+						if op and op == pw.gpr then
+							findings[#findings + 1] = {
+								atom  = atom.name,
+								line  = ev.line,
+								check = "cop2_gpr_load_delay",
+								kind  = "error",
+								msg   = string.format("%s at line %d: %s reads %s but the load from %s at %s:%d has not retired (need 1 slot)"
+									, atom.name, ev.line, ev.ident, pw.gpr, ev.ident, pw.source, pw.line
+								),
+							}
+							break
+						end
+					end
+				end
+			end
+			-- Advance all pending writes by 1 for the slot this instruction occupies.
+			for i = 1, #pending do pending[i].slots = pending[i].slots - 1 end
+			local next_pending = {}
+			for _, p in ipairs(pending) do
+				if p.slots > 0 then next_pending[#next_pending + 1] = p end
+			end
+			pending = next_pending
+		end
 	end
 end
 
@@ -308,8 +474,9 @@ end
 --- Every atom body must contain exactly one `mac_yield()` call and it must be the LAST top-level token in the body 
 --- (so the tape runtime can pick up cleanly at the next atom's bound registers).
 ---
---- Empty bodies are not currently flagged — runtime infrastructure atoms like `MipsAtom_(yield) { mac_yield() }` 
---- and `MipsAtom_(tape_exit) { jump_reg(rret_addr), nop }` are valid as-is; mac_yield at the end is the contract.
+--- Empty bodies are not currently flagged — runtime infrastructure atoms like 
+--- `MipsAtom_(yield) { mac_yield() }` and `MipsAtom_(tape_exit) { jump_reg(rret_addr), nop }` 
+--- are valid as-is; mac_yield at the end is the contract.
 --- Stage 2: signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here.
 local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	-- Per-kind semantics:
@@ -402,22 +569,22 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #3: ABI handoff discipline
+-- Check #3: Binding handoff discipline
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- For every atom with `atom_bind(Binds_X)`, verify the atom body reads every field of `Binds_X` from R_TapePtr (in any order) 
 --- and advances R_TapePtr by S_(Binds_X) at the end. Mismatches are errors.
 ---
---- This is the "job boundary sanity check": Binds_X is the atom's input payload (like a C function's argument struct). 
---- The body must read each input field and advance the input cursor past the payload. 
---- The order of reads doesn't matter — each field is at a different offset in the struct, and the advance at the end is what keeps the tape pointer in sync.
+--- Binds_X is the atom phase's input payload (like a C function's argument struct).
+--- The body must read each input field and advance the input cursor past the payload. The order of reads doesn't matter.
+--- Each field is at a different offset in the struct, and the advance at the end is what keeps the tape pointer in sync.
 ---
 --- Rules:
 ---   1. Body MUST contain one `load_word(R_*, R_TapePtr, O_(Binds_X, field))` per field of Binds_X. Missing field = error.
 ---   2. Body MUST contain an `add_ui_self(R_TapePtr, S_(Binds_X))` (or equivalent advance by the struct's byte count). Missing = error.
 ---   3. atom_bind(Binds_X) where Binds_X doesn't exist = error.
---- Per-atom: verify the atom body reads every field of its `Binds_X` from R_TapePtr and advances R_TapePtr by S_(Binds_X).
---- Signature changed in Stage 1B: takes `(atom, pipe_ctx, findings)` where `pipe_ctx` carries the cross-atom
+--- Per-atom: Verify the atom body reads every field of its `Binds_X` from R_TapePtr and advances R_TapePtr by S_(Binds_X).
+--- Signature changed in Stage 1B: Takes `(atom, pipe_ctx, findings)` where `pipe_ctx` carries the cross-atom 
 --- `info_by_atom` + `binds_index` tables (built once by validate() before the per-atom loop).
 --- Per-atom iteration now lives in validate(); this is a per-atom predicate.
 local function check_abi_handoff(atom, pipe_ctx, findings)
@@ -575,10 +742,8 @@ end
 ---   cycles_min     - shortest path through the body (sum of token costs)
 ---   cycles_max     - longest path through the body
 ---   branches       - number of branches in the body
----   paths          - number of distinct paths reached (terminated at
----                    mac_yield or end-of-body)
----   has_loops      - true iff a path re-entered a token it had visited
----                    (warning; loop bodies aren't supported)
+---   paths          - number of distinct paths reached (terminated at mac_yield or end-of-body)
+---   has_loops      - true iff a path re-entered a token it had visited (warning; loop bodies aren't supported)
 ---   unknown_macros - list of unique macro names not in duffle.INSTRUCTION_LATENCY
 local function analyze_atom_paths(atom)
 	local tokens   = atom.paths.tokens or duffle.tokenize_body(atom.body)
@@ -753,7 +918,7 @@ end
 -- Severity: WARNING (build continues).
 -- The rule is intentionally permissive because the production `code/duffle/` and `code/gte_hello/`
 -- sources use R_* aliases in atom_reads / atom_writes that may not yet be opted in via the 
--- bare `atom_reg` marker. R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase ARE opted in (lottes_tape.h Task 21).
+-- bare `atom_reg` marker. R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase ARE opted in.
 -- Raw C-ABI aliases like R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle:
 -- no auto-include of wave-context; explicit opt-in only). Warnings keep the build green
 -- and surface the migration gap so users see which atoms still need opt-in registration.
@@ -761,7 +926,7 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 	local reg_registry = pipe_ctx.register_alias_registry or {}
 
 	-- (a) atom_dbg_reg_default(R_X, T) -- pipe_ctx.types.
-	--     source_line is on every entry; emit the diagnostic against the default declaration's own line so the report's
+	--     source_line is on every entry; emit the diagnostic against the default declaration's own line so the report's 
 	--     "Findings by atom" section can attribute the failure to the marker location.
 	for reg, def in pairs(pipe_ctx.types or {}) do
 		if not reg_registry[reg] then
@@ -996,14 +1161,15 @@ end
 -- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
 
 local CHECK_RULES = {
-	{ name = "gte_pipeline_fill",            per_atom   = check_gte_pipeline_fill            },
-	{ name = "mac_yield_uniformity",         per_atom   = check_mac_yield_uniformity         },
-	{ name = "abi_handoff",                  per_atom   = check_abi_handoff                  },
-	{ name = "gpu_portstore_shape",          per_atom   = check_gpu_portstore_shape          },
-	{ name = "per_atom_cycle_budget",        per_atom   = check_per_atom_cycle_budget        },
-	{ name = "enum_alias_membership",        per_source = check_enum_alias_membership        },
-	{ name = "atom_type_consistency",        per_source = check_atom_type_consistency        },
-	{ name = "binds_no_substruct_deref",     per_source = check_binds_no_substruct_deref     },
+	{ name = "gte_write_retire",            per_atom   = check_gte_write_retire            },
+	{ name = "cop2_gpr_load_delay",         per_atom   = check_cop2_gpr_load_delay         },
+	{ name = "mac_yield_uniformity",        per_atom   = check_mac_yield_uniformity        },
+	{ name = "abi_handoff",                 per_atom   = check_abi_handoff                 },
+	{ name = "gpu_portstore_shape",         per_atom   = check_gpu_portstore_shape         },
+	{ name = "per_atom_cycle_budget",       per_atom   = check_per_atom_cycle_budget       },
+	{ name = "enum_alias_membership",       per_source = check_enum_alias_membership       },
+	{ name = "atom_type_consistency",       per_source = check_atom_type_consistency       },
+	{ name = "binds_no_substruct_deref",    per_source = check_binds_no_substruct_deref    },
 	{ name = "reads_writes_alias_membership",per_source = check_reads_writes_alias_membership},
 }
 
@@ -1048,13 +1214,17 @@ local function validate(ctx, src)
 		atoms                   = atoms,
 		types                   = scan.types or {},
 		atom_infos_list         = atom_infos or {},
-		register_alias_registry = scan.register_alias_registry or {},
+register_alias_registry = scan.register_alias_registry or {},
 		type_name_registry      = scan.type_name_registry or {},
 	}
+	-- Shared cross-source component-body index (built once per pass via duffle's memoizing helper).
+	-- `atom.paths.word_events` + `atom.paths.word_event_errors` are populated below and consumed by
+	-- the per-atom checks (`check_gte_write_retire`, `check_cop2_gpr_load_delay`).
+	pipe_ctx.component_body_index = duffle.get_component_body_index(ctx)
 
 	-- THE per-atom pipeline. ONE iteration of atoms; the 5 check_* functions + analyze_atom_paths
 	-- all run here, sharing a single tokenize_body + build_body_line_index per body.
-	-- Plex move: every piece of state derived from an atom body lives on `atom.paths` (the per-atom mega-struct);
+	-- Every piece of state derived from an atom body lives on `atom.paths` (the per-atom mega-struct);
 	-- readers (analyze_atom_paths, the 5 checks, the renderers) all consume `atom.paths`, not the raw `atoms` list.
 	-- Stage 1B: each check_* now takes `(atom, ...)` instead of `(atoms, findings)` — no more single-atom `{a}` shim.
 	-- Per-source rules run once after this loop completes (no parallel dispatch table).
@@ -1065,11 +1235,24 @@ local function validate(ctx, src)
 		a.paths.line_in_body     = duffle.build_body_line_index(a.body)
 		a.paths.tok_class        = classify_tokens(a.paths.tokens)
 
+-- Precompute the semantic emitted-word event stream for this atom. The per-atom checks
+		-- (`check_gte_write_retire`, `check_cop2_gpr_load_delay`) read these to retire slots on the
+		-- actual emitted machine words (including `mac_X(...)`-expanded words from nested components).
+		local body_entry = {
+			body_tokens = a.body_tokens,
+			body_off    = a.body_off,
+			line_of     = src.scan.line_of,
+			source      = src.path,
+			declaration = a.line,
+		}
+		a.paths.word_events, a.paths.word_event_errors =
+			duffle.expand_word_events(body_entry, pipe_ctx.component_body_index, ctx.shared.word_counts or {})
+
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a)
 
 		-- Run all per-atom checks on this one atom via the CHECK_RULES data table (Muratori: data over control flow).
-		-- Adding a new check = 1 row in CHECK_RULES; this loop never needs editing.
+	-- Adding a new check = 1 row in CHECK_RULES; this loop never needs editing.
 		for _, rule in ipairs(CHECK_RULES) do
 			if rule.per_atom then rule.per_atom(a, pipe_ctx, findings) end
 		end

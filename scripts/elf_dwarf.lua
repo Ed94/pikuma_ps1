@@ -240,7 +240,7 @@ end
 
 -- Pure-Lua 5.3 LEB128 readers (no `bit` library). `2^shift` arithmetic matches the existing parser.
 -- Offsets are 0-based; returns (value, next_pos).
--- Track A Task 10: promoted from `local function` to M.* exports so passes/dwarf_injection.lua
+-- Promoted from `local function` to M.* exports so passes/dwarf_injection.lua
 -- can import them as file-scope locals per the 2nd-caller lift precedent
 -- (the uleb128 + sleb128 encoders were promoted the same way).
 function M.read_uleb128_at(buf, pos)

@@ -104,27 +104,26 @@ MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri), atom_phase(f
 };
 
 internal
-atom_dbg_skip_over()
+// atom_dbg_skip_over()
 MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
-	, atom_writes(R_PrimCursor, R_FaceCursor)
+	, atom_writes(R_PrimCursor, R_FaceCursr)
 ) {
 	mac_load_tri_indices(  R_T0, R_T1, R_T2),
 	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
-	nop2, gte_cmdw_rotate_translate_perspective_triple,
-	nop2, gte_cmdw_nclip,
+	nop2, gte_cmdw_rotate_translate_perspective_triple, // 2 nops retire the final cpu -> gte writes before RTPT
+	/*nop2,*/ gte_cmdw_nclip,
 
 	/* Culling (Branch forward if Backface) */
-	nop2, gte_mv_from_data_r(R_T0, C2_MAC0),
-	nop,
-	branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop,
+	/*nop2,*/ gte_mv_from_data_r(R_T0, C2_MAC0),
+	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot. 
 	/* Format Primitive */
 	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
 	mac_gte_store_f3_post_rtpt(),
 
 	/* Calculate Depth */
-	nop2, gte_avg_sort_z3,
-	nop2, gte_mv_from_data_r(R_T1, C2_OTZ),
+	/*nop2,*/ gte_avg_sort_z3,
+	/*nop2,*/ gte_mv_from_data_r(R_T1, C2_OTZ),
 	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),
 	set_lt_u(    R_AT, R_T1, R_AT),

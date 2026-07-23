@@ -235,7 +235,6 @@ local function extract_arg_names(args_str)
 		if trimmed ~= "" then
 			-- Find the identifier at the end: walk back over trailers (whitespace + `*` + `[]`),
 			-- then walk back over the identifier chars (alnum + `_`).
-			-- Plex: inlined the 2 single-caller helpers (no 2-caller rule met).
 			local ident_end = #trimmed
 			while ident_end > 0 do
 				local ch = trimmed:sub(ident_end, ident_end)

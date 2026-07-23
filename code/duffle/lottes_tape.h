@@ -60,7 +60,7 @@ enum {
 MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 
 /* Generalized Tape Engine Runner */
-FI_ void tape_run(Slice_U4 tape) { register U4* tp rgcc(R_TapePtr) = tape.ptr; asm volatile(
+FI_ void tape_run(Slice_MipsCode tape) { register U4* tp rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
 	asm_words(
 			add_ui(     R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
 		, store_word( R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
@@ -91,8 +91,8 @@ FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ mem.ptr, mem.len, 0 }
 FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
 FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 
-FI_ Slice_U4 tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Slice_U4){ C_(U4*,tb->ptr), tb->used }; }
-FI_ Slice_U4 tb_slice(TapeBuilder  tb) {                             return (Slice_U4){ C_(U4*,tb.ptr),  tb.used }; }
+FI_ Slice_MipsCode tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Slice_MipsCode){ C_(U4*,tb->ptr), tb->used }; }
+FI_ Slice_MipsCode tb_slice(TapeBuilder  tb) {                        return (Slice_MipsCode){ C_(U4*,tb.ptr),  tb.used }; }
 #define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,tape_exit))
 
 #pragma endregion Tape Drive

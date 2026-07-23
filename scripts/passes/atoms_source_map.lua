@@ -641,42 +641,6 @@ end
 
 local M = {}
 
---- Build the cross-source component body index used by `render_provenance` to attribute each emitted `.word` to its actual line within the macro body.
----
---- Components are declared in one source (the header that contains `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`) 
---- but invoked from many source files (every atom body that calls `mac_X(...)`).
---- The body_offset + body_tokens + line_of live with the declaration source, so a per-source index would miss invocations from other sources.
----
---- The cross-source index is keyed by the bare component name (`gte_load_tri_verts`, NOT `ac_gte_load_tri_verts`)
---- `strip_mac_prefix_from_token` strips the `mac_` prefix from call-site identifiers and yields that exact bare name;
---- matching it here keeps the lookup aligned with the `ctx.shared.components` map's keying convention.
---- First declaration wins (subsequent redeclarations would collide; today's sources declare each component exactly once).
---- @param ctx PassCtx
---- @return table<string, table>  -- {[comp_name] = {body_off, body_tokens, line_of}}
-local function build_cross_source_component_body_index(ctx)
-	local index = {}
-	for _, src in ipairs(ctx.sources or {}) do
-		if src.scan and src.scan.atoms then
-			local line_of = src.scan.line_of
-			for _, atom in ipairs(src.scan.atoms) do
-				if atom.kind == "comp_bare" or atom.kind == "comp_proc" then
-					-- Prefer `atom.name` (stripped of `ac_` prefix); fall back to `raw_name`
-					-- only if the stripped name is absent (defensive — current scan-source always sets both).
-					local name = atom.name or atom.raw_name
-					if name and not index[name] then
-						index[name] = {
-							body_off    = atom.body_off,
-							body_tokens = atom.body_tokens,
-							line_of     = line_of,
-						}
-					end
-				end
-			end
-		end
-	end
-	return index
-end
-
 --- Pass entry: emit one `<out_root>/<basename>.atoms.sourcemap.txt` per source file that contains at least one `MipsAtom_(name)` / `MipsCode code_<name>` declaration.
 --- Also emits `<out_root>/<basename>.atoms.provenance.txt`:
 --- per-.word provenance with `mac_X(...)` component resolution back to the component's definition file:line + the per-word body line.
@@ -704,10 +668,13 @@ function M.run(ctx)
 	local comp = (ctx.shared and ctx.shared.components) or {}
 
 	-- Cross-source component body index.
-	-- Built ONCE so every source's provenance writer can resolve `mac_X(...)` invocations back to the macro's body tokens (regardless of which source declared the component).
-	-- Per-source copies were insufficient — the atom file (`hello_gte_tape.c`) does not contain the `MipsAtomComp_(...)` declarations, 
+	-- Built ONCE (and memoized at `ctx.shared.component_body_index`) so every source's provenance writer can resolve `mac_X(...)` 
+	-- invocations back to the macro's body tokens (regardless of which source declared the component).
+	-- The atom file (`hello_gte_tape.c`) does not contain the `MipsAtomComp_(...)` declarations, 
 	-- so the body data would be missing for every component invocation the atom file emitted.
-	local comp_body_index = build_cross_source_component_body_index(ctx)
+	-- Superseded by `duffle.get_component_body_index` so the same index is shared with `static_analysis.lua`
+	-- and any future dependency-check pass (sourcemap/provenance byte-identical because the new entry only ADDS fields).
+	local comp_body_index = duffle.get_component_body_index(ctx)
 
 	-- Always emit the canonical text form (per-source).
 	for _, src in ipairs(ctx.sources) do

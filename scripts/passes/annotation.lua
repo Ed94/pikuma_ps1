@@ -387,8 +387,7 @@ end
 
 --- Migration warning emitted alongside the new registry-membership check.
 ---
---- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase
---- are the wave-context aliases opted in via `#define atom_reg` in lottes_tape.h (Task 21).
+--- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase are the context aliases opted in via `#define atom_reg` in lottes_tape.h.
 --- Any source referencing an R_X that's NOT in the registry will trip the new check; a single pass-level info entry
 --- (emitted only when at least one such rejection lands in this source) tells users where to look.
 ---
