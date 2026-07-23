@@ -378,7 +378,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		smem.floor.rot.y += 5;
 	}
 	// --- TAPE DIAGNOSTICS ---
-	if (1)
+	if (0)
 	{
 		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
 		TapeBuilder tb = tb_make_old(& tape_arena); tb_scope(& tb) {

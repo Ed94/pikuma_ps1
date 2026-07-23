@@ -404,10 +404,8 @@ local function read_form_value(buf, str_buf, pos, form)
 end
 
 --- Read a `DW_FORM_ref_sig8` value at 0-based offset `pos` from `buf`.
---- Returns the low 4 bytes (LE) as `low`, the high 4 bytes (LE) as `high`, and
---- the cursor position after the 8-byte value as `next_pos`.
---- Callers that need the full type-unit + type-offset pair
---- (e.g. to resolve a type identifier embedded as a signature)
+--- Returns the low 4 bytes (LE) as `low`, the high 4 bytes (LE) as `high`, and the cursor position after the 8-byte value as `next_pos`.
+--- Callers that need the full type-unit + type-offset pair (e.g. to resolve a type identifier embedded as a signature)
 --- should use this directly rather than going through `read_form_value`,
 --- which only exposes the low 4 bytes to preserve its existing (value, next_pos) return shape.
 --- @param buf string
@@ -427,8 +425,7 @@ end
 --
 -- Unit header layout (from pos 0):
 --   unit_length(4) + version(2) + unit_type(1) + address_size(1) + debug_abbrev_offset(4)
---   -- followed by type_unit_specific fields:
---   type_signature(8) + type_offset(4)
+--   followed by type_unit_specific fields: type_signature(8) + type_offset(4)
 -- The type_signature is at byte offset 8 of the body (right after debug_abbrev_offset).
 -- @param info string  -- the .debug_info section bytes
 -- @param target_sig_lo integer  -- low 4 bytes (LE) of the desired signature

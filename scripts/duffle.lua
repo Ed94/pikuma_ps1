@@ -1136,6 +1136,37 @@ M.INSTRUCTION_LATENCY = {
 -- advisory so the cycle budget stays accurate as the codebase grows.
 M.UNKNOWN_INSTRUCTION_CYCLES = 1
 
+-- Control-transfer (branch/jump/call) delay-slot policy table.
+--
+-- Used by the emitted-word delay-slot check to identify which emitted machine-word idents 
+-- are control transfers whose next emitted word is the hardware delay slot.
+-- One table row per emitted encoder; the `family` field is informational (informational only; 
+-- the check matches by `event.ident` against the row keys).
+-- `suppress_arg1` (when present) lists first-arg values that should NOT emit a finding even when the next emitted word is 
+-- `nop` or absent — e.g. the fixed `mac_yield()` handshake uses `jump_reg(R_AtomJmp), nop` and is intentionally suppressed.
+--
+-- Consumers:
+--   * passes/static_analysis.lua::check_control_transfer_delay_slot_use
+-- No other pass consumes this table as of 2026-07-23.
+M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES = {
+	branch_equal    = { family = "branch" },
+	branch_ne       = { family = "branch" },
+	branch_lt_zero  = { family = "branch" },
+	branch_ge_zero  = { family = "branch" },
+	branch_le_zero  = { family = "branch" },
+	branch_gt_zero  = { family = "branch" },
+	jump            = { family = "jump" },
+	jump_reg        = {
+		family = "jump",
+		-- The fixed `mac_yield()` 4-word handshake (defined in `lottes_tape.h`) ends in `jump_reg(R_AtomJmp), nop`. 
+		-- The `nop` is structural, not an optimization opportunity — suppress it so the check stays signal-only.
+		suppress_arg1 = { R_AtomJmp = "fixed mac_yield handshake" },
+	},
+	jump_link       = { family = "call" },
+	call_reg        = { family = "call" },
+	call_addr       = { family = "call" },
+}
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 8: Cross-source component-body index + word-event expansion
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1333,8 +1364,8 @@ function M.expand_word_events(body_entry, component_index, word_counts)
 						else
 							visiting[bare] = true
 							local inner = component_index[bare]
-							-- `call_source` / `call_line` (the ROOT atom site) are PRESERVED — we do NOT
-							-- update them when recursing. Nested events keep pointing at the original root atom.
+							-- `call_source` / `call_line` (the ROOT atom site) are PRESERVED — we do NOT update them when recursing.
+							-- Nested events keep pointing at the original root atom.
 							expand(inner.body_tokens, inner.body_off, inner.line_of,
 								inner.source, call_source, call_line, visiting)
 							visiting[bare] = nil

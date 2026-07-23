@@ -6,23 +6,36 @@
 ---      before any subsequent `gte_cmdw_*` consumes one of the command's input registers (`duffle.GTE_COMMAND_INPUTS`).
 ---      The check walks `atom.paths.word_events` (the semantic emitted-word stream). Every emitted machine word
 ---      (including CPU ALU, branch, GTE transfer, `nop`/`nop2` half, and `mac_X(...)`-expanded words) counts as one retired slot.
----   2. cop2_gpr_load_delay: Every `gte_mv_from_data_r` / `gte_mv_from_ctrl_r` (COP2-to-GPR read) requires 1 retired slot
----      before the destination GPR can be used as an operand of the next instruction.
+---   2. cop2_gpr_load_delay: Every `gte_mv_from_data_r` / `gte_mv_from_ctrl_r` (COP2-to-GPR read) 
+---      requires 1 retired slot before the destination GPR can be used as an operand of the next instruction.
 ---      The check walks `atom.paths.word_events` and consults `duffle.OPERAND_READ_POSITIONS` to classify which emitted tokens read each GPR operand position.
----      Branch delay slots are out of scope (separate MIPS control-flow concern).
----   3. mac_yield uniformity: Every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
----   4. Binding handoff: Every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
----   5. GPU Port-Store Shape: Per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` + `mac_insert_ot_tag_X` words
+---      Branch delay slots are out of scope (separate MIPS control-flow concern; tracked by check #3 below).
+---   3. control_transfer_delay_slot_use: For every emitted branch/jump/call encoder in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`
+---      (the six `branch_*` encoders plus `jump` / `jump_reg` / `jump_link` / `call_reg` / `call_addr`),
+---      inspect the next emitted event in `atom.paths.word_events`.
+---      Emit an `info`-severity finding when the successor is `nop` or absent (the next emitted word IS the hardware delay slot).
+---      `jump_reg(R_AtomJmp)` is suppressed by policy (the fixed `mac_yield()` handshake).
+---      `nop2` needs no special case: `expand_word_events` emits two `nop` events for it, so the first expansion is the hardware delay slot.
+---      `atom_label` also needs no special case (zero events).
+---   4. mac_yield uniformity: Every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
+---   5. Binding handoff: Every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
+---   6. GPU Port-Store Shape: Per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` + `mac_insert_ot_tag_X` words
 ---      must equal the GP0 cmd's expected packet size.
----   6. Per-Atom Cycle Budget: Sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
+---   7. Per-Atom Cycle Budget: Sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
 ---
 --- Per-source rules (registry-driven):
----   7. enum_alias_membership: Every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`, `atom_type(...)`, `atom_reads`, or `atom_writes`
+---   8. enum_alias_membership: Every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`, `atom_type(...)`, `atom_reads`, or `atom_writes`
 ---      must be in `scan.register_alias_registry`.
----   8. atom_type_consistency: Every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`.
----   9. binds_no_substruct_deref: Every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body must reference a leaf scalar (pointer-to-struct counts as leaf;
----      nested struct members do NOT).
----  10. reads_writes_alias_membership: Distinct check name duplicating #7's reads/writes coverage so the report can attribute failures to a precedence class.
+---   9. atom_type_consistency: Every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`.
+---  10. binds_no_substruct_deref: Every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body must reference a leaf scalar 
+---      (pointer-to-struct counts as leaf; nested struct members do NOT).
+---  11. reads_writes_alias_membership: Distinct check name duplicating #8's reads/writes coverage so the report can attribute failures to a precedence class.
+---
+--- Findings carry an explicit `kind` ("error" / "warning" / "info").
+--- The renderer maintains three independent severity collections; `info` is never folded into warnings.
+--- Scan/cycle summary rows are kept in a separate `summaries` collection (rendered as trailing summary lines, not findings).
+--- The report header now includes `Info: N` alongside Findings / Errors / Warnings, and a dedicated
+--- `── Info` section renders finding-level info between `── Warnings` and the per-atom cycle counts.
 ---
 --- The orchestrator (`ps1_meta.lua`) wires this module in via the PASSES table:
 ---   `["static-analysis"] = {
@@ -31,8 +44,8 @@
 ---       deps   = {"word-counts", "components"},
 ---       out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } }
 ---     }
---- `kind = "diagnostic"` keeps every finding visible in the report; the orchestrator does not exit non-zero
---- on static-analysis errors. Annotation and header-output validation remain build-stopping.
+--- `kind = "diagnostic"` keeps every finding visible in the report; the orchestrator does not exit non-zero on static-analysis errors.
+--- Annotation and header-output validation remain build-stopping.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible.
 
@@ -103,9 +116,10 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field outputs  table[]
 --- @field errors   table[]
 --- @field warnings table[]
+--- @field info     table[]   -- finding-level info (kind == "info"); distinct from per-source scanned/cycles summary rows
 
 --- @alias AtomName    string  -- lower_snake_case atom nameMacroName   string  -- lower_snake_case macro identifier
---- @alias CheckName   string  -- "gte_pipeline_fill" | "mac_yield_uniformity" | "abi_handoff" | "gpu_port_store_shape" | "per_atom_cycle_budget"
+--- @alias CheckName   string  -- "gte_write_retire" | "cop2_gpr_load_delay" | "control_transfer_delay_slot_use" | "mac_yield_uniformity" | "abi_handoff" | "gpu_portstore_shape" | "per_atom_cycle_budget"
 
 --- @class AtomBody
 --- @field line     integer  -- source line of the atom declaration
@@ -397,6 +411,7 @@ end
 -- within the same instruction slot emits a finding with `kind = "error"`.
 --
 -- Branch delay slots + BD-slot absorption are out of scope (separate MIPS control-flow concern).
+-- A separate check (control_transfer_delay_slot_use, below) covers branch/jump/call delay slots.
 -- ─────────────────────────────────────────────────────────────────────────
 
 -- Return the textual ident of the GPR read at `pos` in the macro's argument list, or nil if the operand is not a GPR.
@@ -463,6 +478,56 @@ local function check_cop2_gpr_load_delay(atom, pipe_ctx, findings)
 				if p.slots > 0 then next_pending[#next_pending + 1] = p end
 			end
 			pending = next_pending
+		end
+	end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Check #1c: control-transfer delay-slot use.
+--
+-- Reads `atom.paths.word_events` (the semantic emitted-word stream from `duffle.expand_word_events`).
+-- For each event whose `ident` is in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`, inspect the next
+-- emitted event in the SAME `events` array. The next event is the hardware delay-slot word
+-- (the duffle pipeline already absorbs the BD-slot into the branch's cost in `analyze_atom_paths`;
+-- this check observes, it does not reschedule).
+--
+-- Emit one `info`-severity finding when:
+--   * the successor event is absent (no following emitted word); `slot_ident` is reported as `<missing>`; OR
+--   * the successor event's `ident == "nop"` (the first emitted word of `nop2` is also `nop`).
+--
+-- Suppress the finding when `policy.suppress_arg1[first_arg]` is non-nil — the only current
+-- suppression is `jump_reg(R_AtomJmp)`, the fixed `mac_yield()` handshake.
+--
+-- `pipe_ctx` is unused; the uniform `(atom, pipe_ctx, findings)` signature is preserved so the check
+-- plugs into the existing CHECK_RULES dispatch without modifying the per-atom loop or analyze_atom_paths.
+-- `expand_word_events` already normalizes `nop2` to two `nop` events and `atom_label` to zero events,
+-- so no special-case branching is needed for either.
+-- ─────────────────────────────────────────────────────────────────────────
+
+local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
+	local events = atom.paths.word_events or {}
+	if not events or #events == 0 then return end
+	local policies = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
+	for event_idx, event in ipairs(events) do
+		local policy = policies[event.ident]
+		if policy then
+			local arg1 = event.args and event.args[1] or nil
+			local suppressed = policy.suppress_arg1 and policy.suppress_arg1[arg1] or nil
+			if not suppressed then
+				local slot = events[event_idx + 1]
+				if slot == nil or slot.ident == "nop" then
+					local slot_ident = slot and slot.ident or "<missing>"
+					findings[#findings + 1] = {
+						atom  = atom.name,
+						line  = event.line,
+						check = "control_transfer_delay_slot_use",
+						kind  = "info",
+						msg   = string.format(
+							"%s at line %d has `%s` whose emitted delay-slot word is `%s`; useful work may replace that no-op if its dependencies are valid on both paths",
+							atom.name, event.line, event.ident, slot_ident),
+					}
+				end
+			end
 		end
 	end
 end
@@ -917,8 +982,8 @@ end
 --
 -- Severity: WARNING (build continues).
 -- The rule is intentionally permissive because the production `code/duffle/` and `code/gte_hello/`
--- sources use R_* aliases in atom_reads / atom_writes that may not yet be opted in via the 
--- bare `atom_reg` marker. R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase ARE opted in.
+-- sources use R_* aliases in atom_reads / atom_writes that may not yet be opted in via the bare `atom_reg` marker.
+-- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase ARE opted in.
 -- Raw C-ABI aliases like R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle:
 -- no auto-include of wave-context; explicit opt-in only). Warnings keep the build green
 -- and surface the migration gap so users see which atoms still need opt-in registration.
@@ -1161,16 +1226,17 @@ end
 -- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
 
 local CHECK_RULES = {
-	{ name = "gte_write_retire",            per_atom   = check_gte_write_retire            },
-	{ name = "cop2_gpr_load_delay",         per_atom   = check_cop2_gpr_load_delay         },
-	{ name = "mac_yield_uniformity",        per_atom   = check_mac_yield_uniformity        },
-	{ name = "abi_handoff",                 per_atom   = check_abi_handoff                 },
-	{ name = "gpu_portstore_shape",         per_atom   = check_gpu_portstore_shape         },
-	{ name = "per_atom_cycle_budget",       per_atom   = check_per_atom_cycle_budget       },
-	{ name = "enum_alias_membership",       per_source = check_enum_alias_membership       },
-	{ name = "atom_type_consistency",       per_source = check_atom_type_consistency       },
-	{ name = "binds_no_substruct_deref",    per_source = check_binds_no_substruct_deref    },
-	{ name = "reads_writes_alias_membership",per_source = check_reads_writes_alias_membership},
+	{ name = "gte_write_retire",               per_atom   = check_gte_write_retire               },
+	{ name = "cop2_gpr_load_delay",            per_atom   = check_cop2_gpr_load_delay            },
+	{ name = "control_transfer_delay_slot_use",per_atom   = check_control_transfer_delay_slot_use},
+	{ name = "mac_yield_uniformity",           per_atom   = check_mac_yield_uniformity           },
+	{ name = "abi_handoff",                    per_atom   = check_abi_handoff                    },
+	{ name = "gpu_portstore_shape",            per_atom   = check_gpu_portstore_shape            },
+	{ name = "per_atom_cycle_budget",          per_atom   = check_per_atom_cycle_budget          },
+	{ name = "enum_alias_membership",          per_source = check_enum_alias_membership          },
+	{ name = "atom_type_consistency",          per_source = check_atom_type_consistency          },
+	{ name = "binds_no_substruct_deref",       per_source = check_binds_no_substruct_deref       },
+	{ name = "reads_writes_alias_membership", per_source = check_reads_writes_alias_membership },
 }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1265,24 +1331,38 @@ register_alias_registry = scan.register_alias_registry or {},
 		if rule.per_source then rule.per_source(src, pipe_ctx, findings) end
 	end
 
+	-- Three-way severity binning: per-finding severity is set by the check via `f.kind`.
+	-- "error" / "warning" / "info" are all distinct; info findings are NEVER folded into warnings.
+	-- (Pre-2026-07-23 the binner treated everything non-error as a warning, which made the
+	-- control-transfer delay-slot check indistinguishable from real warnings in the report.)
+	-- The `info` list returned here is finding-level only; scan/cycle summary lines go into `summaries`.
+	-- An invalid/missing kind is a hard error (no silent fallback to info); this prevents typos like
+	-- kind="warn" or omitted kind fields from being misclassified as info in the rendered report.
 	local errors   = {}
 	local warnings = {}
 	local info     = {}
 	for _, f in ipairs(findings) do
-		-- Per-finding severity is set by the check via `f.kind` ("error" or "warning"). 
-		-- A `gte_pipeline_fill` finding can be either severity (errors for missing nops; warnings for unknown cmdw macros not in the latency table).
-		-- Bin by `kind`, not by check name.
-		if f.kind == "error" then errors  [#errors   + 1] = { line = f.line, msg = f.msg }
-		else                      warnings[#warnings + 1] = { line = f.line, msg = f.msg }
+		if     f.kind == "error"   then errors  [#errors   + 1] = { line = f.line, msg = f.msg }
+		elseif f.kind == "warning" then warnings[#warnings + 1] = { line = f.line, msg = f.msg }
+		elseif f.kind == "info"    then info    [#info     + 1] = { line = f.line, msg = f.msg }
+		else
+			error(string.format(
+				"invalid finding kind %s for check %q (atom=%s, line=%d); expected one of \"error\", \"warning\", \"info\"",
+				tostring(f.kind), tostring(f.check), tostring(f.atom), f.line or 0), 0)
 		end
 	end
-	-- Per-source "scanned:" summary line. 
-	-- Includes the source basename for traceability 
+
+	-- Per-source "scanned:" / "cycles:" summary lines. These are SCANNER / BUDGET rollups,
+	-- not findings — they belong in their own collection so the report can render them
+	-- AS summary rows (after Module findings) rather than mixed into the Info finding section.
+	local summaries = {}
+	-- Per-source "scanned:" summary line.
+	-- Includes the source basename for traceability
 	-- (the old format was just "scanned: N atom bodies; M findings" which is unidentifiable when the module has multiple sources).
-	-- Sources with 0 atoms (pure-header files like dsl.h, mips.h, etc.) are SKIPPED. 
+	-- Sources with 0 atoms (pure-header files like dsl.h, mips.h, etc.) are SKIPPED.
 	-- The per-module header already lists them in the "Sources:" section, and emitting a noisy "0 atom bodies" line per header is just clutter.
 	if #atoms > 0 or #findings > 0 then
-		info[#info + 1] = {
+		summaries[#summaries + 1] = {
 			line = 0,
 			msg  = string.format("scanned: %s: %d atom bodies; %d findings",
 				src.basename, #atoms, #findings),
@@ -1304,7 +1384,7 @@ register_alias_registry = scan.register_alias_registry or {},
 				max_atom_name = a.name
 			end
 		end
-		info[#info + 1] = {
+		summaries[#summaries + 1] = {
 			line = 0,
 			msg  = string.format("cycles: path-aware min=%d max=%d across %d atoms; worst atom=%s (%d); best-case, no stalls; BD-slot nops absorbed into branch costs",
 				total_min, total_max, #atoms, max_atom_name or "?", max_atom_cyc),
@@ -1312,11 +1392,12 @@ register_alias_registry = scan.register_alias_registry or {},
 	end
 
 	return {
-		atoms    = atoms,
-		findings = findings,
-		errors   = errors,
-		warnings = warnings,
-		info     = info,
+		atoms     = atoms,
+		findings  = findings,
+		errors    = errors,
+		warnings  = warnings,
+		info      = info,
+		summaries = summaries,
 	}
 end
 
@@ -1324,10 +1405,13 @@ end
 -- Per-directory output: build/gen/<dir_basename>.static_analysis.txt
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Per-directory emit. Aggregates atoms + findings across every source in `dir_sources` 
---- and writes a single report to `<out_root>/<dir_basename>.static_analysis.txt`. 
+--- Per-directory emit. Aggregates atoms + findings across every source in `dir_sources`
+--- and writes a single report to `<out_root>/<dir_basename>.static_analysis.txt`.
 --- Called only when at least one atom was found (the caller in M.run handles the skip).
-local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, findings, errors, warnings, info)
+---
+--- `info` is finding-level info only (kind == "info" findings); the scanned/cycles summary rows
+--- live in `summaries` and are rendered as trailing summary lines after `Module findings:`.
+local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, findings, errors, warnings, info, summaries)
 	-- Module basename = last component of `dir` ("code/duffle" -> "duffle").
 	local dir_basename = dir:match("([^/\\]+)$") or dir
 	local out_path     = ctx.out_root .. "/" .. dir_basename .. ".static_analysis.txt"
@@ -1359,8 +1443,10 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 		header_atoms = header_atoms .. string.format("  (atoms: %d, comp_bare: %d, comp_proc: %d)",
 			n_atoms - n_bare - n_proc, n_bare, n_proc)
 	end
-	add(string.format("%s   Findings: %d   Errors: %d   Warnings: %d",
-		header_atoms, #findings, #errors, #warnings))
+	-- Header carries the per-severity counts; info is its own column, not a warning.
+	-- (`Info: N` is the byte-asserted field that the focused test matches; do not collapse it into Warnings.)
+	add(string.format("%s   Findings: %d   Errors: %d   Warnings: %d   Info: %d",
+		header_atoms, #findings, #errors, #warnings, #info))
 	add("")
 
 	-- Group findings by atom (with source prefix when multi-source module)
@@ -1402,6 +1488,16 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	if #warnings == 0 then add("  (none)") end
 	for _, w in ipairs(warnings) do
 		add(string.format("  ! line %d  %s", w.line, w.msg))
+	end
+
+	-- Finding-level Info section.
+	-- Rendered between Warnings and the per-atom cycle table so the next `── ` line after `── Info` is the per-atom cycle counts section;
+	-- the trailing scan/cycle summary rows (rendered after Module findings) stay outside this section.
+	add("")
+	add("── Info ────────────────────────────────────────────────")
+	if #info == 0 then add("  (none)") end
+	for _, i_ in ipairs(info) do
+		add(string.format("  i line %d  %s", i_.line, i_.msg))
 	end
 
 	-- Per-atom cycle counts (path-aware). For each atom:
@@ -1480,16 +1576,22 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	end
 
 	-- Module-level findings summary (across all sources).
+	-- Info is its own count; it is NOT lumped into warnings.
 	local total_errs  = #errors
 	local total_warns = #warnings
+	local total_infos = #info
 	add("")
-	add(string.format("Module findings:  %d error(s), %d warning(s)", total_errs, total_warns))
+	add(string.format("Module findings:  %d error(s), %d warning(s), %d info", total_errs, total_warns, total_infos))
 
-	-- Per-source "scanned:" info lines (each line includes the source basename for traceability).
-	if #info > 0 then
+	-- Per-source "scanned:" / "cycles:" summary lines (each line includes the source basename for traceability).
+	-- These are kept SEPARATE from the finding-level Info section above so the report's Info section is signal-only
+	-- (true findings), not a mix of findings + rollups.
+	-- The downstream test (`test_control_transfer_delay_slot.lua`)
+	-- asserts that the Info section contains NEITHER `scanned:` NOR `cycles:` lines.
+	if summaries and #summaries > 0 then
 		add("")
-		for _, i_ in ipairs(info) do
-			add(string.format("  %s", i_.msg))
+		for _, s in ipairs(summaries) do
+			add(string.format("  %s", s.msg))
 		end
 	end
 
@@ -1511,53 +1613,63 @@ function M.run(ctx)
 	local outputs  = {}
 	local errors   = {}
 	local warnings = {}
+	-- `info` aggregates finding-level info across every source (the per-source validate() also
+	-- returns a `summaries` collection for scan/cycle rollups;
+	-- those are NOT finding-level and never enter `info`).
+	local info     = {}
 
 	-- Aggregate per-DIRECTORY (per-module).
-	-- One static_analysis.txt per source-directory, emitted only if the directory contains at least one atom. 
+	-- One static_analysis.txt per source-directory, emitted only if the directory contains at least one atom.
 	-- Empty-source directories (e.g. duffle headers with no atoms) produce no report.
 	-- Group sources by `src.dir`. The first component of `dir` is the module name (e.g. "code/duffle" -> "duffle", "code/gte_hello" -> "gte_hello").
 	-- Output path is `<out_root>/<module_basename>.static_analysis.txt`.
 	local by_dir = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
 
 	for dir, dir_sources in pairs(by_dir) do
-		-- Run validate() against every source in this directory; accumulate atoms / findings / errors / warnings. 
-		-- The validate() function does its own per-source analysis (Binds indexing, atom discovery, all 5 checks) 
+		-- Run validate() against every source in this directory; accumulate atoms / findings / errors / warnings.
+		-- The validate() function does its own per-source analysis (Binds indexing, atom discovery, all checks)
 		-- and attaches path-aware cycle data to each atom it finds.
 		local all_atoms    = {}
 		local all_findings = {}
 		local dir_errors   = {}
 		local dir_warnings = {}
-		local all_info     = {}
+		local dir_info     = {}
+		local dir_summaries = {}
 		for _, src in ipairs(dir_sources) do
 			local result = validate(ctx, src)
-			-- Tag each atom with its source so the render step can prefix the atom line with "<filename>:" 
+			-- Tag each atom with its source so the render step can prefix the atom line with "<​filename>:"
 			-- when atoms from multiple sources live in the same module (e.g. lottes_tape.h + atom_dsl.h both declaring atoms).
 			for _, a in ipairs(result.atoms) do
 				a.source_path = src.path
 				all_atoms[#all_atoms + 1] = a
 			end
 			for _, f  in ipairs(result.findings) do all_findings[#all_findings + 1] = f  end
-			for _, e  in ipairs(result.errors)   do dir_errors  [#dir_errors   + 1] = e  end
-			for _, w  in ipairs(result.warnings) do dir_warnings[#dir_warnings + 1] = w  end
-			for _, i_ in ipairs(result.info)     do all_info    [#all_info     + 1] = i_ end
+			for _, e  in ipairs(result.errors)    do dir_errors    [#dir_errors    + 1] = e  end
+			for _, w  in ipairs(result.warnings)  do dir_warnings  [#dir_warnings  + 1] = w  end
+			for _, i_ in ipairs(result.info)      do dir_info      [#dir_info      + 1] = i_ end
+			for _, s  in ipairs(result.summaries or {}) do dir_summaries[#dir_summaries + 1] = s end
 		end
 
 		-- Skip directories with zero atoms. A directory with only headers / no MipsAtom_ is "nothing to report".
 		if #all_atoms == 0 then
-			-- Still aggregate errors/warnings so orchestrator sees them, but don't write a file.
-			for _, e in ipairs(dir_errors)   do errors  [#errors   + 1] = e end
+			-- Still aggregate errors/warnings/info so orchestrator sees them, but don't write a file.
+			for _, e in ipairs(dir_errors) do errors  [#errors   + 1] = e end
 			for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
+			for _, i_ in ipairs(dir_info) do info[#info + 1] = i_ end
 		else
-			local out_path = emit_module_static_analysis_txt(ctx, dir, dir_sources, all_atoms, all_findings, dir_errors, dir_warnings, all_info)
+			local out_path = emit_module_static_analysis_txt(ctx, dir, dir_sources, all_atoms, all_findings, dir_errors, dir_warnings, dir_info, dir_summaries)
 			if out_path then
 				table.insert(outputs, { static_analysis_txt = out_path })
 			end
-			for _, e in ipairs(dir_errors)   do errors  [#errors   + 1] = e end
+			for _, e in ipairs(dir_errors) do errors  [#errors   + 1] = e end
 			for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
+			for _, i_ in ipairs(dir_info) do info[#info + 1] = i_ end
 		end
 	end
 
-	return { outputs = outputs, errors = errors, warnings = warnings }
+	-- Result exposes at least {outputs, errors, warnings, info}.
+	-- Summaries are internal to the renderer; callers (orchestrator, focused tests) consume the four severity-typed collections.
+	return { outputs = outputs, errors = errors, warnings = warnings, info = info }
 end
 
 return M
