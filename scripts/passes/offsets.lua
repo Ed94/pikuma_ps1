@@ -48,7 +48,7 @@ local OFFSET_MACRO_COL = 44
 --- @class PassCtx
 --- @field shared             table                  -- cross-pass shared state
 --- @field shared.corpus      table                  -- canonical corpus projection
---- @field shared.word_counts table                  -- compatibility alias to corpus.word_counts
+--- @field shared.word_counts table
 --- @field out_root           string                 -- output root (e.g. "build/gen")
 --- @field dry_run            boolean                -- if true, compute but don't write
 

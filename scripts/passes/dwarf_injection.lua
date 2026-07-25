@@ -46,10 +46,8 @@ local lfs = require("lfs")
 
 -- File-scope aliases to elf_dwarf helpers; the canonical implementations live in scripts/elf_dwarf.lua.
 -- ELF decoding helpers come from `elf_dwarf.lua`.
-local read_uleb128_at       = elf_dwarf.read_uleb128_at
-local read_sleb128_at       = elf_dwarf.read_sleb128_at
 local find_abbrev_table_end = elf_dwarf.find_abbrev_table_end
--- Note: uleb128 + sleb128 are encoders; read_uleb128_at + read_sleb128_at are decoders. Different functions.
+-- Local DWARF opcode constants + length-prefixed integers (uleb128 + sleb128 encoders are in elf_dwarf.lua).
 local uleb128 = elf_dwarf.uleb128
 local sleb128 = elf_dwarf.sleb128
 
@@ -207,14 +205,13 @@ local DW_FORM_udata          = 0x0F   -- ULEB128 (DW_AT_byte_size for struct_typ
 local DW_FORM_implicit_const = 0x21   -- DWARF5 §7.5.6: abbrev declaration carries a SLEB constant (used by the abbrev-table walker)
 local DW_FORM_sec_offset     = 0x17   -- 4-byte section-relative offset (into .debug_loclists / .debug_rnglists)
 
-local DW_OP_reg0             = 0x50
--- DW_OP_regN = 0x50 + N; the variable's value resides in that register.
-local DW_OP_piece            = 0x93   -- followed by ULEB128 byte count (per DWARF5 §7.7.5)
+-- DW_OP_reg0 + DW_OP_piece are declared canonically above (lines 114-116) alongside the other DWARF5 §7.7.3 loclist opcodes.
+
 
 local DW_ATE_unsigned        = 0x07   -- DWARF5 §7.8.1: DW_ATE_unsigned (used for U4 base type)
 
-local DW_LANG_C99            = 0x0C   -- = 12 (C99); use as a safe "C-like" placeholder
 -- (DW_LANG_Mips_Assembler = 0x8001 was used in the, but we want this CU to look like a C TU so VSCode's Variables pane treats it as code.)
+-- No DW_AT_language attribute is emitted (see build_debug_info_section's abbrev 100).
 
 -- R_<name> → MIPS GPR lookups go through the merged register_alias_registry
 -- (collected by collect_per_source_registries from ctx.sources[*].scan.register_alias_registry).
@@ -616,13 +613,14 @@ local function build_atom_sequence(atom)
 	-- If entry 1 is the first word of a component invocation, emit the component-definition row at the same PC immediately after.
 	-- The def line is always a statement target unless the inv is explicitly skip-over (atom_dbg_skip_over);
 	-- the whole-atom skip path takes the early-return at line ~497 above so atom_is_stmt is irrelevant here.
-	-- For the body row, prefer `body_lines[1]`  (the actual source line of the first body word in the macro's expansion)
+	-- For the body row, prefer `body_lines[1]` (the actual source line of the first body word in the macro's expansion)
 	-- over `comp_line` (the macro signature line).
-	-- When `body_lines` is absent (the component was not indexed by the scan, e.g. an external macro), 
-	-- fall back to `comp_line` so the line program remains valid.
+	-- Canonical contract: the emission-model pass populates `body_lines` for every invocation;
+	-- absence now is an error (older emitters / external macros are no longer supported).
 	if inv1 and 1 == inv1.start_pos + 1 then
 		local comp_file_idx_1 = resolve_provenance_file_index(inv1.comp_file)
-		local body_line_1     = (inv1.body_lines and inv1.body_lines[1]) or inv1.comp_line
+		assert(inv1.body_lines, "missing body_lines: emitter did not run emission-model")
+		local body_line_1     = inv1.body_lines[1]
 		emit_row(comp_file_idx_1, body_line_1, not inv1.skip_over)
 	end
 
@@ -648,18 +646,20 @@ local function build_atom_sequence(atom)
 			emit_row(call_file_idx, inv.call_line, atom_is_stmt)
 			-- 2) component body row at this PC.
 			-- Prefer `body_lines[1]` over `comp_line` so gdb's `step` lands on the macro's actual body line (not the signature line above `{ ... }`).
-			-- Fallback to `comp_line` when the component isn't indexed.
+			-- Canonical contract: `body_lines` is always populated by the emission-model pass.
 			local body_file_idx = resolve_provenance_file_index(inv.comp_file)
-			local body_line_1   = (inv.body_lines and inv.body_lines[1]) or inv.comp_line
+			assert(inv.body_lines, "missing body_lines: emitter did not run emission-model")
+			local body_line_1   = inv.body_lines[1]
 			emit_row(body_file_idx, body_line_1, not inv.skip_over)
 		elseif inv then
 			-- Subsequent word of an invocation: 1-based offset into body_lines:
 			-- word 1 of the invocation corresponds to body_lines[1], word 2 -> body_lines[2], etc.
 			-- 1-based offset = idx - inv.start_pos (since idx = inv.start_pos + i for the i-th body word).
-			-- When `body_lines` is missing (older emitters / external macros), fall back to comp_line.
+			-- Canonical contract: `body_lines` is always populated by the emission-model pass.
 			local body_file_idx = resolve_provenance_file_index(inv.comp_file)
 			local words_into    = idx - inv.start_pos  -- 1-based word position in invocation
-			local body_line_i   = (inv.body_lines and inv.body_lines[words_into]) or inv.comp_line
+			assert(inv.body_lines, "missing body_lines: emitter did not run emission-model")
+			local body_line_i   = inv.body_lines[words_into]
 			emit_row(body_file_idx, body_line_i, not inv.skip_over)
 		else
 			-- RAW word: single call-site row. emit_row restores is_stmt after a selected component range before exposing this adjacent row.
@@ -1283,7 +1283,7 @@ end
 ---   Abbrev 100 (DW_TAG_compile_unit, with children):
 ---     DW_AT_name       (DW_FORM_strp)   -- CU name
 ---     DW_AT_comp_dir   (DW_FORM_strp)   -- compilation dir
----     DW_AT_language   (DW_FORM_data1)  -- DW_LANG_C99
+---     DW_AT_language   (DW_FORM_data1)  -- one byte language code
 ---   Abbrev 101 (DW_TAG_subprogram, with children):
 ---     DW_AT_name       (DW_FORM_string) -- atom function name
 ---     DW_AT_low_pc     (DW_FORM_addr)   -- atom.addr
@@ -2099,8 +2099,6 @@ end
 
 --- Build the new .debug_info: SPLICE inserted DIEs into the MAIN CU as children.
 ---
---- This function appended a DETACHED synthetic CU to the end of .debug_info.
---- That put every atom DIE in a separate CU from the one GDB selected for PC lookup, so `RR_PrimCursor` + `bind_args` never appeared in scope.
 --- This implementation instead:
 ---   1. Builds the inserted-children bytes (base_type, struct_types, subprograms with their RR_* + bind_args children) via build_inserted_children.
 ---   2. Patches the main CU's `unit_length` field to account for the inserted bytes.
@@ -2109,7 +2107,7 @@ end
 ---   5. Replaces the main CU's final byte (the root children-terminator, 0) with: inserted_children_bytes + a single 0 byte (root terminator preserved).
 ---
 --- The crt CU (everything before main_cu_start) is preserved.
---- **No detached synthetic CU is appended.**
+
 --- @param existing string            -- existing .debug_info section bytes
 --- @param main_cu_start integer      -- 0-based offset of the main CU's unit_length field
 --- @param main_cu_end_excl integer   -- 0-based offset of the first byte AFTER the main CU
@@ -2156,21 +2154,11 @@ end
 --- Atoms don't have stack frames. The .debug_loc section describes per-instruction location adjustments for call-frame-based variables;
 --- We use DW_OP_regN which is register-based and doesn't need .debug_loc entries).
 --- The section itself must not be empty OR gdb may complain; the DW_LLE_end_of_list marker (per DWARF5 §7.7) is a single byte 0x00.
--- local function build_debug_loc_section() return string.char(0x00) end
+--
+-- The actual .debug_loc emission is `string.char(DW_LLE_end_of_list)` inlined
+-- at the per-section writers below (the dispatch is in M.run, not a table).
 
-local SECTION_BUILDERS = {
-	debug_line     = build_dwarf_line_section,
-	debug_aranges  = build_dwarf_aranges_section,
-	debug_rnglists = build_dwarf_rnglists_section,
-	debug_abbrev   = build_debug_abbrev_section,
-	debug_info     = build_debug_info_section,
-	debug_str      = build_debug_str_section,
-	debug_loc      = function() return string.char(DW_LLE_end_of_list) end,
-	-- debug_loclists is fed directly in M.run (it needs the merged registries for the R_TapePtr GPR lookup;
-	-- the SECTION_BUILDERS table cannot carry that context, so the dispatch is inlined in the per-run writers loop).
-}
-
--- Per-section output path resolver (mirrors SECTION_BUILDERS).
+-- Per-section output path resolver.
 -- Returns the on-disk path for the section's `.bin` blob.
 local SECTION_WRITERS = {
 	debug_line     = function(out_root, basename) return out_root .. "\\" .. basename .. ".dwarf_line.bin"     end,
@@ -2244,10 +2232,10 @@ function M.run(ctx)
 
 	-- Read the existing DWARF sections directly (no subprocess; lfs + io.open + manual ELF32 section-header walk).
 	-- We need all 8 sections: .debug_line / .debug_aranges / .debug_rnglists get extended
-	-- (additional rows appended to the existing unit), and .debug_info / .debug_abbrev / .debug_str / .debug_loc / .debug_loclists 
+	-- (additional rows appended to the existing unit), and .debug_info / .debug_abbrev / .debug_str / .debug_loc / .debug_loclists
 	-- get spliced (the main CU's unit_length is patched;
 	-- no new compile unit is appended; debug_loc/debug_loclists may not exist in the source ELF so we add-section them on splice).
-	-- The dispatch (SECTION_BUILDERS) handles each.
+	-- The per-section dispatch is inlined in the writers loop below.
 	local existing_sections = elf_dwarf.read_elf_sections(elf_path, {
 		".debug_line", ".debug_aranges", ".debug_rnglists",
 		".debug_info", ".debug_abbrev", ".debug_str",
@@ -2303,6 +2291,7 @@ function M.run(ctx)
 	--
 	-- .debug_str now also receives the new RR_<R_Name> entries
 	-- (the merged registry drives the strings table to keep .debug_str and .debug_info in sync).
+	-- (the per-section dispatch is inlined in the writers loop below)
 	local basename = ctx.basename or duffle.basename_no_ext(elf_path) or DEFAULT_BASENAME
 	if ctx.out_root and ctx.out_root ~= "" then
 		duffle.ensure_dir(ctx.out_root)

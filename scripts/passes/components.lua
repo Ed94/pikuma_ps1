@@ -11,15 +11,6 @@
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
 
---- @class Component
---- @field name    string
---- @field body    string
---- @field args    string|nil
---- @field line    integer
---- @field comment string|nil
-
---- @class M
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
@@ -31,7 +22,6 @@
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir  = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle          = dofile(_bootstrap_dir .. "../duffle_paths.lua")
-local word_count_eval = require("word_count_eval")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -247,7 +237,7 @@ local function extract_arg_names(args_str)
 			local ident_start = ident_end
 			while ident_start > 0 do
 				local ch = trimmed:sub(ident_start, ident_start)
-				if duffle.is_alnum(ch) or ch == "_" then
+				if duffle.is_alnum_byte(string.byte(ch)) or ch == "_" then
 					ident_start = ident_start - 1
 				else
 					break
@@ -640,7 +630,7 @@ end
 
 --- (internal) Populate the canonical `corpus.component_body_index` projection with this source's body index entries.
 --- First declaration wins; later declarations are dropped (no separate collision record: the components collision is already surfaced by `update_canonical_components`).
---- The pass does NOT write to `ctx.shared.component_body_index` (the legacy corpus owns this projection).
+--- The pass does NOT write to `ctx.shared.component_body_index` (the corpus owns this projection).
 --- @param corpus     table  -- the canonical corpus
 --- @param src        SourceFile
 --- @param components Component[]

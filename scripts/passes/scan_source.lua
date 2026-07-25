@@ -2029,8 +2029,8 @@ function M.run(ctx)
 	local code_macros       = {}
 	local code_macro_bodies = {}
 
-	-- Resolve the canonical source list. The corpus owns the authoritative source_order; no legacy alias is consulted and no per-source fallback synthesis is performed.
-	-- A context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus message so callers migrate to the canonical context (no production compatibility layer).
+	-- Resolve the canonical source list. The corpus owns the authoritative source_order.
+	-- A context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus error.
 	ctx.shared = ctx.shared or {}
 	local corpus = ctx.shared.corpus
 	if not corpus or type(corpus.source_order) ~= "table" then

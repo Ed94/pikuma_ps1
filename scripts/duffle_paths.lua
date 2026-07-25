@@ -11,11 +11,10 @@
 ---   ```
 ---
 --- That small bootstrap: (a) locates this helper via `arg[0]` / `debug.getinfo`,
---- (b) loads it (which sets `package.path` + `package.cpath` via cached `git rev-parse`),
+--- (b) loads it (which sets `package.path` + `package.cpath`),
 --- (c) at the bottom calls `require("duffle")` (now resolvable since `package.path` was just set) and returns the duffle M.
 --- Net effect: the caller gets the duffle module in one statement; no separate `dofile(...)` + `require("duffle")` dance.
 ---
---- Replaces the prior 2-line (entry) or 4-line (pass) pattern that had the call site do its own path resolution + duplicated setup.
 
 local M = {}
 
@@ -26,9 +25,6 @@ local CACHE_KEY = "__duffle_repo_root__"
 --- `duffle_paths.lua` always lives at `<repo>/scripts/duffle_paths.lua`, so the repo root is the
 --- parent of the directory containing this script. We derive it directly from `debug.getinfo(1, "S").source`
 --- (returns `@<path>` for the currently-running chunk).
----
---- Replaces the prior `io.popen("git rev-parse --show-toplevel")` approach, which cost ~100-180ms per
---- LuaJIT process on Windows due to git's CLI startup. The path-derive approach costs <1ms.
 ---
 --- If `debug.getinfo` can't parse this script's path (shouldn't happen — dofile always populates source),
 --- return nil and let `M.setup()` fail loud.
@@ -61,7 +57,12 @@ end
 function M.setup()
 	local repo_root = find_repo_root()
 	if not repo_root then
-		io.stderr:write("[duffle_paths] git rev-parse failed -- not in a git repo?\n")
+		-- Unreachable in practice: find_repo_root() derives the repo root from this script's
+		-- own source path via debug.getinfo(1, "S").source (no subprocess, no git CLI, <1ms).
+		-- A nil return means the source path did not match the expected
+		-- <repo>/scripts/duffle_paths.lua layout — a packaging bug, not a "missing git repo"
+		-- condition. os.exit(2) is retained so a real failure surfaces loud rather than
+		-- silently producing an unconfigured module table.
 		os.exit(2)
 	end
 

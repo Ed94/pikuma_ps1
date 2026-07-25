@@ -7,7 +7,7 @@
 ---
 --- Writes:
 ---   - `<ctx.out_root>/<dir_basename>.errors.h` — one per module, with `#error` directives on findings (the C compile will surface the error)
----   - The annotations.txt report is rendered by `passes/report.lua` from the per-module results stashed in `ctx.flags._annot_results`
+---   - The annotations.txt report is rendered by `passes/report.lua` from the canonical `corpus.sources_by_dir` projection (re-validating each source via `M.validate()`).
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible
 
@@ -45,7 +45,6 @@ local ensure_dir     = duffle.ensure_dir
 --- @field project_root       string
 --- @field upstream           table<string, table>
 --- @field flags              table
---- @field flags._annot_results table[] -- stashed by annotation pass; consumed by report.lua
 --- @field dry_run            boolean
 --- @field verbose            boolean
 
@@ -500,9 +499,10 @@ end
 --- Validate one source against its pre-scanned SourceScan payload + the corpus-wide pipe_ctx.
 --- @param ctx             PassCtx
 --- @param src             SourceFile
---- @param corpus_pipe_ctx PipeCtx   -- built once per pass from corpus registries
+--- @param corpus_pipe_ctx PipeCtx|nil  -- built once per pass from corpus registries; nil = self-build (canonical projection).
 --- @return AnnotatedResult
 local function validate(ctx, src, corpus_pipe_ctx)
+	corpus_pipe_ctx = corpus_pipe_ctx or build_corpus_pipe_ctx(ctx)
 	local scan = src.scan
 
 	-- Project the pre-scanned atoms to the AtomEntry shape this pass needs.
@@ -668,17 +668,6 @@ local function emit_module_errors_h(ctx, dir_basename, atoms_count, errors, sour
 	return out_path
 end
 
---- Stash aggregated per-module results for the report pass to consume.
-local function emit_module_annotations_stub(ctx, dir, dir_basename, atoms_count)
-	ctx.flags                = ctx.flags                or {}
-	ctx.flags._annot_results = ctx.flags._annot_results or {}
-	ctx.flags._annot_results[#ctx.flags._annot_results + 1] = {
-		dir          = dir,
-		dir_basename = dir_basename,
-		atoms_count  = atoms_count,
-	}
-end
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- M.run — orchestrator entry
 -- ════════════════════════════════════════════════════════════════════════════
@@ -713,13 +702,9 @@ function M.run(ctx)
 		local dir_atoms    = 0
 		local dir_errors   = {}
 		local dir_warnings = {}
-		-- Per-source validate() results, cached for the report pass (it reads from this instead of re-validating each source).
-		ctx.flags                       = ctx.flags                       or {}
-		ctx.flags._annot_source_results = ctx.flags._annot_source_results or {}
 		for _, src in ipairs(dir_sources) do
 			local result  = validate(ctx, src, corpus_pipe_ctx)
 			result.source = src.path                           -- tag for downstream rendering
-			ctx.flags._annot_source_results[src.path] = result -- stash so report.lua reads from cache instead of re-running validate()
 			dir_atoms = dir_atoms + #result.atoms
 			for _, e in ipairs(result.errors) do
 				dir_errors[#dir_errors + 1] = { line = e.line, msg = e.msg, source = src.path }
@@ -735,8 +720,6 @@ function M.run(ctx)
 		if err_path then
 			table.insert(outputs, { errors_h = err_path })
 		end
-
-		emit_module_annotations_stub(ctx, dir, dir_basename, dir_atoms)
 	end
 
 	return { outputs = outputs, errors = errors, warnings = warnings }

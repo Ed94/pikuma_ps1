@@ -63,7 +63,7 @@ local FORMAT_VERSION = 1
 --- @class AtomSourceMapCtx
 --- @field shared             table   -- `ctx.shared`
 --- @field shared.corpus      table   -- canonical source-order corpus
---- @field shared.word_counts table   -- identity alias of `corpus.word_counts`
+--- @field shared.word_counts table
 --- @field out_root           string  -- output root (e.g. "build/gen")
 --- @field dry_run            boolean -- if true, compute but don't write
 --- @field flags              table   -- `ctx.flags`; reads `flags.gdb_runtime` + `flags.elf_path`
@@ -391,31 +391,6 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = ""
 
-	-- ── show_c2 ──
-	-- GTE data regs (COP2). pcsx-redux's gdb stub doesn't expose COP2 (only 72 regs: 32 GPR + COP0 + FPR).
-	--   curl http://localhost:8080/api/v1/lua/gte
-	-- We keep the command definition as a stub that points the user at the plugin.
-	lines[#lines + 1] = "define show_c2"
-	lines[#lines + 1] = '  echo "[gdb_tape_atoms] show_c2: gdb stub does not expose COP2 in this build."'
-	lines[#lines + 1] = '  echo "[gdb_tape_atoms] Use scripts/pcsx_debug_helper.zip + curl http://localhost:8080/api/v1/lua/gte"'
-	lines[#lines + 1] = '  echo "[gdb_tape_atoms] (or pcsx-redux Debug > Registers window for a native view)"'
-	lines[#lines + 1] = "end"
-	lines[#lines + 1] = "document show_c2"
-	lines[#lines + 1] = "  Stub. The gdb stub in this pcsx-redux build does not expose COP2 regs."
-	lines[#lines + 1] = "  For GTE data + control state, use the pcsx_debug_helper Lua plugin or the"
-	lines[#lines + 1] = "  pcsx-redux Debug > Registers window."
-	lines[#lines + 1] = "end"
-	lines[#lines + 1] = ""
-
-	-- ── show_c2ctl ──
-	lines[#lines + 1] = "define show_c2ctl"
-	lines[#lines + 1] = '  echo "[gdb_tape_atoms] show_c2ctl: see show_c2 for the same workaround."'
-	lines[#lines + 1] = "end"
-	lines[#lines + 1] = "document show_c2ctl"
-	lines[#lines + 1] = "  Stub. Same workaround as show_c2."
-	lines[#lines + 1] = "end"
-	lines[#lines + 1] = ""
-
 	-- ── wave_ctx ──
 	lines[#lines + 1] = "define wave_ctx"
 	lines[#lines + 1] = '  printf "$t4 = R_FaceCursor     0x%08x\\n", $t4'
@@ -533,7 +508,9 @@ function M.run(ctx)
 	for _, src in ipairs(corpus.source_order) do
 		local has_projection = false
 		for _, atom in ipairs((src.scan or {}).atoms or {}) do
-			if atom.paths then has_projection = true; break end
+			if (atom.kind == "atom" or atom.kind == "raw_atom") and atom.paths then
+				has_projection = true; break
+			end
 		end
 		if not has_projection then
 			for _, atom in ipairs((src.scan or {}).raw_atoms or {}) do

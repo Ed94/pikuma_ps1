@@ -15,7 +15,7 @@
 ---      inspect the next emitted event in `atom.paths.word_events`.
 ---      Emit an `info`-severity finding when the successor is `nop` or absent (the next emitted word IS the hardware delay slot).
 ---      `jump_reg(R_AtomJmp)` is suppressed by policy (the fixed `mac_yield()` handshake).
----      `nop2` needs no special case: `expand_word_events` emits two `nop` events for it, so the first expansion is the hardware delay slot.
+---      `nop2` needs no special case: emission-model emits two `nop` events for it, so the first expansion is the hardware delay slot.
 ---      `atom_label` also needs no special case (zero events).
 ---   3. mac_yield uniformity: Every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
 ---   4. Binding handoff: Every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
@@ -30,10 +30,6 @@
 ---  10. binds_no_substruct_deref: Every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body must reference a leaf scalar
 ---      (pointer-to-struct counts as leaf; nested struct members do NOT).
 ---
---- `enum_alias_membership` already iterates `ai.reads` and `ai.writes` against
---- `corpus.register_alias_registry`, so a duplicate precedence-class check
---- only produced duplicate findings. The CHECK_RULES row and the helper
---- function are gone; no public/private surface retains that name.)
 ---
 --- Findings carry an explicit `kind` ("error" / "warning" / "info").
 --- The renderer maintains three independent severity collections; `info` is never folded into warnings.
@@ -714,10 +710,9 @@ local function analyze_hardware_relations(atom)
 		local ev_line   = ev.body_line or ev.line   or ev.def_line or 0
 		local ev_source = ev.def_path  or ev.source or ""
 		local ev_args   = ev.args      or {}
-		-- `word_events` use `i` as the 0-based word index across the entire expansion);
-		-- The legacy `duffle.expand_word_events` walker emits `word`.
-		-- Either is accepted; unknown defaults to 0 (the producer's own word).
-		local ev_word   = ev.i or ev.word or 0
+		-- `word_events` use `i` as the 0-based word index across the entire expansion.
+		-- Default to 0 if the field is absent (the producer's own word).
+		local ev_word   = ev.i or 0
 
 		-- Read a Status source, then apply current-event GPR writes, then consume a pending CU2 transition at the first relevant COP2 use.
 		-- Both operations are part of this one event walk.
@@ -1032,7 +1027,7 @@ local function check_gte_result_position(atom, _pipe_ctx, findings)
 	-- For each word event whose encoder is `gte_mv_from_data_r`, look up the register being read in `forward_state.post_command_roles`.
 	-- If a role is set, the reader's register must match the role's register (the registered "latest_<role>" target).
 	for _, ev in ipairs(events) do
-		local ev_ident = ev.encoder or ev.ident
+		local ev_ident = ev.encoder
 		if ev_ident == "gte_mv_from_data_r" then
 			local args = ev.args or {}
 			local reg  = args[2]
@@ -1101,14 +1096,14 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 	local pending_snapshot = {}
 	local prev_ev = nil
 	for event_idx, ev in ipairs(events) do
-		local ev_ident = ev.encoder or ev.ident or ""
+		local ev_ident = ev.encoder or ""
 		local ev_args  = ev.args or {}
-		local ev_word  = ev.i or ev.word or 0
+		local ev_word  = ev.i or 0
 
 		-- Classify the nop BEFORE its event is applied to the pending state.
 		if ev_ident == "nop" and prev_ev ~= nil then
 			-- Skip BD-slot nops: they are exclusively owned by control_transfer_delay_slot_use.
-			local prev_ident  = prev_ev.encoder or prev_ev.ident or ""
+			local prev_ident  = prev_ev.encoder or ""
 			local prev_args   = prev_ev.args or {}
 			local bd_policies = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
 			local is_bd_slot  = false
@@ -1246,8 +1241,10 @@ end
 -- ─────────────────────────────────────────────────────────────────────────
 -- Check #1c: control-transfer delay-slot use.
 --
--- Reads `atom.paths.word_events` (the semantic emitted-word stream from `duffle.expand_word_events`).
--- For each event whose `ident` is in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`, inspect the next emitted event in the SAME `events` array.
+-- Reads `atom.paths.word_events` (the semantic emitted-word stream from
+-- `passes/emission_model.lua`). For each event whose `encoder` is in
+-- `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`, inspect the next emitted
+-- event in the SAME `events` array.
 -- The next event is the hardware delay-slot word (the duffle pipeline already absorbs the BD-slot into the branch's cost in `analyze_atom_paths`.
 -- This check observes, it does not reschedule.
 --
@@ -1260,7 +1257,7 @@ end
 --
 -- `pipe_ctx` is unused; the uniform `(atom, pipe_ctx, findings)` signature is preserved so the check plugs into 
 -- the existing CHECK_RULES dispatch without modifying the per-atom loop or analyze_atom_paths.
--- `expand_word_events` already normalizes `nop2` to two `nop` events and `atom_label` to zero events, so no special-case branching is needed for either.
+-- `passes/emission_model` already normalizes `nop2` to two `nop` events and `atom_label` to zero events, so no special-case branching is needed for either.
 -- ─────────────────────────────────────────────────────────────────────────
 
 local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
@@ -1921,10 +1918,6 @@ local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 	end
 end
 
--- Because enum_alias_membership (Check #8) already iterates ai.reads / ai.writes against corpus.register_alias_registry.
--- The duplicate row produced redundant findings for the same off-registry register.
--- Neither a check function nor a CHECK_RULES row retains the name.
--- If a future regression reintroduces either, the test_canonical_corpus.lua grep sweep will surface it.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHECK_RULES — data-driven check dispatch (Muratori: data over control flow)
@@ -1995,8 +1988,9 @@ end
 
 local function validate(ctx, src, corpus_pipe_ctx)
 	local scan = src.scan
-	-- Read the canonical corpus word_counts for the defensive fallback path below
-	-- (test-only: Focused tests that bypass emission-model and feed static_analysis still need word_events produced by the legacy `duffle.expand_word_events` walker).
+	-- Read the canonical corpus word_counts for the per-atom pipeline
+	-- (atom.paths.word_events is the canonical projection).
+
 	local corpus = (ctx.shared and ctx.shared.corpus) or {}
 
 	-- Read atoms + binds + atom_infos from the pre-scanned SourceScan payload.
@@ -2050,35 +2044,26 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	---
 	--- Body, token, and emission projections come from here (`paths.tokens = body_tokens`, `paths.line_in_body = build_body_line_index` `paths.word_events`
 	--- and related fields are owned by `passes/emission_model.lua` pass (per-atom emission projection).
-	--- This pass reads: `paths.tokens`, `paths.line_in_body` ` paths.items`, `paths.word_events` from the canonical projection, 
-	--- then computes `paths.tok_class`, `paths.cycles_min/max`, `paths.branches`, `paths.paths`, `paths.has_loops`, `paths.unknown_macros` 
+	--- This pass reads: `paths.tokens`, `paths.line_in_body` ` paths.items`, `paths.word_events` from the canonical projection,
+	--- then computes `paths.tok_class`, `paths.cycles_min/max`, `paths.branches`, `paths.paths`, `paths.has_loops`, `paths.unknown_macros`
 	--- via `classify_tokens` + `analyze_atom_paths`.
 	--- No re-walk of body text or body_tokens happens here.
 	---
-	--- Isolated component checks may supply a component body directly.
-	--- Such inputs may omit an emission projection and require this pass to populate `paths.word_events` through `duffle.expand_word_events`.
-	--- Normal callers run emission-model first.
+	--- Canonical contract: `atom.paths` and `atom.paths.word_events` MUST be
+	--- populated by `passes/emission_model.run(ctx)` before this pass runs.
+	--- The `atom.paths.word_events` projection is owned by the emission-model pass; static-analysis reads it directly.
 	local findings = {}
 	for _, a in ipairs(atoms) do
-		a.paths = a.paths or {}
+		if a.paths == nil then
+			error("static_analysis: a.paths is nil; emit emission-model first")
+		end
+		if a.paths.word_events == nil then
+			error("static_analysis: a.paths.word_events is nil; emit emission-model first")
+		end
 		-- `paths.tokens` / `paths.line_in_body` / `paths.items` / `paths.word_events` are populated by `passes/emission_model.lua`.
 		-- Supply tokens when no emission projection is present.
 		if a.paths.tokens == nil then a.paths.tokens = a.body_tokens end
 		a.paths.tok_class = classify_tokens(a.paths.tokens)
-
-		-- Supply word events when no emission projection is present.
-		if a.paths.word_events == nil then
-			local body_entry = {
-				body_tokens = a.body_tokens,
-				body_off    = a.body_off,
-				line_of     = src.scan.line_of,
-				source      = src.path,
-				declaration = a.line,
-			}
-			a.paths.word_events = duffle.expand_word_events(body_entry,
-				pipe_ctx.component_body_index,
-				corpus.word_counts or {})
-		end
 
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a)

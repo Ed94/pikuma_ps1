@@ -135,14 +135,21 @@ function M.run(ctx)
 	if type(corpus.source_order) ~= "table" then error("emission_model: ctx.shared.corpus.source_order is required", 0) end
 
 	-- Walk every source in canonical source order; for each source, iterate atoms.
-	-- Atom declarations (`kind == "atom"` / `"raw_atom"`) receive the canonical `atom.paths` projection; component declarations
-	-- (`comp_bare` / `comp_proc`) are recursively expanded by atom projections and do not get an independent projection themselves.
-	-- Test-only fixtures that need per-component word events may still consume `duffle.expand_word_events`
-	-- (which remains available; emission-model owns the canonical per-atom projection).
+	-- Atom declarations (`kind == "atom"` / `"raw_atom"`) AND component declarations
+	-- (`comp_bare` / `comp_proc`) each receive the canonical `atom.paths` projection.
+	-- Components are macros inlined into atom bodies; focused tests and isolated
+	-- component analyses read them from `atom.paths` on the component record.
+	-- The per-atom emission projection is produced by `duffle.project_emission` (this pass).
+	-- Test-only fixtures may consume `atom.paths.word_events` directly from the emission-model pass output.
 	for _, src in ipairs(corpus.source_order) do
 		local scan = src.scan or {}
 		for _, atom in ipairs(scan.atoms or {}) do
-			if atom and atom.body and (atom.kind == "atom" or atom.kind == "raw_atom") then
+			if atom and atom.body and (
+				atom.kind == "atom"      or
+				atom.kind == "raw_atom"  or
+				atom.kind == "comp_bare" or
+				atom.kind == "comp_proc"
+			) then
 				local proj = project_atom(atom, src, corpus)
 				for _, e in ipairs(proj.errors) do
 					-- Preserve `kind` (cycle / count_mismatch / unbalanced) so readers can dispatch on the diagnostic class without re-parsing the message string.

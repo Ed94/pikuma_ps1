@@ -384,12 +384,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		TapeBuilder tb = tb_make_old(& tape_arena); tb_scope(& tb) {
 			// Skip set_gte_world atom for diagnostics to isolate the triangle loop
 			for (U4 i = 0; i < Floor_num_faces; i++) {
-				// =======================================================
-				// SWAP EMIT TO TEST DIFFERENT PARTS OF THE PIPELINE:
-				// =======================================================
-				// 1. code_diag_yield -> Tests Tape Engine jump logic
-				// 2. code_diag_color -> Tests OT and Prim Arena memory
-				// 3. code_diag_gte   -> Tests Vertex arrays and GTE Math
 				// tb_emit(& tb, code_diag_yield);
 				// tb_emit(& tb, code_diag_color);
 				// tb_emit(& tb, code_diag_gte); 

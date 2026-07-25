@@ -357,22 +357,6 @@ function M.write_file_lf(path, content)
 	f:write(content); f:close()
 end
 
---- Return `{path, ...}` for files in `out_root` whose basename matches `pattern` (Lua pattern, NOT regex — `%.` not `\.`).
---- Empty list if `out_root` doesn't exist or matches nothing.
---- @param out_root Path
---- @param pattern  string  -- Lua pattern matched against basename only
---- @return string[]
-function M.list_dir(out_root, pattern)
-	local files = {}
-	if lfs.attributes(out_root, "mode") ~= "directory" then return files end
-	for entry in lfs.dir(out_root) do
-		if entry:match(pattern) then
-			files[#files + 1] = out_root .. "\\" .. entry
-		end
-	end
-	return files
-end
-
 local _absolute_path_cache = {}
 
 --- Convert a (possibly relative) path to an absolute path, using CWD if needed.
@@ -408,10 +392,6 @@ function M.ensure_dir(path)
 	-- Falls through silently if lfs.mkdir fails (e.g. permission denied); the subsequent write_file will surface the error.
 	if lfs.attributes(path, "mode") ~= "directory" then lfs.mkdir(path) end
 end
-
--- Test helper: clear the cache (used by tests + between process runs).
--- Not normally needed since Lua state is per-process.
-function M._reset_ensured_dirs() _ensured_dirs = {} end
 
 --- Group a list of `SourceFile`-shaped records by their `dir` field.
 --- Used by the annotation / static-analysis / report passes to partition sources into per-DIRECTORY (per-module) buckets before emitting per-module reports.
@@ -813,10 +793,8 @@ end
 
 -- Split a brace-body into top-level comma-separated tokens. Honors nested parens/braces/brackets and skips strings/comments.
 --
--- FIX (2026-07-09): split at top-level NEWLINES and SEMICOLONS too, AND emit a token break after a top-level comment/string. 
--- Previous behavior glued the macro call after a comment into the same token, so `word_count_of_token` only saw the 
--- leading ident (often nil after stripping the comment), undercounting the body.
--- Pure-comment / pure-string chunks (which now appear between real statements) are filtered out so they contribute 0 words instead of 1.
+-- Splits at top-level NEWLINES and SEMICOLONS too, AND emits a token break after a top-level comment/string.
+-- Pure-comment / pure-string chunks contribute 0 words.
 function M.split_top_level_commas(body)
 	local tokens      = {}
 	local pos         = 1
@@ -829,7 +807,7 @@ function M.split_top_level_commas(body)
 		local scan = 1
 		local len  = #chunk
 		while scan <= len do
-			if M.is_space(chunk:sub(scan, scan)) then
+			if M.is_space_byte(chunk:byte(scan)) then
 				scan = scan + 1
 			else
 				local nx = M.skip_str_or_cmt(chunk, scan)
@@ -978,51 +956,6 @@ function M.build_body_line_index(body)
 	index[len + 1] = newline_count + 1
 	_body_line_index_cache[body] = index
 	return index
-end
-
---- Find the end of a marker call (`atom_label(...)` or `atom_offset(...)`).
---- Returns the position past the closing `)`, or nil if the token isn't a marker call.
---- @param tok string
---- @return integer|nil
-function M.find_marker_call_end(tok)
-	local  ident, after = M.read_ident(tok, 1)
-	if not ident then return nil end
-	if ident ~= "atom_label" and ident ~= "atom_offset" then return nil end
-	local paren_pos = M.skip_ws_and_cmt(tok, after)
-	if tok:sub(paren_pos, paren_pos) ~= "(" then return nil end
-	local _, close = M.read_parens(tok, paren_pos)
-	return close
-end
-
---- True iff `tok` is an atom-label or atom-offset marker call.
---- Sibling helper to M.find_marker_call_end; uses the same string constants.
---- @param tok string
---- @return boolean
-function M.is_marker_token(tok)
-	local  leading = M.read_ident(tok, 1)
-	return leading == "atom_label" or leading == "atom_offset"
-end
-
---- Count words contributed by the non-marker portion of `tok` (after the marker's closing `)`).
---- Returns 0 if `tok` isn't a marker call or has no trailing content.
----
---- `count_token_words_fn` is injected by the caller rather than imported here because the dependency arrow already points the other way:
---- `passes/offsets.lua` and `passes/atoms_source_map.lua` both `require("word_count_eval")` and pass its `count_token_words` as the 3rd argument to this function,
---- while `word_count_eval` itself loads `duffle` via `duffle_paths.lua` (see `passes/word_count_eval.lua` near the top of the file)
---- and calls `duffle.trim` / `duffle.read_ident` / `duffle.skip_ws_and_cmt` from `M.count_token_words`. Importing `word_count_eval` 
---- from this module would reverse that direction and form a recursive require cycle.
---- The callback keeps the marker-syntax helpers (`find_marker_call_end`, `is_marker_token`, this function)
---- shared in `duffle` without making the foundational utility depend on a pass module.
---- @param tok string
---- @param word_counts table
---- @param count_token_words_fn fun(tok: string, wc: table): integer
---- @return integer
-function M.count_marker_rest(tok, word_counts, count_token_words_fn)
-	local marker_end = M.find_marker_call_end(tok)
-	if not marker_end or marker_end >= #tok then return 0 end
-	local rest = M.trim(tok:sub(marker_end))
-	if rest == "" then return 0 end
-	return count_token_words_fn(rest, word_counts)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -2046,7 +1979,7 @@ M.GPR_VALUE_RULES = {
 --
 -- Consumers:
 --   * passes/static_analysis.lua::check_control_transfer_delay_slot_use
--- No other pass consumes this table as of 2026-07-23.
+
 M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES = {
 	branch_equal    = { family = "branch" },
 	branch_ne       = { family = "branch" },
@@ -2080,21 +2013,6 @@ M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES = {
 --- @field source         string       -- absolute path of the source containing the declaration
 --- @field declaration    integer      -- 1-based line number of the MipsAtomComp_(ac_X) declaration
 --- @field kind           string       -- "comp_bare" | "comp_proc"
-
---- @class WordEvent
---- @field word           integer      -- 0-based word index across the entire expansion (root atom + recursed bodies)
---- @field ident          string       -- leading identifier of the emitting token (for nop2 → "nop")
---- @field args           string[]     -- top-level comma-split args of the emitting token (trimmed)
---- @field source         string       -- where the token is defined (component source for recursed; atom source for root)
---- @field line           integer      -- source line of the token (within `source`)
---- @field call_source    string       -- always the ROOT atom's source path (preserved across recursion)
---- @field call_line      integer      -- root atom's call-site line (preserved across recursion)
-
---- @class WordEventError
---- @field kind           string       -- "cycle" (currently the only error kind)
---- @field msg            string       -- deterministic human-readable description
---- @field source         string       -- path of the source containing the offending token
---- @field line           integer      -- 1-based line of the offending token within `source`
 
 -- The cross-source component-body index is owned by the canonical corpus
 -- (`corpus.component_body_index`, populated by `passes/components.lua`).
@@ -2196,7 +2114,7 @@ local E_MAC_PREFIX_LEN = 4
 -- The items stream is the single ordered source of truth; `word_events` and `markers` are dense views over it (never a separate walk).
 --
 -- The helper below operates on a body string (not a body_entry) so the canonical pass can call it without depending on the older SourceScan / body_off conventions.
--- component_index argument is accepted for parity with `expand_word_events` and is reserved for recursive component expansion.
+-- component_index argument is reserved for recursive component expansion.
 -- word_counts table is the canonical authored-metadata + current-component count table.
 
 --- @class EmissionProjection
@@ -2606,89 +2524,6 @@ function M.project_emission(body_text, component_index, word_counts)
 		component_index = component_index or {},
 		word_counts     = word_counts     or {},
 	})
-end
-
-function M.expand_word_events(body_entry, component_index, word_counts)
-	local events = {}
-	local errors = {}
-
-	-- `word_idx` is 0-based across the entire expansion (root atom body + every recursed component body).
-	-- Each emitted machine word consumes one slot.
-	local word_idx = 0
-
-	local root_call_source = body_entry.source
-	local root_call_line   = body_entry.declaration or 0
-
-	local function expand(tokens, body_off, line_of, def_source, call_source, call_line, visiting)
-		for _, bt in ipairs(tokens) do
-			local tok = M.trim(bt.tok or "")
-			if tok ~= "" then
-				local ident, args = token_ident_and_args(tok)
-				local tok_line    = (line_of and line_of(body_off + bt.rel)) or 0
-
-				if ident == "atom_label" or ident == "atom_offset" then
-					-- Marker: zero events.
-				else
-					-- Strip the `mac_` prefix to look up the component by its BARE name.
-					local bare = nil
-					if ident:sub(1, E_MAC_PREFIX_LEN) == E_MAC_PREFIX then
-						bare = ident:sub(E_MAC_PREFIX_LEN + 1)
-					end
-
-					if bare and component_index and component_index[bare] then
-						if visiting[bare] then
-							-- Cycle: this component is already on the expansion stack.
-							errors[#errors + 1] = {
-								kind   = "cycle",
-								msg    = string.format("component cycle detected involving %q", bare),
-								source = def_source,
-								line   = tok_line,
-							}
-						else
-							visiting[bare] = true
-							local inner = component_index[bare]
-							-- `call_source` / `call_line` (the ROOT atom site) are PRESERVED — we do NOT update them when recursing.
-							-- Nested events keep pointing at the original root atom.
-							expand(inner.body_tokens, inner.body_off, inner.line_of,
-								inner.source, call_source, call_line, visiting)
-							visiting[bare] = nil
-						end
-					else
-						-- Direct token (or unknown `mac_X` falling back). Emit `n` events.
-						local n = 1
-						if word_counts and word_counts[ident] then n = word_counts[ident] end
-						local out_ident = (ident == "nop2") and "nop" or ident
-						for _ = 1, n do
-							word_idx = word_idx + 1
-							events[#events + 1] = {
-								word        = word_idx - 1,
-								ident       = out_ident,
-								args        = args,
-								source      = def_source,
-								line        = tok_line,
-								call_source = call_source,
-								call_line   = call_line,
-							}
-						end
-					end
-				end
-			end
-		end
-	end
-
-	-- Initial call: the root atom body. `def_source` and `call_source` both start at the atom's source;
-
-	-- `call_line` starts at the atom's declaration line (every event from the root body inherits this).
-	expand(
-		body_entry.body_tokens,
-		body_entry.body_off or 0,
-		body_entry.line_of,
-		body_entry.source,
-		root_call_source,
-		root_call_line,
-	{})
-
-	return events, errors
 end
 
 return M

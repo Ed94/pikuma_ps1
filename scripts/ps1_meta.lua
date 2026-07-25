@@ -20,7 +20,7 @@
 -- Bootstrap: load `duffle_paths.lua` via this script's own path.
 -- Use `arg[0]` when this file is the entry script (`arg[0]` ends in "ps1_meta.lua");
 -- fall back to `debug.getinfo(1, "S").source` when this file is being dofile()'d or require()'d (in which case `arg[0]` is the *caller's* path, not ours).
--- That single statement: (a) sets `package.path` + `package.cpath` (via cached `git rev-parse`), (b) at the bottom returns `require("duffle")`.
+-- That single statement: (a) sets `package.path` + `package.cpath`, (b) at the bottom returns `require("duffle")`.
 -- So the dofile's return value is the duffle module.
 local _is_entry_script = arg and arg[0] and arg[0]:match("ps1_meta%.lua$") ~= nil
 local _bootstrap_src
@@ -63,12 +63,6 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 --- @field deps   string[]     -- names of upstream passes
 --- @field groups string[]?    -- OPTIONAL build-phase groups this pass is a root of
 ---                            -- (e.g. { "pre-link" }, { "post-link" }); absent ⇒ dependency-only
---- @field desc   string       -- human description (used by --help + ASCII graph)
---- @field out    PassOutput[] -- output paths (used by --dry-run + report)
-
---- @class PassOutput
---- @field kind          string  -- "header" | "report"
---- @field path_template string  -- e.g. "<source_dir>/gen/<basename>.macs.h"
 
 --- @class SourceFile
 --- @field path     string  -- absolute path to the source file
@@ -82,14 +76,9 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 --- @field shared.corpus      table                  -- canonical authored-source/project projection
 --- @field out_root           string                 -- output root (e.g. "build/gen")
 --- @field project_root       string                 -- PS1 repository root
---- @field upstream           table<string, table>   -- per-pass output accumulator
 --- @field flags              table                  -- CLI flags + per-pass stash
 --- @field dry_run            boolean                -- if true, compute but don't write
 --- @field verbose            boolean                -- if true, log diagnostic info
-
---- @class PassOutputEntry
---- @field [string] string  -- dynamic shape; key is the output kind
-	-- (e.g. "macs_h", "offsets_h", "errors_h", "annotations_txt", "static_analysis_txt", "summary_txt"), value is the path
 
 --- @class Finding
 --- @field line integer  -- source line (or 0 for pass-level)
@@ -125,46 +114,31 @@ local PASSES = {
 	["scan-source"] = {
 		module = "passes.scan_source",
 		kind   = "shared", deps = {},
-		desc   = "Walk each source once; produce the fat SourceScan payload for downstream passes",
-		out    = {},
 	},
 	["word-counts"] = {
 		module = "passes.word_count_eval",
 		kind   = "shared", deps = {},
-		desc   = "Build the shared metadata table (metadata.h + .macs.h)",
-		out    = {},
 	},
 	components = {
 		module = "passes.components",
 		kind   = "header-output",
 		deps   = {"scan-source", "word-counts"},
-		desc   = "Emit mac_X macros from MipsAtomComp_ declarations",
-		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.macs.h" } },
 	},
 	["emission-model"] = {
 		module = "passes.emission_model",
 		kind   = "validation",
 		deps   = {"components"},
-		desc   = "Build canonical per-atom words, markers, and invocation ancestry",
-		out    = {},
 	},
 	annotation = {
 		module = "passes.annotation",
 		kind   = "validation",
 		deps   = {"scan-source", "word-counts"},
-		desc   = "Validate atom DSL usage; emit errors.h + annotations.txt",
-		out    = {
-			{ kind = "report", path_template = "<out_root>/<basename>.errors.h" },
-			{ kind = "report", path_template = "<out_root>/<basename>.annotations.txt" },
-		},
 	},
 	offsets = {
 		module = "passes.offsets",
 		kind   = "header-output",
 		deps   = {"scan-source", "word-counts", "components", "emission-model"},
 		groups = { "pre-link" },
-		desc   = "Compute branch offsets for atom_label / atom_offset",
-		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.offsets.h" } },
 	},
 	["static-analysis"] = {
 		module = "passes.static_analysis",
@@ -173,43 +147,23 @@ local PASSES = {
 		-- Report severity is independent from process exit policy.
 		kind   = "diagnostic",
 		deps   = {"scan-source", "word-counts", "components", "emission-model"},
-		desc   = "Static analysis: GTE pipeline-fill, mac_yield uniformity, ABI handoff, GPU port-store shape, per-atom cycle budget, type consistency",
-		out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } },
 	},
 	["atoms-source-map"] = {
 		module = "passes.atoms_source_map",
 		kind   = "header-output",
 		deps   = {"word-counts", "components", "emission-model"},
-		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging) AND gen/<basename>.atoms.provenance.txt (per-.word provenance; each word tagged with its call-site file:line and, when emitted by a mac_X(...) component invocation, the component's definition file:line). Consumed by passes/dwarf_injection.lua to synthesize DW_TAG_inlined_subroutine instances for source-level Step Into on component invocations.",
-		out    = {
-			{ kind = "report", path_template = "<out_root>/<basename>.atoms.sourcemap.txt"   },
-			{ kind = "report", path_template = "<out_root>/<basename>.atoms.provenance.txt" },
-		},
 	},
 	["dwarf-injection"] = {
 		module = "passes.dwarf_injection",
 		kind   = "shared",
 		deps   = {"scan-source", "atoms-source-map"},
 		groups = { "post-link" },
-		desc   = "Inject per-atom .debug_line + .debug_aranges (F') + per-atom .debug_info subprogram + per-wave-context-reg .debug_info variables (G') into the ELF (post-link; writes 7 section .bin blobs plus one deterministic .gdbinit sidecar). (rbind composite) reads ctx.sources[i].scan to find atom_bind(Binds_X) atoms + their Binds_X struct fields; emits per-Binds_X DW_TAG_structure_type DIEs + per-rbind-atom DW_TAG_variable 'bind_args' DIEs with piece-chain DW_OP_bregN/DW_OP_piece location expressions.",
-		out    = {
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_line.bin"     },
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_aranges.bin"  },
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_rnglists.bin" },
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_abbrev.bin"   },
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_info.bin"     },
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_str.bin"      },
-			{ kind = "report", path_template = "<out_root>/<basename>.dwarf_loc.bin"      },
-			{ kind = "report", path_template = "<out_root>/<basename>.gdbinit"            },
-		},
 	},
 	report = {
 		module = "passes.report",
 		kind   = "report",
 		deps   = {"annotation", "static-analysis"},
 		groups = { "pre-link" },
-		desc   = "Render the per-project summary",
-		out    = { { kind = "report", path_template = "<out_root>/annotation_validation.txt" } },
 	},
 }
 
@@ -557,7 +511,7 @@ local function build_ctx(args)
 		or normalized_project_root:sub(1, 1) == "/"
 	if not project_root_is_absolute then
 		-- canonical_path_key validates ordinary relative paths and rejects
-		-- drive-relative paths before the legacy display-path helper is used.
+		-- drive-relative paths before the absolute-path rewrite is performed.
 		duffle.canonical_path_key(normalized_project_root)
 		project_root = duffle.normalize_path(duffle.to_absolute_path(normalized_project_root))
 	else
@@ -654,7 +608,6 @@ local function build_ctx(args)
 	local ctx = {
 		metadata_path = args.metadata,
 		shared        = { corpus = corpus },
-		upstream      = {},
 		out_root      = args.out_root,
 		project_root  = corpus.project_root,
 		flags         = args.flags or {},
@@ -782,16 +735,6 @@ end
 -- Main Orchestrator
 -- ════════════════════════════════════════════════════════════════════════════
 
---- (internal) Push a pass's outputs + warnings into `ctx.upstream[name]` for downstream passes to consume.
---- @param ctx       PassCtx
---- @param pass_name string
---- @param result PassResult
-local function accumulate_pass_result(ctx, pass_name, result)
-	ctx.upstream[pass_name] = ctx.upstream[pass_name] or {}
-	for _, out  in ipairs(result.outputs  or {}) do table.insert(ctx.upstream[pass_name], out)  end
-	for _, warn in ipairs(result.warnings or {}) do table.insert(ctx.upstream[pass_name], warn) end
-end
-
 --- (internal) If the pass's kind is in PASS_KIND_STOP_ON_ERROR and it reported errors, write each error to stderr.
 --- Returns true if any validation errors were reported.
 --- @param pass_name string
@@ -812,14 +755,11 @@ end
 --- @param order string[]
 --- @return boolean  -- true if any validation errors were reported
 local function dispatch_passes(ctx, order)
-	ctx.shared = ctx.shared or {}
 	local had_errors = false
 	for _, pass_name in ipairs(order) do
 		local pass   = PASSES[pass_name]
-		-- io.stderr:write(string.format("[ps1_meta] %-22s running\n", pass_name))
 		local mod    = require(pass.module)
 		local result = mod.run(ctx)
-		accumulate_pass_result(ctx, pass_name, result)
 		if report_validation_errors(pass_name, pass, result) then
 			had_errors = true
 		end

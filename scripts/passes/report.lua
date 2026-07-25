@@ -5,8 +5,10 @@
 ---   - `build/gen/<dir_basename>.annotations.txt` — one per source-directory containing atoms; aggregates across all sources in the directory.
 ---   - `build/gen/annotation_validation.txt` — the project summary.
 ---
---- The annotation pass stashes per-MODULE summary entries in `ctx.flags._annot_results` (set by `passes/annotation.lua`). 
---- This pass re-validates each source via `annotation.validate()` to get the detailed per-source results needed for the report. 
+--- The annotation pass emits `errors.h` files per module and the canonical
+--- `corpus.sources_by_dir` projection groups sources by directory. This pass
+--- iterates the canonical dir projection directly and re-validates each source
+--- via `annotation.validate()` to get the detailed per-source results.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -24,6 +26,13 @@
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+
+-- Load the annotation pass so we can re-validate each source against the
+-- canonical corpus projection. The annotation pass exposes `M.validate`,
+-- which returns the per-source AnnotationResult (atoms / annots / macros /
+-- binds / errors / warnings) that the report pass renders into the
+-- per-module `<dir_basename>.annotations.txt` output.
+local annotation    = dofile(_bootstrap_dir .. "annotation.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -67,7 +76,6 @@ local PASS_NAME = "report"
 --- @field project_root       string               -- project root (e.g. "code/")
 --- @field upstream           table<string, table> -- per-pass upstream outputs
 --- @field flags              table                -- CLI flags + per-pass stash
---- @field flags._annot_results ModuleEntry[]      -- stashed by annotation pass
 --- @field dry_run            boolean              -- if true, compute but don't write
 --- @field verbose            boolean              -- if true, log diagnostic info
 
@@ -377,21 +385,22 @@ end
 -- Orchestration helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
---- (internal) Pull per-source validate() results from the annotation pass's stash.
---- The annotation pass runs first in the dep chain and caches results in `ctx.flags._annot_source_results`;
---- we read from there instead of re-validating each source.
+--- (internal) Re-validate every source in a directory against the canonical
+--- corpus projection. Calls `annotation.validate()` per source to produce the
+--- per-source AnnotationResult (atoms / annots / macros / binds / errors /
+--- warnings) that the report renderer consumes. This is the canonical path —
+--- no private stash; each report pass run is reproducible from the corpus.
 --- Returns the list of module results + the flat list of all results (for the project-wide summary).
 --- @param ctx PassCtx
 --- @param dir_sources SourceFile[]
 --- @return AnnotationResult[], AnnotationResult[]
 local function lookup_module_results(ctx, dir_sources)
-	local src_cache      = (ctx.flags and ctx.flags._annot_source_results) or {}
 	local module_results = {}
 	local all_results    = {}
 	for _, src in ipairs(dir_sources) do
-		local result = src_cache[src.path]
-		if result then
-			result.source = src.path                                    -- defensive (annotation tags it too; this guards against cache misses from earlier iterations)
+		if src.scan then
+			local result = annotation.validate(ctx, src, nil)
+			result.source = src.path                                    -- tag for downstream rendering
 			module_results[#module_results + 1] = result
 			all_results[#all_results + 1] = result
 		end
@@ -435,29 +444,28 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	local module_entries = (ctx.flags and ctx.flags._annot_results) or {}
-	-- Read module grouping from `corpus.sources_by_dir` (the canonical projection).
-	-- Module grouping comes from `corpus.sources_by_dir`.
+	-- Module grouping comes from `corpus.sources_by_dir` (the canonical projection).
+	-- Iterate it directly; no private cache, no per-pass stash.
 	local corpus = ctx.shared and ctx.shared.corpus
 	local by_dir = (corpus and corpus.sources_by_dir) or {}
 
 	if not ctx.dry_run then duffle.ensure_dir(ctx.out_root) end
 
 	local all_results_for_summary = {}
-	for _, entry in ipairs(module_entries) do
-		debug_log("entry: dir=%s basename=%s atoms_count=%d dir_sources=%d\n", entry.dir, entry.dir_basename, entry.atoms_count, #(by_dir[entry.dir] or {}))
+	for dir, dir_sources in pairs(by_dir) do
+		local dir_basename = dir:match("([^/\\]+)$") or dir
+		debug_log("dir=%s basename=%s sources=%d\n", dir, dir_basename, #dir_sources)
 
-		if entry.atoms_count > 0 or #(by_dir[entry.dir] or {}) > 0 then
-			local dir_sources                 = by_dir[entry.dir] or {}
+		if #dir_sources > 0 then
 			local module_results, all_results = lookup_module_results(ctx, dir_sources)
 			for _, r in ipairs(all_results) do
 				all_results_for_summary[#all_results_for_summary + 1] = r
 			end
 
 			if module_has_content(module_results) then
-				local out_path = ctx.out_root .. "/" .. entry.dir_basename .. ".annotations.txt"
+				local out_path = ctx.out_root .. "/" .. dir_basename .. ".annotations.txt"
 				if not ctx.dry_run then
-					duffle.write_file(out_path, render_module_report(entry.dir, dir_sources, module_results))
+					duffle.write_file(out_path, render_module_report(dir, dir_sources, module_results))
 				end
 				outputs[#outputs + 1] = { annotations_txt = out_path }
 			else
