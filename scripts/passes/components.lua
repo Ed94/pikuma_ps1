@@ -64,7 +64,6 @@ local GEN_SUBDIR      = "gen"
 --- @field project_root       string                 -- project root (e.g. "code/")
 --- @field upstream           table<string, table>   -- per-pass upstream outputs
 --- @field flags              table                  -- CLI flags
---- @field dry_run            boolean                -- if true, compute but don't write
 --- @field verbose            boolean                -- log diagnostic info
 
 --- @class PassResult
@@ -535,7 +534,6 @@ end
 
 --- Emit a per-source `.macs.h` header with the `mac_X` macros + `WORD_COUNT` entries. 
 --- Writes in BINARY mode so LF line endings are preserved (the git blob is LF; Windows text-mode would emit CRLF and break the byte-identical diff).
---- Honors `ctx.dry_run`: prints the intended path but does not write the file.
 --- @param ctx        PassCtx
 --- @param src        SourceFile
 --- @param components Component[]
@@ -553,11 +551,6 @@ local function emit_component_macros_h(ctx, src, components, counts)
 	end
 
 	local content = table.concat(lines, "\n") .. "\n"
-	if ctx.dry_run then
-		print(string.format("  -> %s (dry-run)", out_path))
-		return out_path
-	end
-
 	duffle.ensure_dir(out_dir)
 	duffle.write_file_lf(out_path, content)
 	print(string.format("  -> %s", out_path))

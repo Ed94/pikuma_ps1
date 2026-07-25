@@ -123,7 +123,7 @@ end
 -- Run the emission-model pass.
 -- ─────────────────────────────────────────────────────────────────────────
 
---- @param ctx PassCtx  -- { shared = { corpus = ... }, out_root, dry_run, ... }
+--- @param ctx PassCtx  -- { shared = { corpus = ... }, out_root, ... }
 --- @return PassResult
 function M.run(ctx)
 	local outputs  = {}

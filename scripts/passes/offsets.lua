@@ -50,7 +50,6 @@ local OFFSET_MACRO_COL = 44
 --- @field shared.corpus      table                  -- canonical corpus projection
 --- @field shared.word_counts table
 --- @field out_root           string                 -- output root (e.g. "build/gen")
---- @field dry_run            boolean                -- if true, compute but don't write
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
@@ -220,10 +219,8 @@ local function process_source(ctx, src)
 	if #atoms_data == 0 then return nil end
 
 	local out_path = src.dir .. "/gen/" .. duffle.basename_no_ext(src.dir) .. ".offsets.h"
-	if not ctx.dry_run then
-		duffle.ensure_dir(duffle.dirname(out_path))
-		duffle.write_file(out_path, generate_header(src.path:gsub("/", "\\"), atoms_data))
-	end
+	duffle.ensure_dir(duffle.dirname(out_path))
+	duffle.write_file(out_path, generate_header(src.path:gsub("/", "\\"), atoms_data))
 	return out_path
 end
 

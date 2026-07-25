@@ -76,7 +76,6 @@ local PASS_NAME = "report"
 --- @field project_root       string               -- project root (e.g. "code/")
 --- @field upstream           table<string, table> -- per-pass upstream outputs
 --- @field flags              table                -- CLI flags + per-pass stash
---- @field dry_run            boolean              -- if true, compute but don't write
 --- @field verbose            boolean              -- if true, log diagnostic info
 
 --- @class PassResult
@@ -447,7 +446,7 @@ function M.run(ctx)
 	local corpus = ctx.shared and ctx.shared.corpus
 	local by_dir = (corpus and corpus.sources_by_dir) or {}
 
-	if not ctx.dry_run then duffle.ensure_dir(ctx.out_root) end
+	duffle.ensure_dir(ctx.out_root)
 
 	local all_results_for_summary = {}
 	for dir, dir_sources in pairs(by_dir) do
@@ -462,9 +461,7 @@ function M.run(ctx)
 
 			if module_has_content(module_results) then
 				local out_path = ctx.out_root .. "/" .. dir_basename .. ".annotations.txt"
-				if not ctx.dry_run then
-					duffle.write_file(out_path, render_module_report(dir, dir_sources, module_results))
-				end
+				duffle.write_file(out_path, render_module_report(dir, dir_sources, module_results))
 				outputs[#outputs + 1] = { annotations_txt = out_path }
 			else
 				debug_log("  -> no content; skipping\n")
@@ -472,7 +469,7 @@ function M.run(ctx)
 		end
 	end
 
-	if not ctx.dry_run and #all_results_for_summary > 0 then
+	if #all_results_for_summary > 0 then
 		local summary_path = ctx.out_root .. "/annotation_validation.txt"
 		duffle.write_file(summary_path, render_project_report(all_results_for_summary))
 		outputs[#outputs + 1] = { summary_txt = summary_path }

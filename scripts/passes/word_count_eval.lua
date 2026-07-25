@@ -49,7 +49,6 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- @field project_root       string        -- project root (e.g. "code/")
 --- @field upstream           table<string, table>  -- per-pass upstream outputs
 --- @field flags              table         -- CLI flags
---- @field dry_run            boolean       -- if true, compute but don't write
 --- @field verbose            boolean       -- if true, log diagnostic info
 
 --- @class PassResult

@@ -117,7 +117,6 @@ local parse_enum_int_literal
 --- @field project_root       string
 --- @field upstream           table<string, table>
 --- @field flags              table
---- @field dry_run            boolean
 --- @field verbose            boolean
 
 --- @class PassResult

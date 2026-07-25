@@ -109,7 +109,6 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field project_root       string
 --- @field upstream           table<string, table>
 --- @field flags              table
---- @field dry_run            boolean
 --- @field verbose            boolean
 
 --- @class PassResult
@@ -2197,7 +2196,6 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	-- Module basename = last component of `dir` ("code/duffle" -> "duffle").
 	local dir_basename = dir:match("([^/\\]+)$") or dir
 	local out_path     = ctx.out_root .. "/" .. dir_basename .. ".static_analysis.txt"
-	if ctx.dry_run then return out_path end
 	duffle.ensure_dir(ctx.out_root)
 
 	local lines = {}

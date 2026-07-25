@@ -65,7 +65,6 @@ local FORMAT_VERSION = 1
 --- @field shared.corpus      table   -- canonical source-order corpus
 --- @field shared.word_counts table
 --- @field out_root           string  -- output root (e.g. "build/gen")
---- @field dry_run            boolean -- if true, compute but don't write
 --- @field flags              table   -- `ctx.flags`; reads `flags.gdb_runtime` + `flags.elf_path`
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -464,10 +463,8 @@ local function emit_gdb_runtime(ctx)
 	lines[#lines + 1] = 'printf "[gdb_tape_atoms] runtime loaded %d atoms from %s\\n", $__atom_count, $__elf_path'
 
 	local out_path = ctx.out_root .. "/gdb_tape_atoms_runtime.gdb"
-	if not ctx.dry_run then
-		duffle.ensure_dir(duffle.dirname(out_path))
-		duffle.write_file_lf(out_path, table.concat(lines, "\n") .. "\n")
-	end
+	duffle.ensure_dir(duffle.dirname(out_path))
+	duffle.write_file_lf(out_path, table.concat(lines, "\n") .. "\n")
 	io.stderr:write(string.format(
 		"[atoms_source_map] wrote %s (%d atoms)\n", out_path, #matched))
 end
@@ -528,11 +525,9 @@ function M.run(ctx)
 			local prov_path = ctx.out_root .. "/" .. basename .. ".atoms.provenance.txt"
 			local prov_body = render_provenance(src, wc)
 
-			if not ctx.dry_run then
-				duffle.ensure_dir(duffle.dirname(sourcemap_path))
-				duffle.write_file_lf(sourcemap_path, sourcemap_body)
-				duffle.write_file_lf(prov_path,    prov_body)
-			end
+			duffle.ensure_dir(duffle.dirname(sourcemap_path))
+			duffle.write_file_lf(sourcemap_path, sourcemap_body)
+			duffle.write_file_lf(prov_path,    prov_body)
 
 			outputs[#outputs + 1] = { kind = "report", path = sourcemap_path }
 			outputs[#outputs + 1] = { kind = "report", path = prov_path }

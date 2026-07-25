@@ -45,7 +45,6 @@ local ensure_dir     = duffle.ensure_dir
 --- @field project_root       string
 --- @field upstream           table<string, table>
 --- @field flags              table
---- @field dry_run            boolean
 --- @field verbose            boolean
 
 --- @class PassResult
@@ -640,7 +639,6 @@ end
 --- Render `<dir_basename>.errors.h` with `#error` directives for every error found across all sources in the directory.
 --- Empty directories (no errors, no atoms) produce no file.
 local function emit_module_errors_h(ctx, dir_basename, atoms_count, errors, sources)
-	if ctx.dry_run then return nil end
 	if atoms_count == 0 and #errors == 0 then
 		return nil
 	end
