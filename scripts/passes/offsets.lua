@@ -21,17 +21,11 @@
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
-local word_count_eval = require("word_count_eval")
-local count_token_words = word_count_eval.count_token_words
+local duffle = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
-
--- Marker-call identifiers inside atom bodies.
-local LABEL_MARKER    = "atom_label"
-local OFFSET_MARKER   = "atom_offset"
 
 -- Offset macro/enum naming prefixes (the emitted header uses these).
 local OFFSET_MACRO_PREFIX = "_atom_offset_"
@@ -52,16 +46,11 @@ local OFFSET_MACRO_COL = 44
 --- @field scan     table   -- pre-scanned SourceScan payload (from duffle.scan_source)
 
 --- @class PassCtx
---- @field sources            SourceFile[]           -- all source files in the build
---- @field metadata_path      string                 -- path to word_count.metadata.h
 --- @field shared             table                  -- cross-pass shared state
---- @field shared.word_counts table                  -- macro name -> word count
+--- @field shared.corpus      table                  -- canonical corpus projection
+--- @field shared.word_counts table                  -- compatibility alias to corpus.word_counts
 --- @field out_root           string                 -- output root (e.g. "build/gen")
---- @field project_root       string                 -- project root (e.g. "code/")
---- @field upstream           table<string, table>   -- per-pass upstream outputs
---- @field flags              table                  -- CLI flags
 --- @field dry_run            boolean                -- if true, compute but don't write
---- @field verbose            boolean                -- log diagnostic info
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
@@ -69,10 +58,10 @@ local OFFSET_MACRO_COL = 44
 --- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
 
 --- @class BranchOffset
---- @field tag    string   -- the marker tag (e.g. "F" in `atom_offset(F, T)`)
---- @field target string   -- the target label name (e.g. "T" in `atom_offset(F, T)`)
---- @field pos    integer  -- the branch's word position within the atom body
---- @field offset integer  -- computed `target_word - branch_word - 1`
+--- @field tag         string   -- the marker tag (e.g. "F" in `atom_offset(F, T)`)
+--- @field target      string   -- the target label name (e.g. "T" in `atom_offset(F, T)`)
+--- @field branch_word integer  -- branch word position within the atom body
+--- @field offset      integer  -- computed `target_word - branch_word - 1`
 
 --- @class AtomData
 --- @field name        string         -- atom name
@@ -80,169 +69,85 @@ local OFFSET_MACRO_COL = 44
 --- @field offsets     BranchOffset[] -- per-branch offset list
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Per-token marker-call helpers (atom_label / atom_offset inside bodies)
+-- Canonical marker projection
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Extract comma-separated identifier args from a parenthesized group after a function-like macro call.
--- Returns (args, after_paren) where `after_paren` is the position just past the closing `)`, or nil if `token` did not start with `(`.
--- @param token string
--- @param after_ident integer
--- @return string[], integer|nil
-local function extract_ident_args(token, after_ident)
-	local arg_start = duffle.skip_ws_and_cmt(token, after_ident)
-	if token:sub(arg_start, arg_start) ~= "(" then return {}, nil end
-	local inner, after_paren = duffle.read_parens(token, arg_start)
-	-- scan: <marker>(<args>)
-
-	local args      = {}
-	local pos       = 1
-	local inner_len = #inner
-	while pos <= inner_len do
-		pos = duffle.skip_ws_and_cmt(inner, pos)
-		if pos > inner_len then break end
-		local ident, after = duffle.read_ident(inner, pos)
-		if ident and ident ~= "" then
-			table.insert(args, ident)
-			pos = after
-		else
-			pos = pos + 1
-		end
-		pos = duffle.skip_ws_and_cmt(inner, pos)
-		if pos <= inner_len and inner:sub(pos, pos) == "," then pos = pos + 1 end
-	end
-
-	return args, after_paren
-end
-
--- (internal) Record a `atom_label(name)` marker — `at_pos` is the branch-free word position within the atom body.
--- @param labels table<string, integer>
--- @param args string[]
--- @param at_pos integer
-local function record_label_marker(labels, args, at_pos)
-	if #args >= 1 then labels[args[1]] = at_pos end
-end
-
--- (internal) Record a `atom_offset(tag, target)` marker.
--- @param branches table[]  -- list of {pos=, target=, tag=}
--- @param args string[]
--- @param at_pos integer
-local function record_offset_marker(branches, args, at_pos)
-	if #args >= 2 then
-		table.insert(branches, { pos = at_pos, target = args[2], tag = args[1] })
-	end
-end
-
--- MARKER_TO_HANDLER — data-driven marker dispatch (the plex pattern).
--- Maps the marker ident to its recorder function. Each handler takes (out_table, args, at_pos).
--- Adding a new marker type = 1 row + 1 recorder function.
-local MARKER_TO_HANDLER = {
-	[LABEL_MARKER]  = record_label_marker,
-	[OFFSET_MARKER] = record_offset_marker,
+-- MARKER_PROJECTORS is the marker-kind data table.
+-- The emission-model pass already records marker word positions;
+-- this pass only projects those records into the label/branch lookup shape needed by offset computation.
+local MARKER_PROJECTORS = {
+	label = function(state, marker)
+		state.labels[marker.name] = marker.word_index
+	end,
+	offset = function(state, marker)
+		state.branches[#state.branches + 1] = {
+			tag         = marker.name,
+			target      = marker.target,
+			branch_word = marker.word_index,
+		}
+	end,
 }
 
---- Scan a single token for atom_label/atom_offset markers, walking through balanced groups transparently (so nested calls are found).
---- @param token string
---- @param at_pos integer    -- the branch-free word position of this token in the body
---- @param labels table<string, integer>
---- @param branches table[]
-local function scan_for_atom_markers(token, at_pos, labels, branches)
-	local pos     = 1
-	local tok_len = #token
-	while pos <= tok_len do
-		pos = duffle.skip_ws_and_cmt(token, pos)
-		if pos > tok_len then break end
-		local ch = token:sub(pos, pos)
-		if duffle.is_alpha(ch) then
-			local ident, after = duffle.read_ident(token, pos)
-			local handler = MARKER_TO_HANDLER[ident]
-			if handler then
-				local args, after_paren = extract_ident_args(token, after)
-				-- Marker found — dispatch to its recorder. markers share labels and branches as
-				-- out-tables; the recorder picks which one(s) to write to based on its semantics.
-				-- (record_label_marker writes to labels; record_offset_marker writes to branches.)
-				handler(ident == LABEL_MARKER and labels or branches, args, at_pos)
-				pos = after_paren or after
-			else
-				pos = after
-			end
-		else
-			local nx = duffle.skip_str_or_cmt(token, pos)
-			pos = (nx > pos) and nx or (pos + 1)
-		end
+--- Project canonical marker records into the two lookup tables used by the offset renderer.
+--- No source text, body text, or body token is inspected.
+--- @param markers table[] -- atom.paths.markers
+--- @return table<string, integer>, table[]
+local function project_markers(markers)
+	local state = { labels = {}, branches = {} }
+	for _, marker in ipairs(markers or {}) do
+		local project = MARKER_PROJECTORS[marker.kind]
+		if project then project(state, marker) end
 	end
-end
-
---- Scan an atom body for labels + branches, count total words.
---- Returns (labels, branches, total_words).
---- @param body string
---- @param word_counts table
---- @return table<string, integer>, table[], integer
--- scan_atom_body: walk pre-tokenized body for atom_label/atom_offset markers + word counts.
--- Uses `atom.body_tokens` from the SourceScan payload (pre-tokenized by scan-source pass).
--- @param body_tokens table[]  -- {{tok=string, rel=integer}, ...} from duffle.tokenize_body
--- @param word_counts table
--- @return table, table, integer  -- labels, branches, total_words
-local function scan_atom_body(body_tokens, word_counts)
-	local pos      = 0
-	local labels   = {}
-	local branches = {}
-	for _, t in ipairs(body_tokens) do
-		local tok = t.tok
-		if duffle.is_marker_token(tok) then
-			-- Marker call: record at the current pos, do NOT advance pos.
-			scan_for_atom_markers(tok, pos, labels, branches)
-			pos = pos + duffle.count_marker_rest(tok, word_counts, count_token_words)
-		else
-			local words = count_token_words(tok, word_counts)
-			scan_for_atom_markers(tok, pos, labels, branches)
-			pos = pos + words
-		end
-	end
-	return labels, branches, pos
+	return state.labels, state.branches
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Offset computation + header generation
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Compute branch offsets as `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding).
--- @param labels table<string, integer>
--- @param branches table[]
--- @return BranchOffset[]
+--- Compute branch offsets as `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding).
+--- @param labels table<string, integer>
+--- @param branches table[]
+--- @return BranchOffset[]
 local function compute_offsets(labels, branches)
 	local results = {}
 	for _, br in ipairs(branches) do
 		local target = labels[br.target]
 		if not target then
-			error("Branch target '" .. br.target .. "' has no atom_label (at word " .. br.pos .. ")")
+			error("Branch target '" .. br.target .. "' has no atom_label (at word " .. br.branch_word .. ")")
 		end
-		results[#results + 1] = { target = br.target, tag = br.tag, offset = target - br.pos - 1 }
+		results[#results + 1] = {
+			target      = br.target,
+			tag         = br.tag,
+			branch_word = br.branch_word,
+			offset      = target - br.branch_word - 1,
+		}
 	end
 	return results
 end
 
--- Right-pad `s` with spaces to width `w`. If `s` is already `w` or wider, no padding is added.
--- @param s string
--- @param w integer
--- @return string
+--- Right-pad `s` with spaces to width `w`. If `s` is already `w` or wider, no padding is added.
+--- @param s string
+--- @param w integer
+--- @return string
 local function pad_right(s, w)
 	return s .. string.rep(" ", math.max(0, w - #s))
 end
 
--- (internal) Build a constant-table entry `{macro_name, enum_name, value}` from a BranchOffset.
--- @param r BranchOffset
--- @return table
-local function make_offset_const(r)
+--- (internal) Build a constant-table entry `{macro_name, enum_name, value}` from a BranchOffset.
+--- @param bo BranchOffset
+--- @return table
+local function make_offset_const(bo)
 	return {
-		macro_name = OFFSET_MACRO_PREFIX .. r.tag .. "_" .. r.target,
-		enum_name  = OFFSET_ENUM_PREFIX  .. r.tag .. "_" .. r.target,
-		value      = r.offset,
+		macro_name = OFFSET_MACRO_PREFIX .. bo.tag .. "_" .. bo.target,
+		enum_name  = OFFSET_ENUM_PREFIX  .. bo.tag .. "_" .. bo.target,
+		value      = bo.offset,
 	}
 end
 
--- (internal) Emit one atom's offset constants + enum into the lines buffer.
--- @param add fun(s: string)
--- @param atom AtomData
+--- (internal) Emit one atom's offset constants + enum into the lines buffer.
+--- @param add  fun(s: string)
+--- @param atom AtomData
 local function emit_atom_offsets(add, atom)
 	if #atom.offsets == 0 then return end
 	add("// --- atom: " .. atom.name .. " (" .. atom.total_words .. " words) ---")
@@ -263,10 +168,10 @@ local function emit_atom_offsets(add, atom)
 	add("")
 end
 
--- Generate the per-source .offsets.h header.
--- @param source_path string
--- @param atoms_data AtomData[]
--- @return string
+--- Generate the per-source .offsets.h header.
+--- @param source_path string
+--- @param atoms_data  AtomData[]
+--- @return string
 local function generate_header(source_path, atoms_data)
 	local basename = duffle.basename_no_ext(source_path)
 
@@ -288,59 +193,43 @@ local function generate_header(source_path, atoms_data)
 	return table.concat(lines, "\n") .. "\n"
 end
 
--- ════════════════════════════════════════════════════════════════════════════
--- M — module exports
--- ════════════════════════════════════════════════════════════════════════════
-
 local M = {}
 
--- Project the pre-scanned SourceScan entries into the {name, body, body_tokens} shape this pass needs.
--- MipsAtom_ entries have kind="atom"; MipsCode code_<name> entries have kind="raw_atom".
--- `body_tokens` is set by scan-source on every `scan.atoms[i]` / `scan.raw_atoms[i]`; we carry it forward
--- so `scan_atom_body` reads from the precomputed table directly (no per-atom tokenize_body fallback).
--- @param scan table  -- SourceScan from duffle.scan_source
--- @return table[]  -- list of {name=, body=, body_tokens=}
-local function project_atoms(scan)
-	local out = {}
-	for _, a in ipairs(scan.atoms) do
-		out[#out + 1] = { name = a.raw_name, body = a.body, body_tokens = a.body_tokens }
-	end
-	for _, a in ipairs(scan.raw_atoms) do
-		out[#out + 1] = { name = a.name, body = a.body, body_tokens = a.body_tokens }
-	end
-	return out
-end
-
--- (internal) Process one source: project atoms from scan, scan bodies, write header.
--- Returns the offsets_h path if a header was written, or nil.
--- @param ctx PassCtx
--- @param src SourceFile
--- @return string|nil  -- the offsets_h path
+--- (internal) Process one source: render offsets from canonical atom paths.
+--- Returns the offsets_h path if a header was written, or nil.
+--- @param ctx PassCtx
+--- @param src SourceFile
+--- @return string|nil  -- the offsets_h path
 local function process_source(ctx, src)
-	local atoms = project_atoms(src.scan)
-	if #atoms == 0 then return nil end
-
 	local atoms_data = {}
-	for _, atom in ipairs(atoms) do
-		local labels, branches, total = scan_atom_body(atom.body_tokens, ctx.shared.word_counts)
+	local scan = src.scan or {}
+
+	local function append_atom(atom)
+		local paths = atom and atom.paths
+		if not paths then return end
+		local labels, branches = project_markers(paths.markers)
 		atoms_data[#atoms_data + 1] = {
-			name        = atom.name,
-			total_words = total,
+			name        = atom.raw_name or atom.name,
+			total_words = #(paths.word_events or {}),
 			offsets     = compute_offsets(labels, branches),
 		}
 	end
 
+	for _, atom in ipairs(scan.atoms or {}) do append_atom(atom) end
+	for _, atom in ipairs(scan.raw_atoms or {}) do append_atom(atom) end
+	if #atoms_data == 0 then return nil end
+
 	local out_path = src.dir .. "/gen/" .. duffle.basename_no_ext(src.dir) .. ".offsets.h"
 	if not ctx.dry_run then
 		duffle.ensure_dir(duffle.dirname(out_path))
-		duffle.write_file(out_path, generate_header(src.path, atoms_data))
+		duffle.write_file(out_path, generate_header(src.path:gsub("/", "\\"), atoms_data))
 	end
 	return out_path
 end
 
 --- Run the offsets pass.
---- For each source, emits a per-module `<dir_basename>.offsets.h` containing `#define _atom_offset_F_T = N` constants 
---- for every `atom_offset(F, T)` reference in the source's atoms.
+--- For each canonical source, emits a per-module `<dir_basename>.offsets.h`
+--- containing constants for every marker recorded in atom.paths.
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
@@ -348,7 +237,12 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	for _, src in ipairs(ctx.sources) do
+	local corpus = ctx.shared and ctx.shared.corpus
+	if type(corpus) ~= "table" or type(corpus.source_order) ~= "table" then
+		error("offsets.run requires ctx.shared.corpus.source_order (canonical corpus).", 0)
+	end
+
+	for _, src in ipairs(corpus.source_order) do
 		local out_path = process_source(ctx, src)
 		if out_path then
 			outputs[#outputs + 1] = { offsets_h = out_path }

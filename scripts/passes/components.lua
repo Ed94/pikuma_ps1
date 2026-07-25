@@ -108,8 +108,8 @@ local M = {}
 --- We then verify the preceding context ends with `MipsAtom`
 --- (the function-decl keyword with possible qualifiers between).
 ---
---- @param source string
---- @param name string
+--- @param source     string
+--- @param name       string
 --- @param before_pos integer
 --- @return string|nil
 local function find_function_args_for(source, name, before_pos)
@@ -149,7 +149,7 @@ end
 --- Used to copy signature comments from the source declaration (`MipsAtomComp_` / `MipsAtomComp_Proc_` / function decl)
 --- over to the generated `mac_X` macro, so LSP/IntelliSense displays the args doc.
 --- @param source string
---- @param pos integer
+--- @param pos    integer
 --- @return string
 local function preceding_comment_block(source, pos)
 	local scan_pos = pos
@@ -266,12 +266,12 @@ end
 -- Component projection (read from pre-scanned SourceScan)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Project pre-scanned MipsAtomComp_ / MipsAtomComp_Proc_ entries into Component shape.
--- Does per-source backward lookups for args (preceding function decl) and comment (preceding comment block).
--- Carries `body_tokens` forward from scan-source so word_count_rec reads from the precomputed table instead of calling duffle.tokenize_body again.
--- @param source string  -- the full source text (needed for backward lookups)
--- @param scan  table   -- SourceScan from duffle.scan_source
--- @return Component[]
+--- Project pre-scanned MipsAtomComp_ / MipsAtomComp_Proc_ entries into Component shape.
+--- Does per-source backward lookups for args (preceding function decl) and comment (preceding comment block).
+--- Carries `body_tokens` forward from scan-source so word_count_rec reads from the precomputed table instead of calling duffle.tokenize_body again.
+--- @param source string  -- the full source text (needed for backward lookups)
+--- @param scan   table   -- SourceScan from duffle.scan_source
+--- @return Component[]
 local function project_components(source, scan)
 	local out = {}
 	for _, a in ipairs(scan.atoms) do
@@ -282,6 +282,7 @@ local function project_components(source, scan)
 				line        = a.line,
 				name        = a.name,
 				body        = a.body,
+				body_off    = a.body_off,
 				body_tokens = a.body_tokens,
 				args        = args,
 				comment     = comment,
@@ -339,11 +340,11 @@ end
 -- Word-count computation (memoized recursive lookup)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Strip the `mac_` prefix from a component-call ident so we can look it up against the components-by-name table. 
--- Returns the ident unchanged if it doesn't start with the prefix 
--- (so a non-component ident like `mask_upper` falls through to the wc-table branch).
--- @param ident string|nil
--- @return string|nil
+--- Strip the `mac_` prefix from a component-call ident so we can look it up against the components-by-name table. 
+--- Returns the ident unchanged if it doesn't start with the prefix 
+--- (so a non-component ident like `mask_upper` falls through to the wc-table branch).
+--- @param ident string|nil
+--- @return string|nil
 local function strip_mac_prefix(ident)
 	if not ident then return nil end
 	if ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
@@ -352,13 +353,13 @@ local function strip_mac_prefix(ident)
 	return ident
 end
 
--- (internal) Recursive word-count lookup. `cache` is the memoization table shared across all components
--- in a single source's `count_all_components` pass; the in-progress -1 sentinel detects cycles (A -> B -> A).
--- @param name string -- the component name (without `mac_`)
--- @param comp_by_name table<string, Component>
--- @param wc table<string, integer>
--- @param cache table<string, integer>
--- @return integer
+--- (internal) Recursive word-count lookup. `cache` is the memoization table shared across all components
+--- in a single source's `count_all_components` pass; the in-progress -1 sentinel detects cycles (A -> B -> A).
+--- @param name         string -- the component name (without `mac_`)
+--- @param comp_by_name table<string, Component>
+--- @param wc           table<string, integer>
+--- @param cache        table<string, integer>
+--- @return integer
 local function word_count_rec(name, comp_by_name, wc, cache)
 	if cache[name] ~= nil then return cache[name] end
 	cache[name] = -1  -- mark in-progress (cycle detection)
@@ -397,7 +398,7 @@ end
 --- references hit memoized values instead of re-walking the body.
 --- Cycle detection (A -> B -> A) is preserved via the in-progress `-1` sentinel in `cache`.
 --- @param components Component[]
---- @param wc table<string, integer>
+--- @param wc         table<string, integer>
 --- @return table<string, integer>  -- map of component name (without `mac_`) -> word count
 local function count_all_components(components, wc)
 	local comp_by_name = {}
@@ -470,9 +471,9 @@ end
 
 --- Build the list of lines for one component
 --- (signature comment, `#define mac_X(...)` line with backslash-continued tokens, then `WORD_COUNT(mac_X, N)` entry).
---- @param c Component
+--- @param c          Component
 --- @param components Component[]
---- @param wc table<string, integer>
+--- @param wc         table<string, integer>
 --- @return string[]  -- list of lines for this component
 local function build_component_lines(c, counts)
 	local lines = {}
@@ -504,10 +505,10 @@ end
 -- Per-source emit logic
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Build the boilerplate header lines (the `#ifdef INTELLISENSE_DIRECTIVES` block,
--- the `// Auto-generated` comment, the `// Source:` line, and the self-contained `WORD_COUNT` macro definition).
--- @param src SourceFile
--- @return string[]
+--- Build the boilerplate header lines (the `#ifdef INTELLISENSE_DIRECTIVES` block,
+--- the `// Auto-generated` comment, the `// Source:` line, and the self-contained `WORD_COUNT` macro definition).
+--- @param src SourceFile
+--- @return string[]
 local function header_boilerplate(src)
 	return {
 		-- #pragma once wrapped in #ifdef INTELLISENSE_DIRECTIVES, matching the convention in lottes_tape.h.
@@ -529,13 +530,13 @@ local function header_boilerplate(src)
 	}
 end
 
--- Compute the output path for one source's `.macs.h` file.
--- The pre-rework convention uses the *directory* basename
--- (not the source file basename) e.g. `code/duffle/lottes_tape.h` produces `code/duffle/gen/duffle.macs.h`.
--- This matches what the C codebase #includes.
--- @param src SourceFile
--- @return string  -- the output directory
--- @return string  -- the full output path
+--- Compute the output path for one source's `.macs.h` file.
+--- The pre-rework convention uses the *directory* basename (not the source file basename)
+---  e.g. `code/duffle/lottes_tape.h` produces `code/duffle/gen/duffle.macs.h`.
+--- This matches what the C codebase #includes.
+--- @param src SourceFile
+--- @return string  -- the output directory
+--- @return string  -- the full output path
 local function compute_macs_h_path(src)
 	local  out_dir  = src.dir .. "/" .. GEN_SUBDIR
 	local  out_path = out_dir .. "/" .. duffle.basename_no_ext(src.dir) .. ".macs.h"
@@ -545,10 +546,10 @@ end
 --- Emit a per-source `.macs.h` header with the `mac_X` macros + `WORD_COUNT` entries. 
 --- Writes in BINARY mode so LF line endings are preserved (the git blob is LF; Windows text-mode would emit CRLF and break the byte-identical diff).
 --- Honors `ctx.dry_run`: prints the intended path but does not write the file.
---- @param ctx PassCtx
---- @param src SourceFile
+--- @param ctx        PassCtx
+--- @param src        SourceFile
 --- @param components Component[]
---- @param counts table<string, integer>  -- precomputed word counts (from count_all_components)
+--- @param counts     table<string, integer>  -- precomputed word counts (from count_all_components)
 --- @return string|nil  -- path to the written file (nil if no components)
 local function emit_component_macros_h(ctx, src, components, counts)
 	if #components == 0 then return nil end
@@ -577,41 +578,86 @@ end
 -- Pass entry
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Extend `ctx.shared.word_counts` with this source's component macros so offsets sees them without re-reading the file.
--- @param ctx PassCtx
--- @param components Component[]
--- @param counts table<string, integer>  -- precomputed word counts (from count_all_components)
-local function update_shared_word_counts(ctx, components, counts)
-	local wc = ctx.shared.word_counts
+--- (internal) Extend the canonical `corpus.word_counts` with this source's component macros so offsets sees them without re-reading the file.
+--- First declaration wins: a later caller's count is dropped (the existing entry from the first source is preserved).
+--- @param corpus     table  -- the canonical corpus
+--- @param components Component[]
+--- @param counts     table<string, integer>  -- precomputed word counts (from count_all_components)
+local function update_canonical_word_counts(corpus, components, counts)
+	local wc = corpus.word_counts
 	for _, c in ipairs(components) do
-		wc["mac_" .. c.name] = counts[c.name]
+		local key = "mac_" .. c.name
+		if wc[key] == nil then
+			wc[key] = counts[c.name]
+		end
 	end
 end
 
 --- @class ComponentDef
---- @field name    string  -- bare name (without ac_/mac_ prefix)
---- @field line    integer -- definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
---- @field path    string  -- absolute source path of the definition
---- @field kind    string  -- "comp_bare" | "comp_proc"
+--- @field name string  -- bare name (without ac_/mac_ prefix)
+--- @field line integer -- definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
+--- @field path string  -- absolute source path of the definition
+--- @field kind string  -- "comp_bare" | "comp_proc"
 
---- (internal) Extend `ctx.shared.components` with this source's components-by-name map so downstream passes
---- (atoms_source_map, dwarf_injection) can resolve `mac_X(...)` invocations back to their component definition file:line.
---- provenance emission uses this to attribute each emitted `.word` to either a component macro or the enclosing atom body.
--- @param ctx PassCtx
--- @param src SourceFile
--- @param components Component[]
-local function update_shared_components(ctx, src, components)
-	ctx.shared.components         = ctx.shared.components or {}
+--- (internal) Populate the canonical `corpus.components` projection with this source's components-by-name map.
+--- First declaration wins; later declarations of the same bare name are dropped and recorded as a collision via `corpus.collisions` (kind = "component").
+--- The pass does NOT write to `ctx.shared.components` (ownership follows the canonical contract).
+--- @param corpus     table  -- the canonical corpus
+--- @param src        SourceFile
+--- @param components Component[]
+local function update_canonical_components(corpus, src, components)
 	local rel_path = src.path:gsub("\\", "/")
 	for _, c in ipairs(components) do
-		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`). 
-		-- The atoms_source_map pass strips the `mac_` prefix from the call site identifier before lookup.
-		ctx.shared.components[c.name] = {
-			name = c.name,
-			line = c.line,
-			path = rel_path,
-			kind = c.kind or "comp_bare",
-		}
+		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`).
+		-- The atoms_source_map pass looks up components by bare name from the canonical corpus;
+		-- `mac_` prefix lives at the call-site identifier and is stripped before lookup.
+		if corpus.components[c.name] == nil then
+			corpus.components[c.name] = {
+				name = c.name,
+				line = c.line,
+				path = rel_path,
+				kind = c.kind or "comp_bare",
+			}
+		else
+			-- A second declaration of the same bare name: record a typed collision so static-analysis + the report can surface it.
+			-- Identical-shape declarations (same path + line) do NOT record a collision (the first-wins entry already covers the case).
+			local existing = corpus.components[c.name]
+			if existing.path ~= rel_path or existing.line ~= c.line then
+				local kind     = c.kind or "comp_bare"
+				local first_kind = existing.kind or "comp_bare"
+				corpus.collisions[#corpus.collisions + 1] = {
+					kind              = "component",
+					name              = c.name,
+					first_site        = { path = existing.path, line = existing.line },
+					conflicting_site  = { path = rel_path,       line = c.line },
+					first_shape       = "kind=" .. first_kind,
+					conflicting_shape = "kind=" .. kind,
+				}
+			end
+		end
+	end
+end
+
+--- (internal) Populate the canonical `corpus.component_body_index` projection with this source's body index entries.
+--- First declaration wins; later declarations are dropped (no separate collision record: the components collision is already surfaced by `update_canonical_components`).
+--- The pass does NOT write to `ctx.shared.component_body_index` (the legacy corpus owns this projection).
+--- @param corpus     table  -- the canonical corpus
+--- @param src        SourceFile
+--- @param components Component[]
+--- @param scan       table  -- the SourceScan payload (for line_of)
+local function update_canonical_component_body_index(corpus, src, components, scan)
+	local line_of = scan and scan.line_of
+	for _, c in ipairs(components) do
+		if corpus.component_body_index[c.name] == nil then
+			corpus.component_body_index[c.name] = {
+				body_tokens = c.body_tokens,
+				body_off    = c.body_off,
+				line_of     = line_of,
+				source      = src.path,
+				declaration = c.line,
+				kind        = c.kind,
+			}
+		end
 	end
 end
 
@@ -622,24 +668,42 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Initialize shared component map.
-	-- The atoms_source_map and dwarf_injection passes consume `ctx.shared.components` to resolve `mac_X(...)` 
-	-- invocations back to the component's definition file:line.
-	ctx.shared.components = ctx.shared.components or {}
+	-- Canonical-corpus ownership gate.
+	local corpus = ctx.shared and ctx.shared.corpus
+	if type(corpus) ~= "table" then
+		error("components.run requires ctx.shared.corpus (canonical corpus).", 0)
+	end
+	if type(corpus.source_order) ~= "table" then
+		error("components.run requires ctx.shared.corpus.source_order (canonical corpus).", 0)
+	end
+	if type(corpus.word_counts) ~= "table" then
+		error("components.run requires ctx.shared.corpus.word_counts; "
+			.. "word_count_eval.run must run before components.run "
+			.. "(see PASSES deps).", 0)
+	end
 
-	for _, src in ipairs(ctx.sources) do
+	-- Canonical projection ownership:
+	--   * `corpus.word_counts["mac_"..name]` — current component count
+	--   * `corpus.components[name]`         — bare-name component definition
+	--   * `corpus.component_body_index[name]` — body / line_of / source index
+	-- The pass does NOT mutate `ctx.shared.components` or `ctx.shared.component_body_index`
+	-- (ownership follows the canonical corpus; consumers read from the corpus directly).
+
+	for _, src in ipairs(corpus.source_order) do
 		-- project_components reads from src.scan + does backward lookups on src.text
 		local components = project_components(src.text, src.scan)
 		if #components > 0 then
-			-- Compute word counts for ALL components once (was: rebuilt per call inside the helpers).
-			local counts = count_all_components(components, ctx.shared.word_counts)
+			-- Compute all component word counts once per source.
+			-- Use `corpus.word_counts` (the canonical count table) so the recursive lookup sees both authored-metadata entries
+			-- (loaded by word_count_eval.run) AND same-source component entries (populated earlier in this loop by `update_canonical_word_counts`).
+			local counts = count_all_components(components, corpus.word_counts)
 			local macs_path = emit_component_macros_h(ctx, src, components, counts)
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }
-				update_shared_word_counts(ctx, components, counts)
-				-- share component definitions with downstream passes.
-				-- `mac_X(...)` invocations in atom bodies resolve back to (path, line) via this map.
-				update_shared_components(ctx, src, components)
+				-- Populate the canonical projections AFTER disk emission (so the byte-identical `.macs.h` contract is preserved before any current-count mutation).
+				update_canonical_word_counts(corpus, components, counts)
+				update_canonical_components(corpus, src, components)
+				update_canonical_component_body_index(corpus, src, components, src.scan)
 			end
 		end
 	end

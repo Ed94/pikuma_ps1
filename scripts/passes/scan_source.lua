@@ -25,6 +25,13 @@
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
+-- Forward declarations for helpers used by earlier parsers (parse_enum_body_fields needs parse_enum_int_literal;
+-- parse_typedef_binds needs duffle.find_byte).
+-- Lua local scoping rules require explicit forward declarations because locals are visible only AFTER their declaration site.
+-- The actual assignments happen later in this file;
+-- the closures captured by the early parsers resolve the upvalue at call time (Lua 5.3 / LuaJIT upvalue semantics).
+local parse_enum_int_literal
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
 -- ════════════════════════════════════════════════════════════════════════════
@@ -286,13 +293,13 @@ local POINTER_BYTE_SIZE = 4
 -- Maximum chain depth when resolving typedef / TSet_ chains (cycle guard).
 local TYPE_CHAIN_MAX_DEPTH = 8
 
--- Walk a `Struct_` / `Enum_` body, calling `build_field(first, first_end, after_first)` for each entry.
--- The builder returns either:
---   - (record, new_pos)  -- append record to fields; advance body_pos to new_pos
---   - (nil, new_pos)     -- skip this entry; advance body_pos to new_pos
--- After each entry, the walker skips a single trailing `,` or `;`.
--- The 2 body-field parsers in this file (struct + enum) share this body-walk loop.
--- @param body string
+--- Walk a `Struct_` / `Enum_` body, calling `build_field(first, first_end, after_first)` for each entry.
+--- The builder returns either:
+---   - (record, new_pos)  -- append record to fields; advance body_pos to new_pos
+---   - (nil, new_pos)     -- skip this entry; advance body_pos to new_pos
+--- After each entry, the walker skips a single trailing `,` or `;`.
+--- The 2 body-field parsers in this file (struct + enum) share this body-walk loop.
+--- @param body string
 --- @param build_field fun(first: string, first_end: integer, after_first: integer): (table|nil, integer)
 --- @return table[]
 local function walk_body_fields(body, build_field)
@@ -328,7 +335,7 @@ local function parse_struct_body_fields(body)
 		-- Parse the trailing `*` chain to derive pointer_depth.
 		local depth, cursor = 0, after_type
 		while cursor <= #body and body:sub(cursor, cursor) == "*" do
-			depth  = depth + 1
+			depth  = depth  + 1
 			cursor = cursor + 1
 			cursor = duffle.skip_ws_and_cmt(body, cursor)
 		end
@@ -385,14 +392,12 @@ local function resolve_typedef_byte_size(type_name, type_name_registry, visited,
 	local entry = type_name_registry[type_name]
 	if not entry then return nil end
 
-	-- Confident: this entry was already resolved by the propagation pass
-	-- (e.g., a builtin or a struct whose fields are all resolved).
+	-- Confident: this entry was already resolved by the propagation pass (e.g., a builtin or a struct whose fields are all resolved).
 	if entry.byte_size ~= nil then return entry.byte_size end
 
 	-- Chain-following: typedef / TSet_ aliases follow underlying_type.
 	if entry.underlying_type then
-		return resolve_typedef_byte_size(
-			entry.underlying_type, type_name_registry, visited, depth + 1)
+		return resolve_typedef_byte_size(entry.underlying_type, type_name_registry, visited, depth + 1)
 	end
 
 	-- Struct_ entries with unresolved byte_size can still resolve when their fields are all resolved.
@@ -414,7 +419,7 @@ end
 -- struct byte_size derives from confident fields; void is invalid and skipped; pointers collapse to 4 bytes at parse time.
 -- Mutates `out.type_name_registry[name].byte_size` AND each struct's fields' `offset` + `byte_size` in place.
 local function propagate_type_sizes(out)
-	local reg = out.type_name_registry
+	local  reg = out.type_name_registry
 	if not reg then return end
 
 	-- Seed builtin primitives (U1/U2/U4/S1/S2/S4 + __UINT*_TYPE__ family).
@@ -527,25 +532,22 @@ end
 --   - a plain register ident:               `R_FaceCursor` → reg_name only
 --   - register + atom_type sub-call:        `R_FaceCursor atom_type(V4_S2*)` → reg_name + override entry
 -- Returns (reg_name, override_entry_or_nil, malformed_flag).
--- On malformed `atom_type(...)` (missing close paren, trailing tokens after the close paren, empty type chain, trailing junk inside the
--- parens like `V4_S2*()`), the function still returns the leading reg_name but sets `malformed_flag = true` and `override_entry = nil`
--- so the caller can silently drop the override while keeping the register in the reads/writes list
--- (per the parser-safety contract — "malformed atom_type MUST NOT create any override").
+-- On malformed `atom_type(...)` (missing close paren, trailing tokens after the close paren, empty type chain, trailing junk inside the parens like `V4_S2*()`),
+-- the function still returns the leading reg_name but sets `malformed_flag = true` and `override_entry = nil`
+-- so the caller can silently drop the override while keeping the register in the reads/writes list.
 local function parse_atom_info_reg_entry(entry)
 	local pos = 1
 	pos = duffle.skip_ws_and_cmt(entry, pos)
 	if pos > #entry then return nil, nil, false end
-	local reg_name, reg_end = duffle.read_ident(entry, pos)
+	local  reg_name, reg_end = duffle.read_ident(entry, pos)
 	if not reg_name then return nil, nil, false end
 	pos = duffle.skip_ws_and_cmt(entry, reg_end)
 	-- Plain register, no adjacent atom_type — done.
 	if pos > #entry then return reg_name, nil, false end
 
 	-- Adjacent ident must be a bare `atom_type` (word-bounded both sides).
-	local next_ident, next_end = duffle.read_ident(entry, pos)
-	if not next_ident or next_ident ~= "atom_type" then
-		return reg_name, nil, false
-	end
+	local  next_ident, next_end = duffle.read_ident(entry, pos)
+	if not next_ident or next_ident ~= "atom_type" then return reg_name, nil, false end
 	-- Left word-boundary: `_atom_type` should NOT match `atom_type`.
 	if pos > 1 then
 		local prev = entry:byte(pos - 1)
@@ -559,27 +561,21 @@ local function parse_atom_info_reg_entry(entry)
 
 	-- Expect `(` immediately after `atom_type` (whitespace tolerated).
 	pos = duffle.skip_ws_and_cmt(entry, next_end)
-	if pos > #entry or entry:sub(pos, pos) ~= "(" then
-		return reg_name, nil, true
-	end
+	if pos > #entry or entry:sub(pos, pos) ~= "(" then return reg_name, nil, true end
 	local sub_inner, sub_after = duffle.read_parens(entry, pos)
 
 	-- Reject any trailing tokens (including `;` / `,`) after the close paren.
 	-- The outer caller already split on top-level commas, so the only legal terminator here is end-of-entry.
 	local after_close = duffle.skip_ws_and_cmt(entry, sub_after)
-	if after_close <= #entry then
-		return reg_name, nil, true
-	end
+	if    after_close <= #entry then return reg_name, nil, true end
 
 	-- Parse the type chain inside the parens; require full consumption.
 	-- parse_type_chain returns (ident, depth, end_pos);
-	-- we reject any non-whitespace residue past end_pos (catches `V4_S2*()` etc.).
-	local type_name, depth, after_chain = parse_type_chain(sub_inner, 1)
+	-- We reject any non-whitespace residue past end_pos (catches `V4_S2*()` etc.).
+	local  type_name, depth, after_chain = parse_type_chain(sub_inner, 1)
 	if not type_name then return reg_name, nil, true end
 	local end_check = duffle.skip_ws_and_cmt(sub_inner, after_chain)
-	if end_check <= #sub_inner then
-		return reg_name, nil, true
-	end
+	if    end_check <= #sub_inner then return reg_name, nil, true end
 
 	return reg_name, { type_name = type_name, pointer_depth = depth }, false
 end
@@ -601,8 +597,8 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 	-- Per-subcall handler table. Each handler takes (sub_inner, info_line) and mutates the outer locals above.
 	-- atom_reads/atom_writes share a handler (same shape; just different output target).
 	local function rw_handler(sub_inner, info_line, kind)
-		-- The reads/writes arrays contain ONLY register idents;
-		-- the `atom_type(...)` sub-entry (when present and well-formed) is recorded as a per-atom reg_type_override.
+		-- reads/writes arrays contain ONLY register idents;
+		-- `atom_type(...)` sub-entry (when present and well-formed) is recorded as a per-atom reg_type_override.
 		local entries = duffle.split_top_level_commas(sub_inner)
 		local regs     = {}
 		for _, entry in ipairs(entries) do
@@ -625,7 +621,7 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 	end
 	local function ident_handler(sub_inner, info_line, out_name)
 		-- Validates the arg is a single C identifier (no commas / parens / whitespace).
-		-- Silently reject malformed args; the DWARF chain treats the field as un-set.
+		-- Silently reject malformed args; DWARF chain treats the field as un-set.
 		local name = duffle.read_ident(sub_inner, 1)
 		if name then
 			local after_id = duffle.skip_ws_and_cmt(sub_inner, 1 + #name)
@@ -718,6 +714,7 @@ local BYTE_HASH       = 0x23   -- '#'
 local BYTE_NEWLINE    = 0x0A   -- '\n'
 local BYTE_DASH       = 0x2D   -- '-'
 local BYTE_COMMA      = 0x2C   -- ','
+local BYTE_SEMI       = 0x3B   -- ';'
 local BYTE_EQUAL      = 0x3D   -- '='
 local BYTE_R          = 0x52   -- 'R'
 local BYTE_UNDERSCORE = 0x5F   -- '_'
@@ -754,13 +751,16 @@ local function hex_digit_value(b)
 	return nil
 end
 
--- Parse a decimal/negative-decimal/hex integer literal starting at byte position `start`.
--- Returns (value, end_pos) on success, or (nil, start) on failure / no match.
--- Accepts: 12, -1, 0, 0x10, 0X1F, -0x10.
--- @param text string
--- @param start integer
--- @return integer|nil, integer
-local function parse_enum_int_literal(text, start)
+--- Parse a decimal/negative-decimal/hex integer literal starting at byte position `start`.
+--- Returns (value, end_pos) on success, or (nil, start) on failure / no match.
+--- Accepts: 12, -1, 0, 0x10, 0X1F, -0x10.
+--- @param text string
+--- @param start integer
+--- @return integer|nil, integer
+--- Implementation note: this is a plain assignment (not `local function`) 
+--- so the forward declaration at the top of the file is the same upvalue the earlier `parse_enum_body_fields` closure captures.
+--- Lua 5.3 / LuaJIT upvalue semantics resolve the assignment at call time.
+parse_enum_int_literal = function(text, start)
 	local pos = start
 	local len = #text
 	if pos > len then return nil, start end
@@ -847,10 +847,10 @@ local function resolve_code_macro_value(source, pos, code_macros, code_macro_bod
 
 	-- Try integer literal first (decimal / negative / hex).
 	local int_val, int_end = parse_enum_int_literal(source, pos)
-	if int_val ~= nil then return int_val end
+	if    int_val ~= nil then return int_val end
 
 	-- Try symbol reference (must be R_*_Code per the spec).
-	local sym = duffle.read_ident(source, pos)
+	local  sym = duffle.read_ident(source, pos)
 	if not sym then return nil end
 	if not is_r_code_macro(sym) then return nil end
 
@@ -864,7 +864,7 @@ local function resolve_code_macro_value(source, pos, code_macros, code_macro_bod
 	-- Cross-source fallback: walk the body of the missing symbol if any other source collected its RHS during pass 1a.
 	-- The body is parsed as a fresh RHS (it's the raw post-`=` text of the original `#define` line), so the chain continues transparently.
 	local body = code_macro_bodies and code_macro_bodies[sym]
-	if body then
+	if    body then
 		return resolve_code_macro_value(body, 1, code_macros, code_macro_bodies, visited, depth + 1)
 	end
 
@@ -874,14 +874,14 @@ local function resolve_code_macro_value(source, pos, code_macros, code_macro_bod
 	return nil
 end
 
--- Intercept a `#define R_*_Code <RHS>` preprocessor line.
--- Always saves the raw RHS text into `code_macro_bodies` (for cross-source fallback during chain resolution),
--- then (if resolvable) stores the resolved integer code into `code_macros` keyed by the macro name.
--- `directive_start` points at the `#` byte. The function is silent on non-matching directives, the caller skips the line in any case.
--- @param source string
--- @param directive_start integer  -- byte position of `#`
--- @param code_macros table        -- out._code_macros / ctx.shared._code_macros
--- @param code_macro_bodies table  -- out._code_macro_bodies / ctx.shared._code_macro_bodies
+--- Intercept a `#define R_*_Code <RHS>` preprocessor line.
+--- Always saves the raw RHS text into `code_macro_bodies` (for cross-source fallback during chain resolution),
+--- then (if resolvable) stores the resolved integer code into `code_macros` keyed by the macro name.
+--- `directive_start` points at the `#` byte. The function is silent on non-matching directives, the caller skips the line in any case.
+--- @param source string
+--- @param directive_start integer  -- byte position of `#`
+--- @param code_macros table        -- out._code_macros / ctx.shared._code_macros
+--- @param code_macro_bodies table  -- out._code_macro_bodies / ctx.shared._code_macro_bodies
 local function try_extract_code_macro(source, directive_start, code_macros, code_macro_bodies)
 	local rest = duffle.skip_ws_and_cmt(source, directive_start + 1)
 	local kw, kw_end = duffle.read_ident(source, rest)
@@ -907,13 +907,13 @@ local function try_extract_code_macro(source, directive_start, code_macros, code
 	if value ~= nil then code_macros[macro_name] = value end
 end
 
--- Quick pre-pass: walk the source looking ONLY for `#define R_*_Code` lines.
--- Populates `code_macros` with resolved integer codes AND `code_macro_bodies` with raw RHS text
--- (used by the chain walker as cross-source fallback during pass 1b in `M.run`); ignores everything else.
--- Used by `M.run` pass 1a to build the cross-source `_code_macros` + `_code_macro_bodies` registries before pass 1b resolves chains.
--- @param source string
--- @param code_macros table
--- @param code_macro_bodies table
+--- Quick pre-pass: walk the source looking ONLY for `#define R_*_Code` lines.
+--- Populates `code_macros` with resolved integer codes AND `code_macro_bodies` with raw RHS text
+--- (used by the chain walker as cross-source fallback during pass 1b in `M.run`); ignores everything else.
+--- Used by `M.run` pass 1a to build the cross-source `_code_macros` + `_code_macro_bodies` registries before pass 1b resolves chains.
+--- @param source      string
+--- @param code_macros table
+--- @param code_macro_bodies table
 local function scan_source_pre_pass(source, code_macros, code_macro_bodies)
 	local pos     = 1
 	local src_len = #source
@@ -1012,7 +1012,7 @@ end
 --
 -- All parsers read source-as-written via the duffle primitives (skip_ws_and_cmt / read_parens / read_braces / read_balanced).
 -- No regex per the no_regex constraint; no hand-rolled depth tracking
--- (the MipsAtomComp_Proc_ brace matcher now uses duffle.read_braces instead of bespoke byte-dispatch).
+-- The MipsAtomComp_Proc_ brace matcher uses `duffle.read_braces`.
 --
 -- Adding a new construct = 1 row in DECL_PARSERS + 1 parser function. The scan_source() loop never needs editing.
 
@@ -1186,7 +1186,7 @@ local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
 	if not last_brace_pos then return after_paren end
 
 	-- Use duffle.read_braces to find the matching close brace.
-	-- Replaces the pre-refactor hand-rolled depth tracker (~25 LOC of `if c == 123 then depth = depth + 1 ...`).
+	-- Uses `read_balanced` for delimiter-depth tracking.
 	-- If close_pos is past the end of inner, the brace didn't match (malformed input); skip.
 	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
 	if close_pos > #inner + 1 then return after_paren end
@@ -1340,10 +1340,9 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		register_struct_type(body, name, pos, line_of, out)
 		associate_skip_over_marker(out, name, name, "unrelated", line_of(pos), pos)
 		return after_brace
-	end
 
 	-- ── Shape 2: `typedef Enum_(<underlying>, <name>) { <body> } <alias>;`
-	if id2 == "Enum_" then
+	elseif id2 == "Enum_" then
 		local inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end)
 		if not inner then return id2_end end
 		-- Split `inner` on the first top-level comma into (<underlying>, <name>).
@@ -1359,35 +1358,104 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		return after_brace
 	end
 
-	-- ── Shapes 3 + 4: `typedef <type> <alias>;`  or
-	--                  `typedef <type> TSet_(<name>);`
-	-- Read the <type> ident we already have (id2) and the trailing alias.
-	local after_id2 = duffle.skip_ws_and_cmt(source, id2_end)
-	local id3, id3_end = duffle.read_ident(source, after_id2)
-	if not id3 then return ident_end end
+	-- ── Shapes 3 + 4: `typedef <span> <alias>;`  or
+	--                  `typedef <span> TSet_(<name>);`
+	--
+	-- The <span> between `typedef` and the alias ident may be MULTI-token (e.g. `unsigned char`, `__UINT8_TYPE__`, `const U4`).
+	-- The alias is the LAST identifier before `;` (Shape 3), OR the argument of `TSet_(...)` when that wrapper is present (Shape 4).
+	--
+	-- Two required exact outcomes:
+	--   typedef unsigned char UTF8;       -> name=UTF8, underlying="unsigned char"
+	--   typedef __UINT8_TYPE__ TSet_(U1); -> name=U1,   underlying="__UINT8_TYPE__"
+	--
+	-- Algorithm:
+	--   1. Find the terminating `;` (BYTE_SEMI). If absent, abort cleanly.
+	--   2. If id2 itself is `TSet_`, capture the parenthesized argument and use it as the alias (the preceding underlying span is empty).
+	--   3. Otherwise walk idents forward from id2_end to semi_pos: 
+	--      - If any ident is `TSet_`, capture its argument as the alias and mark the underlying span as everything from id2 to before TSet_.
+	--      - Otherwise remember the last ident (and its source position) as the alias; the underlying span is everything from id2 to before that ident.
+	--   4. Trim the underlying span and call register_typedef_alias.
+	--
+	-- Struct_/Enum_ declarations carry their own dedicated parser paths above; this branch only handles non-Struct_/Enum_ typedefs.
 
-	-- Shape 4: `typedef <type> TSet_(<name>);`
-	if id3 == "TSet_" then
-		local tset_inner, tset_after = read_parens_after(source, id3_end, id3_end)
-		if not tset_inner then return id3_end end
-		local tset_name = duffle.trim(tset_inner)
-		register_typedef_alias(id2, tset_name, pos, line_of, out)
+	-- Find the terminating `;` (BYTE_SEMI). If absent, abort cleanly.
+	local  semi_pos = duffle.find_byte(source, BYTE_SEMI, id2_end)
+	if not semi_pos then return id2_end end
+
+	-- Shape 4 (TSet_ at id2 position): no preceding underlying span.
+	if id2 == "TSet_" then
+		local inner, after_paren = read_parens_after(source, id2_end, id2_end)
+		if not inner then return id2_end end
+		local tset_name = duffle.trim(inner)
+		-- Empty underlying span is acceptable; the TSet_ wrapper itself
+		-- encodes the alias identity (per the duffle TSet_ convention).
+		register_typedef_alias("", tset_name, pos, line_of, out)
 		associate_skip_over_marker(out, tset_name, tset_name, "unrelated", line_of(pos), pos)
-		return tset_after
+		return after_paren
 	end
 
-	-- Shape 3: `typedef <type> <alias>;`
-	register_typedef_alias(id2, id3, pos, line_of, out)
-	associate_skip_over_marker(out, id3, id3, "unrelated", line_of(pos), pos)
-	return id3_end
+	-- Walk idents forward to find the alias ident (last ident before `;`), or the TSet_(<arg>) form (capture the arg, use it as the alias).
+	local last_ident      = nil
+	local last_ident_pos  = nil
+	local last_ident_end  = nil
+	local tset_arg        = nil
+	local tset_arg_end    = nil
+	local tset_pos        = nil
+
+	local scan = id2_end
+	while scan < semi_pos do
+		scan = duffle.skip_ws_and_cmt(source, scan)
+		if scan >= semi_pos then break end
+		local id, id_end = duffle.read_ident(source, scan)
+		if not id then
+			scan = scan + 1
+		elseif id == "TSet_" then
+			-- Shape 4 (TSet_ at non-id2 position): grab the parenthesized argument.
+			local inner, after_paren = read_parens_after(source, id_end, id_end)
+			if inner then
+				tset_arg     = duffle.trim(inner)
+				tset_arg_end = after_paren
+				tset_pos     = scan
+				scan         = after_paren
+			else
+				scan = id_end
+			end
+		else
+			last_ident     = id
+			last_ident_pos = scan
+			last_ident_end = id_end
+			scan           = id_end
+		end
+	end
+
+	if tset_arg then
+		-- Shape 4: alias is the TSet_ argument; the underlying span is the trimmed text from the start of id2 up to (but not including) the TSet_ ident.
+		local underlying_span = source:sub(after_typedef, tset_pos - 1)
+		local underlying      = duffle.trim(underlying_span)
+		register_typedef_alias(underlying, tset_arg, pos, line_of, out)
+		associate_skip_over_marker(out, tset_arg, tset_arg, "unrelated", line_of(pos), pos)
+		return tset_arg_end or (semi_pos + 1)
+	end
+
+	if last_ident then
+		-- Shape 3: alias is the last ident before `;`; the underlying span is the trimmed text from the start of id2 up to (but not including) the alias ident.
+		local underlying_span = source:sub(after_typedef, last_ident_pos - 1)
+		local underlying      = duffle.trim(underlying_span)
+		register_typedef_alias(underlying, last_ident, pos, line_of, out)
+		associate_skip_over_marker(out, last_ident, last_ident, "unrelated", line_of(pos), pos)
+		return last_ident_end
+	end
+
+	-- Malformed: id2 with no following ident before `;`. Skip past the terminating semicolon and let the main loop continue.
+	return semi_pos + 1
 end
 
 --- Parse: `_Pragma("mac_X tape_atom words=N")` (operator form).
---- @param source string
---- @param pos integer
+--- @param source    string
+--- @param pos       integer
 --- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
 --- @return integer
 local function parse_pragma_macro(source, pos, ident_end, line_of, out)
 	local str, str_end = read_parens_after(source, ident_end)
@@ -1413,30 +1481,17 @@ local function parse_pragma_macro(source, pos, ident_end, line_of, out)
 	return str_end
 end
 
---- Parse: `pragma` ident (no-op — directive form `#pragma` is handled by `skip_preprocessor_line` upstream).
---- If we reach this parser it means the directive skip didn't fire, which can happen for non-#-prefixed pragma.
---- Just advance past the ident.
---- @param source string
---- @param pos integer
---- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
---- @return integer
-local function parse_pragma_dummy(source, pos, ident_end, line_of, out)
-	return ident_end
-end
-
 -- Parse the value side of an enum entry.
 -- Accepts integer literals (decimal/negative/hex), `R_*_Code` symbol references resolved via `out._code_macros`,
 -- AND bare `R_*` symbols that map to an `R_*_Code` variant in the registry.
 -- The bare-`R_*` fallback is needed for the lottes_tape.h wave-context aliases whose enum RHS is the bare register ident (e.g. `R_TapePtr = R_T8 atom_reg`);
--- the `R_*_Code` form (e.g. `R_T8_Code`) holds the actual GPR code in mips.h and is now resolvable cross-source via the chain walker.
+-- The `R_*_Code` form holds the GPR code and resolves across sources through the chain walker.
 -- Returns (value, end_pos) on success or (nil, pos) if unresolvable.
 local function parse_enum_value(body, pos, out)
 	local int_val, int_end = parse_enum_int_literal(body, pos)
-	if int_val ~= nil then return int_val, int_end end
+	if    int_val ~= nil then return int_val, int_end end
 
-	local sym = duffle.read_ident(body, pos)
+	local  sym = duffle.read_ident(body, pos)
 	if not sym then return nil, pos end
 
 	-- Bare `R_*` (no `_Code` suffix) → translate to `R_*_Code` and look that up. Non-`R_*` symbols
@@ -1580,7 +1635,6 @@ local DECL_PARSERS = {
 	MipsCode                   = parse_mips_code,
 	typedef                    = parse_typedef_binds,
 	_Pragma                    = parse_pragma_macro,
-	pragma                     = parse_pragma_dummy,
 	-- `enum [<tag>] { <body> }` populates `out.register_alias_registry`.
 	enum                       = parse_enum,
 }
@@ -1655,8 +1709,7 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 					if parser then
 						pos = parser(source, pos, ident_end, line_of, out)
 					else
-						-- A component-procedure declaration has an FI_ signature before MipsAtomComp_Proc_;
-						-- keep the marker pending across that prelude. 
+						-- A component-procedure declaration has an FI_ signature before MipsAtomComp_Proc_; keep the marker pending across that prelude. 
 						-- Any other identifier begins an unrelated declaration/construct and consumes the marker so it cannot drift to a later atom.
 						local markers = out.skip_over.markers
 						local marker  = markers[#markers]
@@ -1693,6 +1746,252 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Corpus merge — first-wins lookup identity + typed collisions
+-- ════════════════════════════════════════════════════════════════════════════
+-- These helpers run ONCE per `M.run` invocation, after every per-source scan has attached `src.scan`.
+-- They merge per-source scans into the canonical `ctx.shared.corpus.*` registries.
+-- The corpus is the source of truth; `src.scan` keeps the source-local projection for the duration of the run but the cross-source visibility lives on `corpus`.
+
+-- Build a deterministic site record (path + line) from a per-source entry.
+-- Falls back to the placeholder when an entry lacks a recorded source file or line.
+local function build_site(path, line)
+	return { path = path or "?", line = line or 0 }
+end
+
+-- Compute a deterministic shape signature for an AliasEntry (register_alias_registry).
+-- Two alias declarations are "identical" iff they resolve to the same shape: 
+--   code (integer) + default_type + default_depth + pointer_depth + has_atom_reg.
+local function alias_shape(entry)
+	if type(entry) ~= "table" then return "" end
+	return string.format("code=%s;default=%s/%s;depth=%s;atom_reg=%s",
+		tostring(entry.code),
+		tostring(entry.default_type or ""),
+		tostring(entry.default_depth or 0),
+		tostring(entry.pointer_depth or 0),
+		tostring(entry.has_atom_reg and 1 or 0))
+end
+
+-- Compute a deterministic shape signature for a type-name registry entry.
+-- struct:  serialized fields (name:type:depth, in declaration order)
+-- enum:    serialized fields (name=value, declaration order)
+-- typedef: The underlying_type string
+local function type_shape(entry)
+	if type(entry) ~= "table" then return "" end
+	if entry.kind == "struct" then
+		local fields = entry.fields or {}
+		local parts  = {}
+		for _, f in ipairs(fields) do
+			parts[#parts + 1] = string.format("%s:%s*%s",
+				tostring(f.name), tostring(f.type_name), tostring(f.pointer_depth or 0))
+		end
+		return "struct[" .. table.concat(parts, ",") .. "]"
+	elseif entry.kind == "enum" then
+		local fields = entry.fields or {}
+		local parts  = {}
+		for _, f in ipairs(fields) do
+			parts[#parts + 1] = string.format("%s=%s", tostring(f.name), tostring(f.value))
+		end
+		return "enum[" .. table.concat(parts, ",") .. "]"
+	elseif entry.kind == "typedef" then
+		return "typedef[" .. tostring(entry.underlying_type or "") .. "]"
+	end
+	return "?"
+end
+
+-- Compute a deterministic shape signature for a Binds_* entry (Struct_ projection).
+-- Binds_* entries come from scan.binds[] (per-source array) with `{line, name, fields, body, bytes}`;
+-- They share the same `fields` layout as the matching struct entry in `type_name_registry`, so the shape is the struct-field serialization.
+-- The `kind` field is absent here, so the struct branch of `type_shape` would misfire; we serialize the fields directly.
+local function bind_shape(entry)
+	if type(entry) ~= "table" then return "" end
+	local fields = entry.fields or {}
+	local parts  = {}
+	for _, f in ipairs(fields) do
+		parts[#parts + 1] = string.format("%s:%s*%s",
+			tostring(f.name), tostring(f.type_name), tostring(f.pointer_depth or 0))
+	end
+	return "struct[" .. table.concat(parts, ",") .. "]"
+end
+
+-- Compute a deterministic shape signature for an AtomEntry.
+-- The "kind + body" pair uniquely identifies the same declaration when re-encountered.
+-- `body` is the brace-delimited body text.
+local function atom_shape(entry)
+	if type(entry) ~= "table" then return "" end
+	return string.format("kind=%s;body=%s",
+		tostring(entry.kind or ""), tostring(entry.body or ""))
+end
+
+-- Compute a deterministic shape signature for an AtomViewEntry.
+-- Two views are identical iff they bind the same Binds_X with the same reg overrides.
+local function view_shape(entry)
+	if type(entry) ~= "table" then return "" end
+	local overrides = entry.reg_type_overrides or {}
+	local keys = {}
+	for k in pairs(overrides) do keys[#keys + 1] = k end
+	table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+	local parts = {}
+	for _, k in ipairs(keys) do
+		local ov = overrides[k]
+		parts[#parts + 1] = string.format("%s=%s*%s", tostring(k),
+			tostring(ov.type_name), tostring(ov.pointer_depth or 0))
+	end
+	return string.format("binds=%s;overrides=[%s]",
+		tostring(entry.binds_name or ""), table.concat(parts, ","))
+end
+
+-- Compute a deterministic shape signature for an AtomCtxEntry.
+local function ctx_shape(entry)
+	if type(entry) ~= "table" then return "" end
+	return "rbind=" .. tostring(entry.rbind_atom or "")
+end
+
+-- Compute a deterministic shape signature for an AtomPhaseGroup.
+-- The atoms list is compared as a SET (sorted) so that two declarations of `atom_phase(setup)` with atoms = [A] vs atoms = [B]
+-- are DIFFERENT shapes (first-wins + collision), while atoms = [A,B] vs atoms = [B,A] are considered identical (and coalesce).
+local function phase_shape(entry)
+	if type(entry) ~= "table" then return "" end
+	local atoms = entry.atoms or {}
+	local sorted = {}
+	for _, a in ipairs(atoms) do sorted[#sorted + 1] = a end
+	table.sort(sorted)
+	return "atoms=[" .. table.concat(sorted, ",") .. "]"
+end
+
+-- Merge a new declaration site into a registry following the first-wins discipline.
+-- * first declaration:    Entry becomes the canonical corpus entry (entry.sites initialized).
+-- * identical subsequent: Append the new site to entry.sites (no collision).
+-- * conflicting shape:    Keep first entry, append ONE typed collision record with shape diff.
+local function merge_named_with_sites(registry, name, new_entry, site, collisions, kind, shape_fn)
+	if registry[name] == nil then
+		registry[name] = new_entry
+		registry[name].sites = { site }
+		return
+	end
+	local existing = registry[name]
+	local new_shape = shape_fn(new_entry)
+	local old_shape = shape_fn(existing)
+	if new_shape == old_shape and new_shape ~= "" then
+		-- Identical shape: coalesce by appending the site.
+		existing.sites = existing.sites or { build_site(existing.source_file, existing.source_line) }
+		existing.sites[#existing.sites + 1] = site
+		return
+	end
+	-- Conflicting shape: first-wins; record exactly one typed collision.
+	collisions[#collisions + 1] = {
+		kind              = kind,
+		name              = name,
+		first_site        = existing.sites and existing.sites[1]
+			or build_site(existing.source_file, existing.source_line),
+		conflicting_site  = site,
+		first_shape       = old_shape,
+		conflicting_shape = new_shape,
+	}
+end
+
+-- Merge per-source scans into the canonical corpus registries.
+-- Iterates `corpus.source_order` (not `ctx.sources`) — the corpus is the source of truth.
+-- Each source owns only its `src.scan`; the corpus owns the cross-source lookup tables.
+local function merge_corpus_registries(corpus)
+	-- Ensure every expected corpus table exists (the fixture_ctx seeds most of these,
+	-- but a barebones corpus from build_ctx should also be safe).
+	corpus.register_alias_registry = corpus.register_alias_registry or {}
+	corpus.type_name_registry      = corpus.type_name_registry      or {}
+	corpus.binds_by_name           = corpus.binds_by_name           or {}
+	corpus.atoms_by_name           = corpus.atoms_by_name           or {}
+	corpus.atom_views              = corpus.atom_views              or {}
+	corpus.atom_ctxs               = corpus.atom_ctxs               or {}
+	corpus.atom_phases             = corpus.atom_phases             or {}
+	corpus.atom_infos              = corpus.atom_infos              or {}
+	corpus.collisions              = corpus.collisions              or {}
+
+	-- Replace the existing corpus collections with empty tables so a re-run on the same corpus produces identical state (deterministic merge).
+	-- This is safe because M.run is the only writer to these tables within a single orchestrator invocation.
+	for _, key in ipairs({
+		"register_alias_registry", "type_name_registry", "binds_by_name",
+		"atoms_by_name", "atom_views", "atom_ctxs", "atom_phases",
+		"atom_infos", "collisions",
+	}) do
+		corpus[key] = {}
+	end
+
+	for _, src in ipairs(corpus.source_order or {}) do
+		local scan = src.scan
+		if scan then
+			local path = src.path
+			-- register_alias_registry: keyed by R_* alias ident.
+			-- Each AliasEntry carries `source_file` (set by scan_source to the path).
+			for name, entry in pairs(scan.register_alias_registry or {}) do
+				local site = build_site(entry.source_file or path, entry.source_line)
+				merge_named_with_sites(
+					corpus.register_alias_registry, name, entry, site,
+					corpus.collisions, "alias", alias_shape)
+			end
+
+			-- type_name_registry: keyed by type ident; covers Struct_/Enum_/typedef.
+			for name, entry in pairs(scan.type_name_registry or {}) do
+				local site = build_site(path, entry.source_line)
+				merge_named_with_sites(
+					corpus.type_name_registry, name, entry, site,
+					corpus.collisions, "type", type_shape)
+			end
+
+			-- binds_by_name: the Binds_* projection of Struct_ types.
+			-- Sources populate scan.binds[] (per-source array) with `{line, name, fields, body}`.
+			-- We merge by name (Binds_X) so cross-source Struct_(X) declarations can be coalesced or collided.
+			for _, bind_entry in ipairs(scan.binds or {}) do
+				local site = build_site(path, bind_entry.line)
+				merge_named_with_sites(
+					corpus.binds_by_name, bind_entry.name, bind_entry, site,
+					corpus.collisions, "binds", bind_shape)
+			end
+
+			-- atoms_by_name: MipsAtom_(name) + MipsAtomComp_(name) + MipsAtomComp_Proc_(name).
+			-- Each atom carries `{line, name, body, body_off, kind, raw_name, ...}`.
+			-- Duplicate atom names across sources are first-wins + collision; see the atom_infos block below for the evidence list.
+			for _, atom_entry in ipairs(scan.atoms or {}) do
+				local site = build_site(path, atom_entry.line)
+				merge_named_with_sites(
+					corpus.atoms_by_name, atom_entry.name, atom_entry, site,
+					corpus.collisions, "atom", atom_shape)
+			end
+
+			-- atom_views: keyed by atom_name; each carries `binds_name` + per-atom overrides.
+			for name, entry in pairs(scan.atom_views or {}) do
+				local site = build_site(path, entry.info_line)
+				merge_named_with_sites(
+					corpus.atom_views, name, entry, site,
+					corpus.collisions, "view", view_shape)
+			end
+
+			-- atom_ctxs: keyed by atom_name; each carries `rbind_atom`.
+			for name, entry in pairs(scan.atom_ctxs or {}) do
+				local site = build_site(path, entry.info_line)
+				merge_named_with_sites(
+					corpus.atom_ctxs, name, entry, site,
+					corpus.collisions, "ctx", ctx_shape)
+			end
+
+			-- atom_phases: keyed by phase label; each carries `atoms = [...]`.
+			-- The phase atoms list is set-shaped for the collision discipline (phase_shape sorts atoms before comparing).
+			for name, entry in pairs(scan.atom_phases or {}) do
+				local site = build_site(path, 0)
+				merge_named_with_sites(
+					corpus.atom_phases, name, entry, site,
+					corpus.collisions, "phase", phase_shape)
+			end
+
+			-- atom_infos: ALWAYS append every record in source/declaration order.
+			-- Duplicates are preserved so the annotation pass can flag them via `check_unique_annotation`;
+			-- The merge is purely order-preserving.
+			for _, info in ipairs(scan.atom_infos or {}) do
+				corpus.atom_infos[#corpus.atom_infos + 1] = info
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- M — module exports
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -1703,37 +2002,50 @@ local M = {}
 --- Walk each source once and attach the fat SourceScan payload to `src.scan`.
 --- No output files; this is a pure in-memory pre-processing pass.
 ---
---- Runs in 3 phases.
----   Pass 1a: `scan_source_pre_pass` over every source, populating the cross-source `ctx.shared._code_macros` AND `ctx.shared._code_macro_bodies` registries.
----             The bodies table holds the raw post-`=` text of every `#define R_*_Code` line (cross-source) so the chain walker can fall back when a 
----             sdefining `#define` lives in a different source than the chain call site.
----   Pass 1b:  Resolve every collected macro's chain using the bodies table as fallback.
----             This fills in `code_macros` entries whose defining source was scanned AFTER the call site 
----             (e.g. lottes_tape.h's `R_TapePtr_Code -> R_T8_Code` chain into mips.h's `R_T8_Code = 24`).
----   Pass 2:   The full `scan_source(source, source_file, code_macros, code_macro_bodies)` walk, which feeds `out._code_macros = ctx.shared._code_macros`
----             (and `out._code_macro_bodies = ctx.shared._code_macro_bodies`)
----             so the enum parser can resolve cross-source `R_*_Code` references and bare `R_*` symbols via the `_Code` registry fallback.
----   Strip:    `src.scan._code_macros` AND `src.scan._code_macro_bodies` are nilled before returning so downstream passes 
----             (annotation, components, offsets, dwarf_injection, etc.) don't see the private parse state.
+--- Runs in 5 phases.
+---   Resolve: Resolve the canonical source order from `ctx.shared.corpus.source_order`.
+---            The canonical corpus is the SOLE source of truth; no `ctx.sources` alias is consulted and no per-source fallback synthesis is performed.
+---   Pass 1a: `scan_source_pre_pass` over every source, populating LOCAL `code_macros` AND LOCAL `code_macro_bodies` tables.
+---            The bodies table holds the raw post-`=` text of every `#define R_*_Code` line (cross-source) 
+---            so the chain walker can fall back when the defining `#define` lives in a different source than the chain call site.
+---   Pass 1b: Resolve every collected macro's chain using the bodies table as fallback.
+---            This fills in `code_macros` entries whose defining source was scanned AFTER the call site (e.g. lottes_tape.h's `R_TapePtr_Code -> R_T8_Code` chain into mips.h's `R_T8_Code = 24`).
+---   Pass 2:  The full `scan_source(source, source_file, code_macros, code_macro_bodies)` walk per source. The per-source `src.scan` payload includes the source-local registries
+---            (register_alias_registry, type_name_registry, atom_views, atom_ctxs, atom_phases, binds, atoms, atom_infos, ...).
+---   Strip:   Strip `src.scan._code_macros`, `src.scan._code_macro_bodies`, and the `_source_file` pointer.
+---            The LOCAL tables `code_macros` and `code_macro_bodies` go out of scope here; they MUST NOT appear on `ctx.shared`, `ctx.shared.corpus`, or any `src.scan` after this point.
+---   Merge:   Iterate `ctx.shared.corpus.source_order` in declared order. For every source's local registry, first-wins lookup identity (entry from the first declaration site becomes the canonical corpus entry);
+---            identical shapes coalesce by appending the declaration site; conflicting shapes keep the first lookup entry and append ONE typed collision record with shape diff.
+---            Populate `register_alias_registry`, `type_name_registry`, `binds_by_name`, `atoms_by_name`, `atom_views`, `atom_ctxs`, `atom_phases`.
+---            `atom_infos` ALWAYS appends every record (preserving source order + duplicates for annotation evidence).
+---
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
-	-- Initialize the cross-source code-macro + body registries in ctx.shared.
-	-- (Pass 1a writes into both; pass 1b reads from both; pass 2 reads both.)
-	ctx.shared                       = ctx.shared or {}
-	ctx.shared._code_macros          = ctx.shared._code_macros or {}
-	ctx.shared._code_macro_bodies    = ctx.shared._code_macro_bodies or {}
-	local code_macros                = ctx.shared._code_macros
-	local code_macro_bodies          = ctx.shared._code_macro_bodies
+	-- The cross-source _code_macros / _code_macro_bodies tables are LOCAL to this run.
+	-- They are shared across source scans ONLY long enough to resolve cross-source R_*_Code chains, then DISCARDED. 
+	-- They MUST NOT appear on ctx.shared, ctx.shared.corpus, or any src.scan after
+	-- this function returns.
+	local code_macros       = {}
+	local code_macro_bodies = {}
+
+	-- Resolve the canonical source list. The corpus owns the authoritative source_order; no legacy alias is consulted and no per-source fallback synthesis is performed.
+	-- A context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus message so callers migrate to the canonical context (no production compatibility layer).
+	ctx.shared = ctx.shared or {}
+	local corpus = ctx.shared.corpus
+	if not corpus or type(corpus.source_order) ~= "table" then
+		error("scan_source.run requires ctx.shared.corpus.source_order (the canonical corpus is the source of truth; no per-source fallback is supported)", 0)
+	end
+	local sources = corpus.source_order
 
 	-- Pass 1a: collect `_code_macros` + `_code_macro_bodies` across ALL sources.
-	for _, src in ipairs(ctx.sources) do
+	for _, src in ipairs(sources) do
 		scan_source_pre_pass(src.text, code_macros, code_macro_bodies)
 	end
 
 	-- Pass 1b: resolve every collected macro's chain with cross-source fallback.
 	-- The bodies table was populated for every `#define R_*_Code` line in pass 1a;
-	-- this iteration finishes the chain even when the chain hops span sources
+	-- This iteration finishes the chain even when the chain hops span sources
 	-- (e.g. R_TapePtr_Code -> R_T8_Code -> 24 spans lottes_tape.h into mips.h).
 	-- Same `code_macros` table is shared with pass 2 below.
 	for macro_name, _ in pairs(code_macro_bodies) do
@@ -1745,28 +2057,33 @@ function M.run(ctx)
 		end
 	end
 
-	-- Pass 2: run the full scan with the shared `_code_macros` + `_code_macro_bodies` 
-	-- so the enum parser can resolve cross-source `R_*_Code` references and bare `R_*` symbols via the `_Code` registry fallback.
-	for _, src in ipairs(ctx.sources) do
+	-- Pass 2: run the full scan with the shared `_code_macros` + `_code_macro_bodies` so the enum parser can resolve cross-source
+	-- `R_*_Code` references and bare `R_*` symbols via the `_Code` registry fallback.
+	-- The private `_code_macros` / `_code_macro_bodies` / `_source_file` strip is midway through `source_order`.
+	-- Must not leave earlier sources leaking the private parse state, because a separate post-loop would not run when an exception propagates out of pass 2.
+	for _, src in ipairs(sources) do
 		src.scan = scan_source(src.text, src.path, code_macros, code_macro_bodies)
-		-- Pre-tokenize each atom body once (plex: single source of truth).
-		-- Downstream passes (offsets, word-counts, components, static-analysis) read from
-		-- `atom.body_tokens` instead of calling `split_top_level_commas` / `tokenize_body` independently.
-		-- The tokens are memoized in duffle.lua's cache, so re-access is O(1).
-		for _, atom in ipairs(src.scan.atoms)           do atom.body_tokens = duffle.tokenize_body(atom.body) end
-		for _, atom in ipairs(src.scan.raw_atoms or {}) do atom.body_tokens = duffle.tokenize_body(atom.body) end
-	end
-
-	-- Strip `_code_macros` + `_code_macro_bodies` (and the convenience `_source_file` pointer)
-	-- before returning so downstream passes don't see private parse state.
-	for _, src in ipairs(ctx.sources) do
+		-- Strip the three private fields immediately so a later fatal source does not leave this source leaking parse state.
+		-- The shared `code_macros` / `code_macro_bodies` locals remain in the outer scope and keep their contents for subsequent sources.
 		if src.scan then
 			src.scan._code_macros       = nil
 			src.scan._code_macro_bodies = nil
 			src.scan._source_file       = nil
 		end
+		-- Pre-tokenize each atom body once (plex: single source of truth).
+		-- Downstream passes (offsets, word-counts, components, static-analysis) read from `atom.body_tokens` instead of calling `split_top_level_commas` / `tokenize_body` independently.
+		-- The tokens are memoized in duffle.lua's cache, so re-access is O(1).
+		for _, atom in ipairs(src.scan.atoms)           do atom.body_tokens = duffle.tokenize_body(atom.body) end
+		for _, atom in ipairs(src.scan.raw_atoms or {}) do atom.body_tokens = duffle.tokenize_body(atom.body) end
 	end
 
+	-- Merge per-source scans into the canonical corpus registries.
+	-- First-wins lookup identity + collision discipline (see merge_corpus_registries).
+	-- The corpus is always present; no conditional / fallback path.
+	merge_corpus_registries(corpus)
+
+	-- code_macros and code_macro_bodies go out of scope here; their references are not captured on corpus, ctx.shared, or any src.scan.
+	-- The Lua GC reclaims them on M.run return.
 	return { outputs = {}, errors = {}, warnings = {} }
 end
 

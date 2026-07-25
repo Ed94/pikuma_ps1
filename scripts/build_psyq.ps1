@@ -81,19 +81,6 @@ $path_psyq          = join-path $path_toolchain  'psyq-4_7'
 $path_psyq_iwyu     = join-path $path_toolchain  'psyq_iwyu'
 $path_psyq_imyu_inc = join-path $path_psyq_iwyu  'include'
 
-function Get-SourceFiles { param([Parameter(Mandatory=$true)] [string[]]$paths, [Parameter(Mandatory=$true)] [string[]]$extensions)
-	$files = @()
-	foreach ($p in $paths) {
-		if (-not (test-path $p)) { continue }
-		foreach ($ext in $extensions) {
-			Get-ChildItem -Path $p -File -Recurse -Filter "*$ext" -ErrorAction SilentlyContinue | ForEach-Object {
-				$files += $_.FullName
-			}
-		}
-	}
-	return ($files | Sort-Object -Unique)
-}
-
 function assemble-unit { param(
 	[string]  $unit,
 	[string]  $link_module,
@@ -243,6 +230,52 @@ function make-binary { param([string]$elf, [string]$exe)
 	if ($LASTEXITCODE -ne 0) { Write-Error "Objcopy failed. Aborting."; exit 1 }
 }
 
+function ps1-meta { param(
+		[string]$unity_root,
+		[string[]]$sources,
+		[Parameter(Mandatory=$true)][string]$metadata,
+		[string]$out_root = (join-path $path_build 'gen'),
+		[string[]]$passes = @('--pre-link'),
+		[string[]]$extra_args = @()
+	)
+	# `--unity-root` and `--source` are
+	# mutually exclusive. Exactly one of `$unity_root` / `$sources` must
+	# be supplied; the other must be absent.
+	if ($null -ne $unity_root -and $unity_root -ne '') 
+	{
+		if ($null -ne $sources -and $sources.Count -gt 0) {
+			write-error 'ps1-meta: -unity_root and -sources are mutually exclusive'
+			exit 2
+		}
+	} 
+	elseif ($null -eq $sources -or $sources.Count -eq 0) {
+		write-error 'ps1-meta: either -unity_root <file> or -sources <file...> is required'
+		exit 2
+	}
+
+	$script = join-path $path_scripts 'ps1_meta.lua'
+	$input_summary = if ($null -ne $unity_root -and $unity_root -ne '') {
+		"unity=$unity_root"
+	}
+	else {
+		"$($sources.Count) source(s)"
+	}
+	write-host "ps1-meta  $input_summary, passes=$($passes -join ',')" ` -ForegroundColor Magenta
+
+	$arg_list = @($passes) + @('--metadata', $metadata) + @('--out-root', $out_root) + @($extra_args)
+	if ($null -ne $unity_root -and $unity_root -ne '') {
+		$arg_list += @('--unity-root', $unity_root)
+	}
+	else {
+		foreach ($s in $sources) { $arg_list += @('--source', $s) }
+	}
+	& luajit $script @arg_list
+	if ($LASTEXITCODE -ne 0) {
+		write-error "ps1-meta failed (exit $LASTEXITCODE). Aborting."
+		exit $LASTEXITCODE
+	}
+}
+
 function build-hello_psyqo {
 	$includes += @()
 
@@ -317,34 +350,16 @@ function build-graphis_hello {
 }
 # build-graphis_hello
 
-function ps1-meta { param(
-		[Parameter(Mandatory=$true)][string[]]$sources,
-		[Parameter(Mandatory=$true)][string]$metadata,
-		[string]$out_root = (join-path $path_build 'gen'),
-		[string[]]$passes = @('--pre-link'),
-		[string[]]$extra_args = @()
-	)
-	$script = join-path $path_scripts 'ps1_meta.lua'
-	write-host "ps1-meta  $($sources.Count) source(s), passes=$($passes -join ',')" ` -ForegroundColor Magenta
-	$arg_list = @($passes) + @('--metadata', $metadata) + @('--out-root', $out_root) + @($extra_args)
-	foreach ($s in $sources) { $arg_list += @('--source', $s) }
-	& luajit $script @arg_list
-	if ($LASTEXITCODE -ne 0) {
-		write-error "ps1-meta failed (exit $LASTEXITCODE). Aborting."
-		exit $LASTEXITCODE
-	}
-}
-
 function build-gte_hello {
 	$includes += @()
 
 	$path_module        = join-path $path_code   'gte_hello'
 	$path_duffle        = join-path $path_code   'duffle'
 	$path_atom_metadata = join-path $path_duffle 'word_count.metadata.h'
+	$path_build_gen     = join-path $path_build   'gen'
 
-	$source_dirs  = @($path_duffle, $path_module)
-	$atom_sources = Get-SourceFiles -paths $source_dirs -extensions @('.h', '.c')
-	ps1-meta -sources $atom_sources -metadata $path_atom_metadata -out_root (join-path $path_build 'gen')
+	$src_c = join-path $path_module 'hello_gte.c'
+	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen
 
 	$assemble_args = @()
 	$assemble_args += $f_debug
@@ -360,7 +375,6 @@ function build-gte_hello {
 
 	# assemble-unit $src_asm $module_asm $includes $assemble_args
 
-	$src_c    = join-path $path_module 'hello_gte.c'
 	$module_c = join-path $path_build  'hello_gte_c.o'
 
 	$compile_args = @()
@@ -386,27 +400,17 @@ function build-gte_hello {
 	make-binary $elf $exe
 
 	# Post-link: gdb-runtime + dwarf-injection in a single Lua invocation (one luajit cold start).
-	ps1-meta -sources $atom_sources -metadata $path_atom_metadata `
-		-out_root (join-path $path_build 'gen') `
-		-passes @('--post-link') `
-		-extra_args @('--elf', $elf)
+	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen -passes @('--post-link') ` -extra_args @('--elf', $elf)
 
-	# F' + G' splice: collapse 9 objcopy subprocess invocations into 3.
-	# - 1 call: 3x --update-section for F' (line / aranges / rnglists)
-	# - 1 call: 3x --update-section for G' (info / abbrev / str)
-	# - 1 call: 2x --add-section for G' (loc / loclists — these don't exist in the source ELF)
-	# - 1 call: 1x --set-section-flags (.rodata / .data enable code flag)
-	# = 4 objcopy calls (was 9; saved 5 spawns).
-	$dwarfLineBin     = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_line.bin'
-	$dwarfArangesBin  = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_aranges.bin'
-	$dwarfRnglistsBin = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_rnglists.bin'
+	$dwarfLineBin     = join-path $path_build_gen 'hello_gte.dwarf_line.bin'
+	$dwarfArangesBin  = join-path $path_build_gen 'hello_gte.dwarf_aranges.bin'
+	$dwarfRnglistsBin = join-path $path_build_gen 'hello_gte.dwarf_rnglists.bin'
 	$injectElf        = join-path $path_build 'hello_gte.dwarf-injected.elf'
 	if ((Test-Path $dwarfLineBin) -and (Test-Path $dwarfArangesBin) -and (Test-Path $dwarfRnglistsBin))
 	{
 		Write-Host "[build] DWARF-injecting $elf -> $injectElf"
 		Copy-Item -LiteralPath $elf -Destination $injectElf -Force
-
-		# Single objcopy call: 3x --update-section for F' (line, aranges, rnglists).
+		# Objcopy call: 3x --update-section for (line, aranges, rnglists).
 		$f_args = @(
 			"--update-section=.debug_line=$dwarfLineBin",
 			"--update-section=.debug_aranges=$dwarfArangesBin",
@@ -419,12 +423,11 @@ function build-gte_hello {
 			return;
 		}
 
-		# G' 5-section splice: 3 update-section (info / abbrev / str) + 2 add-section (loc / loclists).
-		$dwarfInfoBin     = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_info.bin'
-		$dwarfAbbrevBin   = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_abbrev.bin'
-		$dwarfStrBin      = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_str.bin'
-		$dwarfLocBin      = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_loc.bin'
-		$dwarfLoclistsBin = join-path (join-path $path_build 'gen') 'hello_gte.dwarf_loclists.bin'
+		$dwarfInfoBin     = join-path $path_build_gen 'hello_gte.dwarf_info.bin'
+		$dwarfAbbrevBin   = join-path $path_build_gen 'hello_gte.dwarf_abbrev.bin'
+		$dwarfStrBin      = join-path $path_build_gen 'hello_gte.dwarf_str.bin'
+		$dwarfLocBin      = join-path $path_build_gen 'hello_gte.dwarf_loc.bin'
+		$dwarfLoclistsBin = join-path $path_build_gen 'hello_gte.dwarf_loclists.bin'
 		$g_args = @(
 			"--update-section=.debug_info=$dwarfInfoBin",
 			"--update-section=.debug_abbrev=$dwarfAbbrevBin",
@@ -441,7 +444,7 @@ function build-gte_hello {
 
 		# Baked atoms execute from RAM but are emitted as C data arrays, so their ELF sections lack SHF_EXECINSTR.
 		# GDB discards line rows for non-code sections. Mark only the debug-copy sections executable.
-		# The shipping ELF and PS-EXE remain byte/flag unchanged.
+		# The original ELF and PS-EXE remain byte/flag unchanged.
 		& $Objcopy `
 			--set-section-flags ".rodata=alloc,load,readonly,code,contents" `
 			--set-section-flags ".data=alloc,load,data,code,contents" `
@@ -449,7 +452,8 @@ function build-gte_hello {
 		if ($LASTEXITCODE -ne 0) {
 			Write-Warning "[build] atom-section flag update failed (exit $LASTEXITCODE); removing $injectElf"
 			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
-		} else {
+		} 
+		else {
 			Write-Host "[build] DWARF-injected ELF: $injectElf"
 		}
 	}

@@ -4,8 +4,8 @@
 ---
 --- **Architecture**:
 ---   - **PASSES table** — declarative dep graph (data, not code).
----   - **FLAG_HANDLERS table** — per-flag CLI dispatchers (handler-map pattern; replaces an 8-way if/elseif chain).
----   - **parse_args** → **build_ctx** (just opens + reads source files; no inline scanning) → **topo_sort** → **dispatch_passes**.
+---   - **FLAG_HANDLERS table** — maps CLI flags to handlers.
+---   - **parse_args** → **build_ctx** (resolves unity/direct includes or exact sources; no semantic scanning) → **topo_sort** → **dispatch_passes**.
 ---   - The first pass in the dep graph is `scan-source` (see `passes/scan_source.lua`).
 ---     It calls `duffle.scan_source` once per source to produce the fat `SourceScan` payload, which is attached to each `src.scan`. 
 ---     Every other pass that reads source structure depends on `scan-source` and consumes `src.scan` as a read-only. 
@@ -18,13 +18,9 @@
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Bootstrap: load `duffle_paths.lua` via this script's own path.
--- Use `arg[0]` when this file is the entry script (`arg[0]` ends in
--- "ps1_meta.lua"); fall back to `debug.getinfo(1, "S").source` when this
--- file is being dofile()'d or require()'d (in which case `arg[0]` is the
--- *caller's* path, not ours).
---
--- That single statement: (a) sets `package.path` + `package.cpath`
--- (via cached `git rev-parse`), (b) at the bottom returns `require("duffle")`.
+-- Use `arg[0]` when this file is the entry script (`arg[0]` ends in "ps1_meta.lua");
+-- fall back to `debug.getinfo(1, "S").source` when this file is being dofile()'d or require()'d (in which case `arg[0]` is the *caller's* path, not ours).
+-- That single statement: (a) sets `package.path` + `package.cpath` (via cached `git rev-parse`), (b) at the bottom returns `require("duffle")`.
 -- So the dofile's return value is the duffle module.
 local _is_entry_script = arg and arg[0] and arg[0]:match("ps1_meta%.lua$") ~= nil
 local _bootstrap_src
@@ -81,12 +77,11 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 --- @field basename string  -- filename without extension
 
 --- @class PassCtx
---- @field sources            SourceFile[]           -- all source files in the build
 --- @field metadata_path      string                 -- path to word_count.metadata.h
 --- @field shared             table                  -- cross-pass shared state
---- @field shared.word_counts table<string, integer> -- populated by word-counts pass
+--- @field shared.corpus      table                  -- canonical authored-source/project projection
 --- @field out_root           string                 -- output root (e.g. "build/gen")
---- @field project_root       string                 -- project root (e.g. "code/")
+--- @field project_root       string                 -- PS1 repository root
 --- @field upstream           table<string, table>   -- per-pass output accumulator
 --- @field flags              table                  -- CLI flags + per-pass stash
 --- @field dry_run            boolean                -- if true, compute but don't write
@@ -106,13 +101,14 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 --- @field warnings Finding[]         -- informational
 
 --- @class ParsedArgs
---- @field requested_set string[]  -- pass names to run (explicit --all expanded)
---- @field sources       string[]  -- --source values
---- @field metadata      string    -- --metadata value
---- @field out_root      string    -- --out-root value (default "build/gen")
---- @field project_root  string    -- --project-root value (default dirname(metadata))
---- @field dry_run       boolean   -- if true, compute but don't write
---- @field verbose       boolean   -- if true, log diagnostic info
+--- @field requested_set string[]   -- pass names to run (explicit --all expanded)
+--- @field sources       string[]   -- exact --source values, retained in CLI order
+--- @field unity_root    string|nil -- --unity-root value; mutually exclusive with sources
+--- @field metadata      string     -- --metadata value
+--- @field out_root      string     -- --out-root value (default "build/gen")
+--- @field project_root  string     -- PS1 repository root (derived from metadata by default)
+--- @field dry_run       boolean    -- if true, compute but don't write
+--- @field verbose       boolean    -- if true, log diagnostic info
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PASSES Table
@@ -145,6 +141,13 @@ local PASSES = {
 		desc   = "Emit mac_X macros from MipsAtomComp_ declarations",
 		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.macs.h" } },
 	},
+	["emission-model"] = {
+		module = "passes.emission_model",
+		kind   = "validation",
+		deps   = {"components"},
+		desc   = "Build canonical per-atom words, markers, and invocation ancestry",
+		out    = {},
+	},
 	annotation = {
 		module = "passes.annotation",
 		kind   = "validation",
@@ -158,7 +161,7 @@ local PASSES = {
 	offsets = {
 		module = "passes.offsets",
 		kind   = "header-output",
-		deps   = {"scan-source", "word-counts", "components"},
+		deps   = {"scan-source", "word-counts", "components", "emission-model"},
 		groups = { "pre-link" },
 		desc   = "Compute branch offsets for atom_label / atom_offset",
 		out    = { { kind = "header", path_template = "<source_dir>/gen/<basename>.offsets.h" } },
@@ -169,14 +172,14 @@ local PASSES = {
 		-- the orchestrator does NOT exit non-zero on these findings (see PASS_KIND_STOP_ON_ERROR).
 		-- Report severity is independent from process exit policy.
 		kind   = "diagnostic",
-		deps   = {"scan-source", "word-counts", "components"},
+		deps   = {"scan-source", "word-counts", "components", "emission-model"},
 		desc   = "Static analysis: GTE pipeline-fill, mac_yield uniformity, ABI handoff, GPU port-store shape, per-atom cycle budget, type consistency",
 		out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } },
 	},
 	["atoms-source-map"] = {
 		module = "passes.atoms_source_map",
 		kind   = "header-output",
-		deps   = {"word-counts", "components"},
+		deps   = {"word-counts", "components", "emission-model"},
 		desc   = "Emit gen/<basename>.atoms.sourcemap.txt (per-.word C source line map for gdb debugging) AND gen/<basename>.atoms.provenance.txt (per-.word provenance; each word tagged with its call-site file:line and, when emitted by a mac_X(...) component invocation, the component's definition file:line). Consumed by passes/dwarf_injection.lua to synthesize DW_TAG_inlined_subroutine instances for source-level Step Into on component invocations.",
 		out    = {
 			{ kind = "report", path_template = "<out_root>/<basename>.atoms.sourcemap.txt"   },
@@ -241,10 +244,8 @@ end
 local function request_roots_for_group(args, group_name)
 	local roots = roots_for_group(group_name)
 	if #roots == 0 then
-		error(string.format(
-			"ps1_meta: build-phase group %q has zero roots in PASSES; "
-			.. "check PASSES rows for a `groups = { %q }` field",
-			group_name, group_name))
+		error(string.format("ps1_meta: build-phase group %q has zero roots in PASSES; check PASSES rows for a `groups = { %q }` field"
+			, group_name, group_name))
 	end
 	for _, name in ipairs(roots) do
 		args.requested_set[#args.requested_set + 1] = name
@@ -255,8 +256,7 @@ end
 --
 -- Report severity is independent from process exit policy. A "diagnostic" pass still writes every `error`/`warning` finding into its report file,
 -- but `report_validation_errors` returns early for non-stopping kinds, so nothing is printed to stderr and the orchestrator does not exit non-zero.
---
--- Closed-set discipline: adding a new pass kind requires listing it here explicitly; an unknown kind must not silently fall back to "true".
+-- Adding a new pass kind requires listing it here explicitly; an unknown kind must not silently fall back to "true".
 local PASS_KIND_STOP_ON_ERROR = {
 	["shared"]        = false,
 	["header-output"] = true,
@@ -268,9 +268,8 @@ local PASS_KIND_STOP_ON_ERROR = {
 -- Closed set of CLI flags -> pass names.
 -- Per-pass flags (e.g. --word-counts) live here; phase flags (--pre-link, --post-link, --all)
 -- live in FLAG_HANDLERS because they own side effects or invoke group-derivation logic.
--- dwarf-injection is *also* a per-pass opt-in flag, but its selection + opt-in state are both owned by the
--- explicit FLAG_HANDLERS entry below (it sets args.flags.dwarf_injection and appends "dwarf-injection" to requested_set),
--- so it is intentionally absent from this table.
+-- dwarf-injection is *also* a per-pass opt-in flag, but its selection + opt-in state are both owned by the explicit FLAG_HANDLERS entry below
+-- (it sets args.flags.dwarf_injection and appends "dwarf-injection" to requested_set), so it is intentionally absent from this table.
 local PASS_FLAG_TO_NAME = {
 	["--word-counts"]       = "word-counts",
 	["--components"]        = "components",
@@ -297,7 +296,7 @@ end
 
 -- Per-flag handlers. Each handler takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it). 
 -- Returning nil + os.exit() handles termination flags (--help). 
--- This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep and made the dispatch logic hard to scan.
+
 local FLAG_HANDLERS = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -336,10 +335,14 @@ PASS_FLAGS:
     --report              Render per-project summary
 
 COMMON_FLAGS:
-  --source FILE         Source file to process (repeatable)
+  --unity-root FILE     Unity source root: load root + direct quoted authored
+                        includes only. Mutually exclusive with --source.
+  --source FILE         Exact source file to process (repeatable, never expands
+                        includes). Mutually exclusive with --unity-root.
   --metadata PATH       Path to metadata.h (required)
   --out-root DIR        Output root for reports (default: build/gen)
-  --project-root DIR    Project root for .macs.h scan (default: dirname(metadata))
+  --project-root DIR    PS1 repository root (default: derived from
+                        <repo>/code/duffle/word_count.metadata.h)
   --gdb-runtime         Also emit <out_root>/gdb_tape_atoms_runtime.gdb (post-link, requires --elf)
   --elf PATH            Path to linked .elf (for --gdb-runtime / --dwarf-injection)
   --dry-run             Print dep order (alphabetical); exit 0 without running
@@ -351,17 +354,36 @@ EXIT CODES:
   1  Validation errors found
   2  Metaprogram internal error
 
-EXAMPLE:
-  ps1_meta.lua --pre-link  --metadata metadata.h --source code/foo.c --source code/bar.c
-  ps1_meta.lua --post-link --metadata metadata.h --source code/foo.c --source code/bar.c --elf build/hello_gte.elf
+EXAMPLES:
+  ps1_meta.lua --pre-link  --metadata code/duffle/word_count.metadata.h --unity-root code/gte_hello/hello_gte.c
+  ps1_meta.lua --post-link --metadata code/duffle/word_count.metadata.h --unity-root code/gte_hello/hello_gte.c --elf build/hello_gte.elf
   ps1_meta.lua --all       --metadata metadata.h --source code/foo.c --source code/bar.c
 ]])
 end
 
+local FLAG_VALUE_NAMES = {
+	["--source"]       = "FILE",
+	["--unity-root"]   = "FILE",
+	["--metadata"]     = "PATH",
+	["--out-root"]     = "DIR",
+	["--project-root"] = "DIR",
+	["--elf"]          = "PATH",
+}
+
+local function require_flag_value(argv, arg_idx, flag)
+	local value      = argv[arg_idx + 1]
+	local next_known = type(value) == "string"
+		and (FLAG_HANDLERS[value] ~= nil or PASS_FLAG_TO_NAME[value] ~= nil)
+	if value == nil or next_known then
+		io.stderr:write("ps1_meta: " .. flag .. " requires "
+			.. FLAG_VALUE_NAMES[flag] .. "\n")
+		os.exit(EXIT_INTERNAL_ERROR)
+	end
+	return value, arg_idx + 1
+end
+
 -- Per-flag handlers. Each takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it).
 -- Termination flags like --help call os.exit() instead.
--- This replaces the 8-way `if/elseif/elseif...` chain that nested 4 levels deep and made the dispatch logic hard to scan.
---
 -- Populated AFTER print_help so the --help handler can reference it as an upvalue (Lua resolves locals at closure-call time, 
 -- but if the closure is defined before the local, it falls back to _G). 
 FLAG_HANDLERS["--help"] = function(args)
@@ -369,17 +391,46 @@ FLAG_HANDLERS["--help"] = function(args)
 	os.exit(0)
 end
 
-FLAG_HANDLERS["--dry-run"]      = function(args) args.dry_run = true end
-FLAG_HANDLERS["--verbose"]      = function(args) args.verbose = true end
-FLAG_HANDLERS["--source"]       = function(args, argv, arg_idx) args.sources[#args.sources + 1] = argv[arg_idx + 1]; return arg_idx + 1 end
-FLAG_HANDLERS["--metadata"]     = function(args, argv, arg_idx) args.metadata                   = argv[arg_idx + 1]; return arg_idx + 1 end
-FLAG_HANDLERS["--out-root"]     = function(args, argv, arg_idx) args.out_root                   = argv[arg_idx + 1]; return arg_idx + 1 end
-FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx) args.project_root               = argv[arg_idx + 1]; return arg_idx + 1 end
+FLAG_HANDLERS["--dry-run"] = function(args) args.dry_run = true end
+FLAG_HANDLERS["--verbose"] = function(args) args.verbose = true end
+FLAG_HANDLERS["--source"] = function(args, argv, arg_idx)
+	local value, value_idx = require_flag_value(argv, arg_idx, "--source")
+	args.sources[#args.sources + 1] = value
+	return value_idx
+end
+FLAG_HANDLERS["--unity-root"] = function(args, argv, arg_idx)
+	local value, value_idx = require_flag_value(argv, arg_idx, "--unity-root")
+	args.unity_root = value
+	return value_idx
+end
+FLAG_HANDLERS["--metadata"] = function(args, argv, arg_idx)
+	local value, value_idx = require_flag_value(argv, arg_idx, "--metadata")
+	args.metadata = value
+	return value_idx
+end
+FLAG_HANDLERS["--out-root"] = function(args, argv, arg_idx)
+	local value, value_idx = require_flag_value(argv, arg_idx, "--out-root")
+	args.out_root = value
+	return value_idx
+end
+FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx)
+	local value, value_idx = require_flag_value(argv, arg_idx, "--project-root")
+	args.project_root = value
+	return value_idx
+end
 
 -- Per-pass stash flags. Read by `passes/atoms_source_map.lua` to opt into the post-link gdb-runtime emission.
 -- Same shape as the existing per-flag handlers. mutates `args.flags` (which propagates into `ctx.flags`).
-FLAG_HANDLERS["--gdb-runtime"]  = function(args) args.flags                = args.flags or {}; args.flags.gdb_runtime = true end
-FLAG_HANDLERS["--elf"]          = function(args, argv, arg_idx) args.flags = args.flags or {}; args.flags.elf_path    = argv[arg_idx + 1]; return arg_idx + 1 end
+FLAG_HANDLERS["--gdb-runtime"] = function(args)
+	args.flags = args.flags or {}
+	args.flags.gdb_runtime = true
+end
+FLAG_HANDLERS["--elf"] = function(args, argv, arg_idx)
+	local value, value_idx = require_flag_value(argv, arg_idx, "--elf")
+	args.flags = args.flags or {}
+	args.flags.elf_path = value
+	return value_idx
+end
 -- Enable DWARF injection (default OFF). Opts in to the post-link pass and sets the flag in one shot.
 -- The explicit handler below owns both selection and opt-in state, so --dwarf-injection is intentionally absent from PASS_FLAG_TO_NAME.
 FLAG_HANDLERS["--dwarf-injection"] = function(args)
@@ -402,7 +453,7 @@ FLAG_HANDLERS["--post-link"]      = function(args)
 	request_roots_for_group(args, "post-link")
 end
 
--- (atom locals) is now consolidated into --dwarf-injection; no separate flag.
+-- `--dwarf-injection` also emits atom-local debug data.
 
 -- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set.
 FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
@@ -421,6 +472,7 @@ local function parse_args(argv)
 	local args = {
 		requested_set = {},
 		sources       = {},
+		unity_root    = nil,
 		metadata      = nil,
 		out_root      = DEFAULT_OUT_ROOT,
 		project_root  = nil,
@@ -448,21 +500,28 @@ local function parse_args(argv)
 	-- The first invocation of a build is always pre-link, so this avoids silently also invoking post-link work in builds without an ELF artifact.
 	if #args.requested_set == 0 then request_roots_for_group(args, "pre-link") end
 
-	-- Defaults: project_root = dirname(metadata).
-	if args.metadata and not args.project_root then
-		local d = duffle.dirname(args.metadata)
-		if   #d > 0 and (d:sub(-1) == "/" or d:sub(-1) == "\\") then
-			d = d:sub(1, -2)
-		end
-		args.project_root = duffle.dirname(d)
-	end
-
 	if not args.metadata then
 		io.stderr:write("ps1_meta: --metadata PATH is required\n")
 		os.exit(EXIT_INTERNAL_ERROR)
 	end
-	if #args.sources == 0 then
-		io.stderr:write("ps1_meta: at least one --source FILE is required\n")
+
+	-- `<repo>/code/duffle/word_count.metadata.h` is the canonical metadata location. 
+	-- `project_root` names `<repo>`; the resolver derives `<project_root>/code` separately.
+	if not args.project_root then
+		local metadata_dir = duffle.dirname(duffle.normalize_path(args.metadata))
+		local code_root    = duffle.dirname(metadata_dir)
+		args.project_root  = duffle.dirname(code_root)
+	else
+		args.project_root = duffle.normalize_path(args.project_root)
+	end
+
+	local has_unity = type(args.unity_root) == "string" and args.unity_root ~= ""
+	if has_unity and #args.sources > 0 then
+		io.stderr:write("ps1_meta: --unity-root FILE and --source FILE are mutually exclusive\n")
+		os.exit(EXIT_INTERNAL_ERROR)
+	end
+	if not has_unity and #args.sources == 0 then
+		io.stderr:write("ps1_meta: either --unity-root FILE or at least one --source FILE is required\n")
 		os.exit(EXIT_INTERNAL_ERROR)
 	end
 
@@ -485,56 +544,128 @@ end
 -- Build ctx from parsed args
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Build the PassCtx from parsed args. Reads each source file once at startup;
---- passes consume `src.text`, not the path (path is preserved for error reporting).
+--- Build the PassCtx from parsed args. Exact mode opens only the repeated `--source` inputs;
+--- unity mode delegates direct-include resolution to duffle.resolve_source_corpus`. 
+--- Scanning remains pass-owned (`src.scan`).
 --- @param args ParsedArgs
 --- @return PassCtx
 local function build_ctx(args)
-	local sources = {}
-	for _, path in ipairs(args.sources) do
-		-- lfs handles path metadata and directories, not file-content streams.
-		-- Keep this io.open local so this entry point preserves its tailored diagnostic and exit path below.
-		local  f = io.open(path, "r")
-		if not f then
-			io.stderr:write("ps1_meta: cannot open --source " .. path .. "\n")
+	local normalized_project_root = duffle.normalize_path(args.project_root)
+	local project_root            = normalized_project_root
+	local project_root_is_absolute = normalized_project_root:match("^%a:/")
+		or normalized_project_root:sub(1, 2) == "//"
+		or normalized_project_root:sub(1, 1) == "/"
+	if not project_root_is_absolute then
+		-- canonical_path_key validates ordinary relative paths and rejects
+		-- drive-relative paths before the legacy display-path helper is used.
+		duffle.canonical_path_key(normalized_project_root)
+		project_root = duffle.normalize_path(duffle.to_absolute_path(normalized_project_root))
+	else
+		-- Do not route POSIX/UNC/drive-absolute paths through to_absolute_path.
+		duffle.canonical_path_key(project_root)
+	end
+	local resolution
+	if args.unity_root then
+		local ok_resolve, resolved = pcall(duffle.resolve_source_corpus, {
+			unity_root   = args.unity_root,
+			project_root = project_root,
+		})
+		if not ok_resolve then
+			io.stderr:write("ps1_meta: cannot resolve --unity-root "
+				.. tostring(args.unity_root) .. ": " .. tostring(resolved) .. "\n")
 			os.exit(EXIT_INTERNAL_ERROR)
 		end
-		local text = f:read("*a")
-		f:close()
+		resolution = resolved
+	else
+		local source_order    = {}
+		local sources_by_path = {}
+		local resolver = {
+			resolved = {},
+			skipped  = {},
+			shadowed = {},
+		}
+		for _, input_path in ipairs(args.sources) do
+			local path = duffle.normalize_path(input_path)
+			local key_ok, key_or_error = pcall(duffle.canonical_path_key, path)
+			if not key_ok then
+				error("ps1_meta: invalid --source " .. input_path .. ": "
+					.. tostring(key_or_error), 0)
+			end
+			local file = io.open(path, "r")
+			if not file then
+				io.stderr:write("ps1_meta: cannot open --source " .. input_path .. "\n")
+				os.exit(EXIT_INTERNAL_ERROR)
+			end
+			local text = file:read("*a")
+			file:close()
 
-		local dir      = duffle.dirname(path)
-		local basename = duffle.basename_no_ext(path)
-		if #dir > 0 and (dir:sub(-1) == "/" or dir:sub(-1) == "\\") then
-			dir = dir:sub(1, -2)
+			local source = {
+				path     = path,
+				text     = text,
+				dir      = duffle.dirname(path),
+				basename = duffle.basename_no_ext(path),
+			}
+			source_order[#source_order + 1] = source
+			local key = key_or_error
+			if not sources_by_path[key] then sources_by_path[key] = source end
+			resolver.resolved[#resolver.resolved + 1] = {
+				include_path  = path,
+				include_text  = nil,
+				root_source   = nil,
+				root_line     = nil,
+				candidate_a   = path,
+				candidate_b   = nil,
+				selected_path = path,
+				disposition   = "exact",
+			}
 		end
-
-		-- src.scan is populated by the "scan-source" pass (the first pass in the dep graph).
-		-- build_ctx just opens + reads the files; the scan itself happens in the pass module, not inline in the orchestrator.
-		sources[#sources + 1] = {
-			path     = path,
-			text     = text,
-			dir      = dir,
-			basename = basename,
+		resolution = {
+			unity_root      = nil,
+			project_root    = project_root,
+			code_root       = duffle.normalize_path(project_root .. "/code"),
+			source_order    = source_order,
+			sources_by_path = sources_by_path,
+			sources_by_dir  = duffle.group_sources_by_dir(source_order),
+			resolver        = resolver,
 		}
 	end
 
-	-- Pre-compute the per-directory grouping once (Fleury: expose structure).
-	-- Three passes (annotation, report, static-analysis) call group_sources_by_dir with the same ctx.sources;
-	-- computing it here and stashing on ctx.by_dir eliminates 2 redundant calls.
-	local by_dir = duffle.group_sources_by_dir(sources)
-
-	return {
-		sources       = sources,
-		by_dir        = by_dir,
+	local corpus = {
+		unity_root              = resolution.unity_root,
+		project_root            = resolution.project_root,
+		code_root               = resolution.code_root,
+		source_order            = resolution.source_order,
+		sources_by_path         = resolution.sources_by_path,
+		sources_by_dir          = resolution.sources_by_dir,
+		atoms_by_name           = {},
+		binds_by_name           = {},
+		atom_infos              = {},
+		register_alias_registry = {},
+		type_name_registry      = {},
+		atom_views              = {},
+		atom_ctxs               = {},
+		atom_phases             = {},
+		word_counts             = {},
+		components              = {},
+		component_body_index    = {},
+		collisions              = {},
+		resolver                = resolution.resolver,
+	}
+	local ctx = {
 		metadata_path = args.metadata,
-		shared        = {},
+		shared        = { corpus = corpus },
 		upstream      = {},
 		out_root      = args.out_root,
-		project_root  = args.project_root,
+		project_root  = corpus.project_root,
 		flags         = args.flags or {},
 		dry_run       = args.dry_run,
 		verbose       = args.verbose,
 	}
+
+	-- Source records and directory buckets are owned by the corpus.
+	-- Consumers read `corpus.source_order` and `corpus.sources_by_dir` directly.
+	-- The corpus is the sole source of truth for source records and module grouping; `ctx` only holds per-pass execution state.
+	return ctx
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -543,14 +674,14 @@ end
 
 --- Topologically sort the requested pass set, augmented with all transitive deps.
 --- Detects cycles and errors out with details.
---- @param passes table<string, PassDescriptor>
+--- @param passes        table<string, PassDescriptor>
 --- @param requested_set string[]
 --- @return string[]  -- execution order
 ---
---- Implementation note: the 4 algorithm phases (dep-closure, in-degree, ready-queue, sort) are inlined as 3 small blocks within this function. 
---- Each was a 1-caller helper; the 2-caller rule doesn't apply, so inlining produces a single readable function
+--- Dependency closure, in-degree calculation, queue seeding, and sorting are local blocks.
+--- Keeping these blocks local makes the topological sort self-contained.
 local function topo_sort(passes, requested_set)
-	-- Phase 1: dep-closure. Include every pass name transitively required by `requested_set`.
+	-- Dependency closure: include every pass transitively required by `requested_set`.
 	local needed = {}
 	for _, name in ipairs(requested_set) do needed[name] = true end
 	local changed = true
@@ -570,7 +701,7 @@ local function topo_sort(passes, requested_set)
 		end
 	end
 
-	-- Phase 2: in-degrees for Kahn's algorithm. For each pass in `needed`, the number of its deps that are also in `needed`.
+	-- In-degree calculation: count each needed pass's needed dependencies.
 	local in_degree = {}
 	for name, _ in pairs(needed) do in_degree[name] = 0 end
 	for name, _ in pairs(needed) do
@@ -581,14 +712,14 @@ local function topo_sort(passes, requested_set)
 		end
 	end
 
-	-- Phase 3: seed the ready queue with passes whose in-degree is 0, sorted alphabetically for deterministic order.
+	-- Ready-queue seeding: add zero-in-degree passes in deterministic order.
 	local ready = {}
 	for name, deg in pairs(in_degree) do
 		if deg == 0 then ready[#ready + 1] = name end
 	end
 	table.sort(ready)
 
-	-- Phase 4: drain the ready queue. For each popped pass, decrement the in-degree of every remaining pass that depended on it.
+	-- Ready-queue drain: decrement dependents when each pass is emitted.
 	-- Newly-zero-degree passes are inserted back into the ready queue (kept sorted).
 	local order = {}
 	while #ready > 0 do
@@ -629,29 +760,8 @@ end
 -- ASCII dep graph renderer (Decision 6 in the spec)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Topological dep-order printer (used by --dry-run).
----
---- ASCII art graph rendering was removed from this file.
---- Re-render the PASSES graph manually in `docs/guide_metaprogram_ssdl.md` if you need an updated visual;
---- the canonical ASCII view there is regenerated by hand whenever PASSES rows change.
--- ════════════════════════════════════════════════════════════════════════════
-local function render_dep_order(passes, closed)
-	local lines = {}
-	lines[#lines + 1] = "[ps1_meta] Resolved dependency order (closed under deps):"
-	for pass_idx, name in ipairs(closed) do
-		local p        = passes[name]
-		local deps_str = (#p.deps == 0) and "(no deps)" or
-			"(deps: " .. table.concat(p.deps, ", ") .. ")"
-		lines[#lines + 1] = string.format("  %d. %-22s %-45s [%s]",
-			pass_idx, name, deps_str, p.kind)
-	end
-	return table.concat(lines, "\n") .. "\n"
-end
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Topological dep-order printer (used by --dry-run).
---
--- ASCII art graph rendering was removed from this file.
 -- Re-render the PASSES graph manually in `docs/guide_metaprogram_ssdl.md` if you need an updated visual;
 -- The canonical ASCII view there is regenerated by hand whenever PASSES rows change.
 -- ════════════════════════════════════════════════════════════════════════════
@@ -669,54 +779,46 @@ local function render_dep_order(passes, closed)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Main orchestrator
+-- Main Orchestrator
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Push a pass's outputs + warnings into `ctx.upstream[name]` for downstream passes to consume.
--- @param ctx PassCtx
--- @param pass_name string
--- @param result PassResult
+--- (internal) Push a pass's outputs + warnings into `ctx.upstream[name]` for downstream passes to consume.
+--- @param ctx       PassCtx
+--- @param pass_name string
+--- @param result PassResult
 local function accumulate_pass_result(ctx, pass_name, result)
 	ctx.upstream[pass_name] = ctx.upstream[pass_name] or {}
-	for _, out in ipairs(result.outputs or {}) do
-		table.insert(ctx.upstream[pass_name], out)
-	end
-	for _, warn in ipairs(result.warnings or {}) do
-		table.insert(ctx.upstream[pass_name], warn)
-	end
+	for _, out  in ipairs(result.outputs  or {}) do table.insert(ctx.upstream[pass_name], out)  end
+	for _, warn in ipairs(result.warnings or {}) do table.insert(ctx.upstream[pass_name], warn) end
 end
 
--- (internal) If the pass's kind is in PASS_KIND_STOP_ON_ERROR and it reported errors, write each error to stderr.
--- Returns true if any validation errors were reported.
--- @param pass_name string
--- @param pass PassDescriptor
--- @param result PassResult
--- @return boolean
+--- (internal) If the pass's kind is in PASS_KIND_STOP_ON_ERROR and it reported errors, write each error to stderr.
+--- Returns true if any validation errors were reported.
+--- @param pass_name string
+--- @param pass      PassDescriptor
+--- @param result    PassResult
+--- @return boolean
 local function report_validation_errors(pass_name, pass, result)
 	local   has_errors = result.errors and #result.errors > 0
-	if not (has_errors and PASS_KIND_STOP_ON_ERROR[pass.kind]) then
-		return false
-	end
+	if not (has_errors and PASS_KIND_STOP_ON_ERROR[pass.kind]) then return false end
 	for _, e in ipairs(result.errors) do
-		io.stderr:write(string.format("[%s] line %d: %s\n",
-			pass_name, e.line or 0, e.msg or ""))
+		io.stderr:write(string.format("[%s] line %d: %s\n", pass_name, e.line or 0, e.msg or ""))
 	end
 	return true
 end
 
--- (internal) Run each pass in `order` in topological sequence.
--- @param ctx PassCtx
--- @param order string[]
--- @return boolean  -- true if any validation errors were reported
+--- (internal) Run each pass in `order` in topological sequence.
+--- @param ctx   PassCtx
+--- @param order string[]
+--- @return boolean  -- true if any validation errors were reported
 local function dispatch_passes(ctx, order)
-	ctx.shared = {}
+	ctx.shared = ctx.shared or {}
 	local had_errors = false
 	for _, pass_name in ipairs(order) do
 		local pass   = PASSES[pass_name]
-		io.stderr:write(string.format("[ps1_meta] %-22s running\n", pass_name))
+		-- io.stderr:write(string.format("[ps1_meta] %-22s running\n", pass_name))
 		local mod    = require(pass.module)
 		local result = mod.run(ctx)
-
 		accumulate_pass_result(ctx, pass_name, result)
 		if report_validation_errors(pass_name, pass, result) then
 			had_errors = true
@@ -755,14 +857,15 @@ local function main(argv)
 end
 
 -- Module export for in-process consumers (tests that dofile this script).
--- The closed dep-order printer + the canonical `PASSES` table are exposed so a test 
--- can observe the resolved dep order for synthetic PASSES tables without spawning a subprocess.
+-- The closed dep-order printer + the `PASSES` table are exposed so a test can observe the resolved dep order for synthetic PASSES tables without spawning a subprocess.
 -- The conditional `main(...)` call below only fires when this file is invoked as the entry script (arg[0] ends in "ps1_meta.lua");
 -- in dofile() mode (test's arg[0] does not match), main() is skipped and the chunk returns `_M` to the caller.
 local _M = {
 	render_dep_order         = render_dep_order,
 	PASSES                   = PASSES,
 	PASS_KIND_STOP_ON_ERROR  = PASS_KIND_STOP_ON_ERROR,
+	parse_args               = parse_args,
+	build_ctx                = build_ctx,
 }
 
 if arg and arg[0] and arg[0]:match("ps1_meta%.lua$") then

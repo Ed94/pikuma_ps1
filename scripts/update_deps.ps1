@@ -39,13 +39,7 @@ pop-location
 
 # ════════════════════════════════════════════════════════════════════════════
 # PCSX-Redux — built via MSBuild (VS2022)
-#
 # Requires: Visual Studio 2022 with the C++ desktop workload.
-# The .vcxproj files target platform toolset v145, but VS2022 ships v143;
-# we pass /p:PlatformToolset=v143 to retarget at build time (no file edits).
-# NuGet packages (glfw, luajit.native, libFFmpeg-lite, x64sentry) are
-# restored automatically by MSBuild on first build.
-#
 # Output: toolchain\pcsx-redux\vsprojects\x64\Debug\pcsx-redux.exe
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -65,8 +59,7 @@ $path_pcsx_sln = join-path $path_pcsx_redux 'vsprojects\pcsx-redux.sln'
 &	$msbuild_exe $path_pcsx_sln /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /m /v:minimal
 
 # Locate luajit via scoop. `luajit.exe` is on PATH via scoop's shim;
-# we use `scoop prefix` to find the install root for the include dir
-# (needed to compile lpeg against luajit's headers).
+# we use `scoop prefix` to find the install root for the include dir (needed to compile lpeg against luajit's headers).
 # If scoop or luajit is missing, fail fast with an actionable message.
 $luajit_prefix = & scoop prefix luajit 2>$null
 if (-not $luajit_prefix -or -not (Test-Path (Join-Path $luajit_prefix 'bin/luajit.exe'))) {
@@ -87,7 +80,6 @@ if (-not $lua_inc_dir) {
 # Generate lpeg.dll by compiling the 6 source files directly.
 # `gcc` is on PATH (scoop's shim puts it there).
 # The source files: lpcap.c lpcode.c lpcset.c lpprint.c lptree.c lpvm.c
-# (per the lpeg makefile — no `make.lua` template generator in this version).
 # Link against luajit's import library (`libluajit-5.1.a`) for the Lua C API symbols (lua_*, luaL_*).
 $luajit_lib_dir = Join-Path $luajit_prefix 'lib'
 $lpeg_sources = @('lpcap.c', 'lpcode.c', 'lpcset.c', 'lpprint.c', 'lptree.c', 'lpvm.c')
@@ -103,8 +95,6 @@ pop-location
 
 # ════════════════════════════════════════════════════════════════════════════
 # lfs (LuaFileSystem) — compiled from pcsx-redux's vendored luafilesystem source.
-# Used by word_count_eval.lua :: scan_dir for native directory enumeration (~2ms)
-# instead of spawning `dir /b /s` as a subprocess (~56ms).
 # Source: toolchain/pcsx-redux/third_party/luafilesystem/src/lfs.c
 # Output: toolchain/lfs/lfs.dll
 # ════════════════════════════════════════════════════════════════════════════
@@ -118,11 +108,6 @@ $lfs_dll_import = join-path $luajit_lib_dir 'libluajit-5.1.dll.a'
 
 # ════════════════════════════════════════════════════════════════════════════
 # OpenBIOS — built from the PCSX-Redux source tree via make + mipsel-none-elf
-#
-# OpenBIOS is an open-source PS1 BIOS implementation (no retail BIOS dump needed). 
-# It builds with the MIPS cross-toolchain (`mipsel-none-elf-gcc`, on PATH via the `mips` toolchain installer) 
-# + `make` (on PATH via scoop).
-#
 # Output: toolchain\pcsx-redux\src\mips\openbios\openbios.bin
 # ════════════════════════════════════════════════════════════════════════════
 

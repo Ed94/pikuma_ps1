@@ -1,40 +1,44 @@
 --- passes/static_analysis.lua — Per-atom static-analysis checks.
 ---
 --- Per-atom rules:
----   1. gte_write_retire: Every `gte_mv_to_data_r` / `gte_mv_to_ctrl_r` (CPU-to-COP2 write) must retire the documented slot count
----      (`duffle.COP2_WRITE_RETIRE_SLOTS`: 2 slots default, 3 slots for writes to `gte_cr_IRGB` / `gte_cr_ORGB`)
----      before any subsequent `gte_cmdw_*` consumes one of the command's input registers (`duffle.GTE_COMMAND_INPUTS`).
----      The check walks `atom.paths.word_events` (the semantic emitted-word stream). Every emitted machine word
----      (including CPU ALU, branch, GTE transfer, `nop`/`nop2` half, and `mac_X(...)`-expanded words) counts as one retired slot.
----   2. cop2_gpr_load_delay: Every `gte_mv_from_data_r` / `gte_mv_from_ctrl_r` (COP2-to-GPR read) 
----      requires 1 retired slot before the destination GPR can be used as an operand of the next instruction.
----      The check walks `atom.paths.word_events` and consults `duffle.OPERAND_READ_POSITIONS` to classify which emitted tokens read each GPR operand position.
----      Branch delay slots are out of scope (separate MIPS control-flow concern; tracked by check #3 below).
----   3. control_transfer_delay_slot_use: For every emitted branch/jump/call encoder in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`
+---   1. transfer_hazards: A single forward walker (`analyze_hardware_relations`) reads `atom.paths.word_events`
+---      once per atom. For each emitted word event it (a) inspects pending CPU/COP0/COP2/GTE relations against
+---      the event as CONSUMER (recording a hazard on `atom.paths.hazards` when the producer→consumer gap is below
+---      the required retire-slot count), (b) applies the event's GPR value effects (`duffle.INSTRUCTION_GPR_EFFECTS`)
+---      to `atom.paths.forward_state.gpr_values`, applies bounded constant propagation, and stages
+---      matching relation rows as PRODUCERS (with `destination_match` filters, e.g. for the IRGB fan-out). The
+---      `transfer_hazards` CHECK_RULES reader projects `atom.paths.hazards` into per-atom findings without
+---      re-walking source. The walker runs once per atom before the per-atom dispatch; the reader runs inside
+---      the same dispatch.
+---   2. control_transfer_delay_slot_use: For every emitted branch/jump/call encoder in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`
 ---      (the six `branch_*` encoders plus `jump` / `jump_reg` / `jump_link` / `call_reg` / `call_addr`),
 ---      inspect the next emitted event in `atom.paths.word_events`.
 ---      Emit an `info`-severity finding when the successor is `nop` or absent (the next emitted word IS the hardware delay slot).
 ---      `jump_reg(R_AtomJmp)` is suppressed by policy (the fixed `mac_yield()` handshake).
 ---      `nop2` needs no special case: `expand_word_events` emits two `nop` events for it, so the first expansion is the hardware delay slot.
 ---      `atom_label` also needs no special case (zero events).
----   4. mac_yield uniformity: Every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
----   5. Binding handoff: Every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
----   6. GPU Port-Store Shape: Per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` + `mac_insert_ot_tag_X` words
+---   3. mac_yield uniformity: Every atom body must contain exactly one `mac_yield()` call (control transfer pattern).
+---   4. Binding handoff: Every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
+---   5. GPU Port-Store Shape: Per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` + `mac_insert_ot_tag_X` words
 ---      must equal the GP0 cmd's expected packet size.
----   7. Per-Atom Cycle Budget: Sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
+---   6. Per-Atom Cycle Budget: Sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
 ---
 --- Per-source rules (registry-driven):
 ---   8. enum_alias_membership: Every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`, `atom_type(...)`, `atom_reads`, or `atom_writes`
----      must be in `scan.register_alias_registry`.
----   9. atom_type_consistency: Every `reg_type_overrides[R_X].type_name` must resolve in `scan.type_name_registry`.
----  10. binds_no_substruct_deref: Every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body must reference a leaf scalar 
+---      must be in `corpus.register_alias_registry`.
+---   9. atom_type_consistency: Every `reg_type_overrides[R_X].type_name` must resolve in `corpus.type_name_registry`.
+---  10. binds_no_substruct_deref: Every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body must reference a leaf scalar
 ---      (pointer-to-struct counts as leaf; nested struct members do NOT).
----  11. reads_writes_alias_membership: Distinct check name duplicating #8's reads/writes coverage so the report can attribute failures to a precedence class.
+---
+--- `enum_alias_membership` already iterates `ai.reads` and `ai.writes` against
+--- `corpus.register_alias_registry`, so a duplicate precedence-class check
+--- only produced duplicate findings. The CHECK_RULES row and the helper
+--- function are gone; no public/private surface retains that name.)
 ---
 --- Findings carry an explicit `kind` ("error" / "warning" / "info").
 --- The renderer maintains three independent severity collections; `info` is never folded into warnings.
 --- Scan/cycle summary rows are kept in a separate `summaries` collection (rendered as trailing summary lines, not findings).
---- The report header now includes `Info: N` alongside Findings / Errors / Warnings, and a dedicated
+--- The report header includes `Info: N` alongside Findings / Errors / Warnings, and a dedicated
 --- `── Info` section renders finding-level info between `── Warnings` and the per-atom cycle counts.
 ---
 --- The orchestrator (`ps1_meta.lua`) wires this module in via the PASSES table:
@@ -119,7 +123,7 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field info     table[]   -- finding-level info (kind == "info"); distinct from per-source scanned/cycles summary rows
 
 --- @alias AtomName    string  -- lower_snake_case atom nameMacroName   string  -- lower_snake_case macro identifier
---- @alias CheckName   string  -- "gte_write_retire" | "cop2_gpr_load_delay" | "control_transfer_delay_slot_use" | "mac_yield_uniformity" | "abi_handoff" | "gpu_portstore_shape" | "per_atom_cycle_budget"
+--- @alias CheckName   string  -- "transfer_hazards" | "control_transfer_delay_slot_use" | "mac_yield_uniformity" | "abi_handoff" | "gpu_portstore_shape" | "per_atom_cycle_budget" | "enum_alias_membership" | "atom_type_consistency" | "binds_no_substruct_deref"
 
 --- @class AtomBody
 --- @field line     integer  -- source line of the atom declaration
@@ -159,7 +163,7 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --   ident         — the leading identifier (e.g. "load_word", "gte_cmdw_rtpt", "nop", "mac_yield")
 --   nop_words     — 0 / 1 / 2 (for "nop" / "nop2" / anything else)
 --   nop_prefix    — consecutive nop words ending just BEFORE this token (forward-pass pre-compute;
---                   replaces the backward walk in count_preceding_nops — O(N) instead of O(N²))
+--                   makes preceding-nop lookup O(N))
 --   is_yield      — true if this token is `mac_yield` or `mac_yield(...)`
 --   is_atom_label — true if this token is `atom_label(name)`; label_name has the name
 --   is_branch     — true if this token is `branch_*(...)`; branch_label has the label or false
@@ -276,209 +280,966 @@ local function classify_tokens(tokens)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #1: GTE CPU→C2 write retirement (producer/consumer scoreboard).
+-- Check #1: transfer-hazard analysis (forward walker + reader).
 --
--- Reads `atom.paths.word_events` (the semantic emitted-word stream from `duffle.expand_word_events`).
--- Every `gte_mv_to_data_r` / `gte_mv_to_ctrl_r` event stages a write into a pending-writes queue;
--- Every `gte_cmdw_*` event intersects its command input set against the still-pending queue.
--- A write that has not retired its documented slot count (`M.COP2_WRITE_RETIRE_SLOTS.cpu_to_cop2`, override for writes to gte_cr_IRGB / gte_cr_ORGB) is reported as an `error`.
+-- Single typed CPU/COP0/COP2/GTE relation analysis via the forward walker (`analyze_hardware_relations`).
+-- Hazards are projected into findings by the `transfer_hazards` CHECK_RULES reader (`check_transfer_hazards`).
 --
--- Convention: every emitted instruction slot — CPU ALU, branch, GTE transfer, GTE command, `nop`, `mask_upper` half, and every word expanded from a `mac_X(...)` component;
--- Counts as one retired slot.
--- This replaces the prior literal-NOP-prefix heuristic; the canonical `nop2` is the conservative fallback for callers that haven't modeled their producer/consumer pairs.
+-- The forward walker (`analyze_hardware_relations`) reads `atom.paths.word_events` once per atom.
+-- For every emitted word event it:
+--   1. Inspects current pending relations against the event as CONSUMER.
+--      A producer's destination is "consumed" by: 
+--        * a `gte_cmdw_*` whose command input set contains the destination (or any fan-out destination of an IRGB write); OR
+--        * any encoder whose `OPERAND_READ_POSITIONS` includes the GPR destination of an MFC2/CFC2/MFC0 relation.
+--      The consumer check computes `gap = consumer.word - producer.word - 1` and records a hazard on `atom.paths.hazards` when `gap < required`.
+--   2. Applies the event's GPR value effects (`duffle.INSTRUCTION_GPR_EFFECTS`) to `atom.paths.forward_state.gpr_values`.
+--      Unknown writers invalidate the destination GPR's lattice value to `{kind="unknown"}`.
+--      The lattice is closed: `{kind="unknown"}` and `{kind="constant", value=<U4>}`. 
+--      Bounded constant propagation handles load_upper_i / add_ui / or_i / and_i / xor_i + their self variants) on top of the same forward walker;
+--      The writer invalidation is the conservative default.
+--   3. Stages any relation rows whose `token` matches the event as PRODUCERS.
+--      The destination operand is `event.args[relation.writes.arg]`. 
+--      Rows with a `destination_match` filter are only staged when the destination operand equals the filter (e.g. C2_IRGB for the IRGB fan-out row).
+--      The MTC2 ordinary row and the MTC2-IRGB row are both inspected.
+--      Only the matching row stages (the non-matching row is ignored for that event).
+--
+-- After the walker runs, the `transfer_hazards` CHECK_RULES reader (`check_transfer_hazards`) copies every entry on `atom.paths.hazards` into the per-atom findings list.
+-- The reader does NOT re-walk source or re-classify tokens; it is a pure projection of the walker's output.
+--
+-- The walker is called once before the CHECK_RULES per-atom dispatch (see `validate()`);
+-- The reader runs as part of the same CHECK_RULES dispatch so its findings land in `findings` alongside the other checks.
+--
+-- The producer's own emitted word does NOT retire the relation (per the PSX-SPX rule in `docs/psx-spx/docs/cpuspecifications.md:407-419`):
+-- "Store delays are counted in numbers of clock cycles (not in numbers of opcodes).
+-- For 3 cycle delay, one must usually insert 3 cached opcodes (or one uncached opcode)." `gap = consumer.word - producer.word - 1`
+-- therefore counts ONLY words strictly between the producer and the consumer.
 -- ─────────────────────────────────────────────────────────────────────────
 
--- Return true iff `reg_ident` is an IRGB/ORGB write that requires the 3-cycle fan-out.
-local function is_irgb_destination(reg_ident)
-	return reg_ident == "gte_cr_IRGB" or reg_ident == "gte_cr_ORGB"
+-- True iff `consumer_word` falls inside the COP2 command's input set OR inside the producer's `fanout_to` set (for IRGB writes).
+-- Used by the consumer-match step of the forward walker.
+local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
+	local consumer_token = consumer_event.encoder or consumer_event.ident
+	-- Direct match: the consumer's argument is the destination.
+	-- (Reserved for future relations where the consumer literally reads the destination register;
+	-- not used by MTC2/CTC2 today because the "consumer" is a GTE command and its reads are not operand positions.)
+	local args = consumer_event.args or {}
+	for _, pos in ipairs(args) do
+		if pos == destination then return true end
+	end
+	-- Match via the command's input set: the consumer's encoder resolves to a canonical `gte_cmdw_*` 
+	-- short form whose `duffle.GTE_COMMAND_INPUTS` entry includes the destination (or a fan-out target).
+	local aliases   = duffle.GTE_COMMAND_ALIASES or {}
+	local canonical = aliases[consumer_token] or consumer_token
+	if canonical:sub(1, 9) == "gte_cmdw_" or aliases[consumer_token] then
+		local inputs     = duffle.GTE_COMMAND_INPUTS or {}
+		local cmd_inputs = inputs[canonical]
+		if cmd_inputs then
+			-- Direct hit.
+			for _, in_reg in ipairs(cmd_inputs) do
+				if in_reg == destination then return true end
+			end
+			-- Fan-out hit (IRGB writes fan out to C2_IR1/C2_IR2/C2_IR3).
+			for _, fanout in ipairs(producer_rel.fanout_to or {}) do
+				for _, in_reg in ipairs(cmd_inputs) do
+					if in_reg == fanout then return true end
+				end
+			end
+		end
+	end
+	return false
 end
 
--- Look up the alias → canonical mapping.
--- Defaults to the input ident so MVMVA variants + unknown idents surface as `command_unknown` warnings rather than being silently treated as 0-cycle.
+-- True iff `consumer_event` reads the GPR operand at any position the destination register occupies.
+-- The read-position lookup consults `duffle.OPERAND_READ_POSITIONS` 
+-- for the consumer's encoder and walks each `args[pos]` to find an operand-equal match.
+local function is_gpr_consumer_of(consumer_event, destination)
+	local consumer_token = consumer_event.encoder or consumer_event.ident
+	local read_pos       = duffle.OPERAND_READ_POSITIONS or {}
+	local positions      = read_pos[consumer_token]
+	if not positions then return false end
+	local args = consumer_event.args or {}
+	for _, pos in ipairs(positions) do
+		if args[pos] == destination then return true end
+	end
+	return false
+end
+
+-- Bounded U4 arithmetic for the GPR-value lattice. LuaJIT supplies the `bit` module;
+-- the arithmetic fallback keeps this pass Lua 5.3-compatible without adding a dependency to the metaprogram.
+local bit_ok, bit = pcall(require, "bit")
+if not bit_ok then bit = nil end
+
+local U4_MODULUS = 0x100000000
+
+local function wrap_u4(value)
+	if type(value) ~= "number" then return nil end
+	value = value % U4_MODULUS
+	if value < 0 then value = value + U4_MODULUS end
+	return value
+end
+
+local function bit_binary(left, right, operation)
+	left  = wrap_u4(left)
+	right = wrap_u4(right)
+	if left == nil or right == nil then return nil end
+	if bit then
+		local value
+		if     operation == "or"  then value = bit.bor( left, right)
+		elseif operation == "and" then value = bit.band(left, right)
+		else                           value = bit.bxor(left, right)
+		end
+		return wrap_u4(value)
+	end
+
+	local result = 0
+	local place  = 1
+	for _ = 1, 32 do
+		local left_bit  = left % 2
+		local right_bit = right % 2
+		local take
+		if     operation == "or"  then take = left_bit == 1 or right_bit == 1
+		elseif operation == "and" then take = left_bit == 1 and right_bit == 1
+		else                           take = left_bit ~= right_bit
+		end
+		if take then result = result + place end
+		left  = (left  - left_bit)  / 2
+		right = (right - right_bit) / 2
+		place = place * 2
+	end
+	return result
+end
+
+local function shift_left_u4(value, amount)
+	value  = wrap_u4(value)
+	amount = tonumber(amount)
+	if value == nil or amount == nil then return nil end
+	amount = math.floor(amount) % 32
+	if bit then return wrap_u4(bit.lshift(value, amount)) end
+	return wrap_u4(value * (2 ^ amount))
+end
+
+-- Resolve only a standalone integer literal. Compound C expressions remain
+-- unknown by design; the analyzer must not pretend to be a C evaluator.
+local function parse_integer_literal(raw)
+	if type(raw) ~= "string" then return nil end
+	raw = duffle.trim(raw)
+	while raw:sub(1, 1) == "(" and raw:sub(-1) == ")" do
+		raw = duffle.trim(raw:sub(2, -2))
+	end
+	local sign = 1
+	if     raw:sub(1, 1) == "-" then sign = -1; raw = raw:sub(2)
+	elseif raw:sub(1, 1) == "+" then            raw = raw:sub(2)
+	end
+	raw = raw:gsub("[uUlL]+$", "")
+	local value
+	if     raw:match("^0[xX][%da-fA-F]+$") then value = tonumber(raw:sub(3), 16)
+	elseif raw:match("^%d+$")              then value = tonumber(raw, 10)
+	else
+		return nil
+	end
+	if value == nil then return nil end
+	return wrap_u4(sign * value)
+end
+
+local function sign_extend_i16(value)
+	value = value % 0x10000
+	if value >= 0x8000 then return value - 0x10000 end
+	return value
+end
+
+local function is_gpr_operand(operand)
+	return type(operand) == "string" and operand:sub(1, 2) == "R_"
+end
+
+local function constant_for_operand(gpr_values, operand)
+	if operand == "R_0" then return 0 end
+	local slot = is_gpr_operand(operand) and gpr_values[operand] or nil
+	if slot and slot.kind == "constant" then return wrap_u4(slot.value) end
+	return nil
+end
+
+local function invalidate_gpr(gpr_values, operand)
+	if is_gpr_operand(operand) and operand ~= "R_0" then
+		gpr_values[operand] = { kind = "unknown" }
+	end
+end
+
+local function store_gpr_constant(gpr_values, operand, value)
+	if not is_gpr_operand(operand) or operand == "R_0" then return end
+	if value == nil then gpr_values[operand] = { kind = "unknown" }
+	else                 gpr_values[operand] = { kind = "constant", value = wrap_u4(value) }
+	end
+end
+
+local function evaluate_gpr_value_rule(rule, ev_args, gpr_values)
+	local operation = rule.op
+	if operation == "load_upper_i" then
+		local immediate = parse_integer_literal(ev_args[rule.immediate])
+		if    immediate == nil then return nil end
+		return shift_left_u4(immediate % 0x10000, 16)
+	end
+
+	local source = nil
+	if rule.source then
+		source = constant_for_operand(gpr_values, ev_args[rule.source])
+		if source == nil then return nil end
+	end
+	local immediate = rule.immediate and parse_integer_literal(ev_args[rule.immediate]) or nil
+	if rule.immediate and immediate == nil then return nil end
+	if     operation == "add_ui"      then return wrap_u4(      source + sign_extend_i16(immediate))
+	elseif operation == "or_i"        then return bit_binary(   source, immediate % 0x10000, "or")
+	elseif operation == "and_i"       then return bit_binary(   source, immediate % 0x10000, "and")
+	elseif operation == "xor_i"       then return bit_binary(   source, immediate % 0x10000, "xor")
+	elseif operation == "shift_lleft" then return shift_left_u4(source, immediate)
+	end
+
+	if rule.sources then
+		local values = {}
+		for index, position in ipairs(rule.sources) do
+			values[index] = constant_for_operand(gpr_values, ev_args[position])
+			if values[index] == nil then return nil end
+		end
+		if     operation == "add_u" then return wrap_u4(values[1] + values[2])
+		elseif operation == "or_u"  then return bit_binary(values[1], values[2], "or")
+		end
+	end
+	return nil
+end
+
+-- Apply the GPR read/write effects of one emitted event to the forward_state GPR-value lattice.
+-- Encoders without an explicit effect row conservatively invalidate every R_-prefixed operand.
+-- Recognized value rules are evaluated before their destination is invalidated.
+-- A failed/unknown evaluation writes `{kind = "unknown"}` instead.
+local function apply_gpr_effects(ev_ident, ev_args, forward_state)
+	local gpr_values = forward_state.gpr_values
+	local effects    = duffle.INSTRUCTION_GPR_EFFECTS or {}
+	local row        = effects[ev_ident]
+	if row == nil then
+		for _, operand in ipairs(ev_args or {}) do
+			invalidate_gpr(gpr_values, operand)
+		end
+		return
+	end
+
+	local value_rule = (duffle.GPR_VALUE_RULES or {})[ev_ident]
+	local value      = value_rule and evaluate_gpr_value_rule(value_rule, ev_args or {}, gpr_values) or nil
+	for _, position in ipairs(row.writes or {}) do
+		local destination = ev_args and ev_args[position]
+		if is_gpr_operand(destination) then
+			if value_rule and position == value_rule.dest and value ~= nil then
+				store_gpr_constant(gpr_values, destination, value)
+			else
+				invalidate_gpr(gpr_values, destination)
+			end
+		end
+	end
+end
+
+-- Look up the canonical alias of a GTE command ident.
+-- Defaults to the input ident so unknown idents surface rather than silently inheriting a 0-cycle command input set.
 local function canonical_command(ident)
 	local aliases = duffle.GTE_COMMAND_ALIASES or {}
 	return aliases[ident] or ident
 end
 
-local function push_write(pending, reg_ident, slots, source_path, line)
-	pending[#pending + 1] = {
-		reg    = reg_ident,
-		slots  = slots,
-		source = source_path,
-		line   = line,
+-- True for a COP2/GTE use that can make a pending SR.CU2 transition observable.
+-- Atom entry intentionally starts at `unobserved`; this helper never creates a finding without a preceding Status write.
+local function is_cop2_use(ident)
+	local canonical = canonical_command(ident)
+	return canonical:sub(1, 9) == "gte_cmdw_" or ident:sub(1, 4) == "gte_"
+end
+
+local function append_cu2_finding(atom, event, forward, transition,
+	gap, kind, confidence, message)
+	local event_ident = event.encoder or event.ident or "?"
+	local policy      = duffle.CU2_TRANSITION_POLICY or {}
+	local evidence    = policy.evidence or {}
+	atom.paths.hazards[#atom.paths.hazards + 1] = {
+		check                = "transfer_hazards",
+		kind                 = kind,
+		atom                 = atom.name,
+		line                 = event.body_line or event.line or event.def_line or 0,
+		source               = event.def_path or event.source or "",
+		relation_id          = "mtc0_cu2_visibility",
+		semantic             = "MTC0",
+		direction            = "gpr_to_cop0_status",
+		producer_destination = "SR.CU2",
+		producer_word        = transition.producer_word,
+		producer_line        = transition.producer_line,
+		producer_source      = transition.producer_source,
+		consumer_word        = event.i or event.word or 0,
+		consumer_token       = event_ident,
+		gap                  = gap,
+		required             = transition.required,
+		evidence_confidence  = confidence,
+		evidence_source      = evidence.source or transition.evidence_source or "",
+		target_state         = transition.target_state,
+		status_register      = transition.status_register,
+		status_value         = transition.status_value,
+		msg                  = message,
 	}
 end
 
-local function retire_writes(pending, max_elapsed)
-	-- Walk pending in FIFO order; advance their slot counters; remove any whose counter has met or exceeded the required retire window.
-	-- The walk index advances monotonically; once a pending entry's `elapsed >= required` the slot is freed and the next pending entry can retire on the same cycle.
-	local out = {}
-	for i = 1, #pending do
-		pending[i].elapsed = (pending[i].elapsed or 0) + max_elapsed
-		if pending[i].elapsed < pending[i].slots then
-			out[#out + 1] = pending[i]
-		end
+-- Read `sys_mov_to_cop0(source, 12)` before applying any writes from the current event.
+-- A known source stages a target transition; an unknown source stages an ambiguity that is reported only if a later COP2 use reaches it.
+local function stage_cu2_transition(ev_ident, ev_args, ev_word, ev_line,
+	ev_source, forward)
+	if ev_ident ~= "sys_mov_to_cop0" then return end
+	local  policy = duffle.CU2_TRANSITION_POLICY
+	if not policy then return end
+	local status_register = parse_integer_literal(ev_args[2])
+	if    status_register ~= policy.status_register then return end
+
+	local status_value   = constant_for_operand(forward.gpr_values, ev_args[1])
+	local target_state   = "unknown"
+	local target_enabled = nil
+	if status_value ~= nil then
+		target_enabled = bit_binary(status_value, policy.enable_bit, "and") ~= 0
+		target_state   = target_enabled and "enabled" or "disabled"
 	end
-	return out
+	forward.cu2_transition = {
+		producer_word   = ev_word,
+		producer_line   = ev_line,
+		producer_source = ev_source,
+		status_register = status_register,
+		status_value    = status_value,
+		target_enabled  = target_enabled,
+		target_state    = target_state,
+		required        = policy.required,
+		evidence_source = policy.evidence and policy.evidence.source or "",
+	}
+	forward.cu2_state = "pending"
 end
 
-local function check_gte_write_retire(atom, pipe_ctx, findings)
-	local events = atom.paths.word_events
-	if not events or #events == 0 then return end
-	local pending = {}
-	local inputs  = duffle.GTE_COMMAND_INPUTS or {}
-	local slots_def = duffle.COP2_WRITE_RETIRE_SLOTS or { cpu_to_cop2 = 2, cpu_to_irgb = 3 }
+-- Consume a pending Status/CU2 transition at the first relevant COP2 event.
+-- The producer and consumer endpoints are excluded from the strict gap.
+-- A conservative early transition emits once and then settles to its target;
+-- Unknown Status emits one info edge and clears. A settled disable emits the exact COP2-unavailable finding required by the contract.
+local function consume_cu2_transition(atom, event, ev_word, forward)
+	if not is_cop2_use(event.encoder or event.ident or "") then return end
+	local transition = forward.cu2_transition
+	if not transition then return end
+
+	local gap = ev_word - transition.producer_word - 1
+	local target = transition.target_state
+	if target == "unknown" then
+		append_cu2_finding(atom, event, forward, transition, gap, "info", "unknown",
+			string.format("%s at line %d uses COP2 after an MTC0 Status write whose CU2 value is unknown (gap=%d, configured boundary=%d)"
+				, atom.name, event.body_line or event.line or event.def_line or 0
+				, gap, transition.required
+			)
+		)
+		forward.cu2_state      = "unknown"
+		forward.cu2_transition = nil
+		return
+	end
+
+	if gap < transition.required then
+		local verb = target == "enabled" and "enable" or "disable"
+		append_cu2_finding(atom, event, forward, transition, gap, "warning", "conservative",
+			string.format("%s at line %d uses COP2 before the SR.CU2 %s transition has settled (gap=%d, required=%d; timing is conservative)"
+				, atom.name, event.body_line or event.line or event.def_line or 0
+				, verb, gap, transition.required
+			)
+		)
+		forward.cu2_state      = target
+		forward.cu2_transition = nil
+		return
+	end
+
+	forward.cu2_transition = nil
+	if target == "enabled" then
+		forward.cu2_state = "enabled"
+	else
+		append_cu2_finding(atom, event, forward, transition, gap,
+			"error", "exact",
+			string.format(
+				"%s at line %d: COP2 unavailable after SR.CU2 was disabled"
+				.. " (gap=%d, required=%d)",
+				atom.name, event.body_line or event.line or event.def_line or 0,
+				gap, transition.required))
+		forward.cu2_state = "disabled"
+	end
+end
+
+-- The forward walker. Populates `atom.paths.forward_state`, `.relations`, and `.hazards`.
+-- Called once per atom before the per-atom CHECK_RULES dispatch loop.
+local function analyze_hardware_relations(atom)
+	local events      = atom.paths and atom.paths.word_events or {}
+	local prior_state = atom.paths.forward_state
+	local seed_values = {}
+	if prior_state and not prior_state._analysis_complete then
+		for register, slot in pairs(prior_state.gpr_values or {}) do
+			if type(slot) == "table" and slot.kind == "constant" then
+				seed_values[register] = {
+					kind  = "constant",
+					value = wrap_u4(slot.value),
+				}
+			elseif type(slot) == "table" and slot.kind == "unknown" then
+				seed_values[register] = { kind = "unknown" }
+			end
+		end
+	end
+
+	local forward = {
+		gpr_values         = seed_values,
+		pending            = {},
+		cu2_state          = "unobserved",
+		cu2_transition     = nil,
+		_analysis_complete = false,
+	}
+	-- The architectural zero register is always a known U4 zero and cannot be invalidated by an emitted writer.
+	forward.gpr_values.R_0 = { kind = "constant", value = 0 }
+	atom.paths.forward_state = forward
+	atom.paths.relations     = {}
+	atom.paths.hazards       = {}
+
+	local hazards   = atom.paths.hazards
+	local relations = atom.paths.relations
+	local pending   = forward.pending
+
+	local relations_table = duffle.HARDWARE_RELATIONS or {}
+	-- Build a token-indexed lookup once per walker pass.
+	local rows_by_token = {}
+	for _, row in ipairs(relations_table) do
+		local token = row.token
+		if token then
+			rows_by_token[token] = rows_by_token[token] or {}
+			rows_by_token[token][#rows_by_token[token] + 1] = row
+		end
+	end
 
 	for _, ev in ipairs(events) do
-		-- Every non-write slot retires pending writes by 1.
-		if ev.ident == "gte_mv_to_data_r" or ev.ident == "gte_mv_to_ctrl_r" then
-			local dest_reg = ev.args and ev.args[2] or nil
-			if dest_reg then
-				local required = is_irgb_destination(dest_reg) and slots_def.cpu_to_irgb or slots_def.cpu_to_cop2
-				push_write(pending, dest_reg, required, ev.source, ev.line)
+		local ev_ident  = ev.encoder   or ev.ident  or "?"
+		local ev_line   = ev.body_line or ev.line   or ev.def_line or 0
+		local ev_source = ev.def_path  or ev.source or ""
+		local ev_args   = ev.args      or {}
+		-- `word_events` use `i` as the 0-based word index across the entire expansion);
+		-- The legacy `duffle.expand_word_events` walker emits `word`.
+		-- Either is accepted; unknown defaults to 0 (the producer's own word).
+		local ev_word   = ev.i or ev.word or 0
+
+		-- Read a Status source, then apply current-event GPR writes, then consume a pending CU2 transition at the first relevant COP2 use.
+		-- Both operations are part of this one event walk.
+		stage_cu2_transition(ev_ident, ev_args, ev_word, ev_line, ev_source, forward)
+		consume_cu2_transition(atom, ev, ev_word, forward)
+
+		-- ── 1. Inspect pending relations against the event as CONSUMER. ──
+		-- Walk pending in REVERSE so `table.remove` doesn't shift indexes still to be inspected.
+		for pending_idx = #pending, 1, -1 do
+			local prod     = pending[pending_idx]
+			local relation = prod.relation
+			local semantic = relation.semantic
+			local is_match = false
+			if semantic == "MTC2" or semantic == "CTC2" or semantic == "LWC2" then
+				-- Consumer is a GTE command whose input set contains the producer's COP2 destination (or a fan-out target).
+				is_match = is_cop2_consumer_of(ev, prod.destination, relation)
+			elseif semantic == "MFC2" or semantic == "CFC2" or semantic == "MFC0" then
+				-- Consumer is any encoder that reads the producer's GPR destination as an operand.
+				is_match = is_gpr_consumer_of(ev, prod.destination)
+			elseif semantic == "command_latch" then
+				-- Consumer is a subsequent MTC2/CTC2 overwrite of the same C2 destination.
+				-- The semantic is the post-command latch direction (command -> register);
+				-- This is intentionally separate from the preceding MTC2 -> command relation.
+				is_match = (ev_ident == "gte_mv_to_data_r" or ev_ident == "gte_mv_to_ctrl_r")
+					and ev_args[1] ~= nil
+					and ev_args[2] == prod.destination
 			end
-			-- Advance pre-existing writes by 1 (this very slot counts).
-			pending = retire_writes(pending, 1)
-		elseif ev.ident == "gte_cmdw_rtps"  or ev.ident == "gte_cmdw_rtpt" or ev.ident == "gte_cmdw_nclip"
-			or   ev.ident == "gte_cmdw_mvmva" or ev.ident == "gte_cmdw_op"
-			or   ev.ident == "gte_cmdw_avsz3" or ev.ident == "gte_cmdw_avsz4"
-			or   duffle.GTE_COMMAND_ALIASES[ev.ident] ~= nil
-			then
-			-- A dependent GTE command stalls until in-flight commands complete (hardware interlock).
-			-- We still retire all pending writes by 1 for the slot this command occupies, then check the still-pending writes against the command's input set.
-			-- If the command reads a register whose write is still pending, that is a true hazard.
-			pending = retire_writes(pending, 1)
-			local canonical = canonical_command(ev.ident)
-			local cmd_inputs = inputs[canonical]
-			if cmd_inputs == nil then
-				findings[#findings + 1] = {
-					atom  = atom.name,
-					line  = ev.line,
-					check = "gte_write_retire",
-					kind  = "warning",
-					msg   = string.format("%s at line %d uses `%s` but the canonical command is not in GTE_COMMAND_INPUTS -- add an entry (or confirm the alias)"
-						, atom.name, ev.line, ev.ident
-					),
+			if is_match then
+				local gap                = ev_word - prod.word - 1
+				local unknown_visibility = relation.visibility and relation.visibility.kind == "unknown_consumer"
+				if unknown_visibility then
+					hazards[#hazards + 1] = {
+						check                = "transfer_hazards",
+						kind                 = "info",
+						atom                 = atom.name,
+						line                 = ev_line,
+						source               = ev_source,
+						relation_id          = relation.id,
+						semantic             = relation.semantic,
+						direction            = relation.direction,
+						producer_destination = prod.destination,
+						producer_word        = prod.word,
+						producer_line        = prod.line,
+						producer_source      = prod.source_path,
+						consumer_word        = ev_word,
+						consumer_token       = ev_ident,
+						gap                  = gap,
+						required             = nil,
+						evidence_confidence  = relation.evidence and relation.evidence.confidence or "unknown",
+						evidence_source      = relation.evidence and relation.evidence.source or "",
+						msg = string.format("%s at line %d: %s relation %s has an unknown memory-side visibility (producer %s at word %d, consumer at word %d, gap=%d) [%s]"
+							, atom.name, ev_line, relation.semantic, relation.id
+							, prod.destination, prod.word, ev_word, gap
+							, (relation.evidence and relation.evidence.confidence or "unknown")
+						),
+					}
+				elseif prod.required ~= nil and gap < prod.required then
+					local payload = {
+						check                = "transfer_hazards",
+						kind                 = prod.violation_kind or "error",
+						atom                 = atom.name,
+						line                 = ev_line,
+						source               = ev_source,
+						relation_id          = relation.id,
+						semantic             = relation.semantic,
+						direction            = relation.direction,
+						producer_destination = prod.destination,
+						producer_word        = prod.word,
+						producer_line        = prod.line,
+						producer_source      = prod.source_path,
+						consumer_word        = ev_word,
+						consumer_token       = ev_ident,
+						gap                  = gap,
+						required             = prod.required,
+						evidence_confidence  = relation.evidence and relation.evidence.confidence or "unknown",
+						evidence_source      = relation.evidence and relation.evidence.source or "",
+						msg = string.format("%s at line %d: %s relation %s (producer %s at word %d, %s:%d) violated: consumer at word %d (gap=%d, required=%d) [%s]"
+							, atom.name, ev_line, relation.semantic, relation.id
+							, prod.destination, prod.word, prod.source_path, prod.line
+							, ev_word, gap, prod.required
+							, (relation.evidence and relation.evidence.confidence or "unknown")
+						),
+					}
+					-- Surface producer_command on the payload (post-command latch relations store it on the relation row.
+					-- Copy it to the top-level payload for the renderer).
+					if relation.producer_command then
+						payload.producer_command = relation.producer_command
+					end
+					hazards[#hazards + 1] = payload
+				end
+				local satisfied = nil
+				if not unknown_visibility then satisfied = gap >= prod.required end
+				-- Record the relation touch on `paths.relations` even when the gap is satisfied.
+				-- Unknown relations are informational, not numeric pass/fail measurements.
+				relations[#relations + 1] = {
+					relation_id   = relation.id,
+					semantic      = relation.semantic,
+					producer_word = prod.word,
+					consumer_word = ev_word,
+					gap           = gap,
+					required      = prod.required,
+					satisfied     = satisfied,
 				}
-			else
-				for _, pw in ipairs(pending) do
-					-- Check intersection with the command's input set.
-					for _, in_reg in ipairs(cmd_inputs) do
-						if pw.reg == in_reg then
-							findings[#findings + 1] = {
-								atom  = atom.name,
-								line  = ev.line,
-								check = "gte_write_retire",
-								kind  = "error",
-								msg   = string.format("%s at line %d: recent %s at %s:%d has not retired (need %d slot(s); %s reads %s at slot %d)"
-									, atom.name, ev.line, pw.reg, pw.source, pw.line, pw.slots, ev.ident, in_reg, pw.slapsed or 0
-								),
+				table.remove(pending, pending_idx)
+			end
+		end
+
+		-- ── 2. Apply GPR value effects. ──
+		apply_gpr_effects(ev_ident, ev_args, forward)
+
+		-- ── 3. Stage producers created by this event. ──
+		local rows = rows_by_token[ev_ident]
+		if rows then
+			for _, row in ipairs(rows) do
+				-- `stage = false` rows document a direction but do not create a later command-input producer (SWC2 and ordinary MTC0).
+				if row.stage ~= false then
+					local dest_arg    = row.writes and row.writes.arg
+					local destination = dest_arg   and ev_args[dest_arg] or nil
+					if destination then
+						-- Apply the destination_match filter when present.
+						if row.destination_match and row.destination_match ~= destination then
+							goto continue_stage
+						end
+						-- A later write supersedes an unknown LWC2 edge for the same C2 destination before any command consumes it.
+						for prior_idx = #pending, 1, -1 do
+							local prior = pending[prior_idx]
+							if prior.relation.semantic == "LWC2"
+								and prior.destination == destination then
+								table.remove(pending, prior_idx)
+							end
+						end
+						local required = row.visibility and row.visibility.required
+						if required == nil
+							and not (row.visibility and row.visibility.kind == "unknown_consumer") then
+							required = 1
+						end
+						pending[#pending + 1] = {
+							relation       = row,
+							destination    = destination,
+							word           = ev_word,
+							required       = required,
+							source_path    = ev_source,
+							line           = ev_line,
+							violation_kind = row.violation_kind or "error",
+						}
+					end
+				end
+				::continue_stage::
+			end
+		end
+
+		-- ── 4. Update semantic role state and stage post-command latch relations. ──
+		-- A GTE command emits outputs with semantic roles (latest_screen_xy, otz, latest_color, etc.) per `duffle.GTE_COMMAND_OUTPUTS`.
+		-- The walker records these on `forward_state.post_command_roles[<register>]` so the `gte_result_position` reader can later detect a reader that picks the wrong register.
+		--
+		-- The walker also stages POST-COMMAND LATCH relations (kind = "command_latch_input"): a subsequent MTC2/CTC2 overwrite of a latched output before the measured boundary is a hazard.
+		-- The relation kind is intentionally separate from the preceding MTC2 → command relation (`MTC2` / `CTC2` / `LWC2`).
+		-- They describe different directions of the same memory subsystem and would otherwise be conflated.
+		if canonical_command(ev_ident) ~= ev_ident then
+			-- Not a GTE command; skip.
+		else
+			local canonical = canonical_command(ev_ident)
+			if canonical:sub(1, 9) == "gte_cmdw_" then
+				-- Update the post-command role state.
+				local outputs = duffle.GTE_COMMAND_OUTPUTS or {}
+				local cmd_outputs = outputs[canonical]
+				if cmd_outputs then
+					for _, out in ipairs(cmd_outputs) do
+						if out.register then
+							forward.post_command_roles = forward.post_command_roles or {}
+							forward.post_command_roles[out.register] = {
+								role             = out.role,
+								command          = canonical,
+								command_register = out.register,
+								producer_word    = ev_word,
+								producer_line    = ev_line,
 							}
-							break  -- one finding per pending write per command
+						end
+					end
+				end
+				-- Stage post-command latch relations for every measured output.
+				local latch_table = duffle.GTE_COMMAND_LATCH_WINDOWS or {}
+				local cmd_latches = latch_table[canonical]
+				if cmd_latches then
+					for _, latch in ipairs(cmd_latches) do
+						if latch.register and latch.required then
+							-- A later MTC2/CTC2 overwrite of the same register before the measured boundary is the consumer of this relation.
+							pending[#pending + 1] = {
+								relation = {
+									id        = "command_latch_input",
+									semantic  = "command_latch",
+									direction = "gte_command_to_cop2_register",
+									token     = canonical,
+									evidence  = {
+										confidence = "conservative",
+										source     = "gtepipelinetimings.md",
+									},
+									violation_kind    = "warning",
+									producer_command  = canonical,
+									producer_register = latch.register,
+								},
+								destination    = latch.register,
+								word           = ev_word,
+								required       = latch.required,
+								source_path    = ev_source,
+								line           = ev_line,
+								violation_kind = "warning",
+							}
 						end
 					end
 				end
 			end
-			-- A command does NOT introduce a new pending CPU→C2 write
-			-- (the command writes its RESULT registers, which are not subject to the CPU-side retire window).
-			-- We leave `pending` as-is after the input-set check so the next event sees the post-retire state.
-		else
-			-- Plain CPU word / branch / GTE transfer read / nop2 half / etc.
-			pending = retire_writes(pending, 1)
 		end
 	end
+	forward._analysis_complete = true
+end
 
-	-- (Surface expansion-cycle diagnostics as informational findings, not errors.)
-	local errors = atom.paths.word_event_errors or {}
-	for _, e in ipairs(errors) do
-		if e.kind == "cycle" then
+-- ─────────────────────────────────────────────────────────────────────────
+-- Check #1b: transfer_hazards (READER for analyze_hardware_relations output).
+--
+-- The single forward walker `analyze_hardware_relations` (defined above) has already populated `atom.paths.hazards`.
+-- This check copies every entry on that list into the per-atom `findings` table.
+-- It does NOT re-walk source / re-classify tokens; it is a pure projection of the walker's output.
+--
+-- The walker also populates `atom.paths.relations` (one entry per satisfied-or-violated relation touch) and `atom.paths.forward_state` (the GPR-value lattice).
+-- Neither of those is rendered as a finding here; bounded-value rules and LWC2 unknown edges share on top of the same forward walker and adds additional readers.
+--
+-- Static-analysis pass kind remains non-stopping (diagnostic):
+-- The transfer-hazards findings appear in `result.errors` / `result.warnings` (according to the row's `violation_kind`) without changing the build exit status.
+-- This preserves the documented PASSES["static-analysis"] policy in `ps1_meta.lua`.
+-- ─────────────────────────────────────────────────────────────────────────
+
+local function check_transfer_hazards(atom, _pipe_ctx, findings)
+	local  hazards = atom.paths and atom.paths.hazards or {}
+	for _, hazard in ipairs(hazards) do
+		findings[#findings + 1] = hazard
+	end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Check #1d: gte_input_latch (READER for analyze_hardware_relations output).
+--
+-- The forward walker stages post-command latch relations on `atom.paths.hazards` with `relation_id = "command_latch_input"`.
+-- This reader filters those entries and re-emits them under the `gte_input_latch` check name so the test contract can target them independently of the transfer_hazards check.
+-- The reader does NOT re-walk source tokens or build its own pending state; it is a pure projection of the walker's output.
+-- ─────────────────────────────────────────────────────────────────────────
+
+local function check_gte_input_latch(atom, _pipe_ctx, findings)
+	local hazards = atom.paths and atom.paths.hazards or {}
+	for _, hazard in ipairs(hazards) do
+		if hazard.relation_id == "command_latch_input" then
+			local payload = {}
+			for k, v in pairs(hazard) do payload[k] = v end
+			payload.check = "gte_input_latch"
+			-- Surface `producer_command` on the emitted payload:
+			-- The hazard relation record carries it under `relation.producer_command` (since it lives on the relation row);
+			-- copy it to the top-level payload for the renderer and the focused tests.
+			if payload.producer_command == nil and payload.relation and payload.relation.producer_command then
+				payload.producer_command = payload.relation.producer_command
+			end
+			findings[#findings + 1] = payload
+		end
+	end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Check #1e: gte_result_position (READER for forward_state semantic roles).
+--
+-- A GTE command emits outputs with semantic roles (latest_screen_xy, otz, latest_color, etc.) per `duffle.GTE_COMMAND_OUTPUTS`.
+-- The forward walker records `forward_state.post_command_roles[<register>]` after each command.
+--
+-- A subsequent MFC2 (or any encoder that reads a C2 register) that picks the WRONG register for the active role emits a `result_role_mismatch` warning.
+-- For example, reading `C2_SXY0` after RTPS is wrong: the `latest_screen_xy` role is `C2_SXY2`.
+--
+-- The reader does NOT re-walk source tokens; it consumes `forward_state.post_command_roles` and `atom.paths.word_events` only.
+-- ─────────────────────────────────────────────────────────────────────────
+
+local function check_gte_result_position(atom, _pipe_ctx, findings)
+	local  forward = atom.paths and atom.paths.forward_state
+	if not forward or not forward.post_command_roles then return end
+	local events = atom.paths.word_events or {}
+
+	-- Build a set of known _post_<cmd> component names whose contract rows we have to verify
+	-- (table-gap detection: a missing row key is itself an info finding).
+	-- The names are the BODY-LEVEL component calls that appear in atom body text;
+	-- The walker doesn't expose body tokens to the reader, so we scan the events' root_call_text.
+	local contracts = duffle.GTE_COMPONENT_RESULT_CONTRACTS or {}
+	local component_names_seen = {}
+	for _, ev in ipairs(events) do
+		local root_call = ev.root_call_text or ev.call_text or ""
+		local name      = root_call:match("^([%w_]+)") or ""
+		if name:find("_post_") then component_names_seen[name] = true end
+	end
+	for component_name in pairs(component_names_seen) do
+		-- Strip any trailing parenthesized argument list / whitespace.
+		local bare = component_name:match("^([%w_]+)") or component_name
+		if contracts[bare] == nil then
 			findings[#findings + 1] = {
-				atom  = atom.name,
-				line  = e.line,
-				check = "gte_write_retire",
-				kind  = "info",
-				msg   = string.format("%s at line %d: %s", atom.name, e.line, e.msg),
+				check          = "gte_result_position",
+				kind           = "info",
+				atom           = atom.name,
+				line           = 0,
+				source         = "",
+				relation_id    = "table_gap",
+				component_name = bare,
+				msg = string.format("%s: component %q has no GTE_COMPONENT_RESULT_CONTRACTS row (unknown _post_<cmd> contract)"
+					, atom.name, bare),
 			}
 		end
 	end
-end
 
--- ─────────────────────────────────────────────────────────────────────────
--- Check #1b: COP2→GPR load delay (mfc2 / cfc2 → first GPR consumer).
---
--- Reads `atom.paths.word_events`. Every `gte_mv_from_data_r` / `gte_mv_from_ctrl_r` stages a destination GPR + 1 remaining slot.
--- A subsequent event that READS from that GPR (per the OPERAND_READ_POSITIONS table + operand-position rules)
--- within the same instruction slot emits a finding with `kind = "error"`.
---
--- Branch delay slots + BD-slot absorption are out of scope (separate MIPS control-flow concern).
--- A separate check (control_transfer_delay_slot_use, below) covers branch/jump/call delay slots.
--- ─────────────────────────────────────────────────────────────────────────
-
--- Return the textual ident of the GPR read at `pos` in the macro's argument list, or nil if the operand is not a GPR.
--- Operands that are numeric literals (e.g. `0`, `4`, `0xFFFF`) or type keywords (`U4`, `C2_VZ2`) are not GPR reads.
-local function operand_gpr_at(ev, pos)
-	local op = ev.args and ev.args[pos] or nil
-	if not op then return nil end
-	if op:sub(1, 2) == "0x" or op:sub(1, 2) == "0X" then return nil end
-	if op:match("^%d") then return nil end  -- numeric literal
-	if op == "true" or op == "false" then return nil end
-	-- Strip any trailing whitespace; the operator scanner already trims, but be defensive against raw args.
-	return op:match("^%s*(%S+)%s*$")
-end
-
-local function check_cop2_gpr_load_delay(atom, pipe_ctx, findings)
-	local events = atom.paths.word_events
-	if not events or #events == 0 then return end
-	local pending = {}  -- { gpr = "R_T0", line = N, source = path, slots = 1 }
-
+	-- For each word event whose encoder is `gte_mv_from_data_r`, look up the register being read in `forward_state.post_command_roles`.
+	-- If a role is set, the reader's register must match the role's register (the registered "latest_<role>" target).
 	for _, ev in ipairs(events) do
-		if ev.ident == "gte_mv_from_data_r" or ev.ident == "gte_mv_from_ctrl_r" then
-			local dst = ev.args and ev.args[1] or nil
-			if dst then
-				pending[#pending + 1] = {
-					gpr    = dst,
-					slots  = 1,
-					source = ev.source,
-					line   = ev.line,
-				}
+		local ev_ident = ev.encoder or ev.ident
+		if ev_ident == "gte_mv_from_data_r" then
+			local args = ev.args or {}
+			local reg  = args[2]
+			-- Find any post-command `latest_screen_xy` role entry recorded by a prior command.
+			-- The newest projected screen coordinate is recorded under the command's canonical name.
+			-- Reading from C2_SXY0 (the older projection slot) when a `latest_screen_xy` role was set to C2_SXY2 by RTPS / RTPT is a semantic mismatch.
+			local latest_screen_xy_entry = nil
+			for r, e in pairs(forward.post_command_roles or {}) do
+				if e.role == "latest_screen_xy" then
+					latest_screen_xy_entry = e
+					break
+				end
 			end
-			-- The transfer itself counts as one slot (the destination GPR is updated after the next instruction), so the existing pending list advances.
-			for i = 1, #pending do pending[i].slots = pending[i].slots - 1 end
-			local next_pending = {}
-			for _, p in ipairs(pending) do
-				if p.slots > 0 then next_pending[#next_pending + 1] = p end
+			if reg and latest_screen_xy_entry then
+				-- The reader picked C2_SXY0 but the latest_screen_xy role was set to C2_SXY2 by the prior command.
+				-- This is a semantic mismatch.
+				if reg ~= latest_screen_xy_entry.command_register
+					and (reg == "C2_SXY0" or reg == "C2_SXY1") then
+					findings[#findings + 1] = {
+						check       = "gte_result_position",
+						kind        = "warning",
+						atom        = atom.name,
+						line        = ev.body_line or ev.line or ev.def_line or 0,
+						source      = ev.def_path or ev.source or "",
+						relation_id = "result_role_mismatch",
+						semantic    = "result_position",
+						command     = latest_screen_xy_entry.command,
+						role        = latest_screen_xy_entry.role,
+						actual_register   = reg,
+						expected_register = "C2_SXY2",
+						producer_word = latest_screen_xy_entry.producer_word,
+						producer_line = latest_screen_xy_entry.producer_line,
+						msg = string.format("%s at line %d: reading %s after %s but the %s role is C2_SXY2 (not %s)"
+							, atom.name, ev.body_line or ev.line or ev.def_line or 0
+							, reg, latest_screen_xy_entry.command
+							, latest_screen_xy_entry.role
+							, reg),
+					}
+				end
 			end
-			pending = next_pending
-		else
-			-- Resolve read positions for this emitting token.
-			local read_pos = duffle.OPERAND_READ_POSITIONS and duffle.OPERAND_READ_POSITIONS[ev.ident]
-			if read_pos then
-				for _, pw in ipairs(pending) do
-					for _, pos in ipairs(read_pos) do
-						local op = operand_gpr_at(ev, pos)
-						if op and op == pw.gpr then
-							findings[#findings + 1] = {
-								atom  = atom.name,
-								line  = ev.line,
-								check = "cop2_gpr_load_delay",
-								kind  = "error",
-								msg   = string.format("%s at line %d: %s reads %s but the load from %s at %s:%d has not retired (need 1 slot)"
-									, atom.name, ev.line, ev.ident, pw.gpr, ev.ident, pw.source, pw.line
-								),
-							}
-							break
+		end
+	end
+end
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Check #1f: hazard_nop_use (READER for forward_state NOP classification).
+--
+-- Each emitted `nop` word event is classified by inspecting the forward-state immediately before the word:
+--   * `modeled-required`: a pending modeled relation exists that the nop retires
+--     (the nop is needed to retire the relation, even if it can be replaced by independent useful work).
+--   * `modeled-redundant`: no modeled relation is pending immediately before the nop (the nop is a redundant hazard).
+--
+-- Branch/jump delay-slot NOPs are NOT classified by this check (they are exclusively owned by `control_transfer_delay_slot_use`).
+-- The fixed `mac_yield()` handshake (`jump_reg(R_AtomJmp), nop`) is preserved as suppressed.
+--
+-- The reader does NOT re-walk source tokens; it consumes `forward_state.pending` snapshots and `atom.paths.word_events`.
+-- ─────────────────────────────────────────────────────────────────────────
+
+local function check_hazard_nop_use(atom, _pipe_ctx, findings)
+	local forward = atom.paths and atom.paths.forward_state
+	local events  = atom.paths.word_events or {}
+	if not events or #events == 0 then return end
+
+	-- The walker does not currently snapshot the pending state per event; we replay the same forward walk cheaply here.
+	-- The replay is observation-only (no staging); the only output is one finding per non-BD-slot nop with its classification.
+	local pending_snapshot = {}
+	local prev_ev = nil
+	for event_idx, ev in ipairs(events) do
+		local ev_ident = ev.encoder or ev.ident or ""
+		local ev_args  = ev.args or {}
+		local ev_word  = ev.i or ev.word or 0
+
+		-- Classify the nop BEFORE its event is applied to the pending state.
+		if ev_ident == "nop" and prev_ev ~= nil then
+			-- Skip BD-slot nops: they are exclusively owned by control_transfer_delay_slot_use.
+			local prev_ident  = prev_ev.encoder or prev_ev.ident or ""
+			local prev_args   = prev_ev.args or {}
+			local bd_policies = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
+			local is_bd_slot  = false
+			local policy      = bd_policies[prev_ident]
+			if policy then
+				local arg1       = prev_args[1]
+				local suppressed = policy.suppress_arg1 and policy.suppress_arg1[arg1] or nil
+				if not suppressed then is_bd_slot = true end
+			end
+			if not is_bd_slot then
+				-- Find a pending modeled relation that this nop would retire.
+				local retired = nil
+				for _, prod in ipairs(pending_snapshot) do
+					if prod.required and (prod.word + prod.required + 1) > ev_word then
+						retired = prod
+						break
+					end
+				end
+				if retired then
+					-- Look ahead for the would-be consumer (the next emitted command or read after the nop that the relation would retire).
+					-- For an MTC2 -> command relation, the consumer is the next GTE command after the nop.
+					local would_be_consumer = nil
+					for _, future_ev in ipairs(events) do
+						local f_word = future_ev.i or future_ev.word or 0
+						if f_word > ev_word then
+							local f_ident   = future_ev.encoder or future_ev.ident or ""
+							local f_args    = future_ev.args or {}
+							local aliases   = duffle.GTE_COMMAND_ALIASES or {}
+							local canonical = aliases[f_ident] or f_ident
+							if canonical:sub(1, 9) == "gte_cmdw_" then
+								local inputs     = duffle.GTE_COMMAND_INPUTS or {}
+								local cmd_inputs = inputs[canonical]
+								if cmd_inputs then
+									for _, in_reg in ipairs(cmd_inputs) do
+										if in_reg == retired.destination then
+											would_be_consumer = f_ident
+											break
+										end
+									end
+								end
+							elseif f_ident == "gte_mv_to_data_r" or f_ident == "gte_mv_to_ctrl_r" then
+								if f_args[2] == retired.destination then
+									would_be_consumer = f_ident
+								end
+							end
+							if would_be_consumer then break end
 						end
+					end
+					findings[#findings + 1] = {
+						check                = "hazard_nop_use",
+						kind                 = "info",
+						atom                 = atom.name,
+						line                 = ev.body_line or ev.line or ev.def_line or 0,
+						source               = ev.def_path or ev.source or "",
+						nop_classification   = "modeled-required",
+						nop_word_index       = ev_word,
+						retired_relation     = retired.relation.id,
+						producer_destination = retired.destination,
+						consumer_token       = would_be_consumer or "<would-be-consumer>",
+						msg = string.format("%s at line %d: nop at word %d is modeled-required (retires %s for %s)"
+							, atom.name, ev.body_line or ev.line or ev.def_line or 0, ev_word, retired.relation.id, retired.destination
+						),
+					}
+				else
+					-- Track the slot_kind so the BD-separation case can assert the mac_yield handshake is still suppressed.
+					local slot_kind = "plain"
+					findings[#findings + 1] = {
+						check              = "hazard_nop_use",
+						kind               = "warning",
+						atom               = atom.name,
+						line               = ev.body_line or ev.line or ev.def_line or 0,
+						source             = ev.def_path or ev.source or "",
+						nop_classification = "modeled-redundant",
+						nop_word_index     = ev_word,
+						retired_relation   = nil,
+						slot_kind          = slot_kind,
+						msg = string.format("%s at line %d: nop at word %d is modeled-redundant (no pending modeled relation)"
+							, atom.name, ev.body_line or ev.line or ev.def_line or 0, ev_word
+						),
+					}
+				end
+			end
+		end
+
+		-- Update the pending snapshot for the next iteration.
+		-- The replay is observation-only; we mirror the walker's staging
+		-- behavior for MTC2 / CTC2 / LWC2 / MFC2 / CFC2 / MFC0 / command_latch.
+		local aliases   = duffle.GTE_COMMAND_ALIASES or {}
+		local canonical = aliases[ev_ident] or ev_ident
+		if ev_ident == "gte_mv_to_data_r" or ev_ident == "gte_mv_to_ctrl_r" then
+			local relations_table = duffle.HARDWARE_RELATIONS or {}
+			for _, row in ipairs(relations_table) do
+				if row.token == ev_ident and row.stage ~= false then
+					local dest_arg    = row.writes and row.writes.arg
+					local destination = dest_arg   and ev_args[dest_arg] or nil
+					if destination and (not row.destination_match or row.destination_match == destination) then
+						local required = row.visibility and row.visibility.required
+						if    required == nil and not (row.visibility and row.visibility.kind == "unknown_consumer") then
+							required = 1
+						end
+						pending_snapshot[#pending_snapshot + 1] = {
+							relation    = row,
+							destination = destination,
+							word        = ev_word,
+							required    = required,
+						}
 					end
 				end
 			end
-			-- Advance all pending writes by 1 for the slot this instruction occupies.
-			for i = 1, #pending do pending[i].slots = pending[i].slots - 1 end
-			local next_pending = {}
-			for _, p in ipairs(pending) do
-				if p.slots > 0 then next_pending[#next_pending + 1] = p end
+		elseif canonical:sub(1, 9) == "gte_cmdw_" then
+			-- Command: stage post-command latch relations (same as the walker).
+			local latch_table = duffle.GTE_COMMAND_LATCH_WINDOWS or {}
+			local cmd_latches = latch_table[canonical]
+			if cmd_latches then
+				for _, latch in ipairs(cmd_latches) do
+					if latch.register and latch.required then
+						pending_snapshot[#pending_snapshot + 1] = {
+							relation    = {
+								id    = "command_latch_input",
+								semantic = "command_latch",
+							},
+							destination = latch.register,
+							word        = ev_word,
+							required    = latch.required,
+						}
+					end
+				end
 			end
-			pending = next_pending
 		end
+
+		prev_ev = ev
 	end
 end
 
@@ -486,45 +1247,49 @@ end
 -- Check #1c: control-transfer delay-slot use.
 --
 -- Reads `atom.paths.word_events` (the semantic emitted-word stream from `duffle.expand_word_events`).
--- For each event whose `ident` is in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`, inspect the next
--- emitted event in the SAME `events` array. The next event is the hardware delay-slot word
--- (the duffle pipeline already absorbs the BD-slot into the branch's cost in `analyze_atom_paths`;
--- this check observes, it does not reschedule).
+-- For each event whose `ident` is in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`, inspect the next emitted event in the SAME `events` array.
+-- The next event is the hardware delay-slot word (the duffle pipeline already absorbs the BD-slot into the branch's cost in `analyze_atom_paths`.
+-- This check observes, it does not reschedule.
 --
 -- Emit one `info`-severity finding when:
 --   * the successor event is absent (no following emitted word); `slot_ident` is reported as `<missing>`; OR
 --   * the successor event's `ident == "nop"` (the first emitted word of `nop2` is also `nop`).
 --
--- Suppress the finding when `policy.suppress_arg1[first_arg]` is non-nil — the only current
--- suppression is `jump_reg(R_AtomJmp)`, the fixed `mac_yield()` handshake.
+-- Suppress the finding when `policy.suppress_arg1[first_arg]` is non-nil.
+-- The only current suppression is `jump_reg(R_AtomJmp)`, the fixed `mac_yield()` handshake.
 --
--- `pipe_ctx` is unused; the uniform `(atom, pipe_ctx, findings)` signature is preserved so the check
--- plugs into the existing CHECK_RULES dispatch without modifying the per-atom loop or analyze_atom_paths.
--- `expand_word_events` already normalizes `nop2` to two `nop` events and `atom_label` to zero events,
--- so no special-case branching is needed for either.
+-- `pipe_ctx` is unused; the uniform `(atom, pipe_ctx, findings)` signature is preserved so the check plugs into 
+-- the existing CHECK_RULES dispatch without modifying the per-atom loop or analyze_atom_paths.
+-- `expand_word_events` already normalizes `nop2` to two `nop` events and `atom_label` to zero events, so no special-case branching is needed for either.
 -- ─────────────────────────────────────────────────────────────────────────
 
 local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
-	local events = atom.paths.word_events or {}
+	local  events = atom.paths.word_events or {}
 	if not events or #events == 0 then return end
 	local policies = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
 	for event_idx, event in ipairs(events) do
-		local policy = policies[event.ident]
+		-- Canonical word_events use `encoder` as the leading identifier of the emitting token).
+		-- Focused inputs may supply `ident` when constructing isolated events.
+		local event_ident      = event.encoder or event.ident
+		local slot_ident_field = event.encoder and "encoder" or "ident"
+		local policy           = policies[event_ident]
 		if policy then
-			local arg1 = event.args and event.args[1] or nil
+			local arg1       = event.args and event.args[1] or nil
 			local suppressed = policy.suppress_arg1 and policy.suppress_arg1[arg1] or nil
 			if not suppressed then
-				local slot = events[event_idx + 1]
-				if slot == nil or slot.ident == "nop" then
-					local slot_ident = slot and slot.ident or "<missing>"
+				local slot       = events[event_idx + 1]
+				local slot_ident = slot and (slot.encoder or slot.ident) or "<missing>"
+				if slot == nil or (slot.encoder or slot.ident) == "nop" then
+					-- Each word event carries `body_line` as the physical source line.
+					-- Use `body_line`, then `def_line`, then 0.
+					local ev_line = event.body_line or event.line or event.def_line or 0
 					findings[#findings + 1] = {
 						atom  = atom.name,
-						line  = event.line,
+						line  = ev_line,
 						check = "control_transfer_delay_slot_use",
 						kind  = "info",
-						msg   = string.format(
-							"%s at line %d has `%s` whose emitted delay-slot word is `%s`; useful work may replace that no-op if its dependencies are valid on both paths",
-							atom.name, event.line, event.ident, slot_ident),
+						msg   = string.format("%s at line %d has `%s` whose emitted delay-slot word is `%s`; useful work may replace that no-op if its dependencies are valid on both paths"
+							, atom.name, ev_line, event_ident, slot_ident),
 					}
 				end
 			end
@@ -542,7 +1307,7 @@ end
 --- Empty bodies are not currently flagged — runtime infrastructure atoms like 
 --- `MipsAtom_(yield) { mac_yield() }` and `MipsAtom_(tape_exit) { jump_reg(rret_addr), nop }` 
 --- are valid as-is; mac_yield at the end is the contract.
---- Stage 2: signature uniformized to `(atom, pipe_ctx, findings)` — pipe_ctx is ignored here.
+--- Uses the standard `(atom, pipe_ctx, findings)` signature; `pipe_ctx` is unused.
 local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	-- Per-kind semantics:
 	--   MipsAtom_          (baked atom): exactly 1 mac_yield at the end of the body. Control transfer is the atom's job.
@@ -577,9 +1342,8 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 				line  = atom.line,
 				check = "mac_yield_uniformity",
 				kind  = "warning",
-				msg   = string.format(
-					"%s at line %d has no `mac_yield()`; every atom must hand control to the next via mac_yield at end",
-					atom.name, atom.line),
+				msg   = string.format("%s at line %d has no `mac_yield()`; every atom must hand control to the next via mac_yield at end"
+					, atom.name, atom.line),
 			}
 		elseif count > 1 then
 			findings[#findings + 1] = {
@@ -587,17 +1351,14 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 				line  = line_for(last_idx),
 				check = "mac_yield_uniformity",
 				kind  = "warning",
-				msg   = string.format(
-					"%s at line %d has %d `mac_yield()` calls; exactly 1 is allowed",
-					atom.name, line_for(last_idx), count),
+				msg   = string.format("%s at line %d has %d `mac_yield()` calls; exactly 1 is allowed", atom.name, line_for(last_idx), count),
 			}
 		elseif last_idx < n then
 			-- 1 call, but not the last token. We DON'T fail if the post-token is just `nop` or `nop2` or a branch with `, nop` delay slot.
 			-- It's the standard "yield, then BD nop" idiom.
 			local post_non_nop = false
 			for search_idx = last_idx + 1, n do
-				if tc[search_idx].nop_words == 0
-				   and tokens[search_idx].tok ~= "" then
+				if tc[search_idx].nop_words == 0 and tokens[search_idx].tok ~= "" then
 					post_non_nop = true
 					break
 				end
@@ -608,9 +1369,8 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 					line  = line_for(last_idx),
 					check = "mac_yield_uniformity",
 					kind  = "warning",
-					msg   = string.format(
-						"%s at line %d has `mac_yield()` at token %d/%d; the yield must be the LAST non-nop token in the body",
-						atom.name, line_for(last_idx), last_idx, #tokens),
+					msg   = string.format("%s at line %d has `mac_yield()` at token %d/%d; the yield must be the LAST non-nop token in the body"
+						, atom.name, line_for(last_idx), last_idx, #tokens),
 				}
 			end
 		end
@@ -625,9 +1385,8 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 				line  = line_for(last_idx),
 				check = "mac_yield_uniformity",
 				kind  = "warning",
-				msg   = string.format(
-					"%s at line %d is a %s component but has %d `mac_yield()` call(s); components must not yield (the parent atom does)",
-					atom.name, line_for(last_idx), atom.kind, count),
+				msg   = string.format("%s at line %d is a %s component but has %d `mac_yield()` call(s); components must not yield (the parent atom does)"
+					, atom.name, line_for(last_idx), atom.kind, count),
 			}
 		end
 	end
@@ -649,11 +1408,11 @@ end
 ---   2. Body MUST contain an `add_ui_self(R_TapePtr, S_(Binds_X))` (or equivalent advance by the struct's byte count). Missing = error.
 ---   3. atom_bind(Binds_X) where Binds_X doesn't exist = error.
 --- Per-atom: Verify the atom body reads every field of its `Binds_X` from R_TapePtr and advances R_TapePtr by S_(Binds_X).
---- Signature changed in Stage 1B: Takes `(atom, pipe_ctx, findings)` where `pipe_ctx` carries the cross-atom 
+--- Takes `(atom, pipe_ctx, findings)`; `pipe_ctx` carries the cross-atom
 --- `info_by_atom` + `binds_index` tables (built once by validate() before the per-atom loop).
---- Per-atom iteration now lives in validate(); this is a per-atom predicate.
+--- `validate()` owns per-atom iteration; this function evaluates one atom.
 local function check_abi_handoff(atom, pipe_ctx, findings)
-	local info = pipe_ctx.info_by_atom[atom.name]
+	local  info = pipe_ctx.info_by_atom[atom.name]
 	if not info or not info.binds then return end
 	local binds_name = info.binds
 	local binds      = pipe_ctx.binds_index[binds_name]
@@ -661,8 +1420,8 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 		findings[#findings + 1] = {
 			atom  = atom.name, line = atom.line,
 			check = "abi_handoff", kind = "error",
-			msg   = string.format("%s at line %d has `atom_bind(%s)` but no `typedef Struct_(%s)` declaration found in source",
-				atom.name, atom.line, binds_name, binds_name),
+			msg   = string.format("%s at line %d has `atom_bind(%s)` but no `typedef Struct_(%s)` declaration found in source"
+				, atom.name, atom.line, binds_name, binds_name),
 		}
 		return
 	end
@@ -702,8 +1461,8 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 			findings[#findings + 1] = {
 				atom  = atom.name, line = atom.line,
 				check = "abi_handoff", kind = "error",
-				msg   = string.format("%s at line %d binds %s but never loads field `%s` from R_TapePtr (expected O_(%s, %s))",
-					atom.name, atom.line, binds_name, f.name, binds_name, f.name),
+				msg   = string.format("%s at line %d binds %s but never loads field `%s` from R_TapePtr (expected O_(%s, %s))"
+					, atom.name, atom.line, binds_name, f.name, binds_name, f.name),
 			}
 		end
 	end
@@ -712,8 +1471,8 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 		findings[#findings + 1] = {
 			atom  = atom.name, line = atom.line,
 			check = "abi_handoff", kind = "error",
-			msg   = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)",
-				atom.name, atom.line, binds_name, binds_name, binds.bytes, binds.bytes / 0x04),
+			msg   = string.format("%s at line %d binds %s but never advances R_TapePtr by S_(%s) (= %d bytes / %d words)"
+				, atom.name, atom.line, binds_name, binds_name, binds.bytes, binds.bytes / 0x04),
 		}
 	end
 end
@@ -734,13 +1493,13 @@ end
 --- Applies only to `kind = "atom"` (baked atoms). Components don't emit full primitives.
 local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" then return end
-	local tokens = atom.paths.tokens
-	local line_in_body = atom.paths.line_in_body
-	local tc = atom.paths.tok_class
-	local cmd_byte = nil
-	local cmd_line = nil
-	local contrib = 0
-	local saw_format = false
+	local tokens         = atom.paths.tokens
+	local line_in_body   = atom.paths.line_in_body
+	local tc             = atom.paths.tok_class
+	local cmd_byte       = nil
+	local cmd_line       = nil
+	local contrib        = 0
+	local saw_format     = false
 	local saw_prim_write = false
 
 	-- Reads from tc_entry fields pre-computed by classify_tokens (R3 lift).
@@ -777,8 +1536,8 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 				check = "gpu_portstore_shape", kind = "warning",
 				msg   = string.format("%s at line %d writes to R_PrimCursor via raw store_word(...)"
 					.. " but uses no `mac_format_*_color`; the cmd byte + word count cannot be auto-validated."
-					.. " Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.",
-					atom.name, atom.line),
+					.. " Consider migrating to `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`."
+					, atom.name, atom.line),
 			}
 		end
 	else
@@ -787,8 +1546,8 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 			findings[#findings + 1] = {
 				atom  = atom.name, line = cmd_line or atom.line,
 				check = "gpu_portstore_shape", kind = "error",
-				msg   = string.format("%s at line %d emits GP0 0x%02X with %d prim word(s); expected %d (cmd 0x%02X total = %d)",
-					atom.name, cmd_line or atom.line, cmd_byte, contrib, expected, cmd_byte, expected),
+				msg   = string.format("%s at line %d emits GP0 0x%02X with %d prim word(s); expected %d (cmd 0x%02X total = %d)"
+					, atom.name, cmd_line or atom.line, cmd_byte, contrib, expected, cmd_byte, expected),
 			}
 		end
 	end
@@ -811,9 +1570,9 @@ end
 ---   has_loops      - true iff a path re-entered a token it had visited (warning; loop bodies aren't supported)
 ---   unknown_macros - list of unique macro names not in duffle.INSTRUCTION_LATENCY
 local function analyze_atom_paths(atom)
-	local tokens   = atom.paths.tokens or duffle.tokenize_body(atom.body)
-	local tc       = atom.paths.tok_class or classify_tokens(tokens)
-	local n        = #tokens
+	local tokens = atom.paths.tokens or duffle.tokenize_body(atom.body)
+	local tc     = atom.paths.tok_class or classify_tokens(tokens)
+	local n      = #tokens
 
 	-- Build label + branch maps from the pre-computed classification (no re-scan).
 	local labels   = {}
@@ -889,8 +1648,7 @@ local function analyze_atom_paths(atom)
 		if visited[tok_idx] then
 			has_loops = true
 			if _G._DEBUG_DFS_LOOP then
-				io.stderr:write(string.format("  -> LOOP at tok_idx=%d (tok=%s) acc=%d\n",
-					tok_idx, tokens[tok_idx].tok, acc))
+				io.stderr:write(string.format("  -> LOOP at tok_idx=%d (tok=%s) acc=%d\n", tok_idx, tokens[tok_idx].tok, acc))
 			end
 			return
 		end
@@ -962,8 +1720,8 @@ local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 				atom  = atom.name, line = atom.line,
 				check = "per_atom_cycle_budget", kind = "warning",
 				msg   = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; "
-					.. "cycle count will be +%d per call (best-case). Add an entry to duffle.INSTRUCTION_LATENCY.",
-					atom.name, atom.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
+					.. "cycle count will be +%d per call (best-case). Add an entry to duffle.INSTRUCTION_LATENCY."
+					, atom.name, atom.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
 			}
 		end
 	end
@@ -986,7 +1744,7 @@ end
 -- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase ARE opted in.
 -- Raw C-ABI aliases like R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle:
 -- no auto-include of wave-context; explicit opt-in only). Warnings keep the build green
--- and surface the migration gap so users see which atoms still need opt-in registration.
+	-- and report aliases that need explicit registration.
 local function check_enum_alias_membership(_src, pipe_ctx, findings)
 	local reg_registry = pipe_ctx.register_alias_registry or {}
 
@@ -998,9 +1756,8 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 			findings[#findings + 1] = {
 				atom  = "", line = def.source_line or 0,
 				check = "enum_alias_membership", kind = "warning",
-				msg   = string.format(
-					"atom_dbg_reg_default at line %d references unknown register %q (not in register_alias_registry)",
-					def.source_line or 0, reg),
+				msg   = string.format("atom_dbg_reg_default at line %d references unknown register %q (not in register_alias_registry)"
+					, def.source_line or 0, reg),
 			}
 		end
 	end
@@ -1018,9 +1775,8 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 					findings[#findings + 1] = {
 						atom  = atom_name, line = info_line,
 						check = "enum_alias_membership", kind = "warning",
-						msg   = string.format(
-							"atom '%s' at line %d has reg_type_overrides for %q; the alias is not in register_alias_registry",
-							atom_name, info_line, reg),
+						msg   = string.format("atom '%s' at line %d has reg_type_overrides for %q; the alias is not in register_alias_registry"
+							, atom_name, info_line, reg),
 					}
 				end
 			end
@@ -1030,9 +1786,8 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 				findings[#findings + 1] = {
 					atom  = atom_name, line = info_line,
 					check = "enum_alias_membership", kind = "warning",
-					msg   = string.format(
-						"atom '%s' at line %d has atom_reads for %q; the alias is not in register_alias_registry",
-						atom_name, info_line, reg),
+					msg   = string.format("atom '%s' at line %d has atom_reads for %q; the alias is not in register_alias_registry"
+						, atom_name, info_line, reg),
 				}
 			end
 		end
@@ -1041,9 +1796,8 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 				findings[#findings + 1] = {
 					atom  = atom_name, line = info_line,
 					check = "enum_alias_membership", kind = "warning",
-					msg   = string.format(
-						"atom '%s' at line %d has atom_writes for %q; the alias is not in register_alias_registry",
-						atom_name, info_line, reg),
+					msg   = string.format("atom '%s' at line %d has atom_writes for %q; the alias is not in register_alias_registry"
+						, atom_name, info_line, reg),
 				}
 			end
 		end
@@ -1071,9 +1825,8 @@ local function check_atom_type_consistency(_src, pipe_ctx, findings)
 					findings[#findings + 1] = {
 						atom  = atom_name, line = info_line,
 						check = "atom_type_consistency", kind = "error",
-						msg   = string.format(
-							"atom '%s' at line %d reg_type_overrides[%q] uses unknown type %q (not in type_name_registry)",
-							atom_name, info_line, reg, tostring(ov.type_name)),
+						msg   = string.format("atom '%s' at line %d reg_type_overrides[%q] uses unknown type %q (not in type_name_registry)"
+							, atom_name, info_line, reg, tostring(ov.type_name)),
 					}
 				end
 			end
@@ -1101,8 +1854,8 @@ end
 -- Severity: warning (build continues) — this catches a category of bugs
 -- (passing a struct by value through the tape payload) where the symptom is runtime corruption, not a compile error.
 -- Look up a field by name in a type's `fields` array. Returns the matching field entry, or nil if not found.
--- Extracted to keep check_binds_no_substruct_deref's nesting depth <= 5 (the project convention; this is the 5th nesting level:
--- function -> for-atom -> for-token -> if-load/store -> if-type-resolves -> [helper]).
+-- Helper extracted to keep the caller's nesting depth <= 5 (project convention; this is the 5th nesting level:
+--   function -> for-atom -> for-token -> if-load/store -> if-type-resolves).
 local function find_field_by_name(type_entry, field_name)
 	for _, f in ipairs(type_entry.fields or {}) do
 		if f.name == field_name then return f end
@@ -1142,9 +1895,8 @@ local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 					findings[#findings + 1] = {
 						atom  = a.name, line = body_line,
 						check = "binds_no_substruct_deref", kind = "warning",
-						msg   = string.format(
-							"atom '%s' at line %d O_(%s, %s) refers to type %q which has no fields table in type_name_registry",
-							a.name, body_line, type_name, field_name, type_name),
+						msg   = string.format("atom '%s' at line %d O_(%s, %s) refers to type %q which has no fields table in type_name_registry"
+							, a.name, body_line, type_name, field_name, type_name),
 					}
 				else
 					local field = find_field_by_name(type_entry, field_name)
@@ -1152,17 +1904,15 @@ local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 						findings[#findings + 1] = {
 							atom  = a.name, line = body_line,
 							check = "binds_no_substruct_deref", kind = "warning",
-							msg   = string.format(
-								"atom '%s' at line %d O_(%s, %s) does not resolve to a field of %s",
-								a.name, body_line, type_name, field_name, type_name),
+							msg   = string.format("atom '%s' at line %d O_(%s, %s) does not resolve to a field of %s"
+								, a.name, body_line, type_name, field_name, type_name),
 						}
 					elseif not is_field_leaf(field, type_registry) then
 						findings[#findings + 1] = {
 							atom  = a.name, line = body_line,
 							check = "binds_no_substruct_deref", kind = "warning",
-							msg   = string.format(
-								"atom '%s' at line %d O_(%s, %s) dereferences a non-pointer struct field of type %q; nested struct members are forbidden",
-								a.name, body_line, type_name, field_name, field.type_name),
+							msg   = string.format("atom '%s' at line %d O_(%s, %s) dereferences a non-pointer struct field of type %q; nested struct members are forbidden"
+								, a.name, body_line, type_name, field_name, field.type_name),
 						}
 					end
 				end
@@ -1171,44 +1921,10 @@ local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 	end
 end
 
--- ════════════════════════════════════════════════════════════════════════════
--- Check #9: reads_writes_alias_membership
--- ════════════════════════════════════════════════════════════════════════════
-
--- For every `atom_reads(R_X)` and `atom_writes(R_X)` entry in every `atom_infos` entry, the `R_X` MUST be present in `pipe_ctx.register_alias_registry`.
--- This DUPLICATES `enum_alias_membership`'s coverage of the reads/writes arrays;
--- the distinct check name is intentional so the report can attribute the failure to a precedence-class (warnings vs errors) — the production reads/writes
--- paths are intentionally permissive at the warning level even when the registry-driven check is strict at the error level.
--- Per-source rule. Severity: warning (build continues).
-local function check_reads_writes_alias_membership(_src, pipe_ctx, findings)
-	local reg_registry = pipe_ctx.register_alias_registry or {}
-	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
-		local info_line = ai.info_line or 0
-		local atom_name = ai.atom_name or ""
-		for _, reg in ipairs(ai.reads or {}) do
-			if not reg_registry[reg] then
-				findings[#findings + 1] = {
-					atom  = atom_name, line = info_line,
-					check = "reads_writes_alias_membership", kind = "warning",
-					msg   = string.format(
-						"atom '%s' at line %d atom_reads for %q; the alias is not in register_alias_registry",
-						atom_name, info_line, reg),
-				}
-			end
-		end
-		for _, reg in ipairs(ai.writes or {}) do
-			if not reg_registry[reg] then
-				findings[#findings + 1] = {
-					atom  = atom_name, line = info_line,
-					check = "reads_writes_alias_membership", kind = "warning",
-					msg   = string.format(
-						"atom '%s' at line %d atom_writes for %q; the alias is not in register_alias_registry",
-						atom_name, info_line, reg),
-				}
-			end
-		end
-	end
-end
+-- Because enum_alias_membership (Check #8) already iterates ai.reads / ai.writes against corpus.register_alias_registry.
+-- The duplicate row produced redundant findings for the same off-registry register.
+-- Neither a check function nor a CHECK_RULES row retains the name.
+-- If a future regression reintroduces either, the test_canonical_corpus.lua grep sweep will surface it.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CHECK_RULES — data-driven check dispatch (Muratori: data over control flow)
@@ -1221,13 +1937,15 @@ end
 --   per_macro(macro, wc, findings)              — runs once per TAPE_WORDS / _Pragma macro declaration
 --   per_skip_marker(marker, pipe_ctx, findings) — runs once per src.scan.skip_over.markers entry
 --   per_source(src, pipe_ctx, findings)         — runs once per source AFTER the per-atom loop completes
---                                                 (added for the registry-driven rule set; same CHECK_RULES table — no parallel dispatch)
--- Adding a new check = 1 row here + 1 check_* function. validate() is updated only to invoke the per_source dispatch loop (the per_atom dispatch loop never changes).
+--                                                 (registry-driven rule; same CHECK_RULES table)
+-- Each check is one table row and one `check_*` function.
 -- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
 
 local CHECK_RULES = {
-	{ name = "gte_write_retire",               per_atom   = check_gte_write_retire               },
-	{ name = "cop2_gpr_load_delay",            per_atom   = check_cop2_gpr_load_delay            },
+	{ name = "transfer_hazards",               per_atom   = check_transfer_hazards               },
+	{ name = "gte_input_latch",                per_atom   = check_gte_input_latch                },
+	{ name = "gte_result_position",            per_atom   = check_gte_result_position            },
+	{ name = "hazard_nop_use",                 per_atom   = check_hazard_nop_use                 },
 	{ name = "control_transfer_delay_slot_use",per_atom   = check_control_transfer_delay_slot_use},
 	{ name = "mac_yield_uniformity",           per_atom   = check_mac_yield_uniformity           },
 	{ name = "abi_handoff",                    per_atom   = check_abi_handoff                    },
@@ -1236,15 +1954,50 @@ local CHECK_RULES = {
 	{ name = "enum_alias_membership",          per_source = check_enum_alias_membership          },
 	{ name = "atom_type_consistency",          per_source = check_atom_type_consistency          },
 	{ name = "binds_no_substruct_deref",       per_source = check_binds_no_substruct_deref       },
-	{ name = "reads_writes_alias_membership", per_source = check_reads_writes_alias_membership },
 }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Per-source validation
 -- ════════════════════════════════════════════════════════════════════════════
 
-local function validate(ctx, src)
+--- Build the corpus-wide pipe_ctx ONCE per pass run.
+--- Reads the merged `corpus.*` registries (canonical cross-source lookups), and the corpus-wide `atom_infos` list (preserving source order + duplicates).
+--- The corpus is the source of truth; per-source scans retain body / declaration ownership via `src.scan` and the per-source `atoms` / `atom_infos` projections.
+---
+--- Ownership: A context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus message.
+--- No per-source fallback synthesis is performed; callers MUST construct a canonical ctx through `build_ctx`. 
+--- @param ctx PassCtx
+--- @return PipeCtx
+local function build_corpus_pipe_ctx(ctx)
+	local corpus = ctx.shared and ctx.shared.corpus
+	if not corpus then
+		error("static_analysis requires ctx.shared.corpus "
+			.. "(the canonical corpus is the source of truth; "
+			.. "no per-source fallback is supported)", 0)
+	end
+	-- The pipe_ctx views REFERENCE the corpus tables directly (no copies).
+	-- Every consumer of these fields observes mutations via the canonical corpus without independently mutable registry construction.
+	return {
+		-- Cross-source lookup tables (canonical corpus projections).
+		register_alias_registry = corpus.register_alias_registry or {},
+		type_name_registry      = corpus.type_name_registry      or {},
+		atom_views              = corpus.atom_views              or {},
+		atom_ctxs               = corpus.atom_ctxs               or {},
+		atom_phases             = corpus.atom_phases             or {},
+		binds_by_name           = corpus.binds_by_name           or {},
+		atoms_by_name           = corpus.atoms_by_name           or {},
+		-- Corpus-wide ordered list of atom_info records (source-order + duplicates).
+		atom_infos_list         = corpus.atom_infos              or {},
+		-- Corpus-wide collisions (recorded by scan_source.merge_corpus_registries).
+		collisions              = corpus.collisions              or {},
+	}
+end
+
+local function validate(ctx, src, corpus_pipe_ctx)
 	local scan = src.scan
+	-- Read the canonical corpus word_counts for the defensive fallback path below
+	-- (test-only: Focused tests that bypass emission-model and feed static_analysis still need word_events produced by the legacy `duffle.expand_word_events` walker).
+	local corpus = (ctx.shared and ctx.shared.corpus) or {}
 
 	-- Read atoms + binds + atom_infos from the pre-scanned SourceScan payload.
 	-- The scan was done once upstream by duffle.scan_source(); this pass is pure.
@@ -1259,16 +2012,17 @@ local function validate(ctx, src)
 
 	-- pipe_ctx: the cross-atom shared state for the per-atom pipeline (Fleury "expose structure").
 	-- Pre-allocated here, mutated by each per-atom check call below.
-	-- Replaces the per-check local tables that used to live inside each check_* function body.
+	-- Cross-source lookup tables come from `corpus_pipe_ctx` (built once per pass);
+	-- source-local body / declaration ownership comes from `src.scan`.
 	--   info_by_atom             — atom_name -> atom_info (built once; check_abi_handoff reads it)
 	--   binds_index              — Binds_X -> binds struct (built once; check_abi_handoff reads it)
 	--   unknown_seen             — macro_name -> first atom line (accumulated across atoms; check_per_atom_cycle_budget dedups)
 	--   atoms                    — full atom list (used by check_binds_no_substruct_deref's per-source body walk)
 	--   types                    — R_X -> default-type info from atom_dbg_reg_default (check_enum_alias_membership source a)
-	--   atom_infos_list          — flat list of atom_info entries (checks #6/#7/#9 iterate it)
-	--   register_alias_registry  — R_X -> {name, code, has_atom_reg, source_line} from parse_enum_aliases
-	--   type_name_registry       — T -> {name, kind, fields, ...} from parse_typedef_binds
-	-- All registry fields are READ from src.scan (the dep-closed scan-source payload); this pass never re-parses.
+	--   atom_infos_list          — per-source flat list of atom_info entries (checks #6/#7 iterate it)
+	--   register_alias_registry  — R_X -> {name, code, has_atom_reg, source_line} from corpus-wide merge
+	--   type_name_registry       — T -> {name, kind, fields, ...} from corpus-wide merge
+	-- All registry fields are READ from the corpus (the dep-closed scan-source merge); this pass never re-parses.
 	local info_by_atom = {}
 	for _, info in ipairs(atom_infos) do
 		info_by_atom[info.atom_name] = info
@@ -1280,44 +2034,62 @@ local function validate(ctx, src)
 		atoms                   = atoms,
 		types                   = scan.types or {},
 		atom_infos_list         = atom_infos or {},
-register_alias_registry = scan.register_alias_registry or {},
-		type_name_registry      = scan.type_name_registry or {},
+		register_alias_registry = corpus_pipe_ctx.register_alias_registry,
+		type_name_registry      = corpus_pipe_ctx.type_name_registry,
 	}
-	-- Shared cross-source component-body index (built once per pass via duffle's memoizing helper).
-	-- `atom.paths.word_events` + `atom.paths.word_event_errors` are populated below and consumed by
-	-- the per-atom checks (`check_gte_write_retire`, `check_cop2_gpr_load_delay`).
-	pipe_ctx.component_body_index = duffle.get_component_body_index(ctx)
+	-- Shared cross-source component-body index is owned by the canonical corpus
+	-- (`corpus.component_body_index`, populated by `passes/components.lua`).
+	-- Per-atom checks consume the corpus-owned index directly.
+	pipe_ctx.component_body_index = (corpus and corpus.component_body_index) or {}
 
-	-- THE per-atom pipeline. ONE iteration of atoms; the 5 check_* functions + analyze_atom_paths
-	-- all run here, sharing a single tokenize_body + build_body_line_index per body.
-	-- Every piece of state derived from an atom body lives on `atom.paths` (the per-atom mega-struct);
-	-- readers (analyze_atom_paths, the 5 checks, the renderers) all consume `atom.paths`, not the raw `atoms` list.
-	-- Stage 1B: each check_* now takes `(atom, ...)` instead of `(atoms, findings)` — no more single-atom `{a}` shim.
-	-- Per-source rules run once after this loop completes (no parallel dispatch table).
+	--- Per-atom pipeline. ONE iteration of atoms; the 5 check_* functions + analyze_atom_paths all run here, sharing a single tokenize_body + build_body_line_index per body.
+	--- Every piece of state derived from an atom body lives on `atom.paths` (per-atom mega-struct);
+	--- readers (analyze_atom_paths, the 5 checks, the renderers) all consume `atom.paths`, not the raw `atoms` list.
+	--- Each `check_*` function accepts one atom and its shared context.
+	--- Per-source rules run once after this loop completes (no parallel dispatch table).
+	---
+	--- Body, token, and emission projections come from here (`paths.tokens = body_tokens`, `paths.line_in_body = build_body_line_index` `paths.word_events`
+	--- and related fields are owned by `passes/emission_model.lua` pass (per-atom emission projection).
+	--- This pass reads: `paths.tokens`, `paths.line_in_body` ` paths.items`, `paths.word_events` from the canonical projection, 
+	--- then computes `paths.tok_class`, `paths.cycles_min/max`, `paths.branches`, `paths.paths`, `paths.has_loops`, `paths.unknown_macros` 
+	--- via `classify_tokens` + `analyze_atom_paths`.
+	--- No re-walk of body text or body_tokens happens here.
+	---
+	--- Isolated component checks may supply a component body directly.
+	--- Such inputs may omit an emission projection and require this pass to populate `paths.word_events` through `duffle.expand_word_events`.
+	--- Normal callers run emission-model first.
 	local findings = {}
 	for _, a in ipairs(atoms) do
-		a.paths                  = a.paths or {}
-		a.paths.tokens           = a.body_tokens
-		a.paths.line_in_body     = duffle.build_body_line_index(a.body)
-		a.paths.tok_class        = classify_tokens(a.paths.tokens)
+		a.paths = a.paths or {}
+		-- `paths.tokens` / `paths.line_in_body` / `paths.items` / `paths.word_events` are populated by `passes/emission_model.lua`.
+		-- Supply tokens when no emission projection is present.
+		if a.paths.tokens == nil then a.paths.tokens = a.body_tokens end
+		a.paths.tok_class = classify_tokens(a.paths.tokens)
 
--- Precompute the semantic emitted-word event stream for this atom. The per-atom checks
-		-- (`check_gte_write_retire`, `check_cop2_gpr_load_delay`) read these to retire slots on the
-		-- actual emitted machine words (including `mac_X(...)`-expanded words from nested components).
-		local body_entry = {
-			body_tokens = a.body_tokens,
-			body_off    = a.body_off,
-			line_of     = src.scan.line_of,
-			source      = src.path,
-			declaration = a.line,
-		}
-		a.paths.word_events, a.paths.word_event_errors =
-			duffle.expand_word_events(body_entry, pipe_ctx.component_body_index, ctx.shared.word_counts or {})
+		-- Supply word events when no emission projection is present.
+		if a.paths.word_events == nil then
+			local body_entry = {
+				body_tokens = a.body_tokens,
+				body_off    = a.body_off,
+				line_of     = src.scan.line_of,
+				source      = src.path,
+				declaration = a.line,
+			}
+			a.paths.word_events = duffle.expand_word_events(body_entry,
+				pipe_ctx.component_body_index,
+				corpus.word_counts or {})
+		end
 
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a)
 
-		-- Run all per-atom checks on this one atom via the CHECK_RULES data table (Muratori: data over control flow).
+		-- Run the single forward walker for transfer-hazard policy.
+		-- Runs once per atom BEFORE the CHECK_RULES per-atom dispatch so the `transfer_hazards` reader (`check_transfer_hazards`) can
+		-- project `atom.paths.hazards` into `findings` without re-walking source.
+		-- The walker owns `atom.paths.{forward_state, relations, hazards}`; readers never re-iterate events or re-classify tokens.
+		analyze_hardware_relations(a)
+
+	-- Run all per-atom checks on this one atom via the CHECK_RULES data table.
 	-- Adding a new check = 1 row in CHECK_RULES; this loop never needs editing.
 		for _, rule in ipairs(CHECK_RULES) do
 			if rule.per_atom then rule.per_atom(a, pipe_ctx, findings) end
@@ -1333,8 +2105,7 @@ register_alias_registry = scan.register_alias_registry or {},
 
 	-- Three-way severity binning: per-finding severity is set by the check via `f.kind`.
 	-- "error" / "warning" / "info" are all distinct; info findings are NEVER folded into warnings.
-	-- (Pre-2026-07-23 the binner treated everything non-error as a warning, which made the
-	-- control-transfer delay-slot check indistinguishable from real warnings in the report.)
+	-- Keep error, warning, and info findings in distinct buckets so the control-transfer delay-slot check remains distinct from warnings.)
 	-- The `info` list returned here is finding-level only; scan/cycle summary lines go into `summaries`.
 	-- An invalid/missing kind is a hard error (no silent fallback to info); this prevents typos like
 	-- kind="warn" or omitted kind fields from being misclassified as info in the rendered report.
@@ -1342,30 +2113,56 @@ register_alias_registry = scan.register_alias_registry or {},
 	local warnings = {}
 	local info     = {}
 	for _, f in ipairs(findings) do
-		if     f.kind == "error"   then errors  [#errors   + 1] = { line = f.line, msg = f.msg }
-		elseif f.kind == "warning" then warnings[#warnings + 1] = { line = f.line, msg = f.msg }
-		elseif f.kind == "info"    then info    [#info     + 1] = { line = f.line, msg = f.msg }
+		-- Preserve the diagnostic context so focused tests + the renderer can route by the originating check or relation id.
+		-- Hazard readers (transfer_hazards) populate `f.check`, `f.relation_id`, `f.semantic`, `f.direction`, `f.producer_destination`, `f.gap`, `f.required`, `f.evidence_confidence`, etc.;
+		-- Copying them through keeps the per-severity bucket schema compatible with the renderer while making the diagnostic payload queryable.
+		local payload = {
+			line = f.line,
+			msg  = f.msg,
+			check = f.check,
+			atom = f.atom,
+			source = f.source,
+			relation_id       = f.relation_id,
+			semantic          = f.semantic,
+			direction         = f.direction,
+			producer_destination = f.producer_destination,
+			producer_word     = f.producer_word,
+			producer_line     = f.producer_line,
+			producer_source   = f.producer_source,
+			consumer_word     = f.consumer_word,
+			consumer_token    = f.consumer_token,
+			gap               = f.gap,
+			required          = f.required,
+			evidence_confidence = f.evidence_confidence,
+			evidence_source   = f.evidence_source,
+		}
+		-- Preserve relation fields such as target_state and status_register,
+		-- status_value, and future policy metadata) without making the binner
+		-- another semantic walker.
+		for key, value in pairs(f) do
+			if payload[key] == nil then payload[key] = value end
+		end
+		if     f.kind == "error"   then errors  [#errors   + 1] = payload
+		elseif f.kind == "warning" then warnings[#warnings + 1] = payload
+		elseif f.kind == "info"    then info    [#info     + 1] = payload
 		else
-			error(string.format(
-				"invalid finding kind %s for check %q (atom=%s, line=%d); expected one of \"error\", \"warning\", \"info\"",
-				tostring(f.kind), tostring(f.check), tostring(f.atom), f.line or 0), 0)
+			error(string.format("invalid finding kind %s for check %q (atom=%s, line=%d); expected one of \"error\", \"warning\", \"info\""
+				, tostring(f.kind), tostring(f.check), tostring(f.atom), f.line or 0), 0)
 		end
 	end
 
-	-- Per-source "scanned:" / "cycles:" summary lines. These are SCANNER / BUDGET rollups,
-	-- not findings — they belong in their own collection so the report can render them
+	-- Per-source "scanned:" / "cycles:" summary lines. These are SCANNER / BUDGET rollups, not findings; They belong in their own collection so the report can render them
 	-- AS summary rows (after Module findings) rather than mixed into the Info finding section.
 	local summaries = {}
 	-- Per-source "scanned:" summary line.
 	-- Includes the source basename for traceability
-	-- (the old format was just "scanned: N atom bodies; M findings" which is unidentifiable when the module has multiple sources).
+	-- Include the source basename so multi-source module summaries remain identifiable.
 	-- Sources with 0 atoms (pure-header files like dsl.h, mips.h, etc.) are SKIPPED.
 	-- The per-module header already lists them in the "Sources:" section, and emitting a noisy "0 atom bodies" line per header is just clutter.
 	if #atoms > 0 or #findings > 0 then
 		summaries[#summaries + 1] = {
 			line = 0,
-			msg  = string.format("scanned: %s: %d atom bodies; %d findings",
-				src.basename, #atoms, #findings),
+			msg  = string.format("scanned: %s: %d atom bodies; %d findings", src.basename, #atoms, #findings),
 		}
 	end
 
@@ -1618,12 +2415,18 @@ function M.run(ctx)
 	-- those are NOT finding-level and never enter `info`).
 	local info     = {}
 
+	-- Build the corpus-wide pipe_ctx ONCE per pass run.
+	-- The corpus owns the canonical cross-source registries; per-source scans
+	-- retain body / declaration ownership. The pipe_ctx is shared across every
+	-- validate() invocation in this M.run so cross-source visibility is constant.
+	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx)
+	local corpus = ctx.shared.corpus
+
 	-- Aggregate per-DIRECTORY (per-module).
 	-- One static_analysis.txt per source-directory, emitted only if the directory contains at least one atom.
 	-- Empty-source directories (e.g. duffle headers with no atoms) produce no report.
-	-- Group sources by `src.dir`. The first component of `dir` is the module name (e.g. "code/duffle" -> "duffle", "code/gte_hello" -> "gte_hello").
-	-- Output path is `<out_root>/<module_basename>.static_analysis.txt`.
-	local by_dir = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
+	-- Group sources by `src.dir` through the corpus-owned `sources_by_dir`.
+	local by_dir = (corpus and corpus.sources_by_dir) or {}
 
 	for dir, dir_sources in pairs(by_dir) do
 		-- Run validate() against every source in this directory; accumulate atoms / findings / errors / warnings.
@@ -1636,8 +2439,8 @@ function M.run(ctx)
 		local dir_info     = {}
 		local dir_summaries = {}
 		for _, src in ipairs(dir_sources) do
-			local result = validate(ctx, src)
-			-- Tag each atom with its source so the render step can prefix the atom line with "<​filename>:"
+			local result = validate(ctx, src, corpus_pipe_ctx)
+			-- Tag each atom with its source so the render step can prefix the atom line with "<filename>:"
 			-- when atoms from multiple sources live in the same module (e.g. lottes_tape.h + atom_dsl.h both declaring atoms).
 			for _, a in ipairs(result.atoms) do
 				a.source_path = src.path

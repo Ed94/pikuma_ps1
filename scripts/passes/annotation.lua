@@ -21,7 +21,7 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 local write_file     = duffle.write_file
 local ensure_dir     = duffle.ensure_dir
 
--- The annotation pass now consults the source-derived registries built by scan_source:
+-- The annotation pass reads the source-derived registries from scan_source:
 --   * pipe_ctx.register_alias_registry — for atom_dbg_reg_default(R_X, ...) and atom_reg_types(R_X, ...) member-identity checks
 --   * pipe_ctx.type_name_registry      — for atom_dbg_reg_default(<T>, ...) and atom_reg_types(<T>, ...) type-identity checks
 
@@ -108,12 +108,11 @@ local ensure_dir     = duffle.ensure_dir
 --
 -- Each check has a uniform `append_to_findings` shape (errors[] / warnings[] / info[]).
 -- The dispatcher in `validate()` decides which findings list each check writes to — by convention,
--- "existence" checks (declaration must exist, struct must exist) write errors[]; "shape" checks
--- (writes/reads must be wave-context) write warnings[].
+-- "existence" checks (declaration must exist, struct must exist) write errors[]; "shape" checks (writes/reads must be wave-context) write warnings[].
 -- The `macro_word_drift` check writes both errors[] (missing/mismatch) and info[] (match).
 
 --- Check: every annotated atom must have a matching MipsAtom_(name) declaration.
---- @param a AtomAnnotation
+--- @param a        AtomAnnotation
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_atom_decl_exists(a, pipe_ctx, findings)
@@ -144,7 +143,7 @@ end
 --- Emitting a warning here keeps the annotation pass from being stop-on-error for the common test-fixture case,
 --- while still surfacing the issue in the report.
 --- The static-analysis report remains the source of truth for build-stopping errors.
---- @param a AtomAnnotation
+--- @param a        AtomAnnotation
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_binds_struct_exists(a, pipe_ctx, findings)
@@ -160,7 +159,7 @@ end
 
 --- Check: TAPE_WORDS(mac_X, N) ↔ WORD_COUNT(mac_X, N) drift.
 --- Three outcomes: missing (error), mismatch (error), match (info).
---- @param m MacroEntry
+--- @param m  MacroEntry
 --- @param wc table<string, integer> -- the shared word-count table (from ctx.shared.word_counts)
 --- @param findings Findings
 local function check_macro_word_drift(m, wc, findings)
@@ -188,7 +187,7 @@ end
 --- Check: atom_dbg_reg_default(R_X, <type>) must target a register declared as a debug-visible alias in `pipe_ctx.register_alias_registry`,
 --- with a type name found in `pipe_ctx.type_name_registry`.
 --- Pointer depth is still bounded to 0 or 1. Duplicate defaults are still detected.
---- @param _src SourceFile        -- unused (kept for the per_source shape)
+--- @param _src     SourceFile -- unused (kept for the per_source shape)
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
@@ -240,7 +239,7 @@ end
 --- The alias ident `R_<n>` now encodes the GPR identity only for entries that are explicitly opted in via the bare `atom_reg` marker.
 --- R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle: no auto-include of wave-context; explicit opt-in only). 
 --- The check fires for any R_T0..R_T3 reference that hasn't been opted in via `#define atom_reg`.
---- @param _src SourceFile
+--- @param _src     SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_atom_reg_types(_src, pipe_ctx, findings)
@@ -271,7 +270,7 @@ local function check_atom_reg_types(_src, pipe_ctx, findings)
 end
 
 --- Check: atom_view(Binds_X) entries must reference a real Binds_* struct and that struct must declare at least one field.
---- @param _src SourceFile
+--- @param _src     SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_atom_view_layout(_src, pipe_ctx, findings)
@@ -385,14 +384,14 @@ local function check_skip_marker(marker, _pipe_ctx, findings)
 	end
 end
 
---- Migration warning emitted alongside the new registry-membership check.
+--- Warn when a source references an unregistered alias.
 ---
 --- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase are the context aliases opted in via `#define atom_reg` in lottes_tape.h.
---- Any source referencing an R_X that's NOT in the registry will trip the new check; a single pass-level info entry
+--- A source referencing an unregistered R_X emits one pass-level info entry
 --- (emitted only when at least one such rejection lands in this source) tells users where to look.
 ---
---- This check is a stop-gap until users migrate off raw C-ABI register names.
---- @param _src SourceFile
+--- This check directs raw C-ABI register names to explicit alias registration.
+--- @param _src     SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_wave_context_migration(_src, pipe_ctx, findings)
@@ -445,14 +444,65 @@ local CHECK_RULES = {
 -- Validation
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Pure check: read from src.scan, run validations, emit findings.
--- No source walking; no parsing. The scan was done once upstream.
+-- Pure check: read from src.scan, run validations, emit findings. The scan was done once upstream.
 
---- Validate one source against its pre-scanned SourceScan payload.
+--- Build the corpus-wide pipe_ctx ONCE per pass run.
+--- Reads the merged `corpus.*` registries (canonical cross-source lookups),
+--- and the corpus-wide `atom_infos` list (preserving source order + duplicates).
+--- The corpus is the source of truth; per-source scans retain body / declaration
+--- ownership via `src.scan` and the per-source `atoms` / `atom_infos` projections.
+---
+--- Canonical ownership: a context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus message.
+--- No per-source fallback synthesis is performed; callers MUST construct a canonical ctx through `build_ctx`.
 --- @param ctx PassCtx
---- @param src SourceFile
+--- @return PipeCtx
+local function build_corpus_pipe_ctx(ctx)
+	local corpus = ctx.shared and ctx.shared.corpus
+	if not corpus then
+		error("annotation requires ctx.shared.corpus "
+			.. "(the canonical corpus is the source of truth; "
+			.. "no per-source fallback is supported)", 0)
+	end
+
+	-- Corpus atom_infos preserves source-order + duplicates;
+	-- the per-check `check_unique_annotation` post-rule still flags duplicate annotation
+	-- names within this list. We pre-compute the annot_counts map here so the per_source checks can iterate it without re-walking.
+	local annot_counts = {}
+	for _, info in ipairs(corpus.atom_infos or {}) do
+		if info and info.atom_name then
+			annot_counts[info.atom_name] = (annot_counts[info.atom_name] or 0) + 1
+		end
+	end
+
+	-- The pipe_ctx views REFERENCE the corpus tables directly (no copies).
+	-- Every consumer of these fields observes mutations via the canonical corpus without independently mutable registry construction.
+	return {
+		-- Cross-source lookup tables (canonical corpus projections).
+		register_alias_registry  = corpus.register_alias_registry or {},
+		type_name_registry       = corpus.type_name_registry      or {},
+		atom_views               = corpus.atom_views              or {},
+		atom_ctxs                = corpus.atom_ctxs               or {},
+		atom_phases              = corpus.atom_phases             or {},
+		binds_by_name            = corpus.binds_by_name           or {},
+		atoms_by_name            = corpus.atoms_by_name           or {},
+		-- Corpus-wide ordered list of atom_info records (source-order + duplicates).
+		atom_infos_list          = corpus.atom_infos              or {},
+		-- Corpus-wide annotation count aggregation (post-rule consumes this).
+		annot_counts             = annot_counts,
+		-- Corpus-wide collisions (recorded by scan_source.merge_corpus_registries).
+		collisions               = corpus.collisions              or {},
+		-- wc still consumed by check_macro_word_drift; reads from the canonical
+		-- `corpus.word_counts` table (built by word_count_eval.run).
+		word_counts              = corpus.word_counts or {},
+	}
+end
+
+--- Validate one source against its pre-scanned SourceScan payload + the corpus-wide pipe_ctx.
+--- @param ctx             PassCtx
+--- @param src             SourceFile
+--- @param corpus_pipe_ctx PipeCtx   -- built once per pass from corpus registries
 --- @return AnnotatedResult
-local function validate(ctx, src)
+local function validate(ctx, src, corpus_pipe_ctx)
 	local scan = src.scan
 
 	-- Project the pre-scanned atoms to the AtomEntry shape this pass needs.
@@ -478,9 +528,11 @@ local function validate(ctx, src)
 		}
 	end
 
-	-- Build pipe_ctx (Fleury: expose structure). Pre-compute everything the per-check functions need.
-	-- Single source of truth for atom / binds / annotation-count lookups.
-	-- pipe_ctx.types / pipe_ctx.atom_views / pipe_ctx.seen_defaults are projected from the scan payload so per_source check rules can iterate.
+	-- Build the per-source pipe_ctx (Fleury: expose structure).
+	-- Cross-source visibility comes from `corpus_pipe_ctx`;
+	-- per-source declaration / body ownership comes from `src.scan`.
+	-- pipe_ctx.types / pipe_ctx.atom_views / pipe_ctx.seen_defaults / pipe_ctx.type_occurrences 
+	-- are projected from the per-source scan so the per_source check rules can iterate the source-local occurrences.
 	local seen_defaults = {}
 	for reg, _ in pairs(scan.types or {}) do
 		seen_defaults[reg] = (seen_defaults[reg] or 0) + 1
@@ -493,25 +545,20 @@ local function validate(ctx, src)
 	local pipe_ctx = {
 		atom_index               = {},
 		binds_index              = {},
-		annot_counts             = {},
+		annot_counts             = corpus_pipe_ctx.annot_counts,
 		types                    = scan.types or {},
 		type_occurrences         = scan.type_occurrences or {},
 		atom_views               = scan.atom_views or {},
 		seen_defaults            = seen_defaults,
 		atom_infos_list          = atom_infos_list,
 		binds_list               = scan.binds or {},
-		-- Project the source-derived registries from the scan payload so per_source checks consult them instead of the deleted
-		-- SEMANTIC_DEFAULT_REGS / KNOWN_REG_DEFAULT_TYPES / etc.
-		register_alias_registry  = scan.register_alias_registry or {},
-		type_name_registry       = scan.type_name_registry or {},
+		-- Source-derived registries: still populated from the scan payload as a convenience for callers that want source-local visibility.
+		-- The canonical cross-source lookup tables live in corpus_pipe_ctx.
+		register_alias_registry  = corpus_pipe_ctx.register_alias_registry,
+		type_name_registry       = corpus_pipe_ctx.type_name_registry,
 	}
 	for _, a in ipairs(atoms)      do pipe_ctx.atom_index [a.name] = a end
 	for _, b in ipairs(scan.binds) do pipe_ctx.binds_index[b.name] = b end
-	for _, a in ipairs(annots)     do
-		if a.name then
-			pipe_ctx.annot_counts[a.name] = (pipe_ctx.annot_counts[a.name] or 0) + 1
-		end
-	end
 
 	-- Findings live in a single struct with three lists (errors / warnings / info).
 	-- Each check writes to the list appropriate for its severity.
@@ -543,8 +590,8 @@ local function validate(ctx, src)
 		if rule.post then rule.post(pipe_ctx, findings) end
 	end
 
-	-- Per-skip-marker rules. 
-	-- Each raw marker recorded by scan_source (in scan.skip_over.markers) is validated independently; 
+	-- Per-skip-marker rules.
+	-- Each raw marker recorded by scan_source (in scan.skip_over.markers) is validated independently;
 	-- the check emits at most one error per marker.
 	-- Valid markers stay attached to scan.skip_over.atoms /.components for dwarf_injection.lua consumer.
 	local skip_markers = scan.skip_over and scan.skip_over.markers or {}
@@ -555,7 +602,7 @@ local function validate(ctx, src)
 	end
 
 	-- Per-macro rules (TAPE_WORDS vs WORD_COUNT drift).
-	local wc = ctx.shared.word_counts
+	local wc = corpus_pipe_ctx.word_counts
 	for _, m in ipairs(scan.macros) do
 		for _, rule in ipairs(CHECK_RULES) do
 			if rule.per_macro then rule.per_macro(m, wc, findings) end
@@ -571,8 +618,8 @@ local function validate(ctx, src)
 	-- Information summary (always emitted).
 	findings.info[#findings.info + 1] = {
 		line = 0,
-		msg  = string.format("scanned: %d atom(s), %d annotation(s), %d macro-word-decl(s), %d binds struct(s)",
-			#atoms, #annots, #scan.macros, #scan.binds),
+		msg  = string.format("scanned: %d atom(s), %d annotation(s), %d macro-word-decl(s), %d binds struct(s)"
+			, #atoms, #annots, #scan.macros, #scan.binds),
 	}
 
 	return {
@@ -650,9 +697,16 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Per-DIRECTORY (per-module) aggregation. Group sources by `src.dir`, validate every source in the dir, then emit ONE errors.h per dir.
-	-- `ctx.by_dir` is pre-computed in build_ctx (shared across all passes).
-	local by_dir = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
+	-- Build the corpus-wide pipe_ctx ONCE per pass run.
+	-- The corpus owns the canonical cross-source registries; per-source scans retain body / declaration ownership.
+	-- The pipe_ctx is shared across every validate() invocation in this M.run so cross-source visibility is constant.
+	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx)
+	local corpus = ctx.shared.corpus
+
+	-- Per-DIRECTORY (per-module) aggregation.
+	-- Group sources by `src.dir`, validate every source in the dir, then emit ONE errors.h per dir.
+	-- The corpus owns `sources_by_dir`; this pass reads the corpus bucket directly.
+	local by_dir = (corpus and corpus.sources_by_dir) or {}
 
 	for dir, dir_sources in pairs(by_dir) do
 		local dir_basename = dir:match("([^/\\]+)$") or dir
@@ -663,7 +717,7 @@ function M.run(ctx)
 		ctx.flags                       = ctx.flags                       or {}
 		ctx.flags._annot_source_results = ctx.flags._annot_source_results or {}
 		for _, src in ipairs(dir_sources) do
-			local result  = validate(ctx, src)
+			local result  = validate(ctx, src, corpus_pipe_ctx)
 			result.source = src.path                           -- tag for downstream rendering
 			ctx.flags._annot_source_results[src.path] = result -- stash so report.lua reads from cache instead of re-running validate()
 			dir_atoms = dir_atoms + #result.atoms

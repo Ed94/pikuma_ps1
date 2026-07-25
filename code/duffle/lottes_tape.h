@@ -104,6 +104,7 @@ FI_ Slice_MipsCode tb_slice(TapeBuilder  tb) {                        return (Sl
  * ---------------------------------------------------------------------------*/
 
 // The 'Yield' sequence for Tape Atoms (mac_yield). 
+atom_dbg_skip_over()
 MipsAtomComp_(ac_yield) {
 	load_word(R_AtomJmp, R_TapePtr, 0),
 	add_ui_self(         R_TapePtr, S_(MipsCode)),

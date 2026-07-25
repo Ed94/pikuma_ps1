@@ -138,31 +138,31 @@ local PASS_NAME = "report"
 -- Per-MODULE annotation report (aggregated across all sources in a dir)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Extract the basename (last path segment) of a forward- or back-slash separated path. Returns the input unchanged if no separator is found.
--- @param path string
--- @return string
+--- Extract the basename (last path segment) of a forward- or back-slash separated path. Returns the input unchanged if no separator is found.
+--- @param path string
+--- @return string
 local function source_basename(path)
 	return path:match(BASENAME_PATTERN) or path
 end
 
--- (internal) Format a single annotation entry as one rendered line.
--- @param a AnnotEntry
--- @param src_name string
--- @return string
+--- (internal) Format a single annotation entry as one rendered line.
+--- @param a AnnotEntry
+--- @param src_name string
+--- @return string
 local function format_annot_line(a, src_name)
 	if a.error then
 		return string.format("  ✗ line %d  %s  [ERROR: %s]  [%s]", a.line, a.macro or "?", a.error, src_name)
 	end
 	local line = string.format("  ●  line %d  %s  [%s]", a.line, a.name, src_name)
-	if a.binds               then line = line .. "  binds=" .. a.binds end
-	if #a.reads > 0          then line = line .. "  reads={" .. table.concat(a.reads, ",") .. "}" end
-	if #a.writes > 0         then line = line .. "  writes={" .. table.concat(a.writes, ",") .. "}" end
+	if a.binds       then line = line .. "  binds="   .. a.binds end
+	if #a.reads  > 0 then line = line .. "  reads={"  .. table.concat(a.reads,  ",") .. "}" end
+	if #a.writes > 0 then line = line .. "  writes={" .. table.concat(a.writes, ",") .. "}" end
 	return line
 end
 
--- (internal) Tally totals across all results in a module.
--- @param results AnnotationResult[]
--- @return integer, integer, integer, integer, integer, integer
+--- (internal) Tally totals across all results in a module.
+--- @param results AnnotationResult[]
+--- @return integer, integer, integer, integer, integer, integer
 local function tally_module_totals(results)
 	local total_atoms, total_annots, total_binds, total_macros = 0, 0, 0, 0
 	local total_errors, total_warnings = 0, 0
@@ -377,13 +377,13 @@ end
 -- Orchestration helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
--- (internal) Pull per-source validate() results from the annotation pass's stash.
--- The annotation pass runs first in the dep chain and caches results in `ctx.flags._annot_source_results`;
--- we read from there instead of re-validating each source.
--- Returns the list of module results + the flat list of all results (for the project-wide summary).
--- @param ctx PassCtx
--- @param dir_sources SourceFile[]
--- @return AnnotationResult[], AnnotationResult[]
+--- (internal) Pull per-source validate() results from the annotation pass's stash.
+--- The annotation pass runs first in the dep chain and caches results in `ctx.flags._annot_source_results`;
+--- we read from there instead of re-validating each source.
+--- Returns the list of module results + the flat list of all results (for the project-wide summary).
+--- @param ctx PassCtx
+--- @param dir_sources SourceFile[]
+--- @return AnnotationResult[], AnnotationResult[]
 local function lookup_module_results(ctx, dir_sources)
 	local src_cache      = (ctx.flags and ctx.flags._annot_source_results) or {}
 	local module_results = {}
@@ -399,9 +399,9 @@ local function lookup_module_results(ctx, dir_sources)
 	return module_results, all_results
 end
 
--- (internal) Does this module's results contain anything worth emitting?
--- @param module_results AnnotationResult[]
--- @return boolean
+--- (internal) Does this module's results contain anything worth emitting?
+--- @param module_results AnnotationResult[]
+--- @return boolean
 local function module_has_content(module_results)
 	for _, r in ipairs(module_results) do
 		if #r.atoms  > 0 or #r.annots > 0 or #r.binds    > 0
@@ -412,8 +412,8 @@ local function module_has_content(module_results)
 	return false
 end
 
--- (internal) Log a debug message if `_G[DEBUG_FLAG]` is truthy.
--- @param fmt string
+--- (internal) Log a debug message if `_G[DEBUG_FLAG]` is truthy.
+--- @param fmt string
 local function debug_log(fmt, ...)
 	if _G[DEBUG_FLAG] then
 		io.stderr:write(string.format("[%s] " .. fmt, PASS_NAME, ...))
@@ -436,7 +436,10 @@ function M.run(ctx)
 	local warnings = {}
 
 	local module_entries = (ctx.flags and ctx.flags._annot_results) or {}
-	local by_dir         = ctx.by_dir or duffle.group_sources_by_dir(ctx.sources)
+	-- Read module grouping from `corpus.sources_by_dir` (the canonical projection).
+	-- Module grouping comes from `corpus.sources_by_dir`.
+	local corpus = ctx.shared and ctx.shared.corpus
+	local by_dir = (corpus and corpus.sources_by_dir) or {}
 
 	if not ctx.dry_run then duffle.ensure_dir(ctx.out_root) end
 

@@ -1,11 +1,8 @@
 --- passes/atoms_source_map.lua — Per-.word source-line map emitter for tape atoms.
 ---
---- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
---- for `MipsAtom_(name)` (kind="atom"), `MipsAtomComp_` / `MipsAtomComp_Proc_` (kind="comp_*"),
---- and `MipsCode code_<name>` (kind="raw_atom") declarations. 
---- Walks each atom's pre-tokenized body (`{{tok=string, rel=integer}, ...}` from `duffle.tokenize_body`), 
---- counts per-token word contributions via `ctx.shared.word_counts`, and emits one
---- `WORD N LINE L TEXT T` line per `.word` to `<out_root>/<basename>.atoms.sourcemap.txt`.
+--- Reads the canonical `atom.paths` projection produced by the upstream `emission_model` pass.
+--- The ordered `items` stream, dense `word_events`, and `invocations` views are the only semantic inputs to this pass;
+--- it emits one `WORD N LINE L TEXT T` line per emitted `.word`.
 ---
 --- **Two output forms** (per the workspace's per-emission-form pattern from
 --- `guide_metaprogram_ssdl.md`):
@@ -34,10 +31,8 @@
 ---   ENDATOM
 ---   ```
 ---
---- Marker calls (`atom_label(...)`, `atom_offset(...)`) emit 0 `.word`s. 
---- They share the same walking convention as `passes/offsets.lua :: scan_atom_body`: 
---- Markers do NOT advance the word-offset counter, but if a marker is bundled on the same token with a trailing instruction 
---- (e.g. `atom_label(foo) load_half_u(...)`), the trailing instruction's word count is added. This matches `offsets.lua :: count_marker_rest`.
+--- Marker records are zero-width in `atom.paths.items`; they do not appear in
+--- the dense word view and therefore emit no WORD rows.
 ---
 --- **Conventions:** tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -50,10 +45,8 @@
 -- (works both standalone + when require'd). `duffle_paths.lua` sets package.path then returns `require("duffle")` 
 -- at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle           = dofile(_bootstrap_dir .. "../duffle_paths.lua")
-local elf_dwarf        = require("elf_dwarf")
-local word_count_eval  = require("word_count_eval")
-local count_token_words = word_count_eval.count_token_words
+local duffle    = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local elf_dwarf = require("elf_dwarf")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -63,199 +56,90 @@ local count_token_words = word_count_eval.count_token_words
 -- the gdb runtime loader rejects mismatches (E2).
 local FORMAT_VERSION = 1
 
--- Marker-call identifiers (mirrors offsets.lua:33-34).
-local LABEL_MARKER  = "atom_label"
-local OFFSET_MARKER = "atom_offset"
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class AtomSourceMapCtx
---- @field sources            table[] -- SourceScan payload per source (from `ctx.sources`)
 --- @field shared             table   -- `ctx.shared`
---- @field shared.word_counts table   -- macro name -> word count (populated by word-counts + components passes)
+--- @field shared.corpus      table   -- canonical source-order corpus
+--- @field shared.word_counts table   -- identity alias of `corpus.word_counts`
 --- @field out_root           string  -- output root (e.g. "build/gen")
 --- @field dry_run            boolean -- if true, compute but don't write
 --- @field flags              table   -- `ctx.flags`; reads `flags.gdb_runtime` + `flags.elf_path`
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Helpers
+-- Canonical atom-path renderers
 -- ════════════════════════════════════════════════════════════════════════════
 
--- ════════════════════════════════════════════════════════════════════════════
--- Provenance emission
--- ════════════════════════════════════════════════════════════════════════════
-
--- Component-macro invocation prefix (mirrors components.lua's MAC_PREFIX).
-local MAC_PREFIX     = "mac_"
-local MAC_PREFIX_LEN = 4
-
---- Strip the `mac_` prefix from a token's leading identifier.
---- Returns nil if the identifier doesn't start with `mac_`
---- (so non-component tokens like `load_half_u`, `nop2`, `gte_cmdw_*` fall through cleanly).
---- @param tok string
---- @return string|nil
-local function strip_mac_prefix_from_token(tok)
-	local leading = duffle.read_ident(tok, 1)
-	if not leading then return nil end
-	if leading:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
-		return leading:sub(MAC_PREFIX_LEN + 1)
-	end
-	return nil
-end
-
---- Fetch the per-word body lines for a `mac_X(...)` invocation.
---- Walks the component's pre-tokenized body in lockstep with `count_token_words` and attributes each emitted `.word`
---- to a source line via `idx.line_of(...)`. 
---- Atom labels (`atom_label(...)`) emit 0 `.word`s and are skipped.
---- @param bare string|nil          -- the bare component name (e.g. `gte_load_tri_verts`)
---- @param comp_body_index table
---- @param wc table
---- @return table|nil                -- list of source lines, 1-based by word position
-local function fetch_body_lines(bare, comp_body_index, wc)
-	if not (bare and comp_body_index) then return nil end
-	local idx = comp_body_index[bare]
-	if not (idx and idx.body_tokens and idx.line_of) then return nil end
-	local lines = {}
-	for _, bt in ipairs(idx.body_tokens) do
-		local bt_tok = duffle.trim(bt.tok or "")
-		if bt_tok ~= "" then
-			local leading = duffle.read_ident(bt_tok, 1)
-			local bt_words
-			if leading == "atom_label" or leading == "atom_offset" then
-				bt_words = 0
-			else
-				bt_words = count_token_words(bt_tok, wc)
-			end
-			if bt_words > 0 then
-				local body_line = idx.line_of(idx.body_off + bt.rel)
-				for _ = 1, bt_words do lines[#lines + 1] = body_line end
-			end
-		end
-	end
-	return lines
-end
-
---- Unified per-word entry walker. `mode` is "sourcemap" (3 fields) or "provenance" (8 fields including component + body-line lookup).
---- Returns (entries, total_words). Markers contribute 0 entries.
+--- Join canonical words to canonical word items. `items` supplies the ordered
+--- word boundaries, while `word_events` supplies call text and source lines.
 --- @param atom table
---- @param src  table
---- @param wc   table
---- @param mode string           -- "sourcemap" | "provenance"
---- @param comp table|nil        -- shared.components map (provenance only)
---- @param comp_body_index table|nil  -- per-source body index (provenance only)
 --- @return table[], integer
-local function compute_word_entries(atom, src, wc, mode, comp, comp_body_index)
-	local entries = {}
-	local pos     = 0
-	for _, t in ipairs(atom.body_tokens) do
-		local tok = t.tok
-		local rel = t.rel
-
-		local words
-		if duffle.is_marker_token(tok) then
-			words = duffle.count_marker_rest(tok, wc, count_token_words)
-		else
-			words = count_token_words(tok, wc)
-		end
-
-		-- Provenance-only: resolve component + body_lines (one fetch per token).
-		local comp_name, comp_line, comp_path, comp_kind
-		local body_lines
-		if mode == "provenance" then
-			local bare = strip_mac_prefix_from_token(tok)
-			if bare and comp and comp[bare] then
-				comp_name = bare
-				comp_line = comp[bare].line
-				comp_path = comp[bare].path
-				comp_kind = comp[bare].kind
-			end
-			if comp_name then body_lines = fetch_body_lines(bare, comp_body_index, wc) end
-		end
-
-		if words > 0 then
-			local line = src.scan.line_of(atom.body_off + rel)
-			local text = duffle.trim(tok):gsub("[\t\r\n]+", " ")
-			for i = 1, words do
-				local entry
-				if mode == "provenance" then
-					entry = {
-						pos       = pos,
-						line      = line,
-						text      = text,
-						comp_name = comp_name,
-						comp_line = comp_line,
-						comp_path = comp_path,
-						comp_kind = comp_kind,
-						body_line = body_lines and body_lines[i],
-					}
-				else  -- "sourcemap" (default)
-					entry = { pos = pos, line = line, text = text }
-				end
-				entries[#entries + 1] = entry
-				pos = pos + 1
-			end
-		end
+local function canonical_word_entries(atom)
+	local paths = atom.paths or {}
+	local events = paths.word_events or {}
+	local word_items = {}
+	for _, item in ipairs(paths.items or {}) do
+		if item.kind == "word" then word_items[#word_items + 1] = item end
 	end
-	return entries, pos
+
+	local entries = {}
+	for index, event in ipairs(events) do
+		local item = word_items[index] or {}
+		entries[#entries + 1] = {
+			pos        = event.i or (index - 1),
+			line       = event.call_line or item.line or 0,
+			text       = event.call_text or item.call_text or "",
+			body_line  = event.body_line or item.body_line or item.line or 0,
+			invocation = (event.outermost_invocation_id
+				and paths.invocations
+				and paths.invocations[event.outermost_invocation_id]) or nil,
+		}
+	end
+	return entries, #events
 end
 
---- Render one atom's provenance stanza. Format:
----   `WORD N  CALL <src-path>:<src-line>  MACRO <name> "<def-path>:<def-line>"  [BODY <line>]`  (for component words)
----   `WORD N  CALL <src-path>:<src-line>  RAW`                                                  (for direct instructions)
---- `BODY <line>` is the source line of THIS specific word within the macro body
---- (lottes_tape.h:N where N is the per-word body line).
---- Absent for RAW rows and for component rows whose component declaration could not be indexed (older pass combinations / external macros).
---- Downstream consumers (dwarf_injection, tests) fall back to DefLine / comp_line when BODY is absent.
---- Returns (lines, total_words).
---- @param src    table
---- @param atom   table
---- @param wc     table
---- @param comp   table  -- shared.components map
---- @param comp_body_index table  -- per-source component body index: bare_name -> {body_off, body_tokens, line_of}
+--- Render one atom's provenance stanza. Format 1 remains:
+---   `WORD N  CALL <src-path>:<src-line>  MACRO <name> "<def-path>:<def-line>" BODY <line>`
+---   `WORD N  CALL <src-path>:<src-line>  RAW`
+--- Component identity comes from the canonical outermost invocation record;
+--- the count-table lookup is the canonical component declaration witness.
+--- @param src table
+--- @param atom table
+--- @param wc table -- identity alias of corpus.word_counts
 --- @return string[], integer
-local function emit_provenance_stanza(src, atom, wc, comp, comp_body_index)
+local function emit_provenance_stanza(src, atom, wc)
 	local lines    = {}
-	local rel_path = src.path:gsub("\\", "/")
-	local entries, total = compute_word_entries(atom, src, wc, "provenance", comp, comp_body_index)
+	local rel_path = src.path:gsub("\\\\", "/")
+	local entries, total = canonical_word_entries(atom)
 
-	-- ATOM header line with placeholder total (patched after we know it).
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
 
-	for _, pe in ipairs(entries) do
-		if pe.comp_name then
-			local body_suffix = ""
-			if pe.body_line then
-				body_suffix = "  BODY " .. tostring(pe.body_line)
-			end
-			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d"%s',
-				pe.pos, rel_path, pe.line, pe.comp_name, pe.comp_path, pe.comp_line, body_suffix)
+	for _, entry in ipairs(entries) do
+		local inv = entry.invocation
+		local macro_count = inv and wc["mac_" .. inv.component_name]
+		if inv and macro_count ~= nil then
+			lines[#lines + 1] = string.format(
+				'WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d',
+				entry.pos, rel_path, entry.line, inv.component_name,
+				inv.def_path or "", inv.def_line or 0, entry.body_line)
 		else
-			lines[#lines + 1] = string.format("WORD %d  CALL %s:%d  RAW", pe.pos, rel_path, pe.line)
+			lines[#lines + 1] = string.format(
+				"WORD %d  CALL %s:%d  RAW", entry.pos, rel_path, entry.line)
 		end
 	end
 
-	-- Patch the placeholder total in the ATOM header line.
 	lines[1] = lines[1]:gsub(" 0$", " " .. tostring(total))
 	lines[#lines + 1] = "ENDATOM"
 	return lines, total
 end
 
---- Build a per-source component body index keyed by the bare component name (e.g. `gte_load_tri_verts`).
---- Each entry holds the data we need to map each emitted `.word` to its actual source line within the macro body:
----   body_off    -- byte offset of the `{` (start of body) in the component's source file.
----   body_tokens -- list of {tok, rel} pairs; `rel` is the byte offset within the body.
----   line_of     -- closure resolving byte offsets in the component's source file to lines.
---- Only `comp_bare` + `comp_proc` declarations contribute (a macro invocation can only resolve to one of those).
---- First declaration wins (subsequent redeclarations would collide; today's sources declare each component exactly once).
---- Render the full provenance file content for one source (one `.atoms.provenance.txt` per source).
+--- Render the full provenance file content for one source.
 --- @param src table
 --- @param wc table
---- @param comp table  -- shared.components map
---- @param comp_body_index table  -- cross-source component body index (built once in M.run; may be empty)
 --- @return string
-local function render_provenance(src, wc, comp, comp_body_index)
+local function render_provenance(src, wc)
 	local lines = {}
 	lines[#lines + 1] = "# FORMAT_VERSION 1"
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
@@ -265,16 +149,15 @@ local function render_provenance(src, wc, comp, comp_body_index)
 	lines[#lines + 1] = "# dwarf_injection to synthesize DW_TAG_inlined_subroutine instances + per-word"
 	lines[#lines + 1] = "# line program rows for native source-level step into component bodies."
 
-	-- The cross-source component body index is passed in from M.run (one global lookup shared across every source's provenance file).
-	-- A per-source lookup would miss every component whose declaration is in another source (e.g. `gte_load_tri_verts` is declared in `lottes_tape.h` but invoked from `hello_gte_tape.c`).
-
-	for _, atom in ipairs(src.scan.atoms or {}) do
-		local stanza = emit_provenance_stanza(src, atom, wc, comp, comp_body_index)
+	local function append(atom)
+		local stanza = emit_provenance_stanza(src, atom, wc)
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
+	for _, atom in ipairs(src.scan.atoms or {}) do
+		if atom.paths then append(atom) end
+	end
 	for _, atom in ipairs(src.scan.raw_atoms or {}) do
-		local stanza = emit_provenance_stanza(src, atom, wc, comp, comp_body_index)
-		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
+		if atom.paths then append(atom) end
 	end
 
 	return table.concat(lines, "\n") .. "\n"
@@ -286,19 +169,16 @@ end
 --- @param atom   table
 --- @param wc     table
 --- @return string[], integer
-local function emit_atom_stanza(src, atom, wc)
-	local lines              = {}
-	local rel_path           = src.path:gsub("\\", "/")
-	local entries, total     = compute_word_entries(atom, src, wc)
+local function emit_atom_stanza(src, atom)
+	local lines    = {}
+	local rel_path = src.path:gsub("\\\\", "/")
+	local entries, total = canonical_word_entries(atom)
 
-	-- ATOM header line with placeholder total (patched after we know it).
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
-	for _, we in ipairs(entries) do
+	for _, entry in ipairs(entries) do
 		lines[#lines + 1] = string.format("WORD %d  LINE %d  TEXT %s",
-			we.pos, we.line, we.text)
+			entry.pos, entry.line, entry.text)
 	end
-
-	-- Patch the placeholder total in the ATOM header line.
 	lines[1] = lines[1]:gsub(" 0$", " " .. tostring(total))
 	lines[#lines + 1] = "ENDATOM"
 	return lines, total
@@ -309,18 +189,20 @@ end
 --- @param src table
 --- @param wc table
 --- @return string
-local function render_source_map(src, wc)
+local function render_source_map(src)
 	local lines = {}
 	lines[#lines + 1] = "# FORMAT_VERSION " .. FORMAT_VERSION
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
 
-	for   _, atom in ipairs(src.scan.atoms or {}) do
-		local stanza = emit_atom_stanza(src, atom, wc)
+	local function append(atom)
+		local stanza = emit_atom_stanza(src, atom)
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
-	for   _, atom in ipairs(src.scan.raw_atoms or {}) do
-		local stanza = emit_atom_stanza(src, atom, wc)
-		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
+	for _, atom in ipairs(src.scan.atoms or {}) do
+		if atom.paths then append(atom) end
+	end
+	for _, atom in ipairs(src.scan.raw_atoms or {}) do
+		if atom.paths then append(atom) end
 	end
 
 	return table.concat(lines, "\n") .. "\n"
@@ -343,55 +225,35 @@ end
 --- @param ctx PassCtx
 --- @return table[] -- list of {idx, name, src_path, file_base, addr, size_bytes, words, entries}
 local function build_atom_table(ctx)
-	local wc    = (ctx.shared and ctx.shared.word_counts) or {}
 	local addrs = elf_dwarf.read_nm(ctx.flags.elf_path)
-
+	local corpus = ctx.shared and ctx.shared.corpus
 	local matched = {}
-	for _, src in ipairs(ctx.sources) do
-		if src.scan then
-			local file_base = src.path:match("([^/\\]+)$") or src.path
-			for _, atom in ipairs(src.scan.atoms or {}) do
-				if atom.kind == nil or atom.kind == "atom" then
-					local name    = atom.raw_name or atom.name
-					local info    = addrs[name]
-					if info then
-						local entries, total = compute_word_entries(atom, src, wc)
-						matched[#matched + 1] = {
-							name       = name,
-							src_path   = src.path,
-							file_base  = file_base,
-							addr       = info[1],
-							size_bytes = info[2],
-							words      = total,
-							entries    = entries,
-						}
-					end
-				end
-			end
-			for _, atom in ipairs(src.scan.raw_atoms or {}) do
-				local name = atom.name
-				local info = addrs[name]
-				if info then
-					local entries, total = compute_word_entries(atom, src, wc)
-					matched[#matched + 1] = {
-						name       = name,
-						src_path   = src.path,
-						file_base  = file_base,
-						addr       = info[1],
-						size_bytes = info[2],
-						words      = total,
-						entries    = entries,
-					}
-				end
-			end
+
+	for _, src in ipairs(corpus.source_order or {}) do
+		local file_base = src.path:match("([^/\\\\]+)$") or src.path
+		local function append(atom)
+			if not atom.paths then return end
+			local name = atom.raw_name or atom.name
+			local info = addrs[name]
+			if not info then return end
+			local entries, total = canonical_word_entries(atom)
+			matched[#matched + 1] = {
+				name       = name,
+				src_path   = src.path,
+				file_base  = file_base,
+				addr       = info[1],
+				size_bytes = info[2],
+				words      = total,
+				entries    = entries,
+			}
 		end
+		for _, atom in ipairs((src.scan or {}).atoms or {}) do append(atom) end
+		for _, atom in ipairs((src.scan or {}).raw_atoms or {}) do append(atom) end
 	end
 
 	-- Deterministic order: sort by address (matches `nm` output ordering).
 	table.sort(matched, function(a, b) return a.addr < b.addr end)
-	for i, a in ipairs(matched) do
-		a.idx = i - 1
-	end
+	for i, a in ipairs(matched) do a.idx = i - 1 end
 	return matched
 end
 
@@ -652,56 +514,51 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- word-counts + components passes must have populated shared.word_counts.
-	-- If absent, the orchestrator wired the deps wrong — fail loud.
-	local wc = (ctx.shared and ctx.shared.word_counts) or {}
-	if not wc or not next(wc) then
+	local corpus = ctx.shared and ctx.shared.corpus
+	if type(corpus) ~= "table" or type(corpus.source_order) ~= "table" then
+		error("atoms_source_map.run requires ctx.shared.corpus.source_order (canonical corpus).", 0)
+	end
+
+	-- Word counts are owned by `corpus.word_counts`.
+	-- The canonical owner is `corpus.word_counts` (populated by `passes/word_count_eval.lua` + `passes/components.lua`).
+	local wc = corpus.word_counts or {}
+	if not next(wc) then
 		warnings[#warnings + 1] = {
 			line = 0,
-			msg  = "atoms_source_map: ctx.shared.word_counts is empty; the word-counts + components passes may not have populated it. Check the PASSES dep edges.",
+			msg  = "atoms_source_map: corpus.word_counts is empty; the word-counts + components passes may not have populated it. Check the PASSES dep edges.",
 		}
 	end
 
-	-- shared.components map is populated by `passes/components.lua`.
-	-- Used to attribute each emitted `.word` to either a component macro or the enclosing atom body.
-	-- If absent, all words fall through as RAW (correct behavior — provenance is additive).
-	local comp = (ctx.shared and ctx.shared.components) or {}
-
-	-- Cross-source component body index.
-	-- Built ONCE (and memoized at `ctx.shared.component_body_index`) so every source's provenance writer can resolve `mac_X(...)` 
-	-- invocations back to the macro's body tokens (regardless of which source declared the component).
-	-- The atom file (`hello_gte_tape.c`) does not contain the `MipsAtomComp_(...)` declarations, 
-	-- so the body data would be missing for every component invocation the atom file emitted.
-	-- Superseded by `duffle.get_component_body_index` so the same index is shared with `static_analysis.lua`
-	-- and any future dependency-check pass (sourcemap/provenance byte-identical because the new entry only ADDS fields).
-	local comp_body_index = duffle.get_component_body_index(ctx)
-
 	-- Always emit the canonical text form (per-source).
-	for _, src in ipairs(ctx.sources) do
-		if src.scan then
-			local n_atoms     = src.scan.atoms and #src.scan.atoms or 0
-			local n_raw_atoms = src.scan.raw_atoms and #src.scan.raw_atoms or 0
-			if n_atoms + n_raw_atoms > 0 then
-				local basename = duffle.basename_no_ext(src.path)
-
-				-- (1) atoms.sourcemap.txt — per-.word line map (unchanged contract).
-				local sourcemap_path = ctx.out_root .. "/" .. basename .. ".atoms.sourcemap.txt"
-				local sourcemap_body = render_source_map(src, wc)
-
-				-- (2) atoms.provenance.txt — per-.word provenance with `mac_X(...)` component resolution back to the component's definition file:line.
-				--     Consumed by `passes/dwarf_injection.lua` to synthesize `DW_TAG_inlined_subroutine` instances for source-level Step Into on component invocations.
-				local prov_path = ctx.out_root .. "/" .. basename .. ".atoms.provenance.txt"
-				local prov_body = render_provenance(src, wc, comp, comp_body_index)
-
-				if not ctx.dry_run then
-					duffle.ensure_dir(duffle.dirname(sourcemap_path))
-					duffle.write_file_lf(sourcemap_path, sourcemap_body)
-					duffle.write_file_lf(prov_path,    prov_body)
-				end
-
-				outputs[#outputs + 1] = { kind = "report", path = sourcemap_path }
-				outputs[#outputs + 1] = { kind = "report", path = prov_path }
+	for _, src in ipairs(corpus.source_order) do
+		local has_projection = false
+		for _, atom in ipairs((src.scan or {}).atoms or {}) do
+			if atom.paths then has_projection = true; break end
+		end
+		if not has_projection then
+			for _, atom in ipairs((src.scan or {}).raw_atoms or {}) do
+				if atom.paths then has_projection = true; break end
 			end
+		end
+		if has_projection then
+			local basename = duffle.basename_no_ext(src.path)
+
+			-- (1) atoms.sourcemap.txt — format-1 per-word call-site map.
+			local sourcemap_path = ctx.out_root .. "/" .. basename .. ".atoms.sourcemap.txt"
+			local sourcemap_body = render_source_map(src)
+
+			-- (2) atoms.provenance.txt — format-1 per-word definition/body map.
+			local prov_path = ctx.out_root .. "/" .. basename .. ".atoms.provenance.txt"
+			local prov_body = render_provenance(src, wc)
+
+			if not ctx.dry_run then
+				duffle.ensure_dir(duffle.dirname(sourcemap_path))
+				duffle.write_file_lf(sourcemap_path, sourcemap_body)
+				duffle.write_file_lf(prov_path,    prov_body)
+			end
+
+			outputs[#outputs + 1] = { kind = "report", path = sourcemap_path }
+			outputs[#outputs + 1] = { kind = "report", path = prov_path }
 		end
 	end
 
