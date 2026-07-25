@@ -57,10 +57,10 @@ enum {
  * ---------------------------------------------------------------------------*/
 
 /* The 'Exit' Atom */
-MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
+atom_dbg_skip_over() MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 
 /* Generalized Tape Engine Runner */
-FI_ void tape_run(Slice_MipsCode tape) { register U4* tp rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
+NI_ void tape_run(Slice_MipsCode tape) { register U4* tp rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
 	asm_words(
 			add_ui(     R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
 		, store_word( R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
@@ -104,23 +104,21 @@ FI_ Slice_MipsCode tb_slice(TapeBuilder  tb) {                        return (Sl
  * ---------------------------------------------------------------------------*/
 
 // The 'Yield' sequence for Tape Atoms (mac_yield). 
-atom_dbg_skip_over()
-MipsAtomComp_(ac_yield) {
+atom_dbg_skip_over() MipsAtomComp_(ac_yield) {
 	load_word(R_AtomJmp, R_TapePtr, 0),
 	add_ui_self(         R_TapePtr, S_(MipsCode)),
 	jump_reg( R_AtomJmp), nop,
 };
 
 /* Words: 3; Loads 3 S2 indices from the face array */
-MipsAtomComp_(ac_load_tri_indices) {
+atom_dbg_skip_over() MipsAtomComp_(ac_load_tri_indices) {
 	load_half_u(R_T0, R_FaceCursor, 0 * S_(S2)),
 	load_half_u(R_T1, R_FaceCursor, 1 * S_(S2)),
 	load_half_u(R_T2, R_FaceCursor, 2 * S_(S2)),
 };
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
-atom_dbg_skip_over()
-MipsAtomComp_(ac_gte_load_tri_verts) {
+atom_dbg_skip_over() MipsAtomComp_(ac_gte_load_tri_verts) {
 	shift_lleft(R_AT, R_T0, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
 	shift_lleft(R_AT, R_T1, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
 	shift_lleft(R_AT, R_T2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
@@ -168,11 +166,11 @@ MipsAtomComp_Proc_(ac_pack_color_word, {
 /* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
  * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields). */
 FI_ MipsAtom ac_format_f3_color(U1 r, U1 g, U1 b)
-MipsAtomComp_Proc_(ac_format_f3_color, { mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b) })
+atom_dbg_skip_over() MipsAtomComp_Proc_(ac_format_f3_color, { mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b) })
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
-MipsAtomComp_(ac_gte_store_f3_post_rtpt) {
+atom_dbg_skip_over() MipsAtomComp_(ac_gte_store_f3_post_rtpt) {
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)),
 	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)),
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2)),
@@ -200,7 +198,7 @@ MipsAtomComp_Proc_(ac_format_g4_color, {
  * three registers aligned with v0/v1/v2 you must store before RTPS).
  * The macro name declares the pipeline position; check #6 (GTE state-
  * machine validation) verifies the call site matches the declaration. */
-MipsAtomComp_(ac_gte_store_g4_p012_post_rtpt_pre_rtps) {
+atom_dbg_skip_over() MipsAtomComp_(ac_gte_store_g4_p012_post_rtpt_pre_rtps) {
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0)),
 	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)),
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2)),
@@ -212,7 +210,7 @@ MipsAtomComp_(ac_gte_store_g4_p012_post_rtpt_pre_rtps) {
  * earlier RTPT — DO NOT read SXY0 here, that's the bug this name
  * prevents).
  */
-MipsAtomComp_(ac_gte_store_g4_p3_post_rtps) { gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3)) };
+atom_dbg_skip_over() MipsAtomComp_(ac_gte_store_g4_p3_post_rtps) { gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3)) };
 
 #pragma endregion Macro Atom Components
 
@@ -296,7 +294,6 @@ internal MipsAtom_(set_gte_world) atom_info(
 /* DIAGNOSTIC 1: Pure tape loop test */
 internal MipsAtom_(diag_yield) { mac_yield() };
 
-// TODO(Ed): Reduce magic numbers/offsets
 /* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
 internal MipsAtom_(diag_color) {
 	store_word(  R_0, R_T7, 0), 
@@ -325,7 +322,6 @@ internal MipsAtom_(diag_color) {
 	mac_yield()
 };
 
-// TODO(Ed): Reduce magic numbers/offsets
 /* DIAGNOSTIC 3: Pure GTE test (No Memory Writes) */
 internal MipsAtom_(diag_gte) {
 	/* Load 3 indices */

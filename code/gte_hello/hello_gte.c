@@ -187,6 +187,7 @@ void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_
 void render(void) {
 }
 
+GCC_OPTIMIZATION_DISABLE
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
 	orderingtbl_clear_reverse(ordering_buf, OrderingTbl_Len);
@@ -394,6 +395,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[smem.active_buf_id];
 	}
 }
+GCC_OPTIMIZATION_ENABLE
 
 int main(void)
 {
