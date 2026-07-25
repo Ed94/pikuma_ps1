@@ -323,9 +323,7 @@ local function render_module_report(dir, sources, results)
 	-- Each renderer writes its header + content via the `add` closure (pre-bound above).
 	-- Adding a new section = 1 row here + 1 render_<thing>_section function.
 	for _, section in ipairs(SECTION_RENDERERS) do
-		add(section.header)
 		section.render(add, results, totals)
-		add("")
 	end
 
 	return table.concat(lines, "\n") .. "\n"
