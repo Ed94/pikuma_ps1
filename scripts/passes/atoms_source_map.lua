@@ -516,19 +516,15 @@ function M.run(ctx)
 		end
 		if has_projection then
 			local basename = duffle.basename_no_ext(src.path)
-
 			-- (1) atoms.sourcemap.txt — format-1 per-word call-site map.
 			local sourcemap_path = ctx.out_root .. "/" .. basename .. ".atoms.sourcemap.txt"
 			local sourcemap_body = render_source_map(src)
-
 			-- (2) atoms.provenance.txt — format-1 per-word definition/body map.
 			local prov_path = ctx.out_root .. "/" .. basename .. ".atoms.provenance.txt"
 			local prov_body = render_provenance(src, wc)
-
 			duffle.ensure_dir(duffle.dirname(sourcemap_path))
 			duffle.write_file_lf(sourcemap_path, sourcemap_body)
 			duffle.write_file_lf(prov_path,    prov_body)
-
 			outputs[#outputs + 1] = { kind = "report", path = sourcemap_path }
 			outputs[#outputs + 1] = { kind = "report", path = prov_path }
 		end

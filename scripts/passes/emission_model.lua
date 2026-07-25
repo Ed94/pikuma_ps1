@@ -134,60 +134,43 @@ function M.run(ctx)
 	if type(corpus)              ~= "table" then error("emission_model: ctx.shared.corpus is required (canonical projection)", 0) end
 	if type(corpus.source_order) ~= "table" then error("emission_model: ctx.shared.corpus.source_order is required", 0) end
 
-	-- Walk every source in canonical source order; for each source, iterate atoms.
-	-- Atom declarations (`kind == "atom"` / `"raw_atom"`) AND component declarations
-	-- (`comp_bare` / `comp_proc`) each receive the canonical `atom.paths` projection.
-	-- Components are macros inlined into atom bodies; focused tests and isolated
-	-- component analyses read them from `atom.paths` on the component record.
-	-- The per-atom emission projection is produced by `duffle.project_emission` (this pass).
-	-- Test-only fixtures may consume `atom.paths.word_events` directly from the emission-model pass output.
+	-- Project once, collect errors + warnings for one atom.
+	-- Kind must be one of: atom | raw_atom | comp_bare | comp_proc.
+	local function process_atom(atom, src)
+		if not (atom and atom.body) then return end
+		local kind = atom.kind
+		if kind ~= "atom" and kind ~= "raw_atom" and kind ~= "comp_bare" and kind ~= "comp_proc" then
+			return
+		end
+		local proj = project_atom(atom, src, corpus)
+		for _, e in ipairs(proj.errors) do
+			-- Preserve `kind` (cycle / count_mismatch / unbalanced) so readers can dispatch on the diagnostic class without re-parsing the message string.
+			errors[#errors + 1] = {
+				kind   = e.kind,
+				line   = e.line,
+				msg    = e.msg,
+				source = e.source or src.path,
+			}
+		end
+		for _, w in ipairs(proj.warnings) do
+			warnings[#warnings + 1] = {
+				kind = w.kind,
+				line = w.line,
+				msg  = w.msg,
+			}
+		end
+	end
+
+	-- Walk every source in canonical order; for each source, iterate atoms + raw_atoms.
+	-- Recognized kinds (atom | raw_atom | comp_bare | comp_proc) each receive the atom.paths projection via duffle.project_emission.
+	-- Components are macros inlined into atom bodies; focused tests and isolated component analyses consume atom.paths directly.
 	for _, src in ipairs(corpus.source_order) do
 		local scan = src.scan or {}
 		for _, atom in ipairs(scan.atoms or {}) do
-			if atom and atom.body and (
-				atom.kind == "atom"      or
-				atom.kind == "raw_atom"  or
-				atom.kind == "comp_bare" or
-				atom.kind == "comp_proc"
-			) then
-				local proj = project_atom(atom, src, corpus)
-				for _, e in ipairs(proj.errors) do
-					-- Preserve `kind` (cycle / count_mismatch / unbalanced) so readers can dispatch on the diagnostic class without re-parsing the message string.
-					errors[#errors + 1] = {
-						kind   = e.kind,
-						line   = e.line,
-						msg    = e.msg,
-						source = e.source or src.path,
-					}
-				end
-				for _, w in ipairs(proj.warnings) do
-					warnings[#warnings + 1] = {
-						kind = w.kind,
-						line = w.line,
-						msg  = w.msg,
-					}
-				end
-			end
+			process_atom(atom, src)
 		end
 		for _, atom in ipairs(scan.raw_atoms or {}) do
-			if atom and atom.body then
-				local proj = project_atom(atom, src, corpus)
-				for _, e in ipairs(proj.errors) do
-					errors[#errors + 1] = {
-						kind   = e.kind,
-						line   = e.line,
-						msg    = e.msg,
-						source = e.source or src.path,
-					}
-				end
-				for _, w in ipairs(proj.warnings) do
-					warnings[#warnings + 1] = {
-						kind = w.kind,
-						line = w.line,
-						msg  = w.msg,
-					}
-				end
-			end
+			process_atom(atom, src)
 		end
 	end
 

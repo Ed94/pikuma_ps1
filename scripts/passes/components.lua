@@ -144,8 +144,7 @@ local function preceding_comment_block(source, pos)
 	local scan_pos = pos
 	local pieces   = {}
 	while true do
-		-- Skip whitespace (space/tab/newline/CR) backward from `scan_pos`,
-		-- returning the position of the first non-whitespace char.
+		-- skip whitespace backward; land on the next non-ws character.
 		local non_ws = scan_pos - 1
 		while non_ws > 0 do
 			local ch = source:sub(non_ws, non_ws)
@@ -156,13 +155,9 @@ local function preceding_comment_block(source, pos)
 			end
 		end
 		if non_ws == 0 then break end
-
-		local is_block_close = non_ws >= 2 and source:sub(non_ws - 1, non_ws) == "*/"
-		local is_line_end    = source:sub(non_ws, non_ws) == "\n" or source:sub(non_ws, non_ws) == "\r"
-
-		if is_block_close then
-			-- Find the opening `/*` for a block comment whose `*/` ends at `non_ws`.
-			-- Walk back from `non_ws` over `/*` candidates.
+		if non_ws >= 2 and source:sub(non_ws - 1, non_ws) == "*/" then
+			-- block comment close: find the opening /* by walking back over /* candidates
+			-- in source[1..non_ws-1].
 			local prefix  = source:sub(1, non_ws - 1)
 			local open_at = nil
 			for scan = #prefix - 1, 1, -1 do
@@ -172,33 +167,28 @@ local function preceding_comment_block(source, pos)
 				end
 			end
 			if not open_at then break end
-			-- Walk back from `open_at` over leading spaces + tabs to include the indentation before the `/*`.
+			-- include the indentation before the /* by walking back over leading spaces + tabs.
 			local block_start = open_at
 			while block_start > 1 do
 				local ch = source:sub(block_start - 1, block_start - 1)
-				if ch == " " or ch == "\t" then
-					block_start = block_start - 1
-				else
-					break
-				end
+				if ch ~= " " and ch ~= "\t" then break end
+				block_start = block_start - 1
 			end
 			table.insert(pieces, 1, source:sub(block_start, non_ws))
 			scan_pos = block_start
-		elseif is_line_end then
-			-- Walk back from `non_ws` to the start of the source line (the most recent `\n` or position 1).
+		else
+			-- line comment path: must end in newline, must start with //.
+			local ch = source:sub(non_ws, non_ws)
+			if ch ~= "\n" and ch ~= "\r" then break end
+			-- walk back from non_ws to the start of the source line (most recent \n or position 1).
 			local line_start = non_ws
 			while line_start > 1 and source:sub(line_start - 1, line_start - 1) ~= "\n" do
 				line_start = line_start - 1
 			end
 			local line = source:sub(line_start, non_ws)
-			if line:sub(1, 2) == "//" then
-				table.insert(pieces, 1, line)
-				scan_pos = line_start - 1
-			else
-				break
-			end
-		else
-			break
+			if line:sub(1, 2) ~= "//" then break end
+			table.insert(pieces, 1, line)
+			scan_pos = line_start - 1
 		end
 	end
 	if #pieces == 0 then return "" end

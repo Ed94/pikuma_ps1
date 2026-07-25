@@ -1,16 +1,14 @@
 --- passes/static_analysis.lua — Per-atom static-analysis checks.
 ---
 --- Per-atom rules:
----   1. transfer_hazards: A single forward walker (`analyze_hardware_relations`) reads `atom.paths.word_events`
----      once per atom. For each emitted word event it (a) inspects pending CPU/COP0/COP2/GTE relations against
----      the event as CONSUMER (recording a hazard on `atom.paths.hazards` when the producer→consumer gap is below
----      the required retire-slot count), (b) applies the event's GPR value effects (`duffle.INSTRUCTION_GPR_EFFECTS`)
----      to `atom.paths.forward_state.gpr_values`, applies bounded constant propagation, and stages
----      matching relation rows as PRODUCERS (with `destination_match` filters, e.g. for the IRGB fan-out). The
----      `transfer_hazards` CHECK_RULES reader projects `atom.paths.hazards` into per-atom findings without
----      re-walking source. The walker runs once per atom before the per-atom dispatch; the reader runs inside
----      the same dispatch.
----   2. control_transfer_delay_slot_use: For every emitted branch/jump/call encoder in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`
+---   1. transfer_hazards: A single forward walker (`analyze_hardware_relations`) reads `atom.paths.word_events` once per atom.
+---      For each emitted word event it (a) inspects pending CPU/COP0/COP2/GTE relations against the event as CONSUMER 
+---      (recording a hazard on `atom.paths.hazards` when the producer→consumer gap is below the required retire-slot count), 
+---      (b) applies the event's GPR value effects (`duffle.INSTRUCTION_GPR_EFFECTS`) to `atom.paths.forward_state.gpr_values`, 
+---      applies bounded constant propagation, and stages matching relation rows as PRODUCERS (with `destination_match` filters, e.g. for the IRGB fan-out).
+---      The `transfer_hazards` CHECK_RULES reader projects `atom.paths.hazards` into per-atom findings without re-walking source.
+---      The walker runs once per atom before the per-atom dispatch; the reader runs inside the same dispatch.
+---   2. control_transfer_delay_slot_use: For every emitted branch/jump/call encoder in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES` 
 ---      (the six `branch_*` encoders plus `jump` / `jump_reg` / `jump_link` / `call_reg` / `call_addr`),
 ---      inspect the next emitted event in `atom.paths.word_events`.
 ---      Emit an `info`-severity finding when the successor is `nop` or absent (the next emitted word IS the hardware delay slot).

@@ -442,7 +442,7 @@ function M.read_balanced(s, open_char, close_char, pos)
 		local c = s:byte(pos)
 		if c == open_byte then
 			depth = depth + 1
-			pos   = pos + 1
+			pos   = pos   + 1
 			-- scan: <open_char> <inner...> <open_char> (depth=depth)
 		elseif c == close_char:byte() then
 			depth = depth - 1
@@ -572,65 +572,87 @@ function M.parse_direct_quoted_includes(source_text)
 		error("parse_direct_quoted_includes requires source text", 2)
 	end
 
+	-- Each arm's effect on (pos, line_leading) is annotated at the branch site.
+	-- Arm order: newline / horiz-space / '//' / '/*' / '"' / '\'' / '#' / default.
 	local logical_text, physical_pos, physical_line = splice_c_lines(source_text)
 	local includes     = {}
 	local pos          = 1
 	local line_leading = true
 	while pos <= #logical_text do
 		local byte = logical_text:byte(pos)
-		if byte == BYTE_NEWLINE then
+		if    byte == BYTE_NEWLINE then
+			-- line break; refresh leading-whitespace state for next line.
 			line_leading = true
 			pos          = pos + 1
 		elseif is_horizontal_space(byte) then
+			-- ordinary inter-token whitespace; preserve current leading-ness.
 			pos = pos + 1
 		elseif byte == BYTE_SLASH and logical_text:byte(pos + 1) == BYTE_SLASH then
+			-- '//' line comment: skip_str_or_cmt walks to EOL on its own, so no separate newline scan is needed here.
 			local after = M.skip_str_or_cmt(logical_text, pos)
+			-- pos := after when the skipper agrees, else single-byte advance.
 			pos = (after > pos) and after or (pos + 1)
 		elseif byte == BYTE_SLASH and logical_text:byte(pos + 1) == BYTE_STAR then
+			-- '/*' block comment.
 			local after = M.skip_str_or_cmt(logical_text, pos)
-			if after == pos then
+			if after <= pos then
+				-- skipper refused (unterminated /*). Treat this byte as ordinary content: step one, mark non-leading.
 				line_leading = false
-				pos = pos + 1
+				pos          = pos + 1
 			else
+				-- jump past the closing '*/'. The span may cross lines, so rescan for embedded '\n' to refresh line_leading.
 				for scan = pos, after - 1 do
 					if logical_text:byte(scan) == BYTE_NEWLINE then line_leading = true end
 				end
 				pos = after
 			end
 		elseif byte == BYTE_DQUOTE or byte == BYTE_SQUOTE then
+			-- enter+leave the string literal in one skip; literal bodies cannot contain a directive regardless of what they look like.
 			line_leading = false
-			local after = M.skip_str_or_cmt(logical_text, pos)
-			pos = (after > pos) and after or (pos + 1)
-		elseif byte == 35 and line_leading then -- '#'
-			local hash_pos       = pos
-			local directive_line = physical_line[hash_pos] or 1
-			local scan           = skip_directive_space(logical_text, pos + 1)
-			local ident, after_ident
-			if scan then ident, after_ident = M.read_ident(logical_text, scan) end
-			if ident == "include" then
-				scan = skip_directive_space(logical_text, after_ident)
+			local after  = M.skip_str_or_cmt(logical_text, pos)
+			pos          = (after > pos) and after or (pos + 1)
+		elseif byte == 35 and line_leading then -- '#' at line head
+			-- Sequential pre-checks; any one failing falls through to ::not_include:: (single-byte advance).
+			-- Full success pushes the record and jumps to ::directive_done:: without ever entering the not-include path.
+			-- (All locals are pre-declared at the top of this arm because Lua forbids a goto from crossing a local declaration into its scope.)
+			local hash_pos, directive_line, scan, ident, after_ident, after_quote
+			local include_path, physical_first, physical_last
+			hash_pos       = pos
+			directive_line = physical_line[hash_pos] or 1
+			scan           = skip_directive_space(logical_text, pos + 1)
+			if not scan then goto not_include end
+			ident, after_ident = M.read_ident(logical_text, scan)
+			if ident ~= "include" then goto not_include end
+			scan = skip_directive_space(logical_text, after_ident)
+			if not scan then goto not_include end
+			if logical_text:byte(scan) ~= BYTE_DQUOTE then goto not_include end
+			after_quote = M.skip_str_or_cmt(logical_text, scan)
+			if not (after_quote > scan and logical_text:byte(after_quote - 1) == BYTE_DQUOTE) then
+				goto not_include
 			end
-			if ident == "include" and scan and logical_text:byte(scan) == BYTE_DQUOTE then
-				local after_quote = M.skip_str_or_cmt(logical_text, scan)
-				if after_quote > scan and logical_text:byte(after_quote - 1) == BYTE_DQUOTE then
-					local include_path   = logical_text:sub(scan + 1, after_quote - 2)
-					local physical_first = physical_pos[hash_pos]
-					local physical_last  = physical_pos[after_quote - 1]
-					includes[#includes + 1] = {
-						path         = include_path,
-						include_path = include_path,
-						include_text = M.trim(source_text:sub(physical_first, physical_last)),
-						line         = directive_line,
-					}
-					pos = after_quote
-				else
-					pos = pos + 1
-				end
-			else
-				pos = pos + 1
-			end
+			-- success: build the include record; pos jumps past closing '"'.
+			include_path   = logical_text:sub(scan + 1, after_quote - 2)
+			physical_first = physical_pos[hash_pos]
+			physical_last  = physical_pos[after_quote - 1]
+			includes[#includes + 1] = {
+				path         = include_path,
+				include_path = include_path,
+				include_text = M.trim(source_text:sub(physical_first, physical_last)),
+				line         = directive_line,
+			}
+			pos = after_quote
+			goto directive_done
+
+			::not_include::
+			-- any pre-check failure: '#' is ordinary content; advance one.
+			pos = pos + 1
+
+			::directive_done::
+			-- '#' at line head clears the leading-whitespace state.
 			line_leading = false
+
 		else
+			-- ordinary source character; mark non-leading, advance one.
 			line_leading = false
 			pos          = pos + 1
 		end
@@ -2226,31 +2248,36 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	local function emit_embedded_markers(tok, tok_line)
 		local pos = 1
 		while pos <= #tok do
+			-- trim leading whitespace and comments before each scan.
 			pos = M.skip_ws_and_cmt(tok, pos)
 			if pos > #tok then break end
-			local ident, after = M.read_ident(tok, pos)
-			if ident then
-				if ident == "atom_label" or ident == "atom_offset" then
-					local open = M.skip_ws_and_cmt(tok, after)
-					local inner, after_paren = M.read_parens(tok, open)
-					if inner then
-						local args = split_top_level_args(inner)
-						if ident == "atom_label" then
-							emit_marker("label", args[1] or "", nil, tok_line)
-						else
-							emit_marker("offset", args[1] or "", args[2] or "", tok_line)
-						end
-						pos = after_paren
-					else
-						pos = after
-					end
-				else
-					pos = after
-				end
-			else
+			local  ident, after = M.read_ident(tok, pos)
+			if not ident then
+				-- not an ident: token is a string or comment; skip or one-step.
 				local next_pos = M.skip_str_or_cmt(tok, pos)
 				pos = (next_pos > pos) and next_pos or (pos + 1)
+				goto continue_loop
 			end
+			if ident ~= "atom_label" and ident ~= "atom_offset" then
+				-- ordinary ident; nothing to emit, step past the ident only.
+				pos = after
+				goto continue_loop
+			end
+			-- marker ident: parse the (...) arguments.
+			local open               = M.skip_ws_and_cmt(tok, after)
+			local inner, after_paren = M.read_parens(tok, open)
+			if not inner then
+				-- (...) unreadable: fall back to non-marker behavior.
+				pos = after
+				goto continue_loop
+			end
+			-- commit: label takes 1 arg, offset takes 2.
+			local args = split_top_level_args(inner)
+			if ident == "atom_label" then emit_marker("label",  args[1] or "", nil,           tok_line) 
+			else                          emit_marker("offset", args[1] or "", args[2] or "", tok_line)
+			end
+			pos = after_paren
+			::continue_loop::
 		end
 	end
 
@@ -2336,108 +2363,100 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		local line_of    = body_entry.line_of or M.LineIndex("")
 		local def_source = body_entry.source or ""
 		local def_line   = body_entry.declaration or 0
-
-		for _, bt in ipairs(tokens) do
+		-- Per-token dispatch: each matched branch returns; only the fall-through
+		-- "opaque word" emit handles direct encoders + mac_X-without-component.
+		local function process_token(bt)
 			local tok = M.trim(bt.tok or "")
-			if tok ~= "" then
-				local ident    = M.read_ident(tok, 1) or "?"
-				local _, args  = token_ident_and_args(tok)
-				local tok_line = line_of(body_off + bt.rel) or 0
-
-				if ident ~= "atom_label" and ident ~= "atom_offset" then emit_embedded_markers(tok, tok_line) end
-
-				if     ident == "atom_label"     then emit_marker("label", args[1] or "", nil, tok_line)
-				elseif ident == "atom_offset"    then emit_marker("offset", args[1] or "", args[2] or "", tok_line) 
-				elseif ident:sub(1, 4) == "mac_" then
-					local bare = ident:sub(5)
-					local comp = ctx_table.component_index[bare]
-					if comp then
-						local invocation_root_call_text = walk_root_call_text or tok
-						if ctx_table.visiting[bare] then
-							-- Cycle: this component is already on the expansion stack.
-							-- Still allocate an ID, still emit invoke_begin / invoke_end (zero-width), still record the cycle error — but do NOT recurse.
-							local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
-							inv.parent_id = walk_parent_inv_id
-							inv.call_text      = tok
-							local err = {
-								kind   = "cycle",
-								msg    = string.format(
-									"project_emission: component cycle detected: %q", bare),
-								source = def_source,
-								line   = tok_line,
-							}
-							inv.errors[#inv.errors + 1] = err
-							errors[#errors + 1] = err
-							emit_invoke_end(inv)
-						else
-							ctx_table.visiting[bare] = true
-							local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
-							inv.parent_id = walk_parent_inv_id
-							inv.call_text = tok
-							inv.def_path  = comp.source
-							inv.def_line  = comp.declaration
-							-- Propagate trackers into the component body:
-							--   * `immediate_call_text` for the recursive walk is THIS call's token text (the immediate outer call for any word emitted inside this body).
-							--   * `root_call_text` is the OUTERMOST call. Immutable value computed before this invocation was opened.
-							local inner_immediate_call_text = tok
-							walk_body_entry({
-									body_tokens = comp.body_tokens or {},
-									body_off    = comp.body_off or 0,
-									line_of     = comp.line_of,
-									source      = comp.source,
-									declaration = comp.declaration,
-								}
-								, inv.id
-								, invocation_root_call_text
-								, inner_immediate_call_text
-							)
-							ctx_table.visiting[bare] = nil
-							emit_invoke_end(inv)
-
-							-- Count `word` items inside [start_word, end_word].
-							local wc_inside = 0
-							for i = inv.start_word, inv.end_word do
-								local it = items[i]
-								if it and it.kind == "word" then
-									wc_inside = wc_inside + 1
-								end
-							end
-							inv.word_count = wc_inside
-
-							-- Declared-vs-measured mismatch is a construction error.
-							-- `word_counts["mac_X"]` is the declared count populated by the components pass;
-							-- we compare against the measured word count.
-							local declared = ctx_table.word_counts["mac_" .. bare]
-							if declared and wc_inside ~= declared then
-								local err = {
-									kind   = "count_mismatch",
-									msg    = string.format(
-										"project_emission: mac_%s declared=%d measured=%d",
-										bare, declared, wc_inside),
-									source = def_source,
-									line   = tok_line,
-								}
-								inv.errors[#inv.errors + 1] = err
-								errors    [#errors     + 1] = err
-							end
-						end
-					else
-						-- mac_X is NOT a known component. Resolve the count from `word_counts`; if unresolved, emit 1 opaque word + one warning.
-						local n = resolve_count(ident, tok_line)
-						local out_ident = (ident == "nop2") and "nop" or ident
-						for _ = 1, n do
-							emit_word(out_ident, args, tok_line, tok, def_source, def_line, walk_immediate_call_text, walk_root_call_text)
-						end
-					end
-				else
-					-- Direct encoder (non-mac_X). Resolve count; emit N words.
-					local n = resolve_count(ident, tok_line)
-					local out_ident = (ident == "nop2") and "nop" or ident
-					for _ = 1, n do
-						emit_word(out_ident, args, tok_line, tok, def_source, def_line, walk_immediate_call_text, walk_root_call_text)
-					end
-				end
+			if tok == "" then return end
+			local ident    = M.read_ident(tok, 1) or "?"
+			local _, args  = token_ident_and_args(tok)
+			local tok_line = line_of(body_off + bt.rel) or 0
+			-- embedded markers live only in non-marker tokens.
+			if ident ~= "atom_label" and ident ~= "atom_offset" then emit_embedded_markers(tok, tok_line) end
+			-- atom_label / atom_offset: terminal markers, no further descent.
+			if     ident == "atom_label"  then emit_marker("label",  args[1] or "", nil,          tok_line); return
+			elseif ident == "atom_offset" then emit_marker("offset", args[1] or "", args[2] or "", tok_line); return
 			end
+			if ident:sub(1, 4) == "mac_" then
+				local bare = ident:sub(5)
+				local comp = ctx_table.component_index[bare]
+				if comp then
+					local invocation_root_call_text = walk_root_call_text or tok
+					if ctx_table.visiting[bare] then
+						-- cycle: still allocate inv_id, emit zero-width begin/end, record the cycle error; do NOT recurse.
+						local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
+						inv.parent_id = walk_parent_inv_id
+						inv.call_text = tok
+						local err = {
+							kind   = "cycle",
+							msg    = string.format("project_emission: component cycle detected: %q", bare),
+							source = def_source,
+							line   = tok_line,
+						}
+						inv.errors[#inv.errors + 1] = err
+						errors    [#errors     + 1] = err
+						emit_invoke_end(inv)
+						return
+					end
+					-- first visit: descend + count + count_mismatch-check below.
+					ctx_table.visiting[bare] = true
+					local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
+					inv.parent_id = walk_parent_inv_id
+					inv.call_text = tok
+					inv.def_path  = comp.source
+					inv.def_line  = comp.declaration
+					-- propagate trackers into the recursive walk:
+					--   immediate_call_text = this call's tok (the IMMEDIATE outer call for words emitted in this body)
+					--   root_call_text       = the OUTERMOST call (immutable across the recursion)
+					walk_body_entry({
+							body_tokens = comp.body_tokens or {},
+							body_off    = comp.body_off or 0,
+							line_of     = comp.line_of,
+							source      = comp.source,
+							declaration = comp.declaration,
+						},
+						inv.id,
+						invocation_root_call_text,
+						tok)
+					ctx_table.visiting[bare] = nil
+					emit_invoke_end(inv)
+					-- count `word` items inside [start_word, end_word].
+					local wc_inside = 0
+					for i = inv.start_word, inv.end_word do
+						local it = items[i]
+						if it and it.kind == "word" then
+							wc_inside = wc_inside + 1
+						end
+					end
+					inv.word_count = wc_inside
+					-- count_mismatch is a construction error: word_counts["mac_X"] is the declared count populated by the components pass; 
+					-- we compare against the measured word count.
+					local declared = ctx_table.word_counts["mac_" .. bare]
+					if declared and wc_inside ~= declared then
+						local err = {
+							kind   = "count_mismatch",
+							msg    = string.format("project_emission: mac_%s declared=%d measured=%d", bare, declared, wc_inside),
+							source = def_source,
+							line   = tok_line,
+						}
+						inv.errors[#inv.errors + 1] = err
+						errors    [#errors     + 1] = err
+					end
+					return
+				end
+				-- mac_X NOT in component_index: fall through to opaque emit.
+			end
+			-- direct encoder, or mac_X-without-component: resolve count + emit n words.
+			-- resolve_count may emit a warning if the count is unresolved.
+			local n = resolve_count(ident, tok_line)
+			local out_ident = (ident == "nop2") and "nop" or ident
+			for _ = 1, n do
+				emit_word(out_ident, args, tok_line, tok, def_source, def_line, walk_immediate_call_text, walk_root_call_text)
+			end
+		end
+		
+		for _, bt in ipairs(tokens) do
+			process_token(bt)
 		end
 	end
 

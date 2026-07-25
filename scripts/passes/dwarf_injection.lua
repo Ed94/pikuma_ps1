@@ -700,85 +700,97 @@ end
 --- @param skip_over table -- {atoms = {[symbol] = association}, components = {[file|name] = association}}
 --- @return table[]  -- list of {name, addr, size_bytes, words, entries, invocations, skip_over?}
 local function build_atom_table(corpus, addrs, skip_over)
+	-- Cross-ref: keep only atoms present in BOTH the nm symbol table AND
+	-- the canonical corpus projection. Output is sorted by ascending addr.
 	local atoms_by_name = corpus.atoms_by_name or {}
 
-	-- Cross-ref: keep only the atoms that exist in BOTH the nm symbol table AND the canonical corpus projection.
-	-- Address-ascending sort + lexical Stable tie-breaker: declaration order, then symbol address.
-	local out = {}
-	for name, info in pairs(addrs) do
+	-- Per-atom ingest. Returns nil if the atom is absent from the corpus
+	-- (caller skips it via the `if atom then ...` guard).
+	local function ingest_atom(name, info)
 		local atom_record = atoms_by_name[name]
-		if atom_record then
-			local paths            = atom_record.paths or {}
-			local word_events      = paths.word_events or {}
-			local invocations_proj = paths.invocations or {}
+		if not atom_record then return nil end
 
-			-- Build the dense entries list from `word_events`. `word_events[i].i` is the 0-based `.word` position;
-			-- `call_line` is the root atom's physical source line for that word (stamped by emission_model).
-			local entries = {}
-			for idx, ev in ipairs(word_events) do
-				entries[#entries + 1] = {
-					pos  = ev.i or (idx - 1),
-					line = ev.call_line or 0,
-					text = ev.call_text or "",
+		local paths            = atom_record.paths or {}
+		local word_events      = paths.word_events or {}
+		local invocations_proj = paths.invocations or {}
+		-- Build the dense entries list from `word_events`.
+		--   `word_events[i].i`     = the 0-based `.word` position
+		--   `call_line`            = the root atom's physical source line for that word
+		--                             (stamped by emission_model)
+		local entries = {}
+		for idx, ev in ipairs(word_events) do
+			entries[#entries + 1] = {
+				pos  = ev.i or (idx - 1),
+				line = ev.call_line or 0,
+				text = ev.call_text or "",
+			}
+		end
+		local atom = {
+			name       = name,
+			addr       = info[1],
+			size_bytes = info[2],
+			words      = #word_events,
+			entries    = entries,
+			skip_over  = skip_over.atoms[name] ~= nil,
+		}
+
+		-- Group consecutive `word_events` rows whose outermost invocation is the SAME
+		-- format-1 invocation into a single `atom.invocations` entry. Rows sharing the
+		-- same comp_name / call_file / call_line / comp_file / comp_line are part of
+		-- the same group. Rows outside any invocation flush cur_inv.
+		if #invocations_proj > 0 then
+			local invocations = {}
+			-- Process one word_event row against the current group state.
+			-- Returns the (possibly updated) cur_inv.
+			local function row(ev, cur_inv)
+				local outer_id  = ev.outermost_invocation_id
+				local outer_inv = outer_id and invocations_proj[outer_id] or nil
+				if not (outer_inv and outer_inv.component_name) then
+					-- raw row: flush any pending cur_inv; no new group starts.
+					if cur_inv then invocations[#invocations + 1] = cur_inv end
+					return nil
+				end
+				local inv_key = outer_inv.component_name
+					.. "|" .. (outer_inv.call_path or "")
+					.. "|" .. tostring(outer_inv.call_line or 0)
+					.. "|" .. (outer_inv.def_path or "")
+					.. "|" .. tostring(outer_inv.def_line or 0)
+				local ev_pos = ev.i or 0
+				if cur_inv and cur_inv.key == inv_key then
+					-- same group: extend range + append body line.
+					cur_inv.end_pos = ev_pos
+					cur_inv.body_lines[#cur_inv.body_lines + 1] = ev.body_line or 0
+					return cur_inv
+				end
+				-- key changed (or no current group): flush + start new.
+				if cur_inv then invocations[#invocations + 1] = cur_inv end
+				return {
+					key        = inv_key,
+					comp_name  = outer_inv.component_name,
+					call_file  = outer_inv.call_path or "",
+					call_line  = outer_inv.call_line or 0,
+					comp_file  = outer_inv.def_path or "",
+					comp_line  = outer_inv.def_line or 0,
+					start_pos  = ev_pos,
+					end_pos    = ev_pos,
+					skip_over  = skip_over.components[normalize_debug_path(outer_inv.def_path or ""):lower() .. "\0" .. outer_inv.component_name] ~= nil,
+					body_lines = { ev.body_line or 0 },
 				}
 			end
-
-			local atom = {
-				name       = name,
-				addr       = info[1],
-				size_bytes = info[2],
-				words      = #word_events,
-				entries    = entries,
-				skip_over  = skip_over.atoms[name] ~= nil,
-			}
-
-			-- Group consecutive `word_events` rows whose outermost invocation
-			-- is the SAME format-1 invocation into a single `atom.invocations`
-			-- entry. Keep entries grouped by outermost invocation
-			-- (two consecutive rows with the same comp_name/call_file/call_line/
-			-- comp_file/comp_line are part of the same invocation).
-			if #invocations_proj > 0 then
-				local invocations = {}
-				local cur_inv = nil
-				for _, ev in ipairs(word_events) do
-					local outer_id = ev.outermost_invocation_id
-					local outer_inv = outer_id and invocations_proj[outer_id] or nil
-					if outer_inv and outer_inv.component_name then
-						local inv_key = outer_inv.component_name
-							.. "|" .. (outer_inv.call_path or "")
-							.. "|" .. tostring(outer_inv.call_line or 0)
-							.. "|" .. (outer_inv.def_path or "")
-							.. "|" .. tostring(outer_inv.def_line or 0)
-						local ev_pos = ev.i or 0
-						if cur_inv and cur_inv.key == inv_key then
-							cur_inv.end_pos = ev_pos
-							cur_inv.body_lines[#cur_inv.body_lines + 1] = ev.body_line or 0
-						else
-							if cur_inv then invocations[#invocations + 1] = cur_inv end
-							cur_inv = {
-								key        = inv_key,
-								comp_name  = outer_inv.component_name,
-								call_file  = outer_inv.call_path or "",
-								call_line  = outer_inv.call_line or 0,
-								comp_file  = outer_inv.def_path or "",
-								comp_line  = outer_inv.def_line or 0,
-								start_pos  = ev_pos,
-								end_pos    = ev_pos,
-								skip_over  = skip_over.components[normalize_debug_path(outer_inv.def_path or ""):lower()
-									.. "\0" .. outer_inv.component_name] ~= nil,
-								body_lines = { ev.body_line or 0 },
-							}
-						end
-					else
-						-- RAW row: flush the current invocation.
-						if cur_inv then invocations[#invocations + 1] = cur_inv; cur_inv = nil end
-					end
-				end
-				if cur_inv then invocations[#invocations + 1] = cur_inv end
-				atom.invocations = invocations
+			local cur_inv = nil
+			for _, ev in ipairs(word_events) do
+				cur_inv = row(ev, cur_inv)
 			end
-			out[#out + 1] = atom
+			if cur_inv then invocations[#invocations + 1] = cur_inv end
+			atom.invocations = invocations
 		end
+		return atom
+	end
+
+	local out = {}
+	for name, info in pairs(addrs) do
+		local atom = ingest_atom(name, info)
+		if atom then out[#out + 1] = atom end
 	end
 	table.sort(out, function(a, b) return a.addr < b.addr end)
 	return out
