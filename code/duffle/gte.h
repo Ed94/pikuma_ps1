@@ -353,41 +353,34 @@ enum { _C2_TX_SUBS_ = 0
 
 /* GTE command words for the common cases.
  *
- * These are pure compile-time integer constants — the C compiler
- * constant-folds them into `.word` directives in .rodata. Use them
- * inside `asm_inline(...)` blocks (see `gte_rtpt` below for the
- * canonical idiom).
+ * These are pure compile-time integer constants — the C compiler constant-folds them into `.word` directives in .rodata.
+ * Use them inside `asm_inline(...)` blocks (see `gte_rtpt` below for the idiom).
  *
  * Decomposition (per the `enc_gte_<field>` definitions above):
  *   gte_cmdw_<name> = gte_cmd_base | enc_gte_cmd(<cmd>)
  
- * The SF/MX/V/CV/LM fields are all zero in the common cases (standard
- * rotation-matrix, no scaling factor, V0 vector, translation vector,
- * no clamp), so the only varying bits are the `cmd` field.
+ * The SF/MX/V/CV/LM fields are all zero in the common cases 
+ * (standard rotation-matrix, no scaling factor, V0 vector, translation vector, no clamp),
+ * so the only varying bits are the `cmd` field.
  *
- * Naming follows the file's convention: `gte_cmd_*` is the raw
- * 6-bit `cmd` field id, `gte_cmdw_*` is the fully-encoded 32-bit
- * instruction word ready to drop into a `.word` directive.
+ * Naming follows the file's convention: `gte_cmd_*` is the raw 6-bit `cmd` field id, `gte_cmdw_*`
+ *  is the fully-encoded 32-bit instruction word ready to drop into a `.word` directive.
  *
  * --------------------------------------------------------------------------
  *  PsyQ-compatibility note (RTPS/RTPT):
- *  The original Sony PsyQ `inline_n.h` ships RTPT as `cop2 0x0280030` and
- *  RTPS as `cop2 0x0180001`. Both have `0x20` set in the upper-reserved
- *  region (bit 21) AND `sf=1` (bit 19) — i.e. the "no division" flag.
- *  Per psx-spec these bits are reserved/must-be-zero, but the real GTE
- *  hardware and PCSX-Redux's GTE model both IGNORE them on these two
- *  commands (the perspective divide happens regardless of `sf`).
+ *  The original Sony PsyQ `inline_n.h` ships RTPT as `cop2 0x0280030` and RTPS as `cop2 0x0180001`.
+ *  Both have `0x20` set in the upper-reserved region (bit 21) AND `sf=1` (bit 19) — i.e. the "no division" flag.
+ *  Per psx-spec these bits are reserved/must-be-zero,
+ *  but the real GTE hardware and PCSX-Redux's GTE model both IGNORE them on these two commands
+ *  (the perspective divide happens regardless of `sf`).
  *
- *  If we emit a strictly-spec-compliant word (`sf=0`, reserved bits
- *  clear), PCSX-Redux's GTE checks those bits more strictly than the
- *  silicon does and RTPT silently no-ops — the floor's screen
- *  coordinates come out as raw projection-of-rotation (Z never
- *  divided), `nclip` ends up wrong, and the triangle is culled.
+ *  If we emit a strictly-spec-compliant word (`sf=0`, reserved bits clear),
+ *  PCSX-Redux's GTE checks those bits more strictly than the silicon does and RTPT silently no-ops — 
+ *  the floor's screen coordinates come out as raw projection-of-rotation (Z never divided),
+ *  `nclip` ends up wrong, and the triangle is culled.
  *
- *  So for RTPS and RTPT we OR-in the `0x28` "PsyQ compat" pattern to
- *  match the working bit pattern everyone has shipped for 25 years.
- *  NCLIP/OP/MVMVA stay spec-clean — their reserved bits really are
- *  zero in the original PsyQ source.
+ *  So for RTPS and RTPT we OR-in the `0x28` "PsyQ compat" pattern to match the working bit pattern everyone has shipped for 25 years.
+ *  NCLIP/OP/MVMVA stay spec-clean — their reserved bits really are zero in the original PsyQ source.
  * --------------------------------------------------------------------------
  */
 #define gte_cmdw_psyq_compat  (1u << 21 | enc_gte_sf(gte_sf_integer))
@@ -424,9 +417,9 @@ enum { _C2_TX_SUBS_ = 0
  * @details Loads values from an SVECTOR struct to GTE data registers C2_VXY0
  * (XY at offset 0) and C2_VZ0 (Z at offset 4) using `lwc2`.
  *
- * Uses string-style GCC inline asm with `%0` substitution because the
- * base register `r0` is a runtime GPR chosen by the compiler — it cannot
- * be encoded into a static `.word` constant.
+ * Uses string-style GCC inline asm with `%0` substitution because the 
+ * base register `r0` is a runtime GPR chosen by the compiler.
+ * It cannot be encoded into a static `.word` constant.
  *
  * Usage:
  *   asm_gte_load_v0(svector_ptr);
@@ -458,26 +451,21 @@ enum {
 
 /* gte_load_vN(r_ptr, base) — placeholder-punned lwc2 loaders
  *
- * Emits `.word` constants encoding `lwc2 $N, off(<base>)` for the chosen
- * GTE vector register, where `<base>` is the GPR number you pass in
+ * Emits `.word` constants encoding `lwc2 $N, off(<base>)` for the chosen GTE vector register, where `<base>` is the GPR number you pass in
  * (typically one of R_T4..R_T9 for the standard "3-pointer" pattern).
  *
  * The caller MUST bind `r_ptr` to that same GPR via a register variable:
  *     register V3_S2* p_in_12 __asm__("$12") = my_ptr;
  *     gte_load_v0(p_in_12, R_T4);   // R_T4 = 12, base is $12
  *
- * Then `"r"(r_ptr)` inside the asm binds to $12 (the only register
- * `p_in_12` can live in), which is exactly the register the .word
- * constants expect. A `"$12"` clobber would conflict with the
- * register-variable binding ("asm specifier for variable conflicts
- * with asm clobber list"), so we omit it. The other ABI-clobbers
- * ($2/$8/$9/$31) stay because the GTE instructions don't touch
- * caller-saved GPRs but the kernel does treat them as volatile.
+ * Then `"r"(r_ptr)` inside the asm binds to $12 (the only register `p_in_12` can live in),
+ * which is exactly the register the .word constants expect. A `"$12"` clobber would conflict with the register-variable binding
+ * ("asm specifier for variable conflicts with asm clobber list"), so we omit it.
+ * The other ABI-clobbers ($2/$8/$9/$31) stay because the GTE instructions don't touch caller-saved GPRs but the kernel does treat them as volatile.
  *
  * WHICH REGISTER TO PICK
  * ----------------------
- * Any caller-saved GPR is safe. Recommended default for an RTPT-style
- * 3-pointer pipeline:
+ * Any caller-saved GPR is safe. Recommended default for an RTPT-style 3-pointer pipeline:
  *   gte_load_v0(p0, R_T4);  // $12
  *   gte_load_v1(p1, R_T5);  // $13
  *   gte_load_v2(p2, R_T6);  // $14
@@ -490,8 +478,7 @@ enum {
  *   clobbers section   : "$2", "$8", ..., "memory"      (from asm_clobber)
  *   3 colons total, GCC-legal. No string-syntax mnemonics in the .word body.
  *
- * The `asm_clobber(...)` helper from gcc_asm.h prepends the colon that
- * starts the clobbers section. */
+ * The `asm_clobber(...)` helper from gcc_asm.h prepends the colon that starts the clobbers section. */
 #define gte_load_v0(r_ptr, base) asm volatile(       \
 	asm_words( gte_lw_v0_xy(base), gte_lw_v0_z(base) ) \
 	asm_rpins,   r_use(r_ptr)                          \
@@ -510,11 +497,11 @@ enum {
 	asm_clobber: rlit(R_V0), rlit(R_T0), rlit(R_T1), rlit(R_RA), clb_mem_drain \
 )
 
-/* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — the canonical prelude to gte_cmd_rtpt.
+/* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — prelude to gte_cmd_rtpt.
  *
  * Loads all three GTE input vectors (6 words) from three separate pointers,
- * one per GTE vector register, each loaded from its own base GPR. Caller
- * must bind each `pN` to `bN` via a register variable.
+ * one per GTE vector register, each loaded from its own base GPR.
+ * Caller must bind each `pN` to `bN` via a register variable.
  *
  *   register V3_S2* p0 rgcc(R_T4) = verts[0].ptr;  // → __asm__("$12")
  *   register V3_S2* p1 rgcc(R_T5) = verts[1].ptr;  // → __asm__("$13")

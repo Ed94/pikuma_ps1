@@ -2,7 +2,7 @@
  *  duffle DSL — GTE Vendor Mnemonics (opt-in)
  *  ============================================================================
  *
- *  Provides the textbook MIPS assembly mnemonics for the GTE/COP2 instructions as thin aliases to the canonical duffle macros in gte.h.
+ *  Provides the textbook MIPS assembly mnemonics for the GTE/COP2 instructions as thin aliases to the duffle macros in gte.h.
  *  The duffle names are primary; this header is for users who prefer the textbook mnemonics.
  *
  *  USAGE:   #include "duffle/gte_vendor_sym.h"   // after gte.h

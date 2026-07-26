@@ -5,10 +5,8 @@
 ---   - `build/gen/<dir_basename>.annotations.txt` — one per source-directory containing atoms; aggregates across all sources in the directory.
 ---   - `build/gen/annotation_validation.txt` — the project summary.
 ---
---- The annotation pass emits `errors.h` files per module and the canonical
---- `corpus.sources_by_dir` projection groups sources by directory. This pass
---- iterates the canonical dir projection directly and re-validates each source
---- via `annotation.validate()` to get the detailed per-source results.
+--- The annotation pass emits `errors.h` files per module and the canonical `corpus.sources_by_dir` projection groups sources by directory.
+--- This pass iterates the canonical dir projection directly and re-validates each source via `annotation.validate()` to get the detailed per-source results.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -27,11 +25,9 @@
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
--- Load the annotation pass so we can re-validate each source against the
--- canonical corpus projection. The annotation pass exposes `M.validate`,
--- which returns the per-source AnnotationResult (atoms / annots / macros /
--- binds / errors / warnings) that the report pass renders into the
--- per-module `<dir_basename>.annotations.txt` output.
+-- Load the annotation pass so we can re-validate each source against the canonical corpus projection.
+-- The annotation pass exposes `M.validate`, which returns the per-source AnnotationResult (atoms / annots / macros / binds / errors / warnings)
+-- that the report pass renders into the per-module `<dir_basename>.annotations.txt` output.
 local annotation    = dofile(_bootstrap_dir .. "annotation.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -382,11 +378,9 @@ end
 -- Orchestration helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
---- (internal) Re-validate every source in a directory against the canonical
---- corpus projection. Calls `annotation.validate()` per source to produce the
---- per-source AnnotationResult (atoms / annots / macros / binds / errors /
---- warnings) that the report renderer consumes. This is the canonical path —
---- no private stash; each report pass run is reproducible from the corpus.
+--- (internal) Re-validate every source in a directory against the canonical corpus projection.
+--- Calls `annotation.validate()` per source to produce the per-source AnnotationResult (atoms / annots / macros / binds / errors / warnings)
+--- that the report renderer consumes. Eeach report pass run is reproducible from the corpus.
 --- Returns the list of module results + the flat list of all results (for the project-wide summary).
 --- @param ctx PassCtx
 --- @param dir_sources SourceFile[]

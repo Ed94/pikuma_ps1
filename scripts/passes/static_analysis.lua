@@ -1,12 +1,16 @@
 --- passes/static_analysis.lua — Per-atom static-analysis checks.
 ---
+--- Ownership: `ctx.shared.corpus` is the canonical merged registry; per-source fallback synthesis is rejected.
+--- `atom.paths` supplies the emitted and analysis projections consumed by this pass.
+---
 --- Per-atom rules:
 ---   1. transfer_hazards: A single forward walker (`analyze_hardware_relations`) reads `atom.paths.word_events` once per atom.
 ---      For each emitted word event it (a) inspects pending CPU/COP0/COP2/GTE relations against the event as CONSUMER 
 ---      (recording a hazard on `atom.paths.hazards` when the producer→consumer gap is below the required retire-slot count), 
 ---      (b) applies the event's GPR value effects (`duffle.INSTRUCTION_GPR_EFFECTS`) to `atom.paths.forward_state.gpr_values`, 
 ---      applies bounded constant propagation, and stages matching relation rows as PRODUCERS (with `destination_match` filters, e.g. for the IRGB fan-out).
----      The `transfer_hazards` CHECK_RULES reader projects `atom.paths.hazards` into per-atom findings without re-walking source.
+---      The `transfer_hazards` CHECK_RULES reader projects `atom.paths.hazards` into per-atom findings.
+---      The reader does NOT re-walk source; this is the per-check purity contract.
 ---      The walker runs once per atom before the per-atom dispatch; the reader runs inside the same dispatch.
 ---   2. control_transfer_delay_slot_use: For every emitted branch/jump/call encoder in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES` 
 ---      (the six `branch_*` encoders plus `jump` / `jump_reg` / `jump_link` / `call_reg` / `call_addr`),
@@ -26,7 +30,7 @@
 ---      must be in `corpus.register_alias_registry`.
 ---   9. atom_type_consistency: Every `reg_type_overrides[R_X].type_name` must resolve in `corpus.type_name_registry`.
 ---  10. binds_no_substruct_deref: Every `load_word(R_A, R_B, O_(Type, Field))` and `store_word(...)` in every atom body must reference a leaf scalar
----      (pointer-to-struct counts as leaf; nested struct members do NOT).
+---      (pointer-to-struct counts as leaf; nested struct members fail the leaf test).
 ---
 ---
 --- Findings carry an explicit `kind` ("error" / "warning" / "info").
@@ -297,7 +301,7 @@ end
 --      Only the matching row stages (the non-matching row is ignored for that event).
 --
 -- After the walker runs, the `transfer_hazards` CHECK_RULES reader (`check_transfer_hazards`) copies every entry on `atom.paths.hazards` into the per-atom findings list.
--- The reader does NOT re-walk source or re-classify tokens; it is a pure projection of the walker's output.
+-- The first `transfer_hazards` reader comment above records the projection contract.
 --
 -- The walker is called once before the CHECK_RULES per-atom dispatch (see `validate()`);
 -- The reader runs as part of the same CHECK_RULES dispatch so its findings land in `findings` alongside the other checks.
@@ -319,7 +323,7 @@ local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
 	for _, pos in ipairs(args) do
 		if pos == destination then return true end
 	end
-	-- Match via the command's input set: the consumer's encoder resolves to a canonical `gte_cmdw_*` 
+	-- Match via the command's input set: the consumer encoder resolves to a `gte_cmdw_*`
 	-- short form whose `duffle.GTE_COMMAND_INPUTS` entry includes the destination (or a fan-out target).
 	local aliases   = duffle.GTE_COMMAND_ALIASES or {}
 	local canonical = aliases[consumer_token] or consumer_token
@@ -528,7 +532,7 @@ local function apply_gpr_effects(ev_ident, ev_args, forward_state)
 	end
 end
 
--- Look up the canonical alias of a GTE command ident.
+-- Look up the alias of a GTE command ident.
 -- Defaults to the input ident so unknown idents surface rather than silently inheriting a 0-cycle command input set.
 local function canonical_command(ident)
 	local aliases = duffle.GTE_COMMAND_ALIASES or {}
@@ -932,7 +936,7 @@ end
 --
 -- The single forward walker `analyze_hardware_relations` (defined above) has already populated `atom.paths.hazards`.
 -- This check copies every entry on that list into the per-atom `findings` table.
--- It does NOT re-walk source / re-classify tokens; it is a pure projection of the walker's output.
+-- The first `transfer_hazards` reader comment above records the projection contract.
 --
 -- The walker also populates `atom.paths.relations` (one entry per satisfied-or-violated relation touch) and `atom.paths.forward_state` (the GPR-value lattice).
 -- Neither of those is rendered as a finding here; bounded-value rules and LWC2 unknown edges share on top of the same forward walker and adds additional readers.
@@ -954,7 +958,7 @@ end
 --
 -- The forward walker stages post-command latch relations on `atom.paths.hazards` with `relation_id = "command_latch_input"`.
 -- This reader filters those entries and re-emits them under the `gte_input_latch` check name so the test contract can target them independently of the transfer_hazards check.
--- The reader does NOT re-walk source tokens or build its own pending state; it is a pure projection of the walker's output.
+-- The first `transfer_hazards` reader comment above records the projection contract.
 -- ─────────────────────────────────────────────────────────────────────────
 
 local function check_gte_input_latch(atom, _pipe_ctx, findings)
@@ -984,7 +988,7 @@ end
 -- A subsequent MFC2 (or any encoder that reads a C2 register) that picks the WRONG register for the active role emits a `result_role_mismatch` warning.
 -- For example, reading `C2_SXY0` after RTPS is wrong: the `latest_screen_xy` role is `C2_SXY2`.
 --
--- The reader does NOT re-walk source tokens; it consumes `forward_state.post_command_roles` and `atom.paths.word_events` only.
+-- The first `transfer_hazards` reader comment above records the projection contract.
 -- ─────────────────────────────────────────────────────────────────────────
 
 local function check_gte_result_position(atom, _pipe_ctx, findings)
@@ -1029,7 +1033,7 @@ local function check_gte_result_position(atom, _pipe_ctx, findings)
 			local args = ev.args or {}
 			local reg  = args[2]
 			-- Find any post-command `latest_screen_xy` role entry recorded by a prior command.
-			-- The newest projected screen coordinate is recorded under the command's canonical name.
+			-- The newest projected screen coordinate is recorded under the command name.
 			-- Reading from C2_SXY0 (the older projection slot) when a `latest_screen_xy` role was set to C2_SXY2 by RTPS / RTPT is a semantic mismatch.
 			local latest_screen_xy_entry = nil
 			for r, e in pairs(forward.post_command_roles or {}) do
@@ -1077,10 +1081,10 @@ end
 --     (the nop is needed to retire the relation, even if it can be replaced by independent useful work).
 --   * `modeled-redundant`: no modeled relation is pending immediately before the nop (the nop is a redundant hazard).
 --
--- Branch/jump delay-slot NOPs are NOT classified by this check (they are exclusively owned by `control_transfer_delay_slot_use`).
+-- Branch/jump delay-slot NOPs belong to `control_transfer_delay_slot_use`, so this check leaves them unclassified.
 -- The fixed `mac_yield()` handshake (`jump_reg(R_AtomJmp), nop`) is preserved as suppressed.
 --
--- The reader does NOT re-walk source tokens; it consumes `forward_state.pending` snapshots and `atom.paths.word_events`.
+-- The first `transfer_hazards` reader comment above records the projection contract.
 -- ─────────────────────────────────────────────────────────────────────────
 
 local function check_hazard_nop_use(atom, _pipe_ctx, findings)
@@ -1238,10 +1242,8 @@ end
 -- ─────────────────────────────────────────────────────────────────────────
 -- Check #1c: control-transfer delay-slot use.
 --
--- Reads `atom.paths.word_events` (the semantic emitted-word stream from
--- `passes/emission_model.lua`). For each event whose `encoder` is in
--- `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`, inspect the next emitted
--- event in the SAME `events` array.
+-- Reads `atom.paths.word_events` (the semantic emitted-word stream from `passes/emission_model.lua`).
+-- For each event whose `encoder` is in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES`, inspect the next emitted event in the SAME `events` array.
 -- The next event is the hardware delay-slot word (the duffle pipeline already absorbs the BD-slot into the branch's cost in `analyze_atom_paths`.
 -- This check observes, it does not reschedule.
 --
@@ -1252,7 +1254,7 @@ end
 -- Suppress the finding when `policy.suppress_arg1[first_arg]` is non-nil.
 -- The only current suppression is `jump_reg(R_AtomJmp)`, the fixed `mac_yield()` handshake.
 --
--- `pipe_ctx` is unused; the uniform `(atom, pipe_ctx, findings)` signature is preserved so the check plugs into 
+-- `pipe_ctx` is unused; the uniform `(atom, pipe_ctx, findings)` signature is preserved so the check plugs into
 -- the existing CHECK_RULES dispatch without modifying the per-atom loop or analyze_atom_paths.
 -- `passes/emission_model` already normalizes `nop2` to two `nop` events and `atom_label` to zero events, so no special-case branching is needed for either.
 -- ─────────────────────────────────────────────────────────────────────────
@@ -1402,8 +1404,8 @@ end
 ---   2. Body MUST contain an `add_ui_self(R_TapePtr, S_(Binds_X))` (or equivalent advance by the struct's byte count). Missing = error.
 ---   3. atom_bind(Binds_X) where Binds_X doesn't exist = error.
 --- Per-atom: Verify the atom body reads every field of its `Binds_X` from R_TapePtr and advances R_TapePtr by S_(Binds_X).
---- Takes `(atom, pipe_ctx, findings)`; `pipe_ctx` carries the cross-atom
---- `info_by_atom` + `binds_index` tables (built once by validate() before the per-atom loop).
+--- Takes `(atom, pipe_ctx, findings)`; `pipe_ctx` carries the cross-atom `info_by_atom` + `binds_index` tables
+--- (built once by validate() before the per-atom loop).
 --- `validate()` owns per-atom iteration; this function evaluates one atom.
 local function check_abi_handoff(atom, pipe_ctx, findings)
 	local  info = pipe_ctx.info_by_atom[atom.name]
@@ -1658,10 +1660,9 @@ local function analyze_atom_paths(atom)
 
 		local succ, term = successors(tok_idx)
 		if term then
-			-- Terminator: record the path's cycle sum. 
-			-- We do NOT add the terminator token to `visited` a path ends here, so a different path that 
-			-- ALSO reaches this terminator is a legitimate new path (not a loop). 
-			-- If we marked it visited, subsequent paths that reach the same terminator would be incorrectly flagged as loops.
+			-- Terminator: record the path's cycle sum.
+			-- The terminator token stays out of `visited`, so another path reaching the same terminator remains a distinct path.
+			-- Marking it visited would flag those legitimate paths as loops.
 			path_count = path_count + 1
 			if new_acc < cycles_min then cycles_min = new_acc end
 			if new_acc > cycles_max then cycles_max = new_acc end
@@ -1704,7 +1705,7 @@ end
 --- (deduplicated across atoms so the warning section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
 --- Per-atom: emit one finding per unknown macro seen, deduplicated across atoms 
 --- (so the warning section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
---- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery (it's the canonical place that walks tokens and computes per-token cycle costs).
+--- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery, which walks tokens and computes per-token cycle costs.
 local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 	local p = atom.paths or {}
 	for _, name in ipairs(p.unknown_macros or {}) do
@@ -1736,9 +1737,9 @@ end
 -- The rule is intentionally permissive because the production `code/duffle/` and `code/gte_hello/`
 -- sources use R_* aliases in atom_reads / atom_writes that may not yet be opted in via the bare `atom_reg` marker.
 -- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase ARE opted in.
--- Raw C-ABI aliases like R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle:
--- no auto-include of wave-context; explicit opt-in only). Warnings keep the build green
-	-- and report aliases that need explicit registration.
+-- Raw C-ABI aliases like R_T0..R_T3 require explicit opt-in; the prototype keeps wave-context registration explicit.
+-- no auto-include of wave-context; explicit opt-in only). 
+-- Warnings keep the build green and report aliases that need explicit registration.
 local function check_enum_alias_membership(_src, pipe_ctx, findings)
 	local reg_registry = pipe_ctx.register_alias_registry or {}
 
@@ -1836,7 +1837,7 @@ end
 -- the `<Field>` MUST resolve to a leaf scalar of `<Type>`. A "leaf scalar" is:
 --   * a non-struct field with `pointer_depth >= 1` (pointer-to-struct IS a leaf — the field is a pointer; the pointee is unrelated), OR
 --   * a non-struct field whose type_name resolves to a typedef / enum / builtin in `type_name_registry`.
--- A nested struct member (pointer_depth == 0 AND type_name resolves to a `kind = "struct"` registry entry) is NOT a leaf scalar and is flagged.
+-- A nested struct member (pointer_depth == 0 and type_name resolves to a `kind = "struct"` registry entry) fails the leaf-scalar test.
 -- The check also flags fields whose Type has no `fields` table (typedefs and enums don't have fields — any Field reference against them is bogus)
 -- and fields whose name doesn't appear in the resolved Type's fields array.
 --
@@ -1858,7 +1859,7 @@ local function find_field_by_name(type_entry, field_name)
 end
 
 -- True iff a (field, type_registry) pair is a leaf scalar (safe to dereference as a tape-payload field).
--- Pointer-to-X is always leaf; non-pointer struct members are NOT leaf.
+-- Pointer-to-X is always a leaf; non-pointer struct members fail the leaf test.
 local function is_field_leaf(field, type_registry)
 	if field.pointer_depth and field.pointer_depth > 0 then
 		return true
@@ -1925,7 +1926,7 @@ end
 --   per_atom(atom, pipe_ctx, findings)          — runs once per atom inside validate()'s single loop
 --   post(pipe_ctx, findings)                    — runs once after all per-atom calls complete
 --   per_macro(macro, wc, findings)              — runs once per TAPE_WORDS / _Pragma macro declaration
---   per_skip_marker(marker, pipe_ctx, findings) — runs once per src.scan.skip_over.markers entry
+--   per_skip_marker(marker, pipe_ctx, findings) — runs once per src.scan.debug_skip_markers entry
 --   per_source(src, pipe_ctx, findings)         — runs once per source AFTER the per-atom loop completes
 --                                                 (registry-driven rule; same CHECK_RULES table)
 -- Each check is one table row and one `check_*` function.
@@ -1951,11 +1952,11 @@ local CHECK_RULES = {
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Build the corpus-wide pipe_ctx ONCE per pass run.
---- Reads the merged `corpus.*` registries (canonical cross-source lookups), and the corpus-wide `atom_infos` list (preserving source order + duplicates).
---- The corpus is the source of truth; per-source scans retain body / declaration ownership via `src.scan` and the per-source `atoms` / `atom_infos` projections.
+--- Reads the merged `corpus.*` registries and the corpus-wide `atom_infos` list (preserving source order + duplicates).
+--- The corpus supplies shared registries; `src.scan` and per-source projections retain body and declaration ownership.
 ---
---- Ownership: A context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus message.
---- No per-source fallback synthesis is performed; callers MUST construct a canonical ctx through `build_ctx`. 
+--- A context without `ctx.shared.corpus` is rejected with an explicit corpus message.
+--- Callers construct the context through `build_ctx`.
 --- @param ctx PassCtx
 --- @return PipeCtx
 local function build_corpus_pipe_ctx(ctx)
@@ -1966,9 +1967,9 @@ local function build_corpus_pipe_ctx(ctx)
 			.. "no per-source fallback is supported)", 0)
 	end
 	-- The pipe_ctx views REFERENCE the corpus tables directly (no copies).
-	-- Every consumer of these fields observes mutations via the canonical corpus without independently mutable registry construction.
+-- Every consumer observes mutations through the corpus tables directly.
 	return {
-		-- Cross-source lookup tables (canonical corpus projections).
+		-- Cross-source lookup tables.
 		register_alias_registry = corpus.register_alias_registry or {},
 		type_name_registry      = corpus.type_name_registry      or {},
 		atom_views              = corpus.atom_views              or {},
@@ -1985,8 +1986,8 @@ end
 
 local function validate(ctx, src, corpus_pipe_ctx)
 	local scan = src.scan
-	-- Read the canonical corpus word_counts for the per-atom pipeline
-	-- (atom.paths.word_events is the canonical projection).
+	-- Read the corpus word_counts for the per-atom pipeline
+	-- (`atom.paths.word_events` is the emitted projection).
 
 	local corpus = (ctx.shared and ctx.shared.corpus) or {}
 
@@ -2028,7 +2029,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		register_alias_registry = corpus_pipe_ctx.register_alias_registry,
 		type_name_registry      = corpus_pipe_ctx.type_name_registry,
 	}
-	-- Shared cross-source component-body index is owned by the canonical corpus
+	-- Shared cross-source component-body index is owned by the corpus
 	-- (`corpus.component_body_index`, populated by `passes/components.lua`).
 	-- Per-atom checks consume the corpus-owned index directly.
 	pipe_ctx.component_body_index = (corpus and corpus.component_body_index) or {}
@@ -2041,13 +2042,11 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	---
 	--- Body, token, and emission projections come from here (`paths.tokens = body_tokens`, `paths.line_in_body = build_body_line_index` `paths.word_events`
 	--- and related fields are owned by `passes/emission_model.lua` pass (per-atom emission projection).
-	--- This pass reads: `paths.tokens`, `paths.line_in_body` ` paths.items`, `paths.word_events` from the canonical projection,
-	--- then computes `paths.tok_class`, `paths.cycles_min/max`, `paths.branches`, `paths.paths`, `paths.has_loops`, `paths.unknown_macros`
-	--- via `classify_tokens` + `analyze_atom_paths`.
+	--- This pass reads: `paths.tokens`, `paths.line_in_body`, `paths.items`, `paths.word_events` from the emitted projection,
+	--- then computes `paths.tok_class`, `paths.cycles_min/max`, `paths.branches`, `paths.paths`, `paths.has_loops`, `paths.unknown_macros` via `classify_tokens` + `analyze_atom_paths`.
 	--- No re-walk of body text or body_tokens happens here.
 	---
-	--- Canonical contract: `atom.paths` and `atom.paths.word_events` MUST be
-	--- populated by `passes/emission_model.run(ctx)` before this pass runs.
+	--- Canonical contract: `atom.paths` and `atom.paths.word_events` MUST be populated by `passes/emission_model.run(ctx)` before this pass runs.
 	--- The `atom.paths.word_events` projection is owned by the emission-model pass; static-analysis reads it directly.
 	local findings = {}
 	for _, a in ipairs(atoms) do
@@ -2354,7 +2353,7 @@ local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, fin
 	end
 
 	-- Module-level findings summary (across all sources).
-	-- Info is its own count; it is NOT lumped into warnings.
+	-- Info has its own count; it remains separate from warnings.
 	local total_errs  = #errors
 	local total_warns = #warnings
 	local total_infos = #info
@@ -2393,13 +2392,11 @@ function M.run(ctx)
 	local warnings = {}
 	-- `info` aggregates finding-level info across every source (the per-source validate() also
 	-- returns a `summaries` collection for scan/cycle rollups;
-	-- those are NOT finding-level and never enter `info`).
+	-- those are summary rows and never enter `info`).
 	local info     = {}
 
 	-- Build the corpus-wide pipe_ctx ONCE per pass run.
-	-- The corpus owns the canonical cross-source registries; per-source scans
-	-- retain body / declaration ownership. The pipe_ctx is shared across every
-	-- validate() invocation in this M.run so cross-source visibility is constant.
+	-- The pipe_ctx is shared across every validate() invocation in this M.run so cross-source visibility is constant.
 	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx)
 	local corpus = ctx.shared.corpus
 

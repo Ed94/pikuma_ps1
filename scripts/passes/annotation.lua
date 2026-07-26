@@ -1,21 +1,20 @@
 --- passes/annotation.lua — Atom-annotation DSL validator.
 ---
 --- Validates `MipsAtom_(name) atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...)) { ... }` declarations in source files.
---- Also reads: `Binds_*` struct declarations (`typedef Struct_(Binds_X) { ... };`)
+--- Also reads `Binds_*` struct declarations (`typedef Struct_(Binds_X) { ... };`).
 ---
---- Source scanning: done ONCE upstream by `duffle.scan_source()` (ps1_meta.lua pre-scans each source and stashes the result in `src.scan`).
+--- `duffle.scan_source()` scans each source once upstream; `ps1_meta.lua` stores that result in `src.scan`.
 ---
---- Writes:
----   - `<ctx.out_root>/<dir_basename>.errors.h` — one per module, with `#error` directives on findings (the C compile will surface the error)
----   - The annotations.txt report is rendered by `passes/report.lua` from the canonical `corpus.sources_by_dir` projection (re-validating each source via `M.validate()`).
+--- Ownership: the canonical `ctx.shared.corpus` supplies cross-source registries, while each `src.scan` supplies its source's declarations and bodies.
+--- A context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus message.
 ---
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible
+--- Writes `<ctx.out_root>/<dir_basename>.errors.h` once per module, with `#error` directives for findings that the C compile surfaces.
+--- `passes/report.lua` renders annotations.txt from `corpus.sources_by_dir`, re-validating each source through `M.validate()`.
+---
+--- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible.
 
--- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
--- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
--- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
--- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
--- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
+-- Bootstrap follows the entry scripts; `scripts/duffle_paths.lua` sets package.path and package.cpath. See `ps1_meta.lua` for the rationale.
+-- `debug.getinfo(1, "S").source` locates this file for standalone and orchestrated runs, then `duffle_paths.lua` returns the loaded `duffle` module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 local write_file     = duffle.write_file
@@ -62,15 +61,15 @@ local ensure_dir     = duffle.ensure_dir
 --- @field writes  string[]      -- R_* names (write targets)
 --- @field errors  string[]|nil  -- parse-time errors from scan_source (atom_info body malformed)
 
---- @class SkipOverMarker  -- sub-shape of scan_source.lua's @class SkipOverMarker
---- @field marker_kind    string                 -- exact marker ident (always "atom_dbg_skip_over")
+--- @class DebugSkipMarker  -- sub-shape of scan_source.lua's @class DebugSkipMarker
+--- @field marker_kind    string                 -- exact marker ident read from source. Only "atom_dbg_skip" (bare) is positive.
 --- @field marker_line    integer
 --- @field args           string|nil             -- trimmed text inside the parens (nil when has_parens is false)
 --- @field has_parens     boolean
+--- @field is_bare        boolean                -- true iff marker_kind == "atom_dbg_skip" AND has_parens == false (the only positive form)
 --- @field pending        boolean                -- true while awaiting the following declaration
 --- @field superseded_by_marker_line integer|nil -- set on a marker that was bumped out of the pending slot
 --- @field target_kind    string|nil             -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
---- @field declaration_line integer|nil
 
 --- @class Finding
 --- @field line integer -- source line (or 0 for pass-level)
@@ -104,10 +103,8 @@ local ensure_dir     = duffle.ensure_dir
 -- Per-check functions (the CHECK_RULES table's payload)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Each check has a uniform `append_to_findings` shape (errors[] / warnings[] / info[]).
--- The dispatcher in `validate()` decides which findings list each check writes to — by convention,
--- "existence" checks (declaration must exist, struct must exist) write errors[]; "shape" checks (writes/reads must be wave-context) write warnings[].
--- The `macro_word_drift` check writes both errors[] (missing/mismatch) and info[] (match).
+--- The dispatcher in `validate()` routes each result by convention: existence checks write errors[] and shape checks write warnings[].
+--- `macro_word_drift` writes errors[] for missing or mismatched metadata and info[] for a match.
 
 --- Check: every annotated atom must have a matching MipsAtom_(name) declaration.
 --- @param a        AtomAnnotation
@@ -138,9 +135,7 @@ local function check_unique_annotation(pipe_ctx, findings)
 end
 
 --- Check: BIND atoms must reference a real Binds_* struct.
---- Emitting a warning here keeps the annotation pass from being stop-on-error for the common test-fixture case,
---- while still surfacing the issue in the report.
---- The static-analysis report remains the source of truth for build-stopping errors.
+--- I keep this as a warning so the annotation pass can report the common test-fixture case; `check_abi_handoff` in static analysis supplies the build-stopping error.
 --- @param a        AtomAnnotation
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -182,9 +177,8 @@ local function check_macro_word_drift(m, wc, findings)
 	}
 end
 
---- Check: atom_dbg_reg_default(R_X, <type>) must target a register declared as a debug-visible alias in `pipe_ctx.register_alias_registry`,
---- with a type name found in `pipe_ctx.type_name_registry`.
---- Pointer depth is still bounded to 0 or 1. Duplicate defaults are still detected.
+--- Check: atom_dbg_reg_default(R_X, <type>) targets an alias in `pipe_ctx.register_alias_registry` and a type in `pipe_ctx.type_name_registry`.
+--- Pointer depth remains bounded to 0 or 1, and duplicate defaults remain errors.
 --- @param _src     SourceFile -- unused (kept for the per_source shape)
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -233,10 +227,8 @@ local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
 	end
 end
 
---- Check: atom_reg_types(R_X, <type>) entries must point to a register declared in `pipe_ctx.register_alias_registry`, with a type name found in `pipe_ctx.type_name_registry`. 
---- The alias ident `R_<n>` now encodes the GPR identity only for entries that are explicitly opted in via the bare `atom_reg` marker.
---- R_T0..R_T3 are intentionally NOT auto-included (per the prototype principle: no auto-include of wave-context; explicit opt-in only). 
---- The check fires for any R_T0..R_T3 reference that hasn't been opted in via `#define atom_reg`.
+--- Check: atom_reg_types(R_X, <type>) entries target an alias in `pipe_ctx.register_alias_registry` and a type in `pipe_ctx.type_name_registry`.
+--- A bare `atom_reg` marker opts the `R_<n>` alias into GPR identity; references to R_T0..R_T3 require the same explicit marker.
 --- @param _src     SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -267,7 +259,7 @@ local function check_atom_reg_types(_src, pipe_ctx, findings)
 	end
 end
 
---- Check: atom_view(Binds_X) entries must reference a real Binds_* struct and that struct must declare at least one field.
+--- Check: atom_view(Binds_X) entries reference a Binds_* struct with at least one field.
 --- @param _src     SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -296,8 +288,7 @@ local function check_atom_view_layout(_src, pipe_ctx, findings)
 	end
 end
 
---- Check: Binds_* structs may not have duplicate field names
---- (they would defeat the typed-field name lookup that atom_view exposes in gdb).
+--- Check: Binds_* structs require unique field names because atom_view uses those names for typed-field lookup in gdb.
 --- @param _src SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -320,26 +311,30 @@ local function check_binds_no_duplicate_fields(_src, pipe_ctx, findings)
 	end
 end
 
--- Check: skip-over markers must satisfy shape + placement constraints.
---- Walks the priority list once; at most one error is appended per marker so that a single source-level defect does not cascade into multiple findings.
+-- Check: debug-skip markers must satisfy shape + placement constraints.
+--- Walks the priority list once; each marker produces at most one error, so one source defect yields one finding.
 --- Priority order (first defect wins):
----   1. has_parens == false         -> requires parentheses: marker()
----   2. args  ~= ""                 -> takes no arguments
----   3. superseded_by_marker_line   -> duplicate marker (cite superseding line)
----   4. pending + no target_kind    -> dangling (no following declaration)
----   5. unsupported target_kind     -> marker precedes an unrelated declaration
---- Valid markers before whole-atom / bare-component / proc-component declarations emit no error and remain in src.scan.skip_over.atoms / .components.
---- @param marker SkipOverMarker
+---   1. marker_kind ~= "atom_dbg_skip" -> legacy/renamed spelling (use `atom_dbg_skip`)
+---   2. marker_kind == "atom_dbg_skip" AND has_parens -> parenthesized form (the marker is bare-only)
+---   3. args  ~= ""                 -> takes no arguments
+---   4. superseded_by_marker_line   -> duplicate marker (cite superseding line)
+---   5. pending + no target_kind    -> dangling (no following declaration)
+---   6. unsupported target_kind     -> marker precedes an unrelated declaration
+--- Valid markers stamp `debug_skip` on whole-atom, bare-component, and proc-component declaration records in scan_source.lua.
+--- @param marker DebugSkipMarker
 --- @param _pipe_ctx PipeCtx     -- unused today; kept for plex-shape consistency with per_annot
 --- @param findings Findings
 local function check_skip_marker(marker, _pipe_ctx, findings)
 	local kind = marker.marker_kind
 	local line = marker.marker_line
 
-	if not marker.has_parens then
+	-- Tasks 6+7 left `scan.debug_skip_markers` with production records for `atom_dbg_skip` only; other identifiers take the walker's unrelated branch.
+
+	if marker.has_parens then
 		findings.errors[#findings.errors + 1] = {
 			line = line,
-			msg  = string.format("%s marker at line %d requires parentheses: marker()", kind, line),
+			msg  = string.format("%s marker at line %d must be bare; the parenthesized form is no longer accepted (use `atom_dbg_skip MipsAtom_(name) { ... }`)",
+				kind, line),
 		}
 		return
 	end
@@ -384,11 +379,8 @@ end
 
 --- Warn when a source references an unregistered alias.
 ---
---- R_TapePtr / R_AtomJmp / R_PrimCursor / R_FaceCursor / R_VertBase / R_OtBase are the context aliases opted in via `#define atom_reg` in lottes_tape.h.
---- A source referencing an unregistered R_X emits one pass-level info entry
---- (emitted only when at least one such rejection lands in this source) tells users where to look.
----
---- This check directs raw C-ABI register names to explicit alias registration.
+--- R_TapePtr, R_AtomJmp, R_PrimCursor, R_FaceCursor, R_VertBase, and R_OtBase opt in through `#define atom_reg` in lottes_tape.h.
+--- When a source uses an unregistered R_X, this check emits one pass-level info entry for that source and directs C-ABI register names to explicit alias registration.
 --- @param _src     SourceFile
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -421,7 +413,7 @@ end
 --   per_annot(annot, pipe_ctx, findings)        -- runs once per AtomAnnotation
 --   post(pipe_ctx, findings)                    -- runs once after all per_annot calls complete (full-corpus aggregation)
 --   per_macro(macro, wc, findings)              -- runs once per TAPE_WORDS / _Pragma macro declaration
---   per_skip_marker(marker, pipe_ctx, findings) -- runs once per src.scan.skip_over.markers entry
+--   per_skip_marker(marker, pipe_ctx, findings) -- runs once per src.scan.debug_skip_markers entry
 --
 -- Adding a new check = 1 row here + 1 function above. The `validate()` dispatch loop never needs editing.
 
@@ -444,14 +436,8 @@ local CHECK_RULES = {
 --
 -- Pure check: read from src.scan, run validations, emit findings. The scan was done once upstream.
 
---- Build the corpus-wide pipe_ctx ONCE per pass run.
---- Reads the merged `corpus.*` registries (canonical cross-source lookups),
---- and the corpus-wide `atom_infos` list (preserving source order + duplicates).
---- The corpus is the source of truth; per-source scans retain body / declaration
---- ownership via `src.scan` and the per-source `atoms` / `atom_infos` projections.
----
---- Canonical ownership: a context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus message.
---- No per-source fallback synthesis is performed; callers MUST construct a canonical ctx through `build_ctx`.
+--- Builds one pass-wide pipe_ctx from the merged `corpus.*` registries and source-ordered `corpus.atom_infos`; per-source declarations and bodies remain in `src.scan`.
+--- The module ownership contract above requires callers to construct `ctx.shared.corpus` through `build_ctx`; the error message below enforces that gate.
 --- @param ctx PassCtx
 --- @return PipeCtx
 local function build_corpus_pipe_ctx(ctx)
@@ -462,9 +448,7 @@ local function build_corpus_pipe_ctx(ctx)
 			.. "no per-source fallback is supported)", 0)
 	end
 
-	-- Corpus atom_infos preserves source-order + duplicates;
-	-- the per-check `check_unique_annotation` post-rule still flags duplicate annotation
-	-- names within this list. We pre-compute the annot_counts map here so the per_source checks can iterate it without re-walking.
+	-- `corpus.atom_infos` preserves source order and duplicates; I precompute counts here for `check_unique_annotation` and the per-source checks.
 	local annot_counts = {}
 	for _, info in ipairs(corpus.atom_infos or {}) do
 		if info and info.atom_name then
@@ -472,10 +456,9 @@ local function build_corpus_pipe_ctx(ctx)
 		end
 	end
 
-	-- The pipe_ctx views REFERENCE the corpus tables directly (no copies).
 	-- Every consumer of these fields observes mutations via the canonical corpus without independently mutable registry construction.
 	return {
-		-- Cross-source lookup tables (canonical corpus projections).
+		-- Cross-source lookup tables from corpus.
 		register_alias_registry  = corpus.register_alias_registry or {},
 		type_name_registry       = corpus.type_name_registry      or {},
 		atom_views               = corpus.atom_views              or {},
@@ -489,8 +472,7 @@ local function build_corpus_pipe_ctx(ctx)
 		annot_counts             = annot_counts,
 		-- Corpus-wide collisions (recorded by scan_source.merge_corpus_registries).
 		collisions               = corpus.collisions              or {},
-		-- wc still consumed by check_macro_word_drift; reads from the canonical
-		-- `corpus.word_counts` table (built by word_count_eval.run).
+		-- `check_macro_word_drift` reads `corpus.word_counts`, populated by word_count_eval.run.
 		word_counts              = corpus.word_counts or {},
 	}
 end
@@ -498,7 +480,7 @@ end
 --- Validate one source against its pre-scanned SourceScan payload + the corpus-wide pipe_ctx.
 --- @param ctx             PassCtx
 --- @param src             SourceFile
---- @param corpus_pipe_ctx PipeCtx|nil  -- built once per pass from corpus registries; nil = self-build (canonical projection).
+--- @param corpus_pipe_ctx PipeCtx|nil  -- built once per pass from corpus registries; nil builds the same projection here.
 --- @return AnnotatedResult
 local function validate(ctx, src, corpus_pipe_ctx)
 	corpus_pipe_ctx = corpus_pipe_ctx or build_corpus_pipe_ctx(ctx)
@@ -527,11 +509,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		}
 	end
 
-	-- Build the per-source pipe_ctx (Fleury: expose structure).
-	-- Cross-source visibility comes from `corpus_pipe_ctx`;
-	-- per-source declaration / body ownership comes from `src.scan`.
-	-- pipe_ctx.types / pipe_ctx.atom_views / pipe_ctx.seen_defaults / pipe_ctx.type_occurrences 
-	-- are projected from the per-source scan so the per_source check rules can iterate the source-local occurrences.
+	-- Build a per-source pipe_ctx: shared lookups come from `corpus_pipe_ctx`, while declarations, bodies, types, views, defaults, and occurrences come from `src.scan`.
 	local seen_defaults = {}
 	for reg, _ in pairs(scan.types or {}) do
 		seen_defaults[reg] = (seen_defaults[reg] or 0) + 1
@@ -551,8 +529,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		seen_defaults            = seen_defaults,
 		atom_infos_list          = atom_infos_list,
 		binds_list               = scan.binds or {},
-		-- Source-derived registries: still populated from the scan payload as a convenience for callers that want source-local visibility.
-		-- The canonical cross-source lookup tables live in corpus_pipe_ctx.
+		-- See the module ownership contract; these shared lookup tables come from corpus_pipe_ctx.
 		register_alias_registry  = corpus_pipe_ctx.register_alias_registry,
 		type_name_registry       = corpus_pipe_ctx.type_name_registry,
 	}
@@ -563,9 +540,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	-- Each check writes to the list appropriate for its severity.
 	local findings = { errors = {}, warnings = {}, info = {} }
 
-	-- Propagate parse-time errors from scan_source's atom_info parsing.
-	-- These are errors found in the atom_info(...) body itself (e.g., malformed args).
-	-- They are pre-existing in the scan payload — we just lift them into our findings list.
+	-- Lift parse-time errors already recorded in scan_source's atom_info payload into this pass's findings list.
 	for _, a in ipairs(annots) do
 		if a.errors then
 			for _, msg in ipairs(a.errors) do
@@ -589,11 +564,9 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		if rule.post then rule.post(pipe_ctx, findings) end
 	end
 
-	-- Per-skip-marker rules.
-	-- Each raw marker recorded by scan_source (in scan.skip_over.markers) is validated independently;
-	-- the check emits at most one error per marker.
-	-- Valid markers stay attached to scan.skip_over.atoms /.components for dwarf_injection.lua consumer.
-	local skip_markers = scan.skip_over and scan.skip_over.markers or {}
+	-- scan_source records each marker in scan.debug_skip_markers; this loop validates each record independently and emits at most one error per marker.
+	-- Valid markers stamp `debug_skip = true` on the following atom or component declaration, which downstream consumers read directly.
+	local skip_markers = scan.debug_skip_markers or {}
 	for _, marker in ipairs(skip_markers) do
 		for _, rule in ipairs(CHECK_RULES) do
 			if rule.per_skip_marker then rule.per_skip_marker(marker, pipe_ctx, findings) end
@@ -684,15 +657,12 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Build the corpus-wide pipe_ctx ONCE per pass run.
+	-- Build the shared pipe_ctx once for this run; every validate() call sees the same cross-source registries.
 	-- The corpus owns the canonical cross-source registries; per-source scans retain body / declaration ownership.
-	-- The pipe_ctx is shared across every validate() invocation in this M.run so cross-source visibility is constant.
 	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx)
 	local corpus = ctx.shared.corpus
 
-	-- Per-DIRECTORY (per-module) aggregation.
-	-- Group sources by `src.dir`, validate every source in the dir, then emit ONE errors.h per dir.
-	-- The corpus owns `sources_by_dir`; this pass reads the corpus bucket directly.
+	-- Group `corpus.sources_by_dir` by module, validate every source in each bucket, and emit one errors.h per directory.
 	local by_dir = (corpus and corpus.sources_by_dir) or {}
 
 	for dir, dir_sources in pairs(by_dir) do

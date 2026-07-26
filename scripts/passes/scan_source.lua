@@ -1,12 +1,12 @@
 --- passes/scan_source.lua — Source pre-scan pass (the "mega entity" pass).
 ---
---- Single source-walk pass that produces the fat `SourceScan` payload consumed by all downstream passes. Walks each `ctx.sources` entry once,
+--- Single source-walk pass that produces the fat `SourceScan` payload consumed by all downstream passes. Walks each corpus source record once,
 --- extracting every construct type the metaprograms need:
 ---
 ---   MipsAtom_              (kind = "atom", with optional atom_info inner)
 ---   MipsAtomComp_          (kind = "comp_bare")
 ---   MipsAtomComp_Proc_     (kind = "comp_proc", body inside last {})
----   atom_dbg_skip_over     (whole-atom/component debug-step marker; following declaration disambiguates)
+---   atom_dbg_skip          — bare whole-atom/component debug-step marker; following declaration disambiguates
 ---   MipsCode code_<name>   (kind = "raw_atom", offsets pass only)
 ---   typedef Struct_(Binds_X) { fields }
 ---   #pragma mac_X tape_atom words=N   +   _Pragma("...")
@@ -37,38 +37,29 @@ local parse_enum_int_literal
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class SourceScan
---- @field atoms      AtomEntry[]     -- MipsAtom_ + MipsAtomComp_ + MipsAtomComp_Proc_
---- @field raw_atoms  AtomEntry[]     -- MipsCode code_<name> { body } (offsets pass only)
---- @field binds      BindsEntry[]    -- typedef Struct_(Binds_X) { fields } (fields pre-parsed)
---- @field atom_infos  AtomInfoEntry[]                 -- MipsAtom_(name) atom_info(...) (sub-calls pre-parsed)
---- @field macros      MacroEntry[]                    -- #pragma mac_X tape_atom words=N  +   _Pragma("...")
---- @field skip_over   SkipOverScan                    -- atom/component debug-step markers + resolved declaration associations
---- @field types       table<string, RegTypeDefault>   -- atom_dbg_reg_default(R_X, <type>) declarations
---- @field atom_views  table<string, AtomViewEntry>    -- MipsAtom_(name) -> {binds_name, reg_type_overrides, info_line}
---- @field atom_ctxs   table<string, AtomCtxEntry>     -- MipsAtom_(name) -> {rbind_atom, info_line, source} (atom_ctx(...) call sites)
---- @field atom_phases table<string, AtomPhaseGroup>   -- phase_label -> {atoms = {atom_name1, atom_name2, ...}} (atom_phase(...) tags)
---- @field line_of     fun(pos: integer): integer      -- shared LineIndex closure
+--- @field atoms             AtomEntry[]     -- MipsAtom_ + MipsAtomComp_ + MipsAtomComp_Proc_
+--- @field raw_atoms         AtomEntry[]     -- MipsCode code_<name> { body } (offsets pass only)
+--- @field binds             BindsEntry[]    -- typedef Struct_(Binds_X) { fields } (fields pre-parsed)
+--- @field atom_infos        AtomInfoEntry[] -- MipsAtom_(name) atom_info(...) (sub-calls pre-parsed)
+--- @field macros            MacroEntry[]    -- #pragma mac_X tape_atom words=N  +   _Pragma("...")
+--- @field debug_skip_markers DebugSkipMarker[] -- raw marker evidence for annotation validation; `debug_skip` lives on the declaration record itself
+--- @field types             table<string, RegTypeDefault>    -- atom_dbg_reg_default(R_X, <type>) declarations
+--- @field atom_views        table<string, AtomViewEntry>     -- MipsAtom_(name) -> {binds_name, reg_type_overrides, info_line}
+--- @field atom_ctxs         table<string, AtomCtxEntry>      -- MipsAtom_(name) -> {rbind_atom, info_line, source} (atom_ctx(...) call sites)
+--- @field atom_phases       table<string, AtomPhaseGroup>    -- phase_label -> {atoms = {atom_name1, atom_name2, ...}} (atom_phase(...) tags)
+--- @field line_of           fun(pos: integer): integer       -- shared LineIndex closure
 
---- @class SkipOverScan
---- @field atoms      table<string, SkipOverAssociation>
---- @field components table<string, SkipOverAssociation>
---- @field markers    SkipOverMarker[]
-
---- @class SkipOverMarker
---- @field marker_kind    string      -- exact marker ident (always "atom_dbg_skip_over")
---- @field marker_line    integer
---- @field marker_pos     integer
---- @field after_paren    integer
---- @field args           string|nil  -- trimmed marker args""
---- @field has_parens     boolean
---- @field pending        boolean
---- @field superseded_by_marker_line integer|nil
---- @field target_name    string|nil  -- stripped declaration name once observed
---- @field target_raw_name string|nil -- source-written declaration name once observed
---- @field target_kind    string|nil  -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
---- @field declaration_line integer|nil
---- @field declaration_pos  integer|nil
---- @field proc_prelude      boolean|nil -- marker has crossed FI_ and awaits MipsAtomComp_Proc_
+--- @class DebugSkipMarker
+--- @field marker_kind    string      -- exact marker ident read from source. Only "atom_dbg_skip" (bare) is positive; any other ident reaches the unrelated fallback and is never associated with a declaration.
+--- @field marker_line    integer     -- line of the marker ident start
+--- @field marker_pos     integer     -- byte position of the marker ident start (the comment walker anchors here)
+--- @field is_bare        boolean     -- true iff marker_kind == "atom_dbg_skip" AND has_parens == false (the only positive form)
+--- @field has_parens     boolean     -- true iff a `(...)` follows the marker ident (diagnostic-only)
+--- @field args           string|nil  -- trimmed args inside the `(...)` (nil when has_parens is false)
+--- @field pending        boolean     -- true while awaiting the following declaration
+--- @field superseded_by_marker_line integer|nil -- set when a newer marker bumped this one out of the pending slot
+--- @field target_kind    string|nil  -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed (nil if no declaration ever followed)
+--- @field proc_prelude   boolean|nil -- true after the marker crossed an `FI_` prelude and awaits `MipsAtomComp_Proc_`
 
 --- @class RegTypeDefault
 --- @field name          string  -- "R_TapePtr" (the register ident; without the value part)
@@ -96,12 +87,6 @@ local parse_enum_int_literal
 --- @field reg_type_overrides table<string, RegTypeOverride> -- "R_T0" -> override
 --- @field info_line        integer                -- line of the atom_info call
 
---- @class SkipOverAssociation
---- @field marker_line      integer
---- @field declaration_line integer
---- @field kind             string
---- @field marker           SkipOverMarker
-
 --- @class SourceFile
 --- @field path     string  -- absolute path to the source file
 --- @field text     string  -- the full source text
@@ -125,16 +110,16 @@ local parse_enum_int_literal
 --- @field warnings table[]
 
 --- @class AtomEntry
---- @field line       integer
---- @field name       string     -- atom name (for components: without ac_ prefix)
---- @field body       string     -- brace-delimited body (without the braces)
---- @field body_off   integer    -- char offset of body[1] in source
---- @field kind       string     -- "atom" | "comp_bare" | "comp_proc" | "raw_atom"
---- @field raw_name   string     -- un-stripped name (for components: with ac_ prefix)
---- @field ident_pos  integer    -- position of the MipsAtom_/MipsAtomComp_ ident start
---- @field after_paren integer   -- position past the closing paren
---- @field args       string|nil -- populated by components pass (backward lookup)
---- @field comment    string|nil -- populated by components pass (backward lookup)
+--- @field line              integer
+--- @field name              string     -- atom name (for components: without ac_ prefix)
+--- @field body              string     -- brace-delimited body (without the braces)
+--- @field body_off          integer    -- char offset of body[1] in source
+--- @field kind              string     -- "atom" | "comp_bare" | "comp_proc" | "raw_atom"
+--- @field raw_name          string     -- un-stripped name (for components: with ac_ prefix)
+--- @field ident_pos         integer    -- position of the MipsAtom_/MipsAtomComp_ ident start
+--- @field after_paren       integer    -- position past the closing paren
+--- @field debug_skip        boolean    -- true when an `atom_dbg_skip` bare marker immediately precedes this declaration (sole-owner stamp; see push_debug_skip_marker)
+--- @field declaration_comment string|nil -- populated by the scanner (backward walk past the marker, captures contiguous `/* */` or `//` block)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Local helpers (shared by per-form parsers)
@@ -166,8 +151,10 @@ local function strip_ac_prefix(raw_name)
 end
 
 -- Preserve a source marker until the following declaration parser observes it.
-local function push_skip_over_marker(out, marker)
-	local markers = out.skip_over.markers
+-- The scanner is the sole owner of marker recognition, placement association, declaration comment attachment, and canonical `debug_skip` fields.
+-- Raw marker evidence lives in `out.debug_skip_markers` for annotation validation; the declaration record carries the resolved `debug_skip` boolean directly.
+local function push_debug_skip_marker(out, marker)
+	local markers = out.debug_skip_markers
 	local prior   = markers[#markers]
 	if prior and prior.pending then
 		prior.pending = false
@@ -197,55 +184,150 @@ local function find_body_braces(source, after_paren, fallback)
 	return body, after_brace, brace + 1
 end
 
--- Attach the pending marker to the next declaration. 
--- The declaration form disambiguates whole atoms from components;
--- unsupported declarations retain placement evidence for annotation.lua and populate neither lookup table.
-local function associate_skip_over_marker(out, target_name, target_raw_name, target_kind, declaration_line, declaration_pos)
-	local markers = out.skip_over.markers
-	local marker  = markers[#markers]
-	if not (marker and marker.pending) then return end
+-- Walk backward from `start_pos` capturing contiguous `/* */` block(s) and
+-- `//` line(s) that immediately precede it. The caller (preceding_declaration_comment)
+-- supplies `start_pos` so the walker does not need to detect marker shape or prelude layout.
+-- The scanner already knows the marker_pos + decl ident_pos and threads that knowledge forward.
+--
+-- The walker captures:
+--   - Block comment close `*/` followed by walking back to `/*`.
+--   - `//` line comments (the line containing the current non-ws position starts with `//`).
+-- It stops at the first non-ws char that does not begin a comment block or line.
+-- Empty string if no comment is adjacent.
+-- @param source string
+-- @param start_pos integer -- exclusive upper bound for the captured block
+-- @return string
+local function preceding_comment_walk_backward(source, start_pos)
+	local pieces  = {}
+	local scan_pos = start_pos
+	while scan_pos > 0 do
+		local non_ws = scan_pos - 1
+		while non_ws > 0 do
+			local ch = source:sub(non_ws, non_ws)
+			if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" then
+				non_ws = non_ws - 1
+			else
+				break
+			end
+		end
+		if non_ws == 0 then break end
 
-	marker.pending          = false
-	marker.target_name      = target_name
-	marker.target_raw_name  = target_raw_name
-	marker.target_kind      = target_kind
-	marker.declaration_line = declaration_line
-	marker.declaration_pos  = declaration_pos
-
-	if not (marker.has_parens and marker.args == "") then return end
-
-	local association = {
-		marker_line      = marker.marker_line,
-		declaration_line = declaration_line,
-		kind             = target_kind,
-		marker           = marker,
-	}
-	if target_kind == "atom" then
-		out.skip_over.atoms[target_name] = association
-	elseif target_kind == "comp_bare" or target_kind == "comp_proc" then
-		out.skip_over.components[target_name] = association
+		if non_ws >= 2 and source:sub(non_ws - 1, non_ws) == "*/" then
+			-- Block comment close: walk back over `/*` candidates.
+			local prefix  = source:sub(1, non_ws - 1)
+			local open_at = nil
+			for scan = #prefix - 1, 1, -1 do
+				if prefix:sub(scan, scan + 1) == "/*" then
+					open_at = scan
+					break
+				end
+			end
+			if not open_at then break end
+			local block_start = open_at
+			while block_start > 1 do
+				local ch = source:sub(block_start - 1, block_start - 1)
+				if ch ~= " " and ch ~= "\t" then break end
+				block_start = block_start - 1
+			end
+			table.insert(pieces, 1, source:sub(block_start, non_ws))
+			scan_pos = block_start
+		else
+			-- Line comment check: walk back from non_ws to the most recent `\n`
+			-- (or position 1) and inspect the resulting line. This handles both
+			-- `// foo\n<marker>` (non_ws ends on `o`) and `// foo\r\n<marker>`.
+			local line_start = non_ws
+			while line_start > 1 and source:sub(line_start - 1, line_start - 1) ~= "\n" do
+				line_start = line_start - 1
+			end
+			local line = source:sub(line_start, non_ws)
+			if line:sub(1, 2) ~= "//" then break end
+			table.insert(pieces, 1, line)
+			scan_pos = line_start - 1
+		end
 	end
+	if #pieces == 0 then return "" end
+	return table.concat(pieces, "\n")
 end
 
--- Register a parsed atom entry in `out.atoms` and link its skip-over marker.
--- Captures the shared 8-field shape used by MipsAtom_, MipsAtomComp_, MipsAtomComp_Proc_.
-local function register_atom(out, kind, declaration_line, name, body, body_off, raw_name, pos, after_paren)
+-- Resolve the start position for the declaration-comment walk.
+-- When a debug-skip marker is pending, the walker must start from the position immediately before the marker ident
+-- (so it walks backward past the marker text and any `FI_ MipsAtom ac_X(args)` proc-prelude layout — neither of which is visible if we start from the declaration ident_pos).
+-- When no marker is pending, the walker starts from the declaration ident_pos directly.
+-- @param pending_marker DebugSkipMarker|nil
+-- @param ident_pos integer -- declaration ident position
+-- @return integer
+local function comment_walk_start(pending_marker, ident_pos)
+	if pending_marker then
+		return pending_marker.marker_pos - 1
+	end
+	return ident_pos - 1
+end
+
+-- Attach the pending marker to the next declaration.
+-- The declaration form disambiguates whole atoms from components; the resolved `debug_skip` is stamped directly on the declaration record
+-- (sole-owner discipline; see push_debug_skip_marker).
+--
+-- A marker is POSITIVE (stamps `debug_skip = true` on the declaration) iff:
+--   marker_kind == "atom_dbg_skip" AND is_bare == true
+-- Any other spelling or shape (parenthesized form, legacy name) is recorded as a raw marker for annotation validation but never stamps `debug_skip`.
+-- @param out SourceScan
+-- @param target_kind string|nil -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
+-- @return boolean|nil -- true iff the marker is the positive bare form
+local function attach_debug_skip_marker(out, target_kind)
+	local markers = out.debug_skip_markers
+	local marker  = markers[#markers]
+	if not (marker and marker.pending) then return nil end
+
+	marker.pending     = false
+	marker.target_kind = target_kind
+
+	if marker.marker_kind == "atom_dbg_skip" and marker.is_bare then
+		return true
+	end
+	return nil
+end
+
+-- Register a parsed atom entry in `out.atoms`. Stamps the resolved `debug_skip` boolean
+-- on the record when a positive bare `atom_dbg_skip` marker is pending.
+-- Captures the shared shape used by MipsAtom_, MipsAtomComp_, MipsAtomComp_Proc_.
+local function register_atom(out, kind, declaration_line, name, body, body_off, raw_name, pos, after_paren, source)
+	-- Capture the pending marker BEFORE attaching so the walker can anchor the backward comment walk on the marker's marker_pos
+	-- (which is the correct anchor even when an `FI_ MipsAtom ac_X(args)` proc-prelude separates the marker from the declaration).
+	local pending_marker = nil
+	local markers = out.debug_skip_markers
+	local m = markers[#markers]
+	if m and m.pending then pending_marker = m end
+
+	local positive = attach_debug_skip_marker(out, kind)
+	local comment  = ""
+	if kind == "comp_bare" or kind == "comp_proc" then
+		-- Scanner-owned declaration-comment attachment.
+		-- The walker does not need to detect marker shape.
+		-- A pending_marker record (or the declaration ident_pos fallback) supplies the anchor position.
+		local start_pos = comment_walk_start(pending_marker, pos)
+		comment = preceding_comment_walk_backward(source, start_pos)
+	end
 	out.atoms[#out.atoms + 1] = {
-		line      = declaration_line, name = name, body = body, body_off = body_off,
-		kind      = kind, raw_name = raw_name,
-		ident_pos = pos, after_paren = after_paren,
+		line              = declaration_line,
+		name              = name,
+		body              = body,
+		body_off          = body_off,
+		kind              = kind,
+		raw_name          = raw_name,
+		ident_pos         = pos,
+		after_paren       = after_paren,
+		debug_skip        = positive == true,
+		declaration_comment = comment,
 	}
-	associate_skip_over_marker(out, name, raw_name, kind, declaration_line, pos)
 end
 
--- Register a parsed raw-atom entry in `out.raw_atoms` and link its skip-over marker.
+-- Register a parsed raw-atom entry in `out.raw_atoms`.
 -- Captures the 5-field shape used by MipsCode (the raw-atom form; offsets pass only).
-local function register_raw_atom(out, declaration_line, name, body, body_off, raw_name, pos, marker_kind)
+local function register_raw_atom(out, declaration_line, name, body, body_off, raw_name, pos)
 	out.raw_atoms[#out.raw_atoms + 1] = {
 		line = declaration_line, name = name, body = body, body_off = body_off,
 		kind = "raw_atom", raw_name = raw_name,
 	}
-	associate_skip_over_marker(out, name, raw_name, marker_kind, declaration_line, pos)
 end
 
 -- Parse a `Type*` chain (zero or more `*` separated by optional whitespace) followed by the type ident.
@@ -354,7 +436,7 @@ end
 
 -- Parse the `Enum_(<underlying>, <name>) { <body> }` body for entries.
 -- Captures one field per named enumerator with the shape { name, value }.
--- The value is the integer literal parsed from the source via the canonical `parse_enum_int_literal`.
+-- The value is the integer literal parsed from the source via `parse_enum_int_literal`.
 local function parse_enum_body_fields(body)
 	return walk_body_fields(body, function(entry_name, name_end, after_name)
 		local value
@@ -652,20 +734,13 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 		}
 	end
 	local SUBCALL_HANDLERS = {
-		-- scan: atom_bind(<Binds_X>)
-		atom_bind       = function(sub_inner)            binds = duffle.trim(sub_inner) end,
-		-- scan: atom_reads(<R_X [atom_type(<T>)], ...>)
-		atom_reads      = function(sub_inner, info_line) rw_handler(sub_inner, info_line, "atom_reads") end,
-		-- scan: atom_writes(<R_X [atom_type(<T>)], ...>)
-		atom_writes     = function(sub_inner, info_line) rw_handler(sub_inner, info_line, "atom_writes") end,
-		-- scan: atom_view(<Binds_X>)
-		atom_view       = function(sub_inner)            view_binds = duffle.trim(sub_inner) end,
-		-- scan: atom_reg_types(<R_X>, <T>)
-		atom_reg_types  = reg_types_handler,
-		-- scan: atom_ctx(<atom_name>)
-		atom_ctx        = function(sub_inner, info_line) ident_handler(sub_inner, info_line, "ctx_atom_name") end,
-		-- scan: atom_phase(<label>)
-		atom_phase      = function(sub_inner, info_line) ident_handler(sub_inner, info_line, "phase_label")   end,
+		atom_bind       = function(sub_inner)            binds = duffle.trim(sub_inner)                       end, -- scan: atom_bind(<Binds_X>)
+		atom_reads      = function(sub_inner, info_line) rw_handler(sub_inner, info_line, "atom_reads")       end, -- scan: atom_reads(<R_X [atom_type(<T>)], ...>)
+		atom_writes     = function(sub_inner, info_line) rw_handler(sub_inner, info_line, "atom_writes")      end, -- scan: atom_writes(<R_X [atom_type(<T>)], ...>)
+		atom_view       = function(sub_inner)            view_binds = duffle.trim(sub_inner)                  end, -- scan: atom_view(<Binds_X>)
+		atom_reg_types  = reg_types_handler,                                                                       -- scan: atom_reg_types(<R_X>, <T>)
+		atom_ctx        = function(sub_inner, info_line) ident_handler(sub_inner, info_line, "ctx_atom_name") end, -- scan: atom_ctx(<atom_name>)
+		atom_phase      = function(sub_inner, info_line) ident_handler(sub_inner, info_line, "phase_label")   end, -- scan: atom_phase(<label>)
 	}
 
 	local sub_pos = 1
@@ -1006,7 +1081,7 @@ end
 --   pos       -- position of the construct's leading ident (e.g., `M` of `MipsAtom_`)
 --   ident_end -- position past the leading ident (where the `(` should be)
 --   line_of   -- closure over LineIndex(source) for 1-based line lookups
---   out       -- the SourceScan out table (mutated in place: out.atoms / out.raw_atoms / out.binds / out.atom_infos / out.macros / out.skip_over)
+--   out       -- the SourceScan out table (mutated in place: out.atoms / out.raw_atoms / out.binds / out.atom_infos / out.macros / out.debug_skip_markers)
 --   returns   -- new position after the construct
 --
 -- All parsers read source-as-written via the duffle primitives (skip_ws_and_cmt / read_parens / read_braces / read_balanced).
@@ -1015,34 +1090,45 @@ end
 --
 -- Adding a new construct = 1 row in DECL_PARSERS + 1 parser function. The scan_source() loop never needs editing.
 
---- Parse an empty debug-skip marker and retain its raw placement evidence.
---- The marker_kind is the source ident itself (e.g. `atom_dbg_skip_over`).
---- The dispatch table maps each ident to this same function;
---- the marker_kind is derived from the source so future idents route through the same row.
+--- Parse a `atom_dbg_skip` marker and record its raw placement evidence.
+---
+--- Positive path: the BARE form (`atom_dbg_skip` followed by whitespace + a supported declaration)
+--- stamps the `debug_skip` field on the immediately-following declaration record via `attach_debug_skip_marker`. `is_bare` 
+--- is set true only when `marker_kind == "atom_dbg_skip"` and there are no parens.
+---
+--- Diagnostic-only path: a following `(...)` is recorded as an invalid parenthesized-form marker so the annotation rule can emit a precise "parenthesized form" diagnostic.
+--- The parenthesized form stays diagnostic; the bare form alone carries the runtime stamp.
 --- @param source string
 --- @param pos integer
 --- @param ident_end integer
 --- @param line_of fun(pos: integer): integer
 --- @param out SourceScan
---- @return integer
-local function parse_skip_over_marker(source, pos, ident_end, line_of, out)
-	local open_paren = duffle.skip_ws_and_cmt(source, ident_end)
-	local marker = {
-		marker_kind  = source:sub(pos, ident_end - 1),
-		marker_line  = line_of(pos),
-		marker_pos   = pos,
-		after_paren  = ident_end,
-		args         = nil,
-		has_parens   = false,
-	}
+--- @return integer -- source cursor position to resume from
+local function parse_dbg_skip_marker(source, pos, ident_end, line_of, out)
+	local marker_kind = source:sub(pos, ident_end - 1)
+
+	-- Diagnostic-only detection of an invalid following `(...)`.
+	-- The cursor is advanced past the `()` either way to keep token order coherent for the next scan iteration.
+	local marker_end  = ident_end
+	local open_paren  = duffle.skip_ws_and_cmt(source, ident_end)
+	local has_parens  = false
+	local args        = nil
 	if source:sub(open_paren, open_paren) == "(" then
 		local inner, after_paren = duffle.read_parens(source, open_paren)
-		marker.after_paren = after_paren
-		marker.args        = duffle.trim(inner)
-		marker.has_parens  = true
+		marker_end = after_paren
+		has_parens = true
+		args       = duffle.trim(inner)
 	end
-	push_skip_over_marker(out, marker)
-	return marker.after_paren
+
+	push_debug_skip_marker(out, {
+		marker_kind = marker_kind,
+		marker_line = line_of(pos),
+		marker_pos  = pos,
+		is_bare     = (marker_kind == "atom_dbg_skip") and (not has_parens),
+		has_parens  = has_parens,
+		args        = args,
+	})
+	return marker_end
 end
 
 -- Parse `atom_dbg_reg_default(R_X, <type>...)`;
@@ -1138,7 +1224,7 @@ local function parse_mips_atom(source, pos, ident_end, line_of, out)
 	local body, after_brace, body_off = find_body_braces(source, brace_search_pos, open_paren + 1)
 	if not body then return after_brace end
 	if raw_name and raw_name ~= "" then
-		register_atom(out, "atom", line_of(pos), raw_name, body, body_off, raw_name, pos, after_paren)
+		register_atom(out, "atom", line_of(pos), raw_name, body, body_off, raw_name, pos, after_paren, source)
 	end
 
 	return after_brace
@@ -1161,7 +1247,7 @@ local function parse_mips_atom_comp(source, pos, ident_end, line_of, out)
 	local body, after_brace, body_off = find_body_braces(source, after_paren, open_paren + 1)
 	if not body then return after_brace end
 	local name = strip_ac_prefix(raw_name)
-	register_atom(out, "comp_bare", line_of(pos), name, body, body_off, raw_name, pos, after_paren)
+	register_atom(out, "comp_bare", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
 
 	return after_brace
 end
@@ -1195,7 +1281,7 @@ local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
 	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
 	local body_off = open_paren + 2 + last_brace_pos
 
-	register_atom(out, "comp_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren)
+	register_atom(out, "comp_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
 
 	return after_paren
 end
@@ -1217,7 +1303,7 @@ local function parse_mips_code(source, pos, ident_end, line_of, out)
 	local  atom_name = next_ident:sub(6)
 	local body, after_brace, body_off = find_body_braces(source, next_after, ident_end)
 	if not body then return after_brace end
-	register_raw_atom(out, line_of(pos), atom_name, body, body_off, atom_name, pos, "unrelated")
+	register_raw_atom(out, line_of(pos), atom_name, body, body_off, atom_name, pos)
 
 	return after_brace
 end
@@ -1316,7 +1402,7 @@ end
 ---   4. `typedef <type> TSet_(<name>);` duffle TSet_ convention.
 ---       Strips TSet_ wrapper; adds to type_name_registry (kind="typedef") with underlying_type=<type>.
 ---
---- All four shapes also associate an "unrelated" skip-over marker (the existing behavior — typedef declarations don't carry atom_dbg_skip_over).
+--- All four shapes also attach an "unrelated" debug-skip marker (the existing behavior — typedef declarations don't carry atom_dbg_skip).
 --- @param source string
 --- @param pos integer
 --- @param ident_end integer
@@ -1337,7 +1423,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		local body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
 		if not body then return after_brace end
 		register_struct_type(body, name, pos, line_of, out)
-		associate_skip_over_marker(out, name, name, "unrelated", line_of(pos), pos)
+		attach_debug_skip_marker(out, "unrelated")
 		return after_brace
 
 	-- ── Shape 2: `typedef Enum_(<underlying>, <name>) { <body> } <alias>;`
@@ -1353,7 +1439,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		local body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
 		if not body then return after_brace end
 		register_enum_type(underlying, name, body, pos, line_of, out)
-		associate_skip_over_marker(out, name, name, "unrelated", line_of(pos), pos)
+		attach_debug_skip_marker(out, "unrelated")
 		return after_brace
 	end
 
@@ -1389,7 +1475,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		-- Empty underlying span is acceptable; the TSet_ wrapper itself
 		-- encodes the alias identity (per the duffle TSet_ convention).
 		register_typedef_alias("", tset_name, pos, line_of, out)
-		associate_skip_over_marker(out, tset_name, tset_name, "unrelated", line_of(pos), pos)
+		attach_debug_skip_marker(out, "unrelated")
 		return after_paren
 	end
 
@@ -1432,7 +1518,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		local underlying_span = source:sub(after_typedef, tset_pos - 1)
 		local underlying      = duffle.trim(underlying_span)
 		register_typedef_alias(underlying, tset_arg, pos, line_of, out)
-		associate_skip_over_marker(out, tset_arg, tset_arg, "unrelated", line_of(pos), pos)
+		attach_debug_skip_marker(out, "unrelated")
 		return tset_arg_end or (semi_pos + 1)
 	end
 
@@ -1441,7 +1527,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		local underlying_span = source:sub(after_typedef, last_ident_pos - 1)
 		local underlying      = duffle.trim(underlying_span)
 		register_typedef_alias(underlying, last_ident, pos, line_of, out)
-		associate_skip_over_marker(out, last_ident, last_ident, "unrelated", line_of(pos), pos)
+		attach_debug_skip_marker(out, "unrelated")
 		return last_ident_end
 	end
 
@@ -1629,7 +1715,9 @@ local DECL_PARSERS = {
 	MipsAtom_                  = parse_mips_atom,
 	MipsAtomComp_              = parse_mips_atom_comp,
 	MipsAtomComp_Proc_         = parse_mips_atom_comp_proc,
-	atom_dbg_skip_over         = parse_skip_over_marker,
+	-- `atom_dbg_skip` is the only debug-skip parser entry. Every other
+	-- identifier follows the ordinary unrelated-token path; there is no alias.
+	atom_dbg_skip              = parse_dbg_skip_marker,
 	atom_dbg_reg_default       = parse_atom_dbg_reg_default,
 	MipsCode                   = parse_mips_code,
 	typedef                    = parse_typedef_binds,
@@ -1637,6 +1725,9 @@ local DECL_PARSERS = {
 	-- `enum [<tag>] { <body> }` populates `out.register_alias_registry`.
 	enum                       = parse_enum,
 }
+
+-- Only the bare `atom_dbg_skip` marker reaches `parse_dbg_skip_marker`.
+-- Unknown identifiers follow the same unrelated-token path as every other unsupported source token.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- The single source walker
@@ -1648,33 +1739,31 @@ local DECL_PARSERS = {
 --- @param source_file string|nil       -- absolute source path (forwarded into AliasEntry.source_file)
 --- @param code_macros table|nil        -- cross-source `R_*_Code` registry; nil = local-only
 --- @param code_macro_bodies table|nil  -- cross-source raw RHS body table; nil = local-only
---- @return table  -- SourceScan { atoms, raw_atoms, binds, atom_infos, macros, skip_over, line_of, register_alias_registry, _code_macros, _code_macro_bodies }
+--- @return table  -- SourceScan { atoms, raw_atoms, binds, atom_infos, macros, debug_skip_markers, line_of, register_alias_registry, _code_macros, _code_macro_bodies }
 local function scan_source(source, source_file, code_macros, code_macro_bodies)
 	local line_of = duffle.LineIndex(source)
 	local out     = {
-		atoms      = {},
-		raw_atoms  = {},
-		binds      = {},
-		atom_infos = {},
-		macros     = {},
-		skip_over  = {
-			atoms      = {},
-			components = {},
-			markers    = {},
-		},
-		types      = {},
-		atom_views = {},
-		line_of    = line_of,
+		atoms             = {},
+		raw_atoms         = {},
+		binds             = {},
+		atom_infos        = {},
+		macros            = {},
+		-- Raw marker evidence for annotation validation. The `debug_skip` boolean
+		-- is stamped on the declaration record itself; the projection lives on AtomEntry.debug_skip.
+		debug_skip_markers = {},
+		types             = {},
+		atom_views        = {},
+		line_of           = line_of,
 		-- Source-derived register-alias registry (atom_reg opt-in entries).
 		-- Keys are full R_* idents (never stripped); see parse_enum / parse_enum_body.
 		register_alias_registry = {},
-		-- Source-derived type-name registry. 
-		-- Populated from `typedef Struct_(...)`, `typedef Enum_(...)`, `typedef <type> <alias>`, and `typedef <type> TSet_(<name>)` declarations. 
-		-- The propagation pass at the end of `scan_source()` resolves byte_size via the builtin map, 
+		-- Source-derived type-name registry.
+		-- Populated from `typedef Struct_(...)`, `typedef Enum_(...)`, `typedef <type> <alias>`, and `typedef <type> TSet_(<name>)` declarations.
+		-- The propagation pass at the end of `scan_source()` resolves byte_size via the builtin map,
 		-- typedef chain walking (cycle-guarded, depth <= 8), and struct field sums.
 		-- See `propagate_type_sizes()` below.
 		type_name_registry = {},
-		-- Shared `R_*_Code -> integer code` registry 
+		-- Shared `R_*_Code -> integer code` registry
 		-- (passed in from M.run pass 1; same reference so preprocessor intercept writes are visible to the enum-value resolver).
 		-- Stripped from `src.scan` before return.
 		_code_macros       = code_macros or {},
@@ -1708,26 +1797,27 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 					if parser then
 						pos = parser(source, pos, ident_end, line_of, out)
 					else
-						-- A component-procedure declaration has an FI_ signature before MipsAtomComp_Proc_; keep the marker pending across that prelude. 
-						-- Any other identifier begins an unrelated declaration/construct and consumes the marker so it cannot drift to a later atom.
-						local markers = out.skip_over.markers
+						-- Unsupported identifiers follow the unrelated-token path. If a
+						-- pending marker is still open, consume it so it cannot drift to a
+						-- later declaration. Unsupported identifiers never create marker records.
+						local markers = out.debug_skip_markers
 						local marker  = markers[#markers]
 						if marker and marker.pending then
 							if ident == "FI_" then
 								marker.proc_prelude = true
 							elseif not marker.proc_prelude then
-								associate_skip_over_marker(out, ident, ident, "unrelated", line_of(pos), pos)
+								attach_debug_skip_marker(out, "unrelated")
 							end
 						end
 						pos = ident_end
 					end
 				else
-					local markers = out.skip_over.markers
+					local markers = out.debug_skip_markers
 					local marker  = markers[#markers]
 					if marker and marker.pending and marker.proc_prelude then
 						local c = source:sub(pos, pos)
 						if c == "{" or c == ";" then
-							associate_skip_over_marker(out, c, c, "unrelated", line_of(pos), pos)
+							attach_debug_skip_marker(out, "unrelated")
 						end
 					end
 					pos = pos + 1
@@ -1748,8 +1838,8 @@ end
 -- Corpus merge — first-wins lookup identity + typed collisions
 -- ════════════════════════════════════════════════════════════════════════════
 -- These helpers run ONCE per `M.run` invocation, after every per-source scan has attached `src.scan`.
--- They merge per-source scans into the canonical `ctx.shared.corpus.*` registries.
--- The corpus is the source of truth; `src.scan` keeps the source-local projection for the duration of the run but the cross-source visibility lives on `corpus`.
+-- They merge per-source scans into the `ctx.shared.corpus.*` registries.
+-- `src.scan` keeps the source-local projection for the duration of the run; the cross-source visibility lives on `corpus`.
 
 -- Build a deterministic site record (path + line) from a per-source entry.
 -- Falls back to the placeholder when an entry lacks a recorded source file or line.
@@ -1858,8 +1948,8 @@ local function phase_shape(entry)
 end
 
 -- Merge a new declaration site into a registry following the first-wins discipline.
--- * first declaration:    Entry becomes the canonical corpus entry (entry.sites initialized).
--- * identical subsequent: Append the new site to entry.sites (no collision).
+-- * first declaration:    Entry becomes the corpus entry (entry.sites initialized).
+-- * identical subsequent: Append the new site to entry.sites.
 -- * conflicting shape:    Keep first entry, append ONE typed collision record with shape diff.
 local function merge_named_with_sites(registry, name, new_entry, site, collisions, kind, shape_fn)
 	if registry[name] == nil then
@@ -1888,8 +1978,8 @@ local function merge_named_with_sites(registry, name, new_entry, site, collision
 	}
 end
 
--- Merge per-source scans into the canonical corpus registries.
--- Iterates `corpus.source_order` (not `ctx.sources`) — the corpus is the source of truth.
+-- Merge per-source scans into the corpus registries.
+-- Iterates `corpus.source_order` (not `ctx.sources`).
 -- Each source owns only its `src.scan`; the corpus owns the cross-source lookup tables.
 local function merge_corpus_registries(corpus)
 	-- Ensure every expected corpus table exists (the fixture_ctx seeds most of these,
@@ -2002,8 +2092,7 @@ local M = {}
 --- No output files; this is a pure in-memory pre-processing pass.
 ---
 --- Runs in 5 phases.
----   Resolve: Resolve the canonical source order from `ctx.shared.corpus.source_order`.
----            The canonical corpus is the SOLE source of truth; no `ctx.sources` alias is consulted and no per-source fallback synthesis is performed.
+---   Resolve: Source order from `ctx.shared.corpus.source_order` (the corpus owns it; the check below enforces the invariant).
 ---   Pass 1a: `scan_source_pre_pass` over every source, populating LOCAL `code_macros` AND LOCAL `code_macro_bodies` tables.
 ---            The bodies table holds the raw post-`=` text of every `#define R_*_Code` line (cross-source) 
 ---            so the chain walker can fall back when the defining `#define` lives in a different source than the chain call site.
@@ -2012,8 +2101,8 @@ local M = {}
 ---   Pass 2:  The full `scan_source(source, source_file, code_macros, code_macro_bodies)` walk per source. The per-source `src.scan` payload includes the source-local registries
 ---            (register_alias_registry, type_name_registry, atom_views, atom_ctxs, atom_phases, binds, atoms, atom_infos, ...).
 ---   Strip:   Strip `src.scan._code_macros`, `src.scan._code_macro_bodies`, and the `_source_file` pointer.
----            The LOCAL tables `code_macros` and `code_macro_bodies` go out of scope here; they MUST NOT appear on `ctx.shared`, `ctx.shared.corpus`, or any `src.scan` after this point.
----   Merge:   Iterate `ctx.shared.corpus.source_order` in declared order. For every source's local registry, first-wins lookup identity (entry from the first declaration site becomes the canonical corpus entry);
+---            The LOCAL tables `code_macros` and `code_macro_bodies` stay confined to this function; they go out of scope on return.
+---   Merge:   Iterate `ctx.shared.corpus.source_order` in declared order. For every source's local registry, first-wins lookup identity (entry from the first declaration site becomes the corpus entry);
 ---            identical shapes coalesce by appending the declaration site; conflicting shapes keep the first lookup entry and append ONE typed collision record with shape diff.
 ---            Populate `register_alias_registry`, `type_name_registry`, `binds_by_name`, `atoms_by_name`, `atom_views`, `atom_ctxs`, `atom_phases`.
 ---            `atom_infos` ALWAYS appends every record (preserving source order + duplicates for annotation evidence).
@@ -2022,14 +2111,12 @@ local M = {}
 --- @return PassResult
 function M.run(ctx)
 	-- The cross-source _code_macros / _code_macro_bodies tables are LOCAL to this run.
-	-- They are shared across source scans ONLY long enough to resolve cross-source R_*_Code chains, then DISCARDED. 
-	-- They MUST NOT appear on ctx.shared, ctx.shared.corpus, or any src.scan after
-	-- this function returns.
+	-- They live across source scans only long enough to resolve cross-source R_*_Code chains, then go out of scope on M.run return.
+	-- The Lua GC reclaims them; nothing here survives onto ctx.shared, ctx.shared.corpus, or any src.scan.
 	local code_macros       = {}
 	local code_macro_bodies = {}
 
-	-- Resolve the canonical source list. The corpus owns the authoritative source_order.
-	-- A context without `ctx.shared.corpus` is rejected with an explicit canonical-corpus error.
+	-- Canonical-corpus check (see the docstring Resolve phase). The corpus is the only source of source_order.
 	ctx.shared = ctx.shared or {}
 	local corpus = ctx.shared.corpus
 	if not corpus or type(corpus.source_order) ~= "table" then
@@ -2069,20 +2156,16 @@ function M.run(ctx)
 			src.scan._code_macro_bodies = nil
 			src.scan._source_file       = nil
 		end
-		-- Pre-tokenize each atom body once (plex: single source of truth).
-		-- Downstream passes (offsets, word-counts, components, static-analysis) read from `atom.body_tokens` instead of calling `split_top_level_commas` / `tokenize_body` independently.
-		-- The tokens are memoized in duffle.lua's cache, so re-access is O(1).
+		-- Pre-tokenize each atom body once (plex: cache lives in duffle.lua; downstream passes read from `atom.body_tokens` instead of calling `split_top_level_commas` / `tokenize_body` independently).
+		-- Re-access is O(1) thanks to the memoization.
 		for _, atom in ipairs(src.scan.atoms)           do atom.body_tokens = duffle.tokenize_body(atom.body) end
 		for _, atom in ipairs(src.scan.raw_atoms or {}) do atom.body_tokens = duffle.tokenize_body(atom.body) end
 	end
 
-	-- Merge per-source scans into the canonical corpus registries.
-	-- First-wins lookup identity + collision discipline (see merge_corpus_registries).
-	-- The corpus is always present; no conditional / fallback path.
+	-- Merge per-source scans into the corpus registries (see merge_corpus_registries for first-wins + collision discipline).
 	merge_corpus_registries(corpus)
 
-	-- code_macros and code_macro_bodies go out of scope here; their references are not captured on corpus, ctx.shared, or any src.scan.
-	-- The Lua GC reclaims them on M.run return.
+	-- code_macros and code_macro_bodies are function-local; the GC reclaims them on M.run return.
 	return { outputs = {}, errors = {}, warnings = {} }
 end
 

@@ -11,7 +11,7 @@
  * Pure macro anntation.
  * ---------------
  * Don't want to constraint the macro usage to some attribute placment constraint, etc, don't want ot dela with the compiler.
- * atom_info, atom_bind, atom_reads, atom_writes, atom_label, atom_dbg_skip_over each expand to a C comment or to nothing
+ * atom_info, atom_bind, atom_reads, atom_writes, atom_label, atom_dbg_skip each expand to a C comment or to nothing
  * (C preprocessor strips them to whitespace).
  *
  * ============================================================================
@@ -90,13 +90,18 @@
 #define atom_info(...)  /* atom_info(__VA_ARGS__) */
 
 /* ----------------------------------------------------------------------------
- * DEBUG SOURCE-STEP MARKERS
+ * DEBUG SOURCE-STEP MARKER
  *
- * Place atom_dbg_skip_over() before a MipsAtom_, MipsAtomComp_, or MipsAtomComp_Proc_.
+ * Place `atom_dbg_skip` (BARE) before a MipsAtom_, MipsAtomComp_, or MipsAtomComp_Proc_.
  * The following declaration kind determines whether the marker selects a whole atom or a component inline view.
  * The source scanner associates the marker with that declaration; placement diagnostics are handled by the annotation pass.
+ *
+ * Example:
+ *     atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
+ *     atom_dbg_skip MipsAtomComp_(ac_yield) { ... };
+ *     atom_dbg_skip MipsAtomComp_Proc_(ac_format_f3_color, { ... });
  * ----------------------------------------------------------------------------*/
-#define atom_dbg_skip_over() /* atom_dbg_skip_over: skip the following atom or component source view */
+#define atom_dbg_skip /* atom_dbg_skip: skip the following atom or component source view */
 
 /* ----------------------------------------------------------------------------
  * Typed-view annotations (Registry for DWARF RR_<R_X> chain resolution)
@@ -117,7 +122,7 @@
  *       The preferred correlation mechanism; atom_ctx is the escape hatch for non-natural cases.
  *
  * All three expand to C comments
- * (the bare-token convention matching `atom_reg` and `atom_dbg_skip_over`).
+ * (the bare-token convention matching `atom_reg` and `atom_dbg_skip`).
  * The Lua scanner reads the bare tokens in source-as-written; the C preprocessor strips them.
  * ----------------------------------------------------------------------------*/
 #define atom_type(T)        /* atom_type: associate <T> with the preceding enum entry (enum site) or this register (atom-info site) */

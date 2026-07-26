@@ -1,12 +1,12 @@
 --- passes/components.lua — Component-macro header generator.
 ---
---- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
---- for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations, then does per-source backward lookups
---- for the function-args string (from the preceding `FI_ MipsAtom ac_X(...)` function declaration)
---- and the preceding comment block (for LSP/IntelliSense signature docs).
+--- Ownership: `corpus.word_counts`, `corpus.components`, and `corpus.component_body_index`.
+--- Scanner owns `declaration_comment` and `debug_skip` on each declaration record; this pass projects both forward.
 ---
---- Emits a per-directory `<dir_basename>.macs.h` containing one `#define mac_X(sig) \` macro per component + `WORD_COUNT(mac_X, N)`
---- entries for downstream offset computation.
+--- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations,
+--- then resolves the function-args string from the preceding `FI_ MipsAtom ac_X(...)` declaration via a backward walk.
+---
+--- Emits one `<dir_basename>.macs.h` per source with `#define mac_X(sig) \` macros plus `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
 --- Lua 5.3 compatible.
@@ -59,7 +59,6 @@ local GEN_SUBDIR      = "gen"
 --- @field sources            SourceFile[]           -- all source files in the build
 --- @field metadata_path      string                 -- path to word_count.metadata.h
 --- @field shared             table                  -- cross-pass shared state
---- @field shared.word_counts table<string, integer> -- populated by word-counts + components
 --- @field out_root           string                 -- output root (e.g. "build/gen")
 --- @field project_root       string                 -- project root (e.g. "code/")
 --- @field upstream           table<string, table>   -- per-pass upstream outputs
@@ -72,11 +71,13 @@ local GEN_SUBDIR      = "gen"
 --- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
 
 --- @class Component
---- @field name    string     -- atom name (without `ac_` prefix)
---- @field body    string     -- brace-delimited body (without the braces)
---- @field args    string|nil -- function-args string (function form only)
---- @field line    integer    -- source line of the declaration
---- @field comment string|nil -- preceding `/* */` or `//` comment block (signature doc)
+--- @field name       string     -- atom name (without `ac_` prefix)
+--- @field body       string     -- brace-delimited body (without the braces)
+--- @field args       string|nil -- function-args string (function form only)
+--- @field line       integer    -- source line of the declaration
+--- @field comment    string|nil -- scanner-owned `declaration_comment`; the components pass reads it from the scanner record
+--- @field kind       string     -- "comp_bare" | "comp_proc"
+--- @field debug_skip boolean    -- mirror of `a.debug_skip` (scanner-owned); true iff a bare `atom_dbg_skip` marker immediately preceded the declaration
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Local helpers (file I/O + path normalization)
@@ -85,7 +86,11 @@ local GEN_SUBDIR      = "gen"
 local M = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Back-walk helpers (composed into the 2 entry points below: find_function_args_for + preceding_comment_block)
+-- Back-walk helpers (composed into the entry point below: find_function_args_for)
+--
+-- Only the function-args lookup for proc components occurs here.
+-- The preceding-comment walk occur in `scan_source.lua` — `a.declaration_comment` carries the resolved comment,
+-- so this file reads it forward rather than re-walking the source.
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Find the args of the function declaration that immediately precedes a `MipsAtomComp_Proc_` invocation of the given name.
@@ -130,69 +135,6 @@ local function find_function_args_for(source, name, before_pos)
 	-- scan: MipsAtom ac_X(<args>)
 	if not inner then return nil end
 	return inner
-end
-
---- Find the contiguous comment block immediately preceding `pos` in `source`.
---- Returns the comment text (with the `/* */` or `//` markers preserved) or an empty string if no comment is adjacent.
----
---- Used to copy signature comments from the source declaration (`MipsAtomComp_` / `MipsAtomComp_Proc_` / function decl)
---- over to the generated `mac_X` macro, so LSP/IntelliSense displays the args doc.
---- @param source string
---- @param pos    integer
---- @return string
-local function preceding_comment_block(source, pos)
-	local scan_pos = pos
-	local pieces   = {}
-	while true do
-		-- skip whitespace backward; land on the next non-ws character.
-		local non_ws = scan_pos - 1
-		while non_ws > 0 do
-			local ch = source:sub(non_ws, non_ws)
-			if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" then
-				non_ws = non_ws - 1
-			else
-				break
-			end
-		end
-		if non_ws == 0 then break end
-		if non_ws >= 2 and source:sub(non_ws - 1, non_ws) == "*/" then
-			-- block comment close: find the opening /* by walking back over /* candidates
-			-- in source[1..non_ws-1].
-			local prefix  = source:sub(1, non_ws - 1)
-			local open_at = nil
-			for scan = #prefix - 1, 1, -1 do
-				if prefix:sub(scan, scan + 1) == "/*" then
-					open_at = scan
-					break
-				end
-			end
-			if not open_at then break end
-			-- include the indentation before the /* by walking back over leading spaces + tabs.
-			local block_start = open_at
-			while block_start > 1 do
-				local ch = source:sub(block_start - 1, block_start - 1)
-				if ch ~= " " and ch ~= "\t" then break end
-				block_start = block_start - 1
-			end
-			table.insert(pieces, 1, source:sub(block_start, non_ws))
-			scan_pos = block_start
-		else
-			-- line comment path: must end in newline, must start with //.
-			local ch = source:sub(non_ws, non_ws)
-			if ch ~= "\n" and ch ~= "\r" then break end
-			-- walk back from non_ws to the start of the source line (most recent \n or position 1).
-			local line_start = non_ws
-			while line_start > 1 and source:sub(line_start - 1, line_start - 1) ~= "\n" do
-				line_start = line_start - 1
-			end
-			local line = source:sub(line_start, non_ws)
-			if line:sub(1, 2) ~= "//" then break end
-			table.insert(pieces, 1, line)
-			scan_pos = line_start - 1
-		end
-	end
-	if #pieces == 0 then return "" end
-	return table.concat(pieces, "\n")
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -246,8 +188,12 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Project pre-scanned MipsAtomComp_ / MipsAtomComp_Proc_ entries into Component shape.
---- Does per-source backward lookups for args (preceding function decl) and comment (preceding comment block).
+--- Reads the scanner-owned `declaration_comment` (resolved by scan_source.lua, skipping backward across an associated bare `atom_dbg_skip` marker when present).
+--- Per-source backward lookups remain in place only for the function `args` of proc components.
+--- That lookup is unique to components.lua and stays separate from the declaration-comment walk.
 --- Carries `body_tokens` forward from scan-source so word_count_rec reads from the precomputed table instead of calling duffle.tokenize_body again.
+--- Carries the scanner-owned `debug_skip` flag forward so the generated projection can emit `/* atom_dbg_skip */`
+--- before the authored comment and so `update_canonical_components` can mirror the same field onto `corpus.components[name]`.
 --- @param source string  -- the full source text (needed for backward lookups)
 --- @param scan   table   -- SourceScan from duffle.scan_source
 --- @return Component[]
@@ -255,8 +201,10 @@ local function project_components(source, scan)
 	local out = {}
 	for _, a in ipairs(scan.atoms) do
 		if a.kind == "comp_bare" or a.kind == "comp_proc" then
-			local args    = find_function_args_for(source, a.raw_name, a.ident_pos)
-			local comment = preceding_comment_block(source, a.ident_pos)
+			local args = find_function_args_for(source, a.raw_name, a.ident_pos)
+			-- Comment ownership: scan_source.lua stamps `declaration_comment` on the record by walking backward past any associated bare marker.
+			-- The pass reads `declaration_comment` directly.
+			local comment = a.declaration_comment or ""
 			out[#out + 1] = {
 				line        = a.line,
 				name        = a.name,
@@ -266,6 +214,7 @@ local function project_components(source, scan)
 				args        = args,
 				comment     = comment,
 				kind        = a.kind,  -- "comp_bare" | "comp_proc"; provenance emitter reads this.
+				debug_skip  = a.debug_skip == true,
 			}
 		end
 	end
@@ -450,12 +399,22 @@ end
 
 --- Build the list of lines for one component
 --- (signature comment, `#define mac_X(...)` line with backslash-continued tokens, then `WORD_COUNT(mac_X, N)` entry).
+--- For skipped components, a `/* atom_dbg_skip */` marker comment is emitted immediately before the authored comment block.
+--- The marker is a single line, the comment comes next, and the `#define` line follows. The `debug_skip` stamp is scanner-owned
+--- (`a.debug_skip == true` on the declaration record); the components pass projects it directly.
 --- @param c          Component
 --- @param components Component[]
 --- @param wc         table<string, integer>
 --- @return string[]  -- list of lines for this component
 local function build_component_lines(c, counts)
 	local lines = {}
+
+	-- Marker comment: emitted once for every skipped component.
+	-- The marker is scanner-owned (declared by `atom_dbg_skip` immediately before the declaration in the source);
+	-- the components pass projects `c.debug_skip` and emits the marker as a generated comment.
+	if c.debug_skip then
+		lines[#lines + 1] = "/* atom_dbg_skip */"
+	end
 
 	if c.comment and c.comment ~= "" then
 		for _, line in ipairs(split_comment_lines(c.comment)) do
@@ -551,9 +510,9 @@ end
 -- Pass entry
 -- ════════════════════════════════════════════════════════════════════════════
 
---- (internal) Extend the canonical `corpus.word_counts` with this source's component macros so offsets sees them without re-reading the file.
+--- (internal) Extend `corpus.word_counts` with this source's component macros so offsets sees them without re-reading the file.
 --- First declaration wins: a later caller's count is dropped (the existing entry from the first source is preserved).
---- @param corpus     table  -- the canonical corpus
+--- @param corpus     table  -- the corpus
 --- @param components Component[]
 --- @param counts     table<string, integer>  -- precomputed word counts (from count_all_components)
 local function update_canonical_word_counts(corpus, components, counts)
@@ -567,33 +526,37 @@ local function update_canonical_word_counts(corpus, components, counts)
 end
 
 --- @class ComponentDef
---- @field name string  -- bare name (without ac_/mac_ prefix)
---- @field line integer -- definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
---- @field path string  -- absolute source path of the definition
---- @field kind string  -- "comp_bare" | "comp_proc"
+--- @field name       string  -- bare name (without ac_/mac_ prefix)
+--- @field line       integer -- definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
+--- @field path       string  -- absolute source path of the definition
+--- @field kind       string  -- "comp_bare" | "comp_proc"
+--- @field debug_skip boolean -- mirror of the scanner-owned `a.debug_skip`; consumers read this directly
 
---- (internal) Populate the canonical `corpus.components` projection with this source's components-by-name map.
+--- (internal) Populate `corpus.components` with this source's components-by-name map.
 --- First declaration wins; later declarations of the same bare name are dropped and recorded as a collision via `corpus.collisions` (kind = "component").
 --- The pass does NOT write to `ctx.shared.components` (ownership follows the canonical contract).
---- @param corpus     table  -- the canonical corpus
+--- The `debug_skip` field mirrors the scanner-owned declaration record (`c.debug_skip`).
+--- No parallel skip map is built here; consumers that need the per-component skip state read `corpus.components[name].debug_skip` directly.
+--- @param corpus     table  -- the corpus
 --- @param src        SourceFile
 --- @param components Component[]
 local function update_canonical_components(corpus, src, components)
 	local rel_path = src.path:gsub("\\", "/")
 	for _, c in ipairs(components) do
 		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`).
-		-- The atoms_source_map pass looks up components by bare name from the canonical corpus;
+		-- The atoms_source_map pass looks up components by bare name from the corpus;
 		-- `mac_` prefix lives at the call-site identifier and is stripped before lookup.
 		if corpus.components[c.name] == nil then
 			corpus.components[c.name] = {
-				name = c.name,
-				line = c.line,
-				path = rel_path,
-				kind = c.kind or "comp_bare",
+				name       = c.name,
+				line       = c.line,
+				path       = rel_path,
+				kind       = c.kind or "comp_bare",
+				debug_skip = c.debug_skip == true,
 			}
 		else
 			-- A second declaration of the same bare name: record a typed collision so static-analysis + the report can surface it.
-			-- Identical-shape declarations (same path + line) do NOT record a collision (the first-wins entry already covers the case).
+			-- Identical-shape declarations (same path + line) reuse the first-wins entry without a collision record.
 			local existing = corpus.components[c.name]
 			if existing.path ~= rel_path or existing.line ~= c.line then
 				local kind     = c.kind or "comp_bare"
@@ -611,10 +574,10 @@ local function update_canonical_components(corpus, src, components)
 	end
 end
 
---- (internal) Populate the canonical `corpus.component_body_index` projection with this source's body index entries.
+--- (internal) Populate `corpus.component_body_index` with this source's body index entries.
 --- First declaration wins; later declarations are dropped (no separate collision record: the components collision is already surfaced by `update_canonical_components`).
---- The pass does NOT write to `ctx.shared.component_body_index` (the corpus owns this projection).
---- @param corpus     table  -- the canonical corpus
+--- The pass writes to `corpus.component_body_index` only (the corpus owns this projection).
+--- @param corpus     table  -- the corpus
 --- @param src        SourceFile
 --- @param components Component[]
 --- @param scan       table  -- the SourceScan payload (for line_of)
@@ -641,13 +604,13 @@ function M.run(ctx)
 	local errors   = {}
 	local warnings = {}
 
-	-- Canonical-corpus ownership gate.
+	-- Corpus ownership gate.
 	local corpus = ctx.shared and ctx.shared.corpus
 	if type(corpus) ~= "table" then
-		error("components.run requires ctx.shared.corpus (canonical corpus).", 0)
+		error("components.run requires ctx.shared.corpus.", 0)
 	end
 	if type(corpus.source_order) ~= "table" then
-		error("components.run requires ctx.shared.corpus.source_order (canonical corpus).", 0)
+		error("components.run requires ctx.shared.corpus.source_order.", 0)
 	end
 	if type(corpus.word_counts) ~= "table" then
 		error("components.run requires ctx.shared.corpus.word_counts; "
@@ -655,25 +618,24 @@ function M.run(ctx)
 			.. "(see PASSES deps).", 0)
 	end
 
-	-- Canonical projection ownership:
+	-- Projection ownership:
 	--   * `corpus.word_counts["mac_"..name]` — current component count
 	--   * `corpus.components[name]`         — bare-name component definition
 	--   * `corpus.component_body_index[name]` — body / line_of / source index
-	-- The pass does NOT mutate `ctx.shared.components` or `ctx.shared.component_body_index`
-	-- (ownership follows the canonical corpus; consumers read from the corpus directly).
+	-- The pass writes to the corpus only; consumers read from the corpus directly.
 
 	for _, src in ipairs(corpus.source_order) do
 		-- project_components reads from src.scan + does backward lookups on src.text
 		local components = project_components(src.text, src.scan)
 		if #components > 0 then
 			-- Compute all component word counts once per source.
-			-- Use `corpus.word_counts` (the canonical count table) so the recursive lookup sees both authored-metadata entries
+			-- Use `corpus.word_counts` so the recursive lookup sees both authored-metadata entries
 			-- (loaded by word_count_eval.run) AND same-source component entries (populated earlier in this loop by `update_canonical_word_counts`).
 			local counts = count_all_components(components, corpus.word_counts)
 			local macs_path = emit_component_macros_h(ctx, src, components, counts)
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }
-				-- Populate the canonical projections AFTER disk emission (so the byte-identical `.macs.h` contract is preserved before any current-count mutation).
+				-- Populate the projections AFTER disk emission (so the byte-identical `.macs.h` contract is preserved before any current-count mutation).
 				update_canonical_word_counts(corpus, components, counts)
 				update_canonical_components(corpus, src, components)
 				update_canonical_component_body_index(corpus, src, components, src.scan)

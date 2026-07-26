@@ -8,9 +8,9 @@
 ---      AFTER computing each current count from the just-built body + `corpus.word_counts`).
 ---
 --- **Canonical contract**:
----   * `ctx.shared.corpus.word_counts` is the canonical count table.
+---   * `ctx.shared.corpus.word_counts` is the count table.
 ---   * `corpus.word_counts` is the sole count table. Consumers read `corpus.word_counts` directly.
----   * `ctx.shared.components` and `ctx.shared.component_body_index` are NOT created by this pass (canonical projections only).
+---   * `ctx.shared.components` and `ctx.shared.component_body_index` are NOT created by this pass (projections only).
 ---   * No `.macs.h` recursive discovery (no `scan_dir`, no scan cache, no `_invalidate_scan_cache`).
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
@@ -116,10 +116,10 @@ function M.run(ctx)
 	end
 
 	-- 3. Load authored metadata. Generated .macs.h files are NOT scanned
-	--    (the canonical pass computes their counts from the just-built bodies after disk emission; see passes/components.lua).
+	--    (the pass computes their counts from the just-built bodies after disk emission; see passes/components.lua).
 	local wc = duffle.load_word_counts(ctx.metadata_path)
 
-	-- 4. Assign the canonical count table. ONE assignment, no copy. The assignment creates no secondary alias.
+	-- 4. Assign the count table. ONE assignment, no copy. The assignment creates no secondary alias.
 	corpus.word_counts = wc
 
 	return { outputs = {}, errors = {}, warnings = {} }

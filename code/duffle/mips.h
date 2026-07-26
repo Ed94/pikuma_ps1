@@ -436,7 +436,7 @@ enum { _BitOffsets = 0
 /* --- Shift-amount alias (matches the gas convention `\p3 = shamt`) --- */
 #define shift_amount(rd, rt, n)     shift_lleft(rd, rt, n)
 
-/* nop — canonical sll $0, $0, 0 */
+/* nop — sll $0, $0, 0 */
 #define nop  shift_lleft(rdiscard, rdiscard, 0)
 #define nop2 nop, nop
 

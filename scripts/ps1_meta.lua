@@ -265,14 +265,11 @@ USAGE:
 
 PASS_FLAGS:
   Pick a phase or one-or-more individual passes:
-    --pre-link            [phase; default] Run the pre-link group + transitive deps.
-                         The root set is data-driven from each PASSES row's
-                         `groups` field; no parallel name list is maintained.
-    --post-link           [phase] Run the post-link group + transitive deps.
-                         Requires --elf. Sets --gdb-runtime and --dwarf-injection
-                         opt-in flags as well.
-    --all                 Select every row of the PASSES table. Pass-local opt-in
-                         guards remain active, so --dwarf-injection still requires
+    --pre-link           [phase; default] Run the pre-link group + transitive deps.
+                         The root set is data-driven from each PASSES row's groups` field; no parallel name list is maintained.
+    --post-link          [phase] Run the post-link group + transitive deps.
+                         Requires --elf. Sets --gdb-runtime and --dwarf-injection opt-in flags as well.
+    --all                Select every row of the PASSES table. Pass-local opt-in guards remain active, so --dwarf-injection still requires
                          --elf and --gdb-runtime still requires a runtime emission.
   Or pick any subset:
     --scan-source         Scan sources into the fat SourceScan payload
@@ -281,20 +278,16 @@ PASS_FLAGS:
     --validate            Run atom annotation DSL validation
     --offsets             Generate <module>/gen/<basename>.offsets.h
     --atoms-source-map    Generate <basename>.atoms.sourcemap.txt per source
-    --dwarf-injection     [opt-in] Select the post-link dwarf-injection pass + set the
-                         opt-in flag. Requires --elf.
+    --dwarf-injection     [opt-in] Select the post-link dwarf-injection pass + set the opt-in flag. Requires --elf.
     --static-analysis     Static analysis: GTE pipeline-fill, mac_yield, ABI handoff, cycle budget
     --report              Render per-project summary
 
 COMMON_FLAGS:
-  --unity-root FILE     Unity source root: load root + direct quoted authored
-                        includes only. Mutually exclusive with --source.
-  --source FILE         Exact source file to process (repeatable, never expands
-                        includes). Mutually exclusive with --unity-root.
+  --unity-root FILE     Unity source root: load root + direct quoted authored includes only. Mutually exclusive with --source.
+  --source FILE         Exact source file to process (repeatable, never expands includes). Mutually exclusive with --unity-root.
   --metadata PATH       Path to metadata.h (required)
   --out-root DIR        Output root for reports (default: build/gen)
-  --project-root DIR    PS1 repository root (default: derived from
-                        <repo>/code/duffle/word_count.metadata.h)
+  --project-root DIR    PS1 repository root (default: derived from <repo>/code/duffle/word_count.metadata.h)
   --gdb-runtime         Also emit <out_root>/gdb_tape_atoms_runtime.gdb (post-link, requires --elf)
   --elf PATH            Path to linked .elf (for --gdb-runtime / --dwarf-injection)
   --verbose             Print per-pass debug output

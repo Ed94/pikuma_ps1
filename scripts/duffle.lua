@@ -1,15 +1,16 @@
---- duffle.lua — Shared primitives + domain tables for the tape-atom
---- metaprograms.
+--- duffle.lua — shared primitives + domain tables for the tape-atom metaprograms.
 ---
---- This module is the source for:
----   - **Character classification** (`is_space`, `is_alpha`, `is_alnum`, `is_digit`, plus the byte-fast `_byte` variants).
----   - **String/path primitives** (`trim`, `dirname`, `basename_no_ext`, `normalize_path`, `canonical_path_key`, `find_byte`).
----   - **I/O primitives** (`read_file`, `write_file`, `ensure_dir`).
----   - **Canonical corpus resolution** (`parse_direct_quoted_includes`, `resolve_source_corpus`).
----   - **C-language scanner** (`skip_ws_and_cmt`, `skip_str_or_cmt`, `read_ident`, `read_parens`, `read_braces`, `read_brackets`, `read_balanced`, `scan_to_char`, `split_top_level_commas`).
----   - **Word-count loader** (`load_word_counts` for `WORD_COUNT(...)` metadata files).
----   - **Line lookup** (`LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping).
----   - **Domain tables** (`TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`, `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
+--- One ownership statement, then the rest is signal:
+---   * **Character classification** (`is_space`, `is_alpha`, `is_alnum`, `is_digit`, plus the byte-fast `_byte` variants).
+---   * **String / path primitives** (`trim`, `dirname`, `basename_no_ext`, `normalize_path`, `canonical_path_key`, `find_byte`).
+---   * **I/O primitives** (`read_file`, `write_file`, `ensure_dir`).
+---   * **Corpus resolution** (`parse_direct_quoted_includes`, `resolve_source_corpus`).
+---   * **C-language scanner** (`skip_ws_and_cmt`, `skip_str_or_cmt`, `read_ident`, `read_parens`, `read_braces`, `read_brackets`,
+---     `read_balanced`, `scan_to_char`, `split_top_level_commas`).
+---   * **Word-count loader** (`load_word_counts` for `WORD_COUNT(...)` metadata files).
+---   * **Line lookup** (`LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping).
+---   * **Domain tables** (`TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`,
+---     `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex.
 
@@ -73,27 +74,22 @@ local BYTE_DIGIT_9 = 0x39       -- '9'
 -- Section -1: Bootstrap (path-setup at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Path setup is done by `scripts/duffle_paths.lua`, which derives the repo root from `debug.getinfo(1, "S").source` (NO subprocess, ~0ms) and then calls `require("duffle")`.
--- Repository paths come from `scripts/duffle_paths.lua` because:
---   1. Entry and pass scripts load `duffle_paths.lua`.
---      The `find_repo_root` / `setup_package_path` defined here was dead code in practice.
---   2. `git rev-parse` costs ~100-180ms per subprocess spawn on Windows.
---      `debug.getinfo` is <1ms. There's no reason to keep the slow path even as a "fallback".
+-- Path setup runs through `scripts/duffle_paths.lua`, which derives the repo root from `debug.getinfo(1, "S").source`
+-- (no subprocess, ~0ms) and then calls `require("duffle")`.
+-- Entry and pass scripts load `duffle_paths.lua` first; a `find_repo_root` / `setup_package_path` defined here was dead code in practice.
+-- `git rev-parse` costs ~100-180ms per subprocess spawn on Windows; `debug.getinfo` is <1ms, so we keep only the fast path.
 --
--- If a future use case ever needs to load `duffle.lua` WITHOUT going through `duffle_paths.lua`, set `package.path` manually before `require`.
+-- To load `duffle.lua` outside `duffle_paths.lua`, set `package.path` manually before `require`.
 -- See `docs/guide_metaprogram_ssdl.md` §"I/O primitives" for the pattern.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 0: LPeg patterns (compiled once at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- LPeg is a required dependency (PEG library, no regex). 
--- It's loaded via `package.cpath` (configured by `duffle_paths.lua` to find `toolchain/lpeg/lpeg.dll`).
--- LPeg handles the high-level scanner, while Section 1 handles byte classification.
--- only relevant at the high-level scanner stage; the byte-by-byte helpers in Section 1 are sufficient for the classification primitives.
+-- LPeg is a required dependency (PEG library, no regex). It's loaded via `package.cpath` — `duffle_paths.lua` wires the path to `toolchain/lpeg/lpeg.dll`.
+-- LPeg handles the high-level scanner; the byte-by-byte helpers in Section 1 handle classification primitives that LPeg's CPython-level cost would dominate.
 --
--- If the require fails, fail loud with an actionable message. The build script (`update_deps.ps1`) builds lpeg.dll into `toolchain/lpeg/`; 
--- if it's missing, run `update_deps.ps1`.
+-- If the require fails, fail loud with an actionable message. The build script (`update_deps.ps1`) builds lpeg.dll into `toolchain/lpeg/`; run it when the dll is missing.
 local lpeg_ok, lpeg = pcall(require, "lpeg")
 if not lpeg_ok then
 	io.stderr:write("[duffle] require('lpeg') failed: ", lpeg, "\n")
@@ -395,7 +391,7 @@ end
 
 --- Group a list of `SourceFile`-shaped records by their `dir` field.
 --- Used by the annotation / static-analysis / report passes to partition sources into per-DIRECTORY (per-module) buckets before emitting per-module reports.
---- Insertion order preserved within each bucket (matches source order in `ctx.sources`).
+--- Insertion order is preserved within each bucket (matches source order in `corpus.source_order`).
 --- @param sources table[]          -- list of source records (each having a `dir` string field)
 --- @return table<string, table[]>  -- map of `dir` -> sources in that dir
 function M.group_sources_by_dir(sources)
@@ -562,7 +558,7 @@ local function splice_c_lines(source)
 end
 
 --- Parse direct quoted preprocessor includes from one source buffer.
---- Translation Line splicing occurs ahead of comment, string, and directive processing. 
+--- Line splicing occurs ahead of comment, string, and directive processing.
 --- Interpreted records retain original physical include text and line numbers.
 --- Angle includes and include-like text inside comments/strings are ignored.
 --- @param source_text string
@@ -850,13 +846,10 @@ function M.split_top_level_commas(body)
 				if has_real_content(chunk) then
 					tokens[#tokens + 1] = chunk
 				elseif #tokens > 0 then
-					-- Pure comment/string chunk at top level (no preceding instruction content within this chunk).
-					-- APPEND it to the LAST token so emit-context callers (components.lua build_component_lines) 
-					-- can convert `// trailing comment` to `/* */` and emit it with the macro body.
-					-- For word counting, count_token_words only inspects the leading ident, so a trailing comment doesn't affect the count.
-					--
-					-- This is the second-half fix to commit 98e27c2: the first fix correctly broke top-level comments off from the NEXT statement (fixing macro-call word counts); 
-					-- This fix preserves them on the PREVIOUS statement (restoring the comments in the emitted .macs.h output).
+					-- Pure comment/string chunk at top level.
+					-- Append it to the LAST token so emit-context callers (components.lua build_component_lines) can convert
+					-- `// trailing comment` to `/* */` and emit it with the macro body.
+					-- count_token_words only inspects the leading ident, so a trailing comment does not affect the count.
 					tokens[#tokens] = tokens[#tokens] .. chunk
 				end
 			end
@@ -1048,18 +1041,16 @@ M.TAPE_ATOM_MACROS = {
 
 -- GTE command-alias resolution table.
 --
--- Maps each GTE command macro that may appear in source to its CANONICAL short form.
--- Both forms resolve to the same PSX-SPX-documented pipeline semantics;
--- The canonical name is the only one that appears in `GTE_COMMAND_INPUTS` and the per-check producer / consumer reports.
--- Aliases resolve exactly once; unknown idents (e.g. an MVMVA with a custom `(sf, mx, v, cv, lm)` payload that is not on this list)
--- are reported as "command unknown" by the check, not silently treated as 0-cycle.
+-- Maps every source-side GTE command macro to its canonical short ident.
+-- Both forms run the same PSX-SPX-documented pipeline semantics.
+-- Aliases resolve exactly once; an unknown ident (an MVMVA with a custom `(sf, mx, v, cv, lm)` payload that is not on this list) lands as
+-- "command unknown" from the check rather than being silently treated as 0-cycle.
 --
--- Source conventions (per `code/duffle/gte.h`): The C source ships both short canonical macros
--- (`gte_cmdw_rtps`, `gte_cmdw_rtpt`, `gte_cmdw_nclip`, `gte_cmdw_avsz3`, `gte_cmdw_avsz4`, `gte_cmdw_mvmva`, `gte_cmdw_op`)
--- and human-readable aliases (`gte_cmdw_rotate_translate_perspective_*`, `gte_cmdw_avg_sort_z3`, etc.).
--- Every alias row maps source ident -> canonical short ident.
+-- Source conventions (per `code/duffle/gte.h`): the C source ships short idents (`gte_cmdw_rtps`, `gte_cmdw_rtpt`, `gte_cmdw_nclip`,
+-- `gte_cmdw_avsz3`, `gte_cmdw_avsz4`, `gte_cmdw_mvmva`, `gte_cmdw_op`) and human-readable aliases
+-- (`gte_cmdw_rotate_translate_perspective_*`, `gte_cmdw_avg_sort_z3`, etc.). Each alias row maps the source ident to its short form.
 M.GTE_COMMAND_ALIASES = {
-	-- Canonical -> canonical (identity).
+	-- Identity rows: short form resolves to itself.
 	["gte_cmdw_rtps"]                                = "gte_cmdw_rtps",
 	["gte_cmdw_rtpt"]                                = "gte_cmdw_rtpt",
 	["gte_cmdw_nclip"]                               = "gte_cmdw_nclip",
@@ -1067,7 +1058,7 @@ M.GTE_COMMAND_ALIASES = {
 	["gte_cmdw_op"]                                  = "gte_cmdw_op",
 	["gte_cmdw_avsz3"]                               = "gte_cmdw_avsz3",
 	["gte_cmdw_avsz4"]                               = "gte_cmdw_avsz4",
-	-- Aliases -> canonical.
+	-- Long-form aliases resolve to the short form.
 	["gte_cmdw_rotate_translate_perspective_single"] = "gte_cmdw_rtps",
 	["gte_cmdw_rotate_translate_perspective_triple"] = "gte_cmdw_rtpt",
 	["gte_cmdw_avg_sort_z3"]                         = "gte_cmdw_avsz3",
@@ -1082,28 +1073,27 @@ M.GTE_COMMAND_ALIASES = {
 
 -- GTE command input-set table.
 --
--- For each canonical command, the set of C2 registers whose recent CPU-to-COP2 write
--- must retire before the command can issue. Per PSX-SPX `docs/psx-spx/docs/cpuspecifications.md:407-419`:
+-- For each command, the set of C2 registers whose recent CPU-to-COP2 write must retire before the command can issue.
+-- Per PSX-SPX `docs/psx-spx/docs/cpuspecifications.md:407-419`:
 --   * A store to COP2 registers (mtc2/ctc2) has a delay of 2..3 clock cycles.
---   * In most cases the delay is 2 cycles; special cases like writes to IRGB
---     (which additionally affect IR1/IR2/IR3) take 3 cycles.
+--   * In most cases the delay is 2 cycles; special cases like writes to IRGB (which additionally affect IR1/IR2/IR3) take 3 cycles.
 --   * "Store delays are counted in numbers of clock cycles (not in numbers of opcodes).
 --    For 3 cycle delay, one must usually insert 3 cached opcodes (or one uncached opcode)."
 --
--- Per PSX-SPX `docs/psx-spx/docs/gtepipelinetimings.md` 
--- (the per-instruction input-latch measurement, which is the SAME phenomenon modeled from the command side), the values are: 
+-- Per PSX-SPX `docs/psx-spx/docs/gtepipelinetimings.md` (the per-instruction input-latch measurement, which is the same
+-- phenomenon modeled from the command side), the values are:
 --   rtps:  every data register, every control register (RT/TR/OFX/OFY/H/DQA/DQB)
 --   rtpt:  same superset (rtpt reads V0..V2, the RT matrix, the TR vector, OFX/OFY, H, DQA, DQB)
 --   nclip: SXY0, SXY1, SXY2 (no RT/TR/OFX inputs)
---   mvmva: variable (depends on the chosen mx / v / cv selector); treated conservatively as the union of all RT + TR + BK + IR columns (the data inputs the command can read).
+--   mvmva: variable (depends on the chosen mx / v / cv selector); treated conservatively as the union of all RT + TR + BK + IR columns
+--          (the data inputs the command can read).
 --   op:    IR1, IR2, IR3 (cross-product output, atomic; consumers treat as fan-out only)
 --   avsz3/avsz4: SZ0..SZ3 + ZSF3/ZSF4
 --
--- We model the data-register + control-register superset. 
--- Per PSX-SPX `gtepipelinetimings.md`, every relevant input is in this set;
--- the per-input latching values listed there are the SAME number's command-side view
+-- We model the data-register + control-register superset. Every relevant input is in this set per PSX-SPX `gtepipelinetimings.md`;
+-- the per-input latching values there describe the same number's command-side view
 -- (a recent mtc2/ctc2 to that register must retire the same number of cycles before the command issues).
--- Anything not in the set is safe to clobber immediately after a prior command.
+-- Anything outside this set is safe to clobber immediately after a prior command.
 M.GTE_COMMAND_INPUTS = {
 	-- RTPS / RTPT: every data + every rotation/translation control + screen offset + projection.
 	["gte_cmdw_rtps"] = {
@@ -1166,15 +1156,15 @@ M.GTE_COMMAND_INPUTS = {
 
 -- GTE command output-set + semantic role table.
 --
--- For each canonical command, the SET of C2 data registers the command writes as outputs, paired with the SEMANTIC ROLE of each output.
--- The semantic role is the basis for the `_post_<cmd>` contract validation:
--- The contract says "after <cmd>, the latest screen-XY is C2_SXY2" (NOT C2_SXY0. The FIFO side effects do NOT make SXY0 the newest result).
+-- For each command, the set of C2 data registers the command writes as outputs, paired with the SEMANTIC ROLE of each output.
+-- The semantic role is the basis for the `_post_<cmd>` contract validation.
+-- The contract says "after <cmd>, the latest screen-XY is C2_SXY2" (C2_SXY0 is wrong; the FIFO side effects leave SXY0 as an older FIFO entry, never the newest).
 --
 -- Per PSX-SPX `docs/psx-spx/docs/geometrytransformationenginegte.md`:
---   * RTPS: writes VXY/VZ -> MAC results; the SINGLE projected screen coordinate is written to C2_SXY2 (the IRGB -> SXY2 path via the perspective divide).
---     C2_SXY0 and C2_SXY1 are NOT written.
+--   * RTPS: writes VXY/VZ -> MAC results; the single projected screen coordinate is written to C2_SXY2 (the IRGB -> SXY2 path via the perspective divide).
+--     C2_SXY0 and C2_SXY1 are untouched.
 --   * RTPT: writes three projected screen coordinates into SXY0, SXY1, SXY2 in pipeline order.
---     The LAST projection is in C2_SXY2; a reader that wants "the last RTPT result" must read C2_SXY2.
+--     The last projection lives in C2_SXY2; a reader that wants "the last RTPT result" reads C2_SXY2.
 --   * NCLIP: writes a single MAC result into C2_SZ3 (the inner-product sum); no screen XY output.
 --   * AVSZ3 / AVSZ4: write average Z into C2_OTZ (single output).
 --   * OP:    writes C2_IR1, C2_IR2, C2_IR3 (cross-product result; no projection).
@@ -1190,22 +1180,21 @@ M.GTE_COMMAND_INPUTS = {
 --   * "mac_result"       : generic MAC output (nclip, op, mvmva)
 --
 -- Consumers:
---   * passes/static_analysis.lua::analyze_hardware_relations (the walker consults this table after a GTE command to update `forward_state.post_command_roles` for `gte_result_position`).
+--   * passes/static_analysis.lua::analyze_hardware_relations (the walker reads this after a GTE command to update
+--     `forward_state.post_command_roles` for `gte_result_position`).
 --   * passes/static_analysis.lua::check_gte_result_position (per-atom CHECK_RULES reader; renders role mismatches).
 -- This table is consumed by the hardware-relation analyzer and result-position check.
 M.GTE_COMMAND_OUTPUTS = {
-	-- RTPS: writes ONE screen coordinate (the perspective-divide result)
-	-- into C2_SXY2; the FIFO side effects do NOT make SXY0 / SXY1 newest.
-	-- `latest_screen_xy` is C2_SXY2.
+	-- RTPS: writes one screen coordinate (the perspective-divide result) into C2_SXY2.
+	-- The FIFO side effects leave SXY0 / SXY1 untouched, so `latest_screen_xy` is C2_SXY2.
 	["gte_cmdw_rtps"] = {
 		{ register = "C2_SXY2", role = "latest_screen_xy" },
 		{ register = "C2_SZ2",  role = "latest_screen_z"  },
 		{ register = "C2_OTZ",  role = "otz"              },
 		{ register = "C2_IR0",  role = "latest_color"     },
 	},
-	-- RTPT: writes THREE screen coordinates; the LAST projection lands in
-	-- C2_SXY2. `latest_screen_xy` is C2_SXY2; C2_SXY0 / C2_SXY1 are the
-	-- earlier projections of the batched triple.
+	-- RTPT: writes three screen coordinates; the last projection lands in C2_SXY2 (`latest_screen_xy`).
+	-- C2_SXY0 / C2_SXY1 carry the earlier projections of the batched triple.
 	["gte_cmdw_rtpt"] = {
 		{ register = "C2_SXY0", role = "screen_xy[0]"     },
 		{ register = "C2_SXY1", role = "screen_xy[1]"     },
@@ -1213,8 +1202,7 @@ M.GTE_COMMAND_OUTPUTS = {
 		{ register = "C2_SZ3",  role = "latest_screen_z"  },
 		{ register = "C2_OTZ",  role = "otz"              },
 	},
-	-- NCLIP: single MAC result; written to C2_SZ3 (the inner-product sum).
-	-- No screen XY output.
+	-- NCLIP: single MAC result; written to C2_SZ3 (the inner-product sum). No screen XY output.
 	["gte_cmdw_nclip"] = {
 		{ register = "C2_SZ3", role = "mac_result" },
 	},
@@ -1243,24 +1231,23 @@ M.GTE_COMMAND_OUTPUTS = {
 -- GTE command/post-command latch-window table.
 --
 -- Per PSX-SPX `docs/psx-spx/docs/gtepipelinetimings.md`, a GTE command emits outputs that latch into the pipeline for a measured number of emitted words.
--- A subsequent MTC2/CTC2 OVERWRITE of one of those outputs BEFORE the latch window expires is a hazard 
--- (the latched value in the pipeline is overwritten by the CPU before the pipeline consumes it).
+-- A subsequent MTC2/CTC2 overwrite of one of those outputs before the latch window expires is a hazard:
+-- the latched value in the pipeline gets overwritten by the CPU before the pipeline consumes it.
 --
--- This relation is the COMMAND -> REGISTER direction (the command is the producer, the MTC2/CTC2 is the consumer).
--- It is NOT the same relation as the preceding MTC2 -> command input propagation
--- (which is the REGISTER -> COMMAND direction and is staged by the producer step of `analyze_hardware_relations`).
+-- This relation is the command -> register direction (the command is the producer; MTC2/CTC2 is the consumer).
+-- It is the inverse of the MTC2 -> command input propagation (register -> command direction), which is staged by the
+-- producer step of `analyze_hardware_relations`.
 --
--- The schema mirrors the producer-side relations (`direction`, `evidence`, `violation_kind`); 
--- `required` is the number of emitted words strictly between the command's last output word and the overwrite.
--- `N=0` permits the immediately following overwrite instruction; `N=4` permits an overwrite that occurs after 4 intervening words.
+-- The schema mirrors the producer-side relations (`direction`, `evidence`, `violation_kind`); `required` counts the
+-- emitted words strictly between the command's last output word and the overwrite.
+-- `required = 0` permits the immediately following overwrite; `required = 4` requires four intervening words.
 --
--- Per PSX-SPX `gtepipelinetimings.md` 
--- The per-command input latching measurements are the SAME number, just inverted: 
--- They describe when a recent MTC2/CTC2 must retire before the command issues; 
--- here we describe when a recent command's outputs latch into the pipeline before a later MTC2/CTC2 may overwrite them.
+-- Per PSX-SPX `gtepipelinetimings.md` the per-command input latching measurements are the same numbers inverted.
+-- They describe when a recent MTC2/CTC2 must retire before the command issues; this table describes when a recent
+-- command's outputs latch into the pipeline before a later MTC2/CTC2 overwrites them.
 --
 -- Consumers:
---   * passes/static_analysis.lua::analyze_hardware_relations (the walker consults this table after a GTE command to stage post-command latch relations in `pending`).
+--   * passes/static_analysis.lua::analyze_hardware_relations (stages post-command latch relations in `pending` after a GTE command).
 --   * passes/static_analysis.lua::check_gte_input_latch      (per-atom CHECK_RULES reader; renders the over-the-boundary findings).
 -- This table is consumed by the hardware-relation analyzer and input-latch check.
 M.GTE_COMMAND_LATCH_WINDOWS = {
@@ -1308,23 +1295,24 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 
 -- GTE component result contracts (immutable; keyed by bare component name).
 --
--- Register-role claims that cannot be inferred from the `_post_<cmd>` suffix alone live here.
--- The bare name (without the `_post_<cmd>` suffix) is the key; the row carries the expected command, the expected role, and the expected C2 register.
+-- Register-role claims that the `_post_<cmd>` suffix alone cannot infer live here.
+-- The bare name (the component name stripped of the `_post_<cmd>` suffix) is the key; the row carries the expected
+-- command, the expected role, and the expected C2 register.
 --
 -- Known rows:
---   * `gte_store_g4_p3_post_rtps`: post-RTPS polygon-emit slot reads the newest projected screen coordinate from C2_SXY2
---     (NOT C2_SXY0; the FIFO side effects do not make SXY0 the newest result).
+--   * `gte_store_g4_p3_post_rtps`: post-RTPS polygon-emit slot reads the newest projected screen coordinate from C2_SXY2.
+--     C2_SXY0 is wrong (C2_SXY0 is an older FIFO entry, never the newest post-RTPS result).
 --
--- Unknown `_post_<cmd>` components (a `<name>_post_<cmd>` suffixed component name whose bare `<name>` is not a row key)
--- emit ONE `table_gap` info finding so downstream consumers can detect when the canonical contract table is incomplete for an authored atom body.
+-- Unknown `_post_<cmd>` components (a `<name>_post_<cmd>`-suffixed component whose bare `<name>` is not a row key) emit one
+-- `table_gap` info finding so downstream consumers can detect when the contract table is incomplete for an authored atom body.
 --
 -- Consumers:
---   * passes/static_analysis.lua::check_gte_result_position (per-atom CHECK_RULES reader; renders result-position findings).
+--   * passes/static_analysis.lua::check_gte_result_position (renders result-position findings).
 --   * passes/static_analysis.lua::emit_table_gap_warning    (called once per atom body; surfaces the missing-row diagnostic).
 -- This table is consumed by the result-position check.
 M.GTE_COMPONENT_RESULT_CONTRACTS = {
 	-- Post-RTPS g4 p3 store contract: writes the latest screen XY (C2_SXY2) into the primitive's p3 slot.
-	-- Reads from C2_SXY0 would be a semantic mismatch (C2_SXY0 is the OLDEST post-RTPS SXY, not the newest one).
+	-- Reading from C2_SXY0 is a semantic mismatch — C2_SXY0 is the oldest post-RTPS SXY, not the newest one.
 	["gte_store_g4_p3_post_rtps"] = {
 		command  = "gte_cmdw_rtps",
 		role     = "latest_screen_xy",
@@ -1334,15 +1322,14 @@ M.GTE_COMPONENT_RESULT_CONTRACTS = {
 
 -- Operand-class table for the COP2->GPR load-delay check.
 --
--- Maps each emitting-token ident to the SET of GPR operand positions it READS (not writes).
--- Covers the current encoder vocabulary (`code/duffle/mips.h` + `code/duffle/gte.h`);
--- expand by adding rows here as new encoders land.
+-- Maps each emitting-token ident to the set of GPR operand positions it reads.
+-- Covers the current encoder vocabulary (`code/duffle/mips.h` + `code/duffle/gte.h`); add rows here as new encoders land.
 --
 -- Semantics:
---   * A "GPR operand position" is the textual slot in the macro's argument list, 1-based; e.g. `load_word(rt, base, off)` has positional operands 1 (rt), 2 (base), 3 (off);
---     The table reads operands 1 + 2 + 3 to find what GPRs the macro touches.
+--   * A "GPR operand position" is the textual slot in the macro's argument list, 1-based; e.g. `load_word(rt, base, off)` has
+--     positional operands 1 (rt), 2 (base), 3 (off). The table reads operands 1 + 2 + 3 to find what GPRs the macro touches.
 --   * The check tracks one entry per destination GPR per MFC2/CFC2 event.
---     A subsequent event is considered a "use" iff any of its READ operand positions reference that destination GPR's ident (e.g. `R_T0`).
+--     A subsequent event counts as a "use" iff any of its read operand positions reference that destination GPR's ident (e.g. `R_T0`).
 --   * Branch delay slots are out of scope (MIPS control-flow; tracked separately).
 M.OPERAND_READ_POSITIONS = {
 	-- CPU ALU with one or two GPR operands. Reads every GPR operand.
@@ -1374,9 +1361,8 @@ M.OPERAND_READ_POSITIONS = {
 	["shift_lright"]           = {1, 2},
 	["shift_aright"]           = {1, 2},
 	["shift_lleft_self"]       = {1},
-	-- Loads: load_word(rt, base, off); the rt operand is the destination (so it's WRITTEN, not read) and base + off are non-GPR operands.
-	-- Treat load_* as NOT reading any GPR operand position (the rt WRITE is not a read for our purposes).
-	-- The single operand in the table for `load_*` is `rt`, but the check treats it as a write, so we leave the read-positions table empty.
+	-- Loads: load_word(rt, base, off); the rt operand is the destination (it's written, not read) and base + off are non-GPR operands.
+	-- The check treats the rt operand as a write, so the read-positions table for `load_*` is empty.
 	["load_word"]              = {},
 	["load_half_u"]            = {},
 	["load_byte_u"]            = {},
@@ -1408,9 +1394,9 @@ M.OPERAND_READ_POSITIONS = {
 	["mov_from_low"]           = {},
 	["mov_to_high"]            = {1},
 	["mov_to_low"]             = {1},
-	-- GTE transfers / loads / stores / commands: the relevant table values live in the check itself
-	-- (gte_mv_to_* writes its rt operand, gte_mv_from_* writes its rt operand, and `gte_*` commands are atomic-from-the-CPU-POV once they issue. 
-	-- They don't trigger load-delay violations because the CPU holds until the command completes).
+	-- GTE transfers / loads / stores / commands: the relevant table values live in the check itself.
+	-- `gte_mv_to_*` writes its rt operand; `gte_mv_from_*` writes its rt operand; `gte_*` commands are atomic-from-the-CPU-POV
+	-- once they issue (the CPU holds until the command completes, so load-delay violations don't surface here).
 	["gte_mv_from_data_r"]     = {},
 	["gte_mv_from_ctrl_r"]     = {},
 	["gte_mv_to_data_r"]       = {},
@@ -1461,9 +1447,10 @@ M.GP0_CMD_BY_SHAPE = {
 	["g4"]  = 0x38, ["gt4"] = 0x3C,
 }
 
--- Per-macro prim-buffer contribution 
--- (NOT .text instruction count this is "how many 32-bit words does this macro write to the primitive being built in main RAM"). 
--- Sum across `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X` calls in an atom body must equal GP0_CMD_SIZE[GP0_CMD_BY_SHAPE[shape]].
+-- Per-macro prim-buffer contribution: how many 32-bit words each macro writes to the primitive being built in main RAM.
+-- (This counts RAM-side prim-buffer words, not .text instruction words.)
+-- The sum across `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X` calls in an atom body must equal
+-- `GP0_CMD_SIZE[GP0_CMD_BY_SHAPE[shape]]`.
 M.GP0_MACRO_CONTRIB = {
 	["mac_format_f3_color"]                         = 1,
 	["mac_format_g3_color"]                         = 3,
@@ -1477,20 +1464,18 @@ M.GP0_MACRO_CONTRIB = {
 }
 
 -- Per-macro cycle cost (best-case, no stalls). Used by the static-analysis pass to emit per-atom cycle budgets.
--- The counts cover the EXPANDED instruction sequence the macro emits (NOT just the token it appears as in source).
--- For example:
---   mac_pack_color_word(off, cmd, r, g, b) emits:
+-- The counts cover the expanded instruction sequence the macro emits (not just the surface token in source).
+-- Worked example — `mac_pack_color_word(off, cmd, r, g, b)` expands to:
 --     load_upper_i(R_AT, (cmd << 8) | b)        -- 1 cycle
 --     or_i_self(R_AT, (g << 8) | r)             -- 1 cycle
 --     store_word(R_AT, R_PrimCursor, off)       -- 1 cycle
---                                              = 3 cycles total
+--                                                = 3 cycles total
 --
---   mac_yield emits a control-transfer sequence (load_word, add_ui_self, jump_reg, nop)
---   which "yields control" the atom body's cycle budget doesn't include the yield's cost (we model it as 0;
---   runtime cost becomes part of the NEXT atom's prologue).
+-- `mac_yield` emits a control-transfer sequence (load_word, add_ui_self, jump_reg, nop). The atom body's cycle budget excludes
+-- the yield's cost (we model it as 0); the runtime cost lands in the next atom's prologue.
 --
--- GTE command values are the GTE instruction's intrinsic cycles (the latency AFTER any pre-cmd `nop2` has retired).
--- When the source emits `nop2, gte_cmdw_X` the nops' cycles are added separately (1+1) plus the gte_cmdw_X value here:
+-- GTE command values are the GTE instruction's intrinsic cycles — the latency after any pre-cmd `nop2` has retired.
+-- When the source emits `nop2, gte_cmdw_X`, the nops' cycles are added separately (1+1) plus the gte_cmdw_X value here:
 --   rtpt  = 23 + 2 nops = 25 total cycles  (PSX-SPX says 23 cycles for the cmd itself; the nops are pre-fill)
 --   rtps  = 15 + 2 nops = 17 total
 --   nclip =  8 + 2 nops = 10 total
@@ -1499,11 +1484,11 @@ M.GP0_MACRO_CONTRIB = {
 --   mvmva =  8 + 2 nops = 10 total
 --   op    =  6 (no pre-cmd nops required; atomic)
 --
--- Note: the "total" above is the pre-fill nops + the GTE intrinsic cycles.
--- PSX-SPX documents the GTE intrinsic cycles as the total execution time of the command itself (rtpt=23, rtps=15, nclip=8, etc.).
--- The pre-fill nops are a codebase convention for retiring preceding C2 writes, not part of the GTE's own execution time.
--- See `docs/psx-spx/docs/geometrytransformationenginegte.md` for the canonical per-command cycle counts and `docs/psx-spx/docs/gtepipelinetimings.md` 
--- for the hardware-verified input-latch boundaries (which show most inputs are safe to clobber after just 0-4 cycles).
+-- PSX-SPX reports the GTE intrinsic cycles as the total execution time of the command itself (rtpt=23, rtps=15, nclip=8, etc.).
+-- The pre-fill nops are a codebase convention for retiring preceding C2 writes.
+-- See `docs/psx-spx/docs/geometrytransformationenginegte.md` for per-command cycle counts and
+-- `docs/psx-spx/docs/gtepipelinetimings.md` for the hardware-verified input-latch boundaries (most inputs become
+-- safe to clobber after 0-4 cycles).
 M.INSTRUCTION_LATENCY = {
 	-- CPU ALU (single-cycle R3000A ops)
 	["nop"]                 = 1,
@@ -1578,7 +1563,7 @@ M.INSTRUCTION_LATENCY = {
 	["gte_cmdw_op"]            = 6,   -- OP: 6 cycles (PSX-SPX)
 	["gte_cmdw_outer_product"] = 6,   -- alias for OP
 	["gte_cmdw_wedge"]         = 6,   -- alias for OP
-	-- Long-form aliases (same cost as canonical)
+	-- Long-form aliases (same cycle cost as their short form)
 	["gte_cmdw_rotate_translate_perspective_single"] = 15,  -- alias for rtps
 	["gte_cmdw_rotate_translate_perspective_triple"] = 23,  -- alias for rtpt
 	["gte_cmdw_avg_sort_z4"]                         = 6,   -- alias for avsz4
@@ -1628,29 +1613,30 @@ M.UNKNOWN_INSTRUCTION_CYCLES = 1
 
 -- Hardware-relation policy table.
 --
--- The single forward-analyzer in `passes/static_analysis.lua::analyze_hardware_relations`
--- reads every emitted word_event, matches its `encoder` against `row.token`, and:
+-- The forward walker in `passes/static_analysis.lua::analyze_hardware_relations` reads every emitted word_event,
+-- matches its `encoder` against `row.token`, and:
 --   * stages the event as a producer in `atom.paths.forward_state`; or
 --   * matches it as a consumer against pending producers and records a hazard on `atom.paths.hazards` when the gap is below `visibility.required`.
 --
--- Each row is the contract for one CPU-to-coprocessor transfer semantic
--- (the coprocessor-to-CPU path mirrors the same shape). The `reads` / `writes` sub-tables carry the argument positions the analyzer inspects:
+-- Each row is the contract for one CPU-to-coprocessor transfer semantic (the coprocessor-to-CPU path mirrors the same shape).
+-- The `reads` / `writes` sub-tables carry the argument positions the analyzer inspects:
 --   * `writes.arg` is the destination operand (the producer's effect); the analyzer stages this register as a pending producer.
---   * `reads` (when present) lists the operand positions the SAME token reads back from hardware; for MTC2 / CTC2 the producer reads the GPR source it is loading from.
+--   * `reads` (when present) lists the operand positions the same token reads back from hardware; for MTC2 / CTC2 the producer reads the GPR source it is loading from.
 --     The `fanout_to` field (MTC2-IRGB row only) tells the consumer-match logic which downstream COP2 registers are transitively updated by the write.
 --
 -- Visibility semantics:
---   * `kind = "post_producer_words"` means the consumer must observe the producer's effect after `required` independent emitted words that are strictly between the producer and the consumer.
---     The producer's own emitted slot does NOT retire the relation (per the canonical PSX-SPX rule: "Store delays are counted in numbers of clock cycles (not in numbers of opcodes).
---     For 3 cycle delay, one must usuallys insert 3 cached opcodes (or one uncached opcode).").
+--   * `kind = "post_producer_words"` means the consumer observes the producer's effect after `required` independent emitted words that are
+--     strictly between the producer and the consumer. The producer's own emitted slot is implicit (it counts as the slot of issue, not toward
+--     `required`) — per the PSX-SPX rule: "Store delays are counted in numbers of clock cycles (not in numbers of opcodes). For 3 cycle delay,
+--     one must usually insert 3 cached opcodes (or one uncached opcode)."
 --   * `required` is the minimum count of intervening emitted words between producer and consumer.
---     `required = 0` is permitted (the consumer may sit on the very next slot); 
---     `required < 0` would mean the consumer may sit on the same slot as the producer and is reserved for future "self-retires" relations.
+--     `required = 0` permits the consumer on the very next slot; `required < 0` would place the consumer on the same slot as the producer
+--     and is reserved for future "self-retires" relations.
 --
 -- Evidence:
---   * `evidence.confidence` is one of `"exact"`, `"conservative"`, `"unknown"`. The severity comes from `violation_kind`; 
---     a hardware measurement that the vendor caveats may still be `"conservative"` even when the underlying timing is numerically known.
---   * `evidence.source` is the canonical upstream reference (file + line range) the row is sourced from. Doc-edits that add new rows must add the source citation here.
+--   * `evidence.confidence` is one of `"exact"`, `"conservative"`, `"unknown"`. The severity comes from `violation_kind`; a hardware
+--     measurement that the vendor caveats may still classify as `"conservative"` even when the underlying timing is numerically known.
+--   * `evidence.source` is the upstream reference (file + line range) the row is sourced from. New rows must carry this citation.
 --
 -- Consumers:
 --   * passes/static_analysis.lua::analyze_hardware_relations          (forward walker).
@@ -1715,7 +1701,7 @@ M.HARDWARE_RELATIONS = {
 		semantic       = "MFC2",
 		token          = "gte_mv_from_data_r",
 		direction      = "cop2_data_to_gpr",
-		reads          = { domain = "cop2.data", arg = 2 },
+		reads          = { domain = "cop2.data",  arg = 2 },
 		writes         = { domain = "gpr",        arg = 1 },
 		visibility     = { kind = "post_producer_words", required = 1 },
 		evidence       = {
@@ -1730,7 +1716,7 @@ M.HARDWARE_RELATIONS = {
 		semantic       = "CFC2",
 		token          = "gte_mv_from_ctrl_r",
 		direction      = "cop2_control_to_gpr",
-		reads          = { domain = "cop2.ctrl", arg = 2 },
+		reads          = { domain = "cop2.ctrl",  arg = 2 },
 		writes         = { domain = "gpr",        arg = 1 },
 		visibility     = { kind = "post_producer_words", required = 1 },
 		evidence       = {
@@ -1748,7 +1734,7 @@ M.HARDWARE_RELATIONS = {
 		semantic       = "MFC0",
 		token          = "sys_mov_from_cop0",
 		direction      = "cop0_control_to_gpr",
-		reads          = { domain = "cop0.ctrl", arg = 2 },
+		reads          = { domain = "cop0.ctrl",  arg = 2 },
 		writes         = { domain = "gpr",        arg = 1 },
 		visibility     = { kind = "post_producer_words", required = 1 },
 		evidence       = {
@@ -1775,8 +1761,8 @@ M.HARDWARE_RELATIONS = {
 		violation_kind = "info",
 		clear_on_consumer = true,
 	},
-	-- COP2 data register -> memory (SWC2). This is a read of C2 state, not a CPU-to-COP2 write.
-	-- Keep the policy row for direction/provenance, but do not stage it as a later command-input producer.
+	-- COP2 data register -> memory (SWC2). A read of C2 state, not a CPU-to-COP2 write.
+	-- The policy row stays in for direction/provenance; staging it as a later command-input producer is suppressed.
 	{
 		id             = "swc2_memory_write",
 		semantic       = "SWC2",
@@ -1793,13 +1779,13 @@ M.HARDWARE_RELATIONS = {
 		stage          = false,
 	},
 	-- MTC0 Status/SR.CU2. The ordinary COP0 store has no general store-delay relation;
-	-- This row is consumed by the dedicated CU2 transition logic in the same forward walk and is therefore not staged in `pending`.
+	-- this row feeds the dedicated CU2 transition logic in the same forward walk and is therefore not staged in `pending`.
 	{
 		id             = "mtc0_cu2_visibility",
 		semantic       = "MTC0",
 		token          = "sys_mov_to_cop0",
 		direction      = "gpr_to_cop0_status",
-		reads          = { domain = "gpr",         arg = 1 },
+		reads          = { domain = "gpr",          arg = 1 },
 		writes         = { domain = "cop0.status",  arg = 2 },
 		status_register = 12,
 		visibility     = { kind = "post_producer_words", required = 2 },
@@ -1832,18 +1818,18 @@ M.CU2_TRANSITION_POLICY = {
 -- Maps every CPU/GTE encoder used in production atoms and the focused transfer-hazard tests to its actual GPR operand effects.
 -- The analyzer applies this table to `atom.paths.forward_state.gpr_values`:
 --   * a write to a GPR invalidates its constant;
---   * a constant-producing transform re-establishes a constant when its inputs are constant (the lattice for `gpr_values` is closed:
---     `{kind="unknown"}` and `{kind="constant", value=<U4>}`).
+--   * a constant-producing transform re-establishes a constant when its inputs are constant
+--     (the `gpr_values` lattice is closed: `{kind="unknown"}` and `{kind="constant", value=<U4>}`).
 --
--- The schema is:
---   reads = {pos1, pos2, ...}    -- 1-based argument positions that are GPR reads.
+-- Schema:
+--   reads  = {pos1, pos2, ...}   -- 1-based argument positions that are GPR reads.
 --   writes = {pos1, pos2, ...}   -- 1-based argument positions that are GPR writes.
 -- The argument positions refer to `word_event.args` (the top-level comma-split args of the emitting token, parsed by `tokenize_body`).
--- Operands that are numeric literals, `0x` hex literals, or `U4`/`S4` type keywords are not GPR operand positions and are not listed.
+-- Numeric literals, `0x` hex literals, and `U4`/`S4` type keywords are not GPR operand positions.
 --
--- Encoders not listed here are treated as "unknown writers" for any GPR they touch;
--- Wknown writers invalidate `forward_state.gpr_values` for every GPR operand they touch (the analyzer cannot assume the result is a constant).
--- This is deliberately conservative: a row missing for a writer means "we do not know what value the GPR now holds" rather than "the GPR keeps its previous constant".
+-- Encoders absent from this table are treated as "unknown writers" for every GPR they touch. Unknown writers invalidate
+-- `forward_state.gpr_values` for those operands — the analyzer cannot assume the result is a constant.
+-- The shape is deliberately conservative: a row missing for a writer means "we do not know what value the GPR now holds".
 --
 -- Consumers:
 --   * passes/static_analysis.lua::analyze_hardware_relations (forward walker).
@@ -1994,10 +1980,9 @@ M.GPR_VALUE_RULES = {
 -- Control-transfer (branch/jump/call) delay-slot policy table.
 --
 -- Used by the emitted-word delay-slot check to identify which emitted machine-word idents are control transfers whose next emitted word is the hardware delay slot.
--- One table row per emitted encoder; the `family` field is informational (informational only; 
--- The check matches by `event.ident` against the row keys). 
--- `suppress_arg1` (when present) lists first-arg values that should NOT emit a finding even when the next emitted word is 
--- `nop` or absent — e.g. the fixed `mac_yield()` handshake uses `jump_reg(R_AtomJmp), nop` and is intentionally suppressed.
+-- One table row per emitted encoder; the `family` field is informational. The check matches by `event.ident` against the row keys.
+-- `suppress_arg1` (when present) lists first-arg values that suppress the finding even when the next emitted word is `nop` or absent
+-- — for example, the fixed `mac_yield()` handshake uses `jump_reg(R_AtomJmp), nop` and is suppressed so the check stays signal-only.
 --
 -- Consumers:
 --   * passes/static_analysis.lua::check_control_transfer_delay_slot_use
@@ -2025,8 +2010,8 @@ M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES = {
 -- Section 8: Cross-source component-body index + word-event expansion
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Two pure helpers that supersede the per-pass local component-body builders (`atoms_source_map.build_cross_source_component_body_index`)
--- and provide the shared, memoized "semantic emitted-word event stream" every downstream pass can read from without re-walking the pre-tokenized bodies.
+-- Shared, memoized helpers: a single emitted-word event stream that every downstream pass reads from,
+-- built once from the pre-tokenized bodies.
 
 --- @class ComponentBodyEntry
 --- @field body_tokens    table        -- pre-tokenized {{tok=string, rel=integer}, ...}
@@ -2036,10 +2021,8 @@ M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES = {
 --- @field declaration    integer      -- 1-based line number of the MipsAtomComp_(ac_X) declaration
 --- @field kind           string       -- "comp_bare" | "comp_proc"
 
--- The cross-source component-body index is owned by the canonical corpus
--- (`corpus.component_body_index`, populated by `passes/components.lua`).
--- Consumers (`passes/static_analysis.lua`, `passes/emission_model.lua`) read it directly;
--- No per-pass memoization helper is needed.
+-- The cross-source component-body index is owned by the corpus (`corpus.component_body_index`, populated by `passes/components.lua`).
+-- Consumers (`passes/static_analysis.lua`, `passes/emission_model.lua`) read it directly; per-pass memoization helpers stay out of scope.
 
 -- ASCII byte constants used by split_top_level_args (kept local to keep Section 8 self-contained).
 local E_BYTE_OPEN_PAREN  = 0x28
@@ -2110,45 +2093,66 @@ local E_MAC_PREFIX_LEN = 4
 ---
 --- Semantics (one event per emitted machine word):
 ---   * **Direct one-word encoders** (`load_word`, `add_ui`, `nop`, `gte_lw`, ...): one event with `ident` = leading ident, `args` = parsed top-level args.
----   * **`nop2`** (2-word pseudo-instruction): two events, BOTH with `ident = "nop"` so the canonical "this slot is a no-op" semantic is visible to downstream analyses.
----   * **Any other N-word token** in `word_counts` (e.g. `mask_upper` = 2, `load_imm_2w` = 2): N events sharing the same `ident` + `args` so useful CPU words retire slots in the cycle budget.
+---   * **`nop2`** (2-word pseudo-instruction): two events, both with `ident = "nop"` so the recognized "this slot is a no-op" semantic is visible to downstream analyses.
+---   * **Any other N-word token** in `word_counts`: N events sharing the same `ident` + `args` so useful CPU words retire slots in the cycle budget.
 ---   * **Known `mac_X(...)` calls**: recursively expand the indexed component body, including nested components. Every event from the expansion carries:
 ---     - `source` / `line` = the COMPONENT'S source path + the line of the token within the component body (i.e. "definition site").
----     - `call_source` / `call_line` = the ROOT atom's source path + call-site line, PRESERVED across recursion (nested-nested events still point at the original root, not at an intermediate component).
----   * **Unknown `mac_X`** (not in `component_index`): fall back to `word_counts[ident]` if present; otherwise emit exactly one opaque event so the cycle budget still accounts for the word.
+---     - `call_source` / `call_line` = the ROOT atom's source path + call-site line, PRESERVED across recursion so nested events still point at the original root.
+---   * **Unknown `mac_X`** (not in `component_index`): fall back to `word_counts[ident]` if present; otherwise emit one opaque event so the cycle budget accounts for the word.
 ---   * **Marker tokens** (`atom_label(...)` / `atom_offset(...)`): zero events (they are pure metaprogram hints, not emitted machine words).
 ---
 --- Cycle protection: a per-expansion `visiting` set tracks components currently on the expansion stack; a re-entry produces a deterministic `{kind = "cycle", ...}` error and aborts that branch (does NOT hang, does NOT recurse).
 ---
---- Pure: does NOT mutate `body_entry`, `component_index`, or `word_counts`. Memoization is the caller's responsibility (callers that want it precomputed for many atoms should memoize `word_events` / `word_event_errors` per atom).
+--- Pure: reads `body_entry` / `component_index` / `word_counts`. Memoization is the caller's responsibility.
+--- Callers wanting `word_events` / `word_event_errors` precomputed for many atoms should memoize them per atom.
 --- @param body_entry       table        -- `{body_tokens, body_off, line_of, source, declaration}` (declaration = root atom's atom.line)
 --- @param component_index  table        -- the bare-name → ComponentBodyEntry map from M.get_component_body_index
 --- @param word_counts      table        -- macro name → emitted-word count (from `ctx.shared.word_counts`)
 --- @return WordEvent[], WordEventError[]
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Section 11: project_emission (canonical per-atom emission projection)
+-- Section 11: project_emission (per-atom emission projection)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- Canonical per-atom emission projection is owned by `passes/emission_model.lua`.
--- The projection is built from the root atom body only (no nested component expansion at this stage);
--- Invocation ancestry recursively expands nested components.
--- The items stream is the single ordered source of truth; `word_events` and `markers` are dense views over it (never a separate walk).
+-- Per-atom emission projection is owned by `passes/emission_model.lua`.
+-- The projection is built from the root atom body only; invocation ancestry recursively expands nested components.
+-- The items stream is the single ordered source of truth; `word_events` and `markers` are dense views over it.
 --
--- The helper below operates on a body string (not a body_entry) so the canonical pass can call it without depending on the older SourceScan / body_off conventions.
+-- The helper below operates on a body string (not a body_entry) so the pass can call it without depending on the older SourceScan / body_off conventions.
 -- component_index argument is reserved for recursive component expansion.
--- word_counts table is the canonical authored-metadata + current-component count table.
+-- word_counts table is authored-metadata + current-component count table.
 
 --- @class EmissionProjection
 --- @field items       table[] -- ordered stream of word|label|offset|invoke_begin|invoke_end
 --- @field word_events table[] -- dense view of items where kind == "word"
 --- @field markers     table[] -- dense view of items where kind == "label"|"offset"
---- @field invocations table[] -- dense view of items where kind == "invoke_begin"|"invoke_end"
+--- @field invocations InvocationRecord[] -- dense view of items where kind == "invoke_begin"|"invoke_end"
 --- @field errors      table[] -- token-resolution failures surfaced without fail-loud
 --- @field warnings    table[] -- opaque warnings (e.g. unknown uncounted macro)
 
--- Internal recursive walker. Single source of truth for the items stream;
--- `word_events`, `markers`, `invocations`, `errors`, `warnings` are dense views / side outputs derived while appending `items`.
+--- @class InvocationRecord
+--- Lives at `atom.paths.invocations[*]`. Constructed once at the single invocation-construction site
+--- (`emit_invoke_begin` inside `_project_emission_inner`); `invoke_begin` / `invoke_end` markers in the items stream share the same `id`.
+--- @field id              integer  -- 1-based, monotonic per-atom invocation id (0 is reserved for "no open invocation")
+--- @field parent_id       integer  -- 0 for the outermost (root) call; otherwise the id of the immediately enclosing invocation
+--- @field kind            string   -- "comp_bare" | "comp_proc" (component form that triggered the expansion)
+--- @field component_name  string   -- the bare component name without the `mac_` prefix
+--- @field call_text       string   -- the immediate `mac_X(...)` token text (or root call text for the outermost entry)
+--- @field root_call_text  string   -- the IMMUTABLE outermost `mac_X(...)` token text for every word emitted in this call's expansion
+--- @field call_path       string   -- source path of the call site (root atom source for direct calls, component source for nested expansions)
+--- @field call_line       integer  -- source line of the call site
+--- @field def_path        string   -- source path of the component definition
+--- @field def_line        integer  -- source line of the component declaration
+--- @field start_pos       integer  -- 0-based emitted-word position of the FIRST word inside this invocation (the value of `word_idx` AT `emit_invoke_begin` time, BEFORE the first word is emitted). Words emitted inside this invocation occupy `start_pos..start_pos+#body_lines-1` (inclusive, 0-based). Downstream DWARF/provenance consumers MUST read this; do NOT reconstruct it from `start_word` (which is the 1-based items index including `invoke_begin`/`invoke_end` markers).
+--- @field end_pos         integer  -- 0-based position of the LAST word inside this invocation (set by `emit_invoke_end` to `word_idx - 1` AFTER all body words are emitted).
+--- @field start_word      integer  -- 1-based items index of the `invoke_begin` item
+--- @field end_word        integer  -- 1-based items index of the `invoke_end` item (set by `emit_invoke_end`)
+--- @field word_count      integer  -- number of `word` items emitted between `start_word` and `end_word` (inclusive)
+--- @field debug_skip      boolean  -- `debug_skip` stamp; true iff `corpus.components[name].debug_skip` is true at construction. Always boolean (never `nil`).
+--- @field errors          table[]  -- per-invocation construction errors (cycle / count_mismatch); does not include pass-level errors
+
+-- Internal recursive walker. The items stream holds every emitted event in order; `word_events`, `markers`,
+-- `invocations`, `errors`, `warnings` are dense views / side outputs appended alongside.
 --
 -- Output rules:
 --   * `word` items record: `invocation_ids` (innermost last) and `outermost_invocation_id` (0 if no invocation is open).
@@ -2161,7 +2165,7 @@ local E_MAC_PREFIX_LEN = 4
 --   * Unknown uncounted macros emit one opaque word + one warning. Unknown metadata-backed macros (entry in `word_counts`) emit the declared word count, no warning.
 --   * Cycle detection uses an active DFS stack (`visiting`); a cycle appends a construction error to BOTH the projection errors and the cycle invocation's own errors,
 --     then breaks out without recursing (the cycle entry still receives an invocation ID + paired `invoke_begin` / `invoke_end` items, so the boundary invariant is preserved).
---   * Component declared-count mismatch (declared vs. measured) is a construction error (kind = "count_mismatch"); it is recorded on the invocation record and the pass-level errors list.
+--   * Component declared-count mismatch (declared vs. measured) is a construction error (kind = "count_mismatch"); recorded on the invocation record and pass-level errors list.
 --   * Final boundary check: if any invocation is still open at end of walk, surface a "unbalanced" construction error.
 local function _project_emission_inner(root_body_entry, ctx_table)
 	local items       = {}
@@ -2224,8 +2228,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		immediate_call_text, root_call_text_w)
 		local inv_ids   = open_invocation_ids_snapshot()
 		local outermost = inv_ids[1] or 0
-		-- Markers carry the open invocation stack snapshot but do NOT record `call_text` / `root_call_text` — 
-		-- markers are zero-width and never participate in the per-word call-site attribution.
+		-- Markers carry the open invocation stack snapshot. `call_text` / `root_call_text` belong to words, not markers — markers are zero-width and skip per-word call-site attribution.
 		local it = {
 			kind                     = kind,
 			name                     = name,
@@ -2284,6 +2287,25 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	local function emit_invoke_begin(inv_kind, component_name, call_text,
 		root_call_text, call_path, call_line)
 		next_inv_id = next_inv_id + 1
+		-- Invocation-level debug_skip stamp: Emission pass owns `atom.paths.invocations[*].debug_skip`.
+		-- The stamp is resolved from the `corpus.components[name]` registry (passed in via `ctx_table.components` by `emission_model.run`), 
+		-- NOT from a parallel skip map, source-text re-parse, or second pass over `invocations`.
+		-- Unmarked components stamp `false` (not `nil`) so consumers can dispatch on the boolean without nil checks.
+		--
+		-- The walker has already found the component body in `ctx_table.component_index[component_name]`, so the matching entry MUST exist in `ctx_table.components[component_name]`
+		-- (both registries are populated from the same source by the components pass).
+		-- A missing entry is a corpus-plumbing bug; we fail loudly here rather than silently stamp `false` and mask the regression.
+		local components      = ctx_table.components
+		local component_def   = components and components[component_name] or nil
+		if not component_def then
+			error("duffle.emit_invoke_begin: component " .. string.format("%q", component_name)
+				.. " is present in `component_index` (the walker matched a `mac_" .. component_name .. "()` call) but absent from `components` (the canonical corpus.components registry). "
+				.. "This is a corpus-plumbing bug — the components pass must populate corpus.components[name] for every component it puts in corpus.component_body_index[name]. " 
+				.. "The emission pass refuses to silently stamp `debug_skip = false` for a missing registry entry."
+				, 0
+			)
+		end
+		local debug_skip_stamp = component_def.debug_skip == true
 		local inv = {
 			id              = next_inv_id,
 			parent_id       = 0,         -- patched below by caller
@@ -2295,29 +2317,39 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			call_line       = call_line,
 			def_path        = nil,       -- patched below after component lookup
 			def_line        = nil,
+			-- 0-based emitted-word position. `word_idx` is the monotonic 0-based counter of `word` items emitted so far in this walk — 
+			-- BEFORE this invocation's first word is emitted, it equals the position of the first word inside the invocation. 
+			-- `start_word` (1-based items index of `invoke_begin`) is kept for items-walking consumers (Annotation pass bounds checks),
+			-- but DWARF / provenance rows MUST read `start_pos` because those rows are 1-based over the dense `word_events` stream (which has no `invoke_begin` items).
+			start_pos       = word_idx,
 			start_word      = #items + 1, -- 1-based items index of invoke_begin
-			end_word        = nil,       -- patched by emit_invoke_end
+			end_pos         = nil,        -- patched by emit_invoke_end
+			end_word        = nil,        -- patched by emit_invoke_end
 			word_count      = 0,
+			debug_skip      = debug_skip_stamp,
 			errors          = {},
 		}
 		invocations[#invocations + 1] = inv
-		items[#items + 1] = {
-			kind                     = "invoke_begin",
-			invocation_id            = inv.id,
-			word_index               = word_idx,
-			invocation_ids           = open_invocation_ids_snapshot(),
+		items      [#items       + 1] = {
+			kind           = "invoke_begin",
+			invocation_id  = inv.id,
+			word_index     = word_idx,
+			invocation_ids = open_invocation_ids_snapshot(),
 		}
 		invocation_stack[#invocation_stack + 1] = inv
 		return inv
 	end
 
 	local function emit_invoke_end(inv)
-		inv.end_word = #items + 1   -- 1-based items index of invoke_end
+		-- 0-based emitted-word position of the LAST word inside this invocation.
+		-- After the last body word was emitted, `word_idx` was incremented past it, so `word_idx - 1` is the 0-based position of the last word.
+		inv.end_pos  = word_idx - 1
+		inv.end_word = #items   + 1  -- 1-based items index of invoke_end
 		items[#items + 1] = {
-			kind                     = "invoke_end",
-			invocation_id            = inv.id,
-			word_index               = word_idx,
-			invocation_ids           = open_invocation_ids_snapshot(),
+			kind           = "invoke_end",
+			invocation_id  = inv.id,
+			word_index     = word_idx,
+			invocation_ids = open_invocation_ids_snapshot(),
 		}
 		for i = #invocation_stack, 1, -1 do
 			if invocation_stack[i] == inv then
@@ -2430,7 +2462,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					end
 					inv.word_count = wc_inside
 					-- count_mismatch is a construction error: word_counts["mac_X"] is the declared count populated by the components pass; 
-					-- we compare against the measured word count.
+					-- We compare against the measured word count.
 					local declared = ctx_table.word_counts["mac_" .. bare]
 					if declared and wc_inside ~= declared then
 						local err = {
@@ -2490,7 +2522,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	}
 end
 
---- Project a body string into the canonical per-atom emission projection.
+--- Project a body string into the per-atom emission projection.
 ---
 --- Semantics:
 ---   * Direct one-word tokens (`nop`, `add_ui`, ...): one `word` item, encoder = ident, word_count = 1.
@@ -2507,17 +2539,33 @@ end
 --- Every emitted `word` carries: `i` (0-based word index), `encoder`, `args` (top-level args), `def_path`, `def_line`,
 --- `call_text` (the immediate token spelling), `root_call_text` (outermost `mac_X(...)` text), `word_count` (always 1),
 --- `invocation_ids` (innermost last), `outermost_invocation_id`.
---- Markers carry: `kind`, `name`, `line`, `word_index`, `target` (only for offset kind), plus `invocation_ids` / `outermost_invocation_id` for the open invocation stack at that word.
+--- Markers carry: `kind`, `name`, `line`, `word_index`, `target` (only for offset kind), plus `invocation_ids` / `outermost_invocation_id`
+--- for the open invocation stack at that word.
 ---
 --- @param body_text       string  -- the raw atom body string
 --- @param component_index table   -- bare-name → component record (corpus.component_body_index)
 --- @param word_counts     table   -- macro name → emitted word count
+--- @param components      table   -- bare-name → component definition (corpus.components); REQUIRED — consumed at the invocation-construction site to stamp
+---                                   `invocation.debug_skip`. A missing or non-table `components` raises a fail-loud error rather than silently falling back.
 --- @return EmissionProjection
-function M.project_emission(body_text, component_index, word_counts)
-	-- Project nested invocation ancestry and construction failures.
-	-- The public surface remains `M.project_emission(body_text, ...)`;
-	-- the recursive walk is delegated to `_project_emission_inner` so that component bodies (which arrive as `{body_tokens, body_off,
-	-- line_of, source, declaration}` records from `corpus.component_body_index`) re-enter the same walker with the same shared output state.
+function M.project_emission(body_text, component_index, word_counts, components)
+	-- The recursive walk delegates to `_project_emission_inner` so component bodies (which arrive as
+	-- `{body_tokens, body_off, line_of, source, declaration}` records from `corpus.component_body_index`)
+	-- re-enter the same walker with the same shared output state.
+	--
+	-- The walker is body-relative: it builds `line_of` from `body_text` and stamps body-relative line numbers (1..N)
+	-- into `item.line` and `invocation.call_line`. `passes/emission_model.lua::stamp_root_provenance` performs the single
+	-- conversion from body-relative to physical source line at the close site, using the source's `line_of` closure that
+	-- the pass forwarded. One owner of the line state.
+	if type(components) ~= "table" then
+		error("duffle.project_emission: `components` is required "
+			.. "(bare-name -> component definition, e.g. corpus.components); "
+			.. "got " .. type(components) .. ". "
+			.. "The emission pass MUST forward the corpus registry "
+			.. "so the invocation-construction site can stamp `debug_skip` "
+			.. "without a second pass, source parse, or parallel lookup.",
+			0)
+	end
 
 	if type(body_text) ~= "string" or body_text == "" then
 		-- Empty body: still return a valid (empty) projection.
@@ -2531,17 +2579,18 @@ function M.project_emission(body_text, component_index, word_counts)
 		}
 	end
 
-	local tokens  = M.tokenize_body(body_text)
-	local line_of = M.LineIndex(body_text)
+	local tokens = M.tokenize_body(body_text)
 	return _project_emission_inner({
 		body_tokens = tokens,
 		body_off    = 0,
-		line_of     = line_of,
+		line_of     = M.LineIndex(body_text),
 		source      = "",
 		declaration = 0,
-	}, {
+	},
+	{
 		component_index = component_index or {},
 		word_counts     = word_counts     or {},
+		components      = components,
 	})
 end
 

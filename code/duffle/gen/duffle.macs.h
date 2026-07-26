@@ -9,6 +9,12 @@
 #define WORD_COUNT(name, count)  enum { words_##name = (count) };
 #endif
 
+/* atom_dbg_skip */
+/* ---------------------------------------------------------------------------
+ *  MACRO ATOM Components (Reusable Assembly Components)
+ *  These do NOT yield. They are expanded inline inside Tape Atoms.
+ * ---------------------------------------------------------------------------*/
+// The 'Yield' sequence for Tape Atoms (mac_yield).
 #define mac_yield(...) \
 	load_word(R_AtomJmp, R_TapePtr, 0) \
 ,	add_ui_self(         R_TapePtr, S_(MipsCode)) \
@@ -16,6 +22,7 @@
 ,	nop
 WORD_COUNT(mac_yield, 4)
 
+/* atom_dbg_skip */
 /* Words: 3; Loads 3 S2 indices from the face array */
 #define mac_load_tri_indices(...) \
 	load_half_u(R_T0, R_FaceCursor, 0 * S_(S2)) \
@@ -23,6 +30,8 @@ WORD_COUNT(mac_yield, 4)
 ,	load_half_u(R_T2, R_FaceCursor, 2 * S_(S2))
 WORD_COUNT(mac_load_tri_indices, 3)
 
+/* atom_dbg_skip */
+/* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
 #define mac_gte_load_tri_verts(...) \
 	shift_lleft(R_AT, R_T0, v3s2_byteoff) \
 ,	add_u_self(R_AT, R_VertBase) \
@@ -80,10 +89,12 @@ WORD_COUNT(mac_insert_ot_tag_g4, 11)
 ,	store_word(  R_AT, R_PrimCursor, (off))
 WORD_COUNT(mac_pack_color_word, 3)
 
+/* atom_dbg_skip */
 #define mac_format_f3_color(r, g, b) \
 	mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b)
 WORD_COUNT(mac_format_f3_color, 3)
 
+/* atom_dbg_skip */
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
 #define mac_gte_store_f3_post_rtpt(...) \
@@ -99,6 +110,7 @@ WORD_COUNT(mac_gte_store_f3_post_rtpt, 3)
 ,	mac_pack_color_word(O_(Poly_G4,c3), 0,               r3,g3,b3)
 WORD_COUNT(mac_format_g4_color, 12)
 
+/* atom_dbg_skip */
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
  * G4 triangle portion to p0/p1/p2.
  * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). 
@@ -113,6 +125,7 @@ WORD_COUNT(mac_format_g4_color, 12)
 ,	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2))
 WORD_COUNT(mac_gte_store_g4_p012_post_rtpt_pre_rtps, 3)
 
+/* atom_dbg_skip */
 /* Words: 1; Stores the V3 screen coord to the G4's p3 slot.
  * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its
  * single-vertex result to SXY2; SXY0 still holds v0.screen from the

@@ -1,12 +1,13 @@
 --- passes/dwarf_injection.lua — Per-atom DWARF injection for tape-atom step-debug.
 ---
---- Reads the post-link ELF directly (lfs + io.open; walks the ELF32 section header table to find
+--- Reads the post-link ELF directly (io.open; walks the ELF32 section header table to find
 --- `.debug_info` + `.debug_abbrev` + `.debug_str` + `.debug_line` + `.debug_aranges` + `.debug_rnglists`),
 --- APPENDS synthetic DWARF line-program sequences for every `code_<name>` atom, EXTENDS the `.debug_aranges`
---- and main-CU range tables with the atom ranges, and APPENDS a new compilation unit to `.debug_info` with
---- per-atom `DW_TAG_subprogram` + per-wave-context-reg `DW_TAG_variable` entries 
---- (so `R_PrimCursor` etc. appear as atom-scoped locals in VSCode's Variables pane). 
---- Writes the new section data to `<out_root>/<basename>.dwarf_*.bin` plus deterministic `<out_root>/<basename>.gdbinit` skip commands.
+--- and main-CU range tables with the atom ranges, and INSERTS synthetic atom/component DIE children into the
+--- existing main compilation unit in `.debug_info` (no second compilation unit).
+--- Per-atom `DW_TAG_subprogram` + per-register `DW_TAG_variable` entries make
+--- `RR_PrimCursor` and the other opted-in aliases appear as atom-scoped locals in VSCode's Variables pane.
+--- Writes the new section data to `<out_root>/<basename>.dwarf_*.bin`.
 ---
 --- The `build_psyq.ps1` post-link hook then splices those `.bin` files into a copy of the ELF via:
 ---   mipsel-none-elf-objcopy --update-section .debug_info=<bin>     <elf>
@@ -40,12 +41,7 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- (read_elf_sections, nm, source-map parser, LE byte r/w). `list_dir` is the general directory primitive in duffle.lua.
 local elf_dwarf = require("elf_dwarf")
 
--- Per-word body lines come from the canonical `atom.paths` projection.
-
-local lfs = require("lfs")
-
 -- File-scope aliases to elf_dwarf helpers; the canonical implementations live in scripts/elf_dwarf.lua.
--- ELF decoding helpers come from `elf_dwarf.lua`.
 local find_abbrev_table_end = elf_dwarf.find_abbrev_table_end
 -- Local DWARF opcode constants + length-prefixed integers (uleb128 + sleb128 encoders are in elf_dwarf.lua).
 local uleb128 = elf_dwarf.uleb128
@@ -85,8 +81,7 @@ local ATOM_SOURCE_FILE_INDEX = 11
 -- without the prefix, gdb's `print R_PrimCursor` resolves to the enum constant, not to this DWARF variable.
 -- With `set print enum on`, gdb displays the enum identifier, so the Watch panel would show `R_PrimCursor = R_PrimCursor` instead of the register value.
 -- Each RR_<R_Name>'s DW_OP_regN uses the alias's `code` as N.
--- DW_OP_bregN would describe a memory location addressed from a register; 
--- the breg form would make gdb dereference the atom register value rather than display it.
+-- DW_OP_bregN would describe a memory location addressed from a register; the breg form would make gdb dereference the atom register value rather than display it.
 
 -- New abbreviation codes (100+ to avoid collision with gcc's existing 1-60+ codes).
 local ABBREV_CU          = 0x64   -- 100: DW_TAG_compile_unit
@@ -160,12 +155,16 @@ local DW_AT_decl_line        = 0x3B   -- DWARF5 §7.7.1: DW_AT_decl_line
 
 -- File index lookup table for the existing main line unit (Unit 2).
 -- Provenance paths come back with mixed slashes; we normalize to basename and look up against the line unit's actual file table.
--- Current scope has two provenance basenames: hello_gte_tape.c (the atom's call site) and lottes_tape.h (the component definition). 
--- Both live in the existing gcc-generated line unit;
--- their 1-based indices are stable across rebuilds because the include order in code/gte_hello/hello_gte.c determines the unit's file table.
+-- Current scope has two provenance basenames: hello_gte_tape.c (the atom's call site) and lottes_tape.h (the component definition).
+-- Both live in the existing gcc-generated line unit; their 1-based indices are stable across rebuilds because the include order
+-- in code/gte_hello/hello_gte.c determines the unit's file table.
+-- gcc only adds a file to the line table when it has actual line-number entries;
+-- headers that are pure macros/typedefs (dsl.h, memory.h, math.h, mips.h, gp.h, gte.h, etc.)
+-- never appear. lottes_tape.h is the FIRST include that emits line entries
+-- (MipsAtomComp_ declarations), so it is the FIRST entry after the primary file.
 local PROVENANCE_BASENAME_TO_FILE_INDEX = {
 	["hello_gte_tape.c"] = ATOM_SOURCE_FILE_INDEX,  -- = 11
-	["lottes_tape.h"]    = 4,
+	["lottes_tape.h"]    = 2,
 }
 
 --- Resolve an absolute provenance path to the line-unit file index used by the emitting line program.
@@ -205,7 +204,7 @@ local DW_FORM_udata          = 0x0F   -- ULEB128 (DW_AT_byte_size for struct_typ
 local DW_FORM_implicit_const = 0x21   -- DWARF5 §7.5.6: abbrev declaration carries a SLEB constant (used by the abbrev-table walker)
 local DW_FORM_sec_offset     = 0x17   -- 4-byte section-relative offset (into .debug_loclists / .debug_rnglists)
 
--- DW_OP_reg0 + DW_OP_piece are declared canonically above (lines 114-116) alongside the other DWARF5 §7.7.3 loclist opcodes.
+-- DW_OP_reg0 + DW_OP_piece are declared above (lines 114-116) alongside the other DWARF5 §7.7.3 loclist opcodes.
 
 
 local DW_ATE_unsigned        = 0x07   -- DWARF5 §7.8.1: DW_ATE_unsigned (used for U4 base type)
@@ -214,8 +213,8 @@ local DW_ATE_unsigned        = 0x07   -- DWARF5 §7.8.1: DW_ATE_unsigned (used f
 -- No DW_AT_language attribute is emitted (see build_debug_info_section's abbrev 100).
 
 -- R_<name> → MIPS GPR lookups go through the merged register_alias_registry
--- (collected by collect_per_source_registries from ctx.sources[*].scan.register_alias_registry).
--- Aliases without an `atom_reg` opt-in are absent from the registry, which means they are NOT debug-visible (no fallback GPR).
+-- (collected by collect_per_source_registries from `corpus.register_alias_registry`).
+-- Aliases without an `atom_reg` opt-in are absent from the registry; absent aliases are not debug-visible.
 -- See the precedence chain in build_inserted_children for the per-alias type resolution.
 
 -- Build the .debug_loclists section for every rbind atom.
@@ -226,17 +225,15 @@ local DW_ATE_unsigned        = 0x07   -- DWARF5 §7.8.1: DW_ATE_unsigned (used f
 -- This is a conservative approximation that always reads the correct GPR value once the first load has retired (load_pc + 8).
 --
 -- `tape_alias` (default: "R_TapePtr") names the wave-runtime pointer register whose value is the tape address.
--- The GPR integer comes from the merged registry; if the alias is absent, this function fails loud 
--- (the build was misconfigured; rbind atoms depend on R_TapePtr being in the registry for their piece-chain DW_OP_breg<N> location).
+-- The GPR integer comes from the merged registry; absent alias fails loud — rbind atoms depend on R_TapePtr being in the registry for their piece-chain DW_OP_breg<N> location.
 -- @param atom_table table[]  -- list of atoms with .rbind set
 -- @param registries table    -- merged registries from collect_per_source_registries
 -- @return string             -- section bytes
 local function build_debug_loclists_section(atom_table, registries)
 	registries = registries or {}
 	-- R_TapePtr comes from the merged register_alias_registry (only present if the user opted it in via `#define atom_reg` in lottes_tape.h).
-	-- When absent we emit just the section terminator (a single DW_LLE_end_of_list byte);
-	-- the .debug_loclists section MUST not be empty for the linker, and `bind_args` will be emitted with no loclist PC range
-	-- (readelf will display it as having no .debug_loclists entries).
+	-- When absent we emit just the section terminator (a single DW_LLE_end_of_list byte); the .debug_loclists section stays non-empty so the linker accepts it,
+	-- and `bind_args` will be emitted with no loclist PC range (readelf will display it as having no .debug_loclists entries).
 	local tape_alias_entry = registries.register_alias_registry and registries.register_alias_registry["R_TapePtr"]
 	local tape_reg = tape_alias_entry and tape_alias_entry.code
 	local parts = {}
@@ -311,8 +308,7 @@ local function compute_loclists_offsets(atom_table)
 		if atom.rbind then
 			offsets[atom.name] = cursor
 			local n_fields = #atom.rbind.fields
-			-- Sum the actual size of each tape piece based on the field's offset, not an assumed constant.
-			-- The expression below mirrors what build_debug_loclists_section produces:
+			-- Sum the actual size of each tape piece based on the field's offset (not an assumed constant); this expression mirrors what build_debug_loclists_section produces:
 			--   1 (DW_LLE_start_length) + 4 (PC) + 1 (uleb length prefix) + sum(tape_piece_size(field.offset))
 			--   + 1 (DW_LLE_start_length) + 4 (transition_pc) + 1 (uleb length prefix) + n_fields * 3 (gpr pieces)
 			--   + 1 (DW_LLE_end_of_list)
@@ -345,52 +341,11 @@ local DEFAULT_BASENAME = "hello_gte"
 
 --- @class DwarfInjectionCtx
 --- @field flags    table   -- ctx.flags; reads flags.elf_path + flags.dwarf_injection
---- @field sources  table[] -- source files with scan.skip_over associations
+--- @field sources  table[] -- source files (reserved for future per-source state)
 --- @field out_root string  -- output root (e.g. "build/gen")
 --- @field basename string  -- input ELF basename (default "hello_gte")
 
---- Normalize a source path for GDB linespecs and component-association keys.
---- GDB accepts forward slashes on Windows; absolute paths avoid cwd-dependent sidecars and match provenance contract.
---- @param path string
---- @return string
-local function normalize_debug_path(path)
-	return duffle.to_absolute_path(path):gsub("\\", "/")
-end
-
---- Consume the per-source scanner associations without naming any atom or component in production.
---- Whole atoms remain symbol-keyed; components are file-qualified internally so a source marker associates
---- with its exact component definition even though GDB 12 requires function-only skip entries for the resulting synthetic inline frame.
---- Iterates `corpus.source_order` (the canonical corpus projection).
---- @param corpus table  -- the canonical corpus from `ctx.shared.corpus`
---- @return table  -- {atoms = {[symbol] = association}, components = {[file|name] = association}}
-local function collect_skip_over(corpus)
-	local skip_over = { atoms = {}, components = {} }
-	for _, src in ipairs((corpus and corpus.source_order) or {}) do
-		local scan_skip = src.scan and src.scan.skip_over
-		if scan_skip then
-			for atom_name, association in pairs(scan_skip.atoms or {}) do
-				skip_over.atoms[atom_name] = {
-					name        = atom_name,
-					source_path = normalize_debug_path(src.path),
-					association = association,
-				}
-			end
-			for component_name, association in pairs(scan_skip.components or {}) do
-				local source_path = normalize_debug_path(src.path)
-				-- component_skip_key (the lower() .. "\0" .. component_name part) inlined at this single call site
-				-- (no other callers remain after pass 17).
-				skip_over.components[source_path:lower() .. "\0" .. component_name] = {
-					name        = component_name,
-					source_path = source_path,
-					association = association,
-				}
-			end
-		end
-	end
-	return skip_over
-end
-
---- Project the canonical corpus registries into the shape the section builders expect.
+--- Project the corpus registries into the shape the section builders expect.
 --- The corpus already owns the merged `register_alias_registry`, `type_name_registry`, `atom_views`, `atom_ctxs`, `atom_phases`, and `atom_infos` projections (populated by `passes.scan_source.lua`).
 --- This helper just references them so the rest of `dwarf_injection.lua` keeps the same `registries.<key>` access shape it has always used.
 ---
@@ -399,7 +354,7 @@ end
 ---
 --- When two sources register the same key, the last-writer wins (later sources override earlier).
 --- Today only one source declares wave-context enums, so collisions are absent.
---- @param corpus table  -- the canonical corpus from `ctx.shared.corpus`
+--- @param corpus table  -- the corpus from `ctx.shared.corpus`
 --- @return table  -- {
 ---   register_alias_registry = {[R_Name]    = AliasEntry},
 ---   type_name_registry      = {[T]         = TypeEntry},
@@ -407,7 +362,7 @@ end
 --- }
 local function collect_per_source_registries(corpus)
 	-- The corpus already holds the merged registries; reference them directly.
-	-- No per-source iteration is needed because `passes.scan_source.lua` has already folded every per-source scan into the canonical tables.
+	-- `passes.scan_source.lua` has already folded every per-source scan into the corpus tables, so no per-source iteration is needed here.
 	-- `atom_infos` is preserved byte-for-byte with no filtering; consumers consult `corpus.atoms_by_name`
 	-- themselves when they need to know whether a particular atom_info corresponds to an actual atom record.
 	local atom_infos_list = {}
@@ -429,37 +384,8 @@ local function collect_per_source_registries(corpus)
 	}
 end
 
---- Render deterministic debugger skip commands. 
---- Ordering is stable by category: exact atom symbols first (lexicographic), then exact component function names (lexicographic full command).
---- Atom commands come from the matched nm/source-map table so the emitted name is the actual ELF symbol.
---- The scanner tables and command set both deduplicate repeated source observations.
---- @param skip_over  table
---- @param atom_table table[] -- nm/source-map cross-reference; names are actual ELF symbols
---- @return string
-local function build_gdbinit(skip_over, atom_table)
-	local commands = {}
-	local atom_names = {}
-	for _, atom in ipairs(atom_table) do
-		if atom.skip_over then atom_names[#atom_names + 1] = atom.name end
-	end
-	table.sort(atom_names)
-	for _, atom_name in ipairs(atom_names) do
-		commands[#commands + 1] = "skip function " .. atom_name
-	end
-
-	local component_commands = {}
-	for _, component in pairs(skip_over.components) do
-		component_commands[#component_commands + 1] = "skip function mac_" .. component.name
-	end
-	table.sort(component_commands)
-	local prior = nil
-	for _, command in ipairs(component_commands) do
-		if command ~= prior then commands[#commands + 1] = command end
-		prior = command
-	end
-
-	return table.concat(commands, "\n") .. "\n"
-end
+-- Skip semantics live in two DWARF projections: `atom.debug_skip` makes a whole atom opaque, and `invocation.debug_skip`
+-- suppresses statement rows and inline DIEs for a selected invocation. No debugger command file is emitted by this pass.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LEB128 encoders
@@ -472,7 +398,6 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 -- DWARF line-program encoder
 -- ════════════════════════════════════════════════════════════════════════════
-
 --- Build the byte sequence for ONE atom's line program:
 ---   DW_LNE_set_address(addr)
 ---   [entry 1 emission]
@@ -482,7 +407,7 @@ end
 ---   DW_LNE_end_sequence
 ---
 --- Each "entry emission" emits one or more rows at the same PC, tracking the source state {file_idx, line}.
---- State transitions emit DW_LNS_set_file + DW_LNS_advance_line as needed; 
+--- State transitions emit DW_LNS_set_file + DW_LNS_advance_line as needed;
 --- same-state transitions emit only the row (copy).
 ---
 --- Entry rules:
@@ -498,11 +423,16 @@ end
 ---   - Extended opcode marker byte = 0.
 ---   - Extended opcodes: marker byte + ULEB128 size + sub_opcode + payload.
 ---
---- Statement-state rules:
+--- Statement-state rules (atom_dbg_step_ux_20260725 — per-row policy):
 ---   * A marked whole atom emits one opaque is_stmt=false range row and no nested component rows; its subprogram symbol/range remains available.
----   * A marked component keeps its first-word call-site row true, toggles only the definition row/range false, and restores before the next unmarked row.
+---   * Per-row policy at every other PC:
+---       - Call-site row of any invocation's first word:  is_stmt = true   (unconditional; `want_call = true`).
+---       - Body row of any invocation (first or subsequent): is_stmt = not inv.debug_skip  (`want_body = not inv.debug_skip`).
+---       - RAW word (no containing invocation):            is_stmt = true   (unconditional).
+---   * The previous per-word `marked_idx` ancestor walk (Tasks 6+7) and the GDB 12 zero-instruction-prologue duplicate row at atom entry are DELETED; the new
+---     first-word emission IS the entry statement.
 ---   * Whole-atom suppression wins over component markers; no nested inversion.
---- @param atom table  -- {name, addr, size_bytes, words, entries, invocations?, skip_over?}
+--- @param atom table  -- {name, addr, size_bytes, words, entries, invocations, debug_skip, word_events}
 --- @return string
 local function build_atom_sequence(atom)
 	local function set_address(addr)
@@ -526,12 +456,10 @@ local function build_atom_sequence(atom)
 
 	if not atom.entries or #atom.entries == 0 then return set_address(atom.addr) .. end_sequence() end
 
-	-- A jump-threaded atom is reached by `jr`, not a C call.
-	-- GDB therefore cannot apply the parent `skip function` entry before descending into a visible child inline frame.
-	-- Make an explicitly marked atom DWARF-opaque:
-	-- one non-statement row covers its complete address range, with no per-word or component source transitions.
+	-- Whole-atom skip (the `atom.debug_skip` field, set by scan_source.run).
+	-- Make the atom DWARF-opaque: one non-statement row covers the complete address range; per-word and component source transitions are skipped.
 	-- The atom's subprogram DIE remains, so symbolic lookup, explicit address breakpoints, and stepi are unaffected.
-	if atom.skip_over then
+	if atom.debug_skip then
 		return table.concat({
 			set_address(atom.addr),
 			set_file(ATOM_SOURCE_FILE_INDEX),
@@ -544,17 +472,40 @@ local function build_atom_sequence(atom)
 		})
 	end
 
-	-- Find which invocation each entry belongs to (if any).
-	-- Returns the invocation record or nil. Pre-computed once so we don't rescan per emitted row.
-	local function inv_for_idx(idx)
-		if not atom.invocations then return nil end
-		for _, inv in ipairs(atom.invocations) do
-			-- inv.start_pos / inv.end_pos are 0-based .word positions; entries are 1-based.
+	-- Per-word invocation ancestry (atom_dbg_step_ux_20260725):
+	--   * `innermost_idx[idx]` = deepest active invocation at idx (nil for RAW words). Used to pick body_lines[k] for body rows.
+	--   * `ancestry_idx[idx]`  = full active ancestry at idx, ordered outermost-first (widest range first; innermost = last entry).
+	--                            Consumed at the first word of every invocation (atom entry + every `idx == inv.start_pos + 1`).
+	--                            Drives the nested-display rule: the outer invocation's call-site + body_lines[1] rows are
+	--                            re-emitted at the inner's first word PC so the debugger displays the outer body line (not
+	--                            the inner body line) when stepping into the inner. PROBLEM B fix.
+	--
+	-- `start_pos` / `end_pos` are 0-based emitted-word positions stamped at construction/close time by
+	-- `duffle.emit_invoke_begin` / `duffle.emit_invoke_end`; missing values are a corpus-plumbing bug, so we let the index
+	-- expression fail loud with arithmetic-on-nil rather than silently producing `0+1=1` for a missing start_pos.
+	--
+	-- The previous per-word `marked_idx` array (Tasks 6+7) is DELETED: a marked invocation's body rows are now driven
+	-- by the per-invocation `inv.debug_skip` predicate at the emit site, not by a precomputed ancestry flag.
+	local invs          = atom.invocations or {}
+	local innermost_idx = {}
+	local ancestry_idx  = {}
+	for idx = 1, #atom.entries do
+		innermost_idx[idx] = nil
+		ancestry_idx[idx]  = {}
+		local active = {}
+		for _, inv in ipairs(invs) do
 			if idx >= inv.start_pos + 1 and idx <= inv.end_pos + 1 then
-				return inv
+				active[#active + 1] = inv
 			end
 		end
-		return nil
+		-- Sort outermost-first (widest range first); innermost is the LAST entry (narrowest range).
+		table.sort(active, function(a, b)
+			return (a.end_pos - a.start_pos) > (b.end_pos - b.start_pos)
+		end)
+		ancestry_idx[idx] = active
+		if #active > 0 then
+			innermost_idx[idx] = active[#active]
+		end
 	end
 
 	local parts = {
@@ -562,7 +513,7 @@ local function build_atom_sequence(atom)
 	}
 
 	-- Source state tracker: emits set_file + advance_line only on transitions, keeps bytes minimal.
-	-- Both fields stay in sync with what we emit so we never duplicate a set_file or skip a state-change emit.
+	-- Both fields stay in sync with what we emit, so we duplicate no set_file and skip no state-change emit.
 	local cur_file = nil  -- line-state.file_idx (nil = uninitialized)
 	local cur_line = 1    -- line-state.line starts at 1 (per DWARF spec)
 	local is_stmt  = true -- main line unit default_is_stmt; every sequence ends restored
@@ -589,87 +540,103 @@ local function build_atom_sequence(atom)
 		parts[#parts + 1] = copy_op()
 	end
 
-	-- Whole-atom suppression wraps the independent sequence itself.
-	-- File/line state setup follows while is_stmt is already false; the matching restore is emitted after the final row below.
-	if atom.skip_over then set_statement_state(false) end
-
-	-- --- Atom entry (idx 1) -------------------------------------------------
-	-- Determine entry-1's primary row (always the call-site file/line;
-	-- we may emit a second row immediately after if entry 1 is also a component invocation's first word).
-	local inv1    = inv_for_idx(1)
-	local entry_1 = atom.entries[1]
-	-- The atom body's own source file (the call site for any mac_X(...) inside it).
 	local call_file_idx = ATOM_SOURCE_FILE_INDEX
 
-	-- Primary row: call site at atom start.
-	-- Capture its (file, line) so we can re-emit it as the GDB 12 zero-instruction-prologue marker below.
-	local entry_1_call_file = call_file_idx
-	local entry_1_call_line = (inv1 and inv1.call_line) or entry_1.line
-	local atom_is_stmt      = not atom.skip_over
+	-- --- Atom entry (idx 1) -------------------------------------------------
+	local entry_1         = atom.entries[1]
+	local entry_1_ancestry = ancestry_idx[1]
 
-	-- Primary row: call site at atom start.
-	emit_row(entry_1_call_file, entry_1_call_line, atom_is_stmt)
-
-	-- If entry 1 is the first word of a component invocation, emit the component-definition row at the same PC immediately after.
-	-- The def line is always a statement target unless the inv is explicitly skip-over (atom_dbg_skip_over);
-	-- the whole-atom skip path takes the early-return at line ~497 above so atom_is_stmt is irrelevant here.
-	-- For the body row, prefer `body_lines[1]` (the actual source line of the first body word in the macro's expansion)
-	-- over `comp_line` (the macro signature line).
-	-- Canonical contract: the emission-model pass populates `body_lines` for every invocation;
-	-- absence now is an error (older emitters / external macros are no longer supported).
-	if inv1 and 1 == inv1.start_pos + 1 then
-		local comp_file_idx_1 = resolve_provenance_file_index(inv1.comp_file)
-		assert(inv1.body_lines, "missing body_lines: emitter did not run emission-model")
-		local body_line_1     = inv1.body_lines[1]
-		emit_row(comp_file_idx_1, body_line_1, not inv1.skip_over)
+	-- atom_dbg_step_ux_20260725: the call-site row at atom entry is ALWAYS is_stmt=true
+	-- (PROBLEM A fix). The previous `not marked_idx[1]` predicate suppressed this row when any
+	-- ancestor was marked; that behavior made source-level stepping skip past the call line entirely.
+	-- The new contract is `want_call = true` unconditionally.
+	--
+	-- If atom entry 1 starts inside an invocation, walk the ancestry and emit a call-site row + (when
+	-- applicable) a body_lines[1] row for every active ancestor. For a non-nested invocation this is
+	-- just the one pair; for nested invocations this emits the outer call-site + body_lines[1] rows
+	-- BEFORE the inner pair so the debugger displays the outer body line at the inner's first word
+	-- (PROBLEM B fix).
+	--
+	-- A marked OUTERMOST ancestor's body_lines[1] row is suppressed at this PC (the existing full-skip
+	-- contract is preserved for the marked outer range); its call-site row IS still emitted as a
+	-- statement. Marked INNER ancestors always emit their body_lines[1] row with is_stmt=false
+	-- (the per-invocation `want_body = not inv.debug_skip` predicate).
+	if #entry_1_ancestry == 0 then
+		-- RAW word at atom entry: single call-site row, always a statement target.
+		emit_row(call_file_idx, entry_1.line, true)
+	else
+		-- Atom starts in an invocation. Walk the ancestry outermost-first.
+		-- Each ancestor emits one call-site row (statement) and one body_lines[1] row
+		-- (statement iff unmarked; suppressed for marked outermost).
+		for ai, anc in ipairs(entry_1_ancestry) do
+			assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
+			assert(anc.body_lines[1] ~= nil
+				, "dwarf_injection: body_lines[1] missing on first-word entry for inv=" .. tostring(anc.component_name))
+			assert(anc.call_path and anc.call_path ~= ""
+				, "dwarf_injection: inv.call_path is missing on invocation " .. tostring(anc.component_name) .. "; emitter did not run emission-model.")
+			emit_row(resolve_provenance_file_index(anc.call_path), anc.call_line,    true)
+			local is_outermost = (ai == 1)
+			if not (is_outermost and anc.debug_skip) then
+				emit_row(resolve_provenance_file_index(anc.def_path),  anc.body_lines[1], not anc.debug_skip)
+			end
+		end
 	end
-
-	-- GDB 12 zero-instruction-prologue marker: duplicate of the PRIMARY entry-1 emission (the call-site row).
-	-- We must explicitly restore the source state to (call_file, call_line) before emitting the duplicate,
-	-- otherwise the duplicate lands at whatever state we ended entry-1 in (the component row, if entry 1 is an invocation start), 
-	---which would attach the marker to the wrong source statement.
-	---
-	-- Only emitted at atom entry, NOT at every component-invocation start.
-	emit_row(entry_1_call_file, entry_1_call_line, atom_is_stmt)
 
 	-- --- Subsequent entries (idx 2..N) --------------------------------------
 	for idx = 2, #atom.entries do
 		local entry = atom.entries[idx]
-		local inv   = inv_for_idx(idx)
+		local inv   = innermost_idx[idx]
 
 		-- Advance PC by 1 .word (4 bytes on MIPS).
 		parts[#parts + 1] = advance_pc(MIPS_BYTES_PER_WORD)
 
 		if inv and idx == inv.start_pos + 1 then
-			-- First word of a component invocation: emit TWO rows at this PC.
-			-- 1) call-site row remains a statement target unless the whole atom is marked.
-			emit_row(call_file_idx, inv.call_line, atom_is_stmt)
-			-- 2) component body row at this PC.
-			-- Prefer `body_lines[1]` over `comp_line` so gdb's `step` lands on the macro's actual body line (not the signature line above `{ ... }`).
-			-- Canonical contract: `body_lines` is always populated by the emission-model pass.
-			local body_file_idx = resolve_provenance_file_index(inv.comp_file)
-			assert(inv.body_lines, "missing body_lines: emitter did not run emission-model")
-			local body_line_1   = inv.body_lines[1]
-			emit_row(body_file_idx, body_line_1, not inv.skip_over)
+			-- First word of the innermost active invocation (PROBLEM B fix — nested-display rule).
+			-- Walk the active ancestry outermost-first; for each ancestor emit a call-site row
+			-- (statement) + a body_lines[1] row. The inner-most invocation's call-site + body pair
+			-- become the LAST two rows in the sequence. Marked outermost ancestors suppress their
+			-- body_lines[1] row at this PC (the existing full-skip contract is preserved for the
+			-- marked outer range); all OTHER ancestors emit body_lines[1] with is_stmt = not debug_skip.
+			--
+			-- This re-emits the outer ancestor's call-site + body rows at the inner's first word PC
+			-- for debugger context: source-level stepping now shows the outer body line (not the
+			-- inner body line) when stepping into the inner. PROBLEM B fix.
+			local ancestry = ancestry_idx[idx]
+			for ai, anc in ipairs(ancestry) do
+				assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
+				assert(anc.body_lines[1] ~= nil
+					, string.format("missing body_lines[1] for inv=%s start_pos=%d len=%d",
+						anc.component_name, anc.start_pos, #(anc.body_lines or {})))
+				assert(anc.call_path and anc.call_path ~= ""
+					, "dwarf_injection: inv.call_path is missing on invocation " .. tostring(anc.component_name) .. "; emitter did not run emission-model.")
+				emit_row(resolve_provenance_file_index(anc.call_path), anc.call_line,    true)
+				local is_outermost = (ai == 1)
+				if not (is_outermost and anc.debug_skip) then
+					emit_row(resolve_provenance_file_index(anc.def_path),  anc.body_lines[1], not anc.debug_skip)
+				end
+			end
 		elseif inv then
-			-- Subsequent word of an invocation: 1-based offset into body_lines:
-			-- word 1 of the invocation corresponds to body_lines[1], word 2 -> body_lines[2], etc.
-			-- 1-based offset = idx - inv.start_pos (since idx = inv.start_pos + i for the i-th body word).
-			-- Canonical contract: `body_lines` is always populated by the emission-model pass.
-			local body_file_idx = resolve_provenance_file_index(inv.comp_file)
-			local words_into    = idx - inv.start_pos  -- 1-based word position in invocation
+			-- Subsequent body word of the innermost active invocation: `body_lines[k]` is indexed by the 1-based offset of this word inside the invocation.
+			-- Both `idx` (1-based DWARF entry index) and `inv.start_pos` (0-based emitted-word position stamped at `emit_invoke_begin`) come from the same
+			-- monotonic counter, so `idx - inv.start_pos` is exactly the 1-based k (the first word of the invocation has `idx == inv.start_pos + 1`, hence `k == 1`).
+			-- atom_dbg_step_ux_20260725: `want_body = not inv.debug_skip`. The previous `want = not marked_idx[idx]`
+			-- (which suppressed ALL body rows when any ancestor was marked) is replaced by the per-invocation
+			-- predicate. Marked invocations emit non-statement body rows at every body word; unmarked
+			-- invocations emit statement body rows.
 			assert(inv.body_lines, "missing body_lines: emitter did not run emission-model")
-			local body_line_i   = inv.body_lines[words_into]
-			emit_row(body_file_idx, body_line_i, not inv.skip_over)
+			local words_into = idx - inv.start_pos
+			assert(inv.body_lines[words_into] ~= nil
+				, string.format("missing body_lines[%d] for inv=%s start_pos=%d len=%d idx=%d",
+					words_into, inv.component_name, inv.start_pos, #(inv.body_lines or {}), idx))
+			emit_row(resolve_provenance_file_index(inv.def_path),       inv.body_lines[words_into], not inv.debug_skip)
 		else
-			-- RAW word: single call-site row. emit_row restores is_stmt after a selected component range before exposing this adjacent row.
-			emit_row(call_file_idx, entry.line, atom_is_stmt)
+			-- RAW word: single call-site row, always a statement target (the word itself is unmarked).
+			emit_row(call_file_idx, entry.line, true)
 		end
 	end
 
 	-- Every sequence starts from default_is_stmt=true.
-	-- Restore that state before DW_LNE_end_sequence so a marked whole atom has explicit bounded toggles
-	-- and no state can leak to a following independent atom sequence.
+	-- Restore that state before DW_LNE_end_sequence: a marked whole atom keeps explicit bounded toggles and no state leaks to the following independent atom sequence.
 	set_statement_state(true)
 	parts[#parts + 1] = end_sequence()
 	return table.concat(parts)
@@ -682,30 +649,33 @@ end
 --- Build the atom table the section builders consume.
 --- Cross-references nm symbols with `corpus.atoms_by_name` and derives word rows + format-1 outermost invocation rows from `atom.paths`.
 ---
---- The atom table is built entirely from in-memory state — disk source-map and provenance text artifacts are NOT consulted.
---- Those artifacts are diagnostic outputs, not semantic inputs; the DWARF injection pass must remain correct regardless of their on-disk content.
+--- The atom table is built entirely from in-memory state. Disk source-map and provenance text artifacts are diagnostic outputs, not semantic inputs;
+--- the DWARF injection pass must remain correct regardless of their on-disk content.
+---
+--- Skip-state ownership (Tasks 6+7):
+---   * Whole-atom skip is read from the `atom.debug_skip` field (stamped by `scan_source.run` when the bare `atom_dbg_skip` marker
+---     immediately precedes the declaration; `corpus.atoms_by_name` exposes it directly).
+---   * Invocation skip is read from `atom.paths.invocations[*].debug_skip` (stamped by `duffle.emit_invoke_begin`
+---     from `corpus.components[name].debug_skip`, no second-pass, no source parse, no parallel lookup).
 ---
 --- The result shape (one entry per ELF symbol matched against the corpus):
----   `{name, addr, size_bytes, words, entries, invocations, skip_over?}`
+---   `{name, addr, size_bytes, words, entries, invocations, debug_skip?}`
 --- where:
 ---   * `entries[i].pos`  — 0-based `.word` position (matches the source-map format-1 row layout; downstream DWARF builders compare against this).
 ---   * `entries[i].line` — call-site line for that word.
 ---   * `entries[i].text` — trimmed encoder token text from `atom.paths.word_events`.
----   * `invocations[j]` — one entry per format-1 outermost `mac_X(...)` invocation with 
----     `{comp_name, call_file, call_line, comp_file, comp_line, start_pos, end_pos, body_lines, skip_over}`. `body_lines[k]`
+---   * `invocations[j]` — one entry per format-1 outermost `mac_X(...)` invocation with
+---     `{comp_name, call_file, call_line, comp_file, comp_line, start_pos, end_pos, body_lines, debug_skip}`. `body_lines[k]`
 ---     is the k-th word's source line within the component body.
 ---
---- @param corpus    table -- the canonical corpus from `ctx.shared.corpus`
+--- @param corpus    table -- the corpus from `ctx.shared.corpus`
 --- @param addrs     table -- ELF symbols keyed by atom name from `elf_dwarf.read_nm`
---- @param skip_over table -- {atoms = {[symbol] = association}, components = {[file|name] = association}}
---- @return table[]  -- list of {name, addr, size_bytes, words, entries, invocations, skip_over?}
-local function build_atom_table(corpus, addrs, skip_over)
-	-- Cross-ref: keep only atoms present in BOTH the nm symbol table AND
-	-- the canonical corpus projection. Output is sorted by ascending addr.
+--- @return table[]  -- list of {name, addr, size_bytes, words, entries, invocations, debug_skip?}
+local function build_atom_table(corpus, addrs)
+	-- Cross-ref: keep only atoms present in BOTH the nm symbol table AND `corpus.atoms_by_name`. Output is sorted by ascending addr.
 	local atoms_by_name = corpus.atoms_by_name or {}
 
-	-- Per-atom ingest. Returns nil if the atom is absent from the corpus
-	-- (caller skips it via the `if atom then ...` guard).
+	-- Per-atom ingest. Returns nil if the atom is absent from the corpus; the caller skips it via the `if atom then ...` guard.
 	local function ingest_atom(name, info)
 		local atom_record = atoms_by_name[name]
 		if not atom_record then return nil end
@@ -715,8 +685,7 @@ local function build_atom_table(corpus, addrs, skip_over)
 		local invocations_proj = paths.invocations or {}
 		-- Build the dense entries list from `word_events`.
 		--   `word_events[i].i`     = the 0-based `.word` position
-		--   `call_line`            = the root atom's physical source line for that word
-		--                             (stamped by emission_model)
+		--   `call_line`            = the root atom's physical source line for that word (stamped by emission_model)
 		local entries = {}
 		for idx, ev in ipairs(word_events) do
 			entries[#entries + 1] = {
@@ -725,64 +694,32 @@ local function build_atom_table(corpus, addrs, skip_over)
 				text = ev.call_text or "",
 			}
 		end
+		-- Whole-atom skip is read from the atom declaration record; the scanner owns it, no parallel lookup table.
 		local atom = {
 			name       = name,
 			addr       = info[1],
 			size_bytes = info[2],
 			words      = #word_events,
 			entries    = entries,
-			skip_over  = skip_over.atoms[name] ~= nil,
+			debug_skip = atom_record.debug_skip == true,
 		}
 
-		-- Group consecutive `word_events` rows whose outermost invocation is the SAME
-		-- format-1 invocation into a single `atom.invocations` entry. Rows sharing the
-		-- same comp_name / call_file / call_line / comp_file / comp_line are part of
-		-- the same group. Rows outside any invocation flush cur_inv.
-		if #invocations_proj > 0 then
-			local invocations = {}
-			-- Process one word_event row against the current group state.
-			-- Returns the (possibly updated) cur_inv.
-			local function row(ev, cur_inv)
-				local outer_id  = ev.outermost_invocation_id
-				local outer_inv = outer_id and invocations_proj[outer_id] or nil
-				if not (outer_inv and outer_inv.component_name) then
-					-- raw row: flush any pending cur_inv; no new group starts.
-					if cur_inv then invocations[#invocations + 1] = cur_inv end
-					return nil
-				end
-				local inv_key = outer_inv.component_name
-					.. "|" .. (outer_inv.call_path or "")
-					.. "|" .. tostring(outer_inv.call_line or 0)
-					.. "|" .. (outer_inv.def_path or "")
-					.. "|" .. tostring(outer_inv.def_line or 0)
-				local ev_pos = ev.i or 0
-				if cur_inv and cur_inv.key == inv_key then
-					-- same group: extend range + append body line.
-					cur_inv.end_pos = ev_pos
-					cur_inv.body_lines[#cur_inv.body_lines + 1] = ev.body_line or 0
-					return cur_inv
-				end
-				-- key changed (or no current group): flush + start new.
-				if cur_inv then invocations[#invocations + 1] = cur_inv end
-				return {
-					key        = inv_key,
-					comp_name  = outer_inv.component_name,
-					call_file  = outer_inv.call_path or "",
-					call_line  = outer_inv.call_line or 0,
-					comp_file  = outer_inv.def_path or "",
-					comp_line  = outer_inv.def_line or 0,
-					start_pos  = ev_pos,
-					end_pos    = ev_pos,
-					skip_over  = skip_over.components[normalize_debug_path(outer_inv.def_path or ""):lower() .. "\0" .. outer_inv.component_name] ~= nil,
-					body_lines = { ev.body_line or 0 },
-				}
-			end
-			local cur_inv = nil
-			for _, ev in ipairs(word_events) do
-				cur_inv = row(ev, cur_inv)
-			end
-			if cur_inv then invocations[#invocations + 1] = cur_inv end
-			atom.invocations = invocations
+		-- Consume invocation records from `atom.paths.invocations`. It is the single producer of per-invocation body_lines, per-invocation debug_skip,
+		-- and per-invocation start_pos/end_pos; the walker stamped every field at the construction/close site (`emit_invoke_begin` / `emit_invoke_end` in duffle.lua).
+		-- DWARF reconstructs invocation ranges by reading `start_pos` / `end_pos` directly (not by grouping `word_events`, not by deriving
+		-- `start_pos`/`end_pos` from `start_word`/`end_word`).
+		-- `start_pos` is the 0-based emitted-word position stamped AT `emit_invoke_begin` time, while `start_word` is the 1-based items index
+		-- (which differs by the count of `invoke_begin`/`invoke_end`/marker items between this call and the previous one).
+		-- Using `start_word` would shift every `words_into` lookup by the marker count and break the call-site + body row pairing at the first word of every invocation.
+		atom.invocations = invocations_proj
+		for _, inv in ipairs(atom.invocations) do
+			-- Tasks 6+7: `debug_skip` flag is already stamped by `duffle.emit_invoke_begin` from `corpus.components[name].debug_skip`.
+			-- Normalize to boolean for downstream dispatch. A missing value is a corpus-plumbing bug; the fail-loud error was raised at the construction site.
+			inv.debug_skip = inv.debug_skip == true
+			assert(type(inv.start_pos) == "number"
+				, "dwarf_injection: inv.start_pos (0-based emitted-word position) is missing on invocation " .. tostring(inv.component_name) .. "; the construction site failed to stamp it.")
+			assert(type(inv.end_pos)   == "number"
+				, "dwarf_injection: inv.end_pos (0-based emitted-word position) is missing on invocation " .. tostring(inv.component_name) .. "; the close site failed to stamp it.")
 		end
 		return atom
 	end
@@ -804,11 +741,11 @@ local function collect_component_defs(atom_table)
 	local out = {}
 	for _, atom in ipairs(atom_table) do
 		for _, inv in ipairs(atom.invocations or {}) do
-			if not out[inv.comp_name] then
-				out[inv.comp_name] = {
-					name     = inv.comp_name,
-					def_file = inv.comp_file,
-					def_line = inv.comp_line,
+			if not out[inv.component_name] then
+				out[inv.component_name] = {
+					name     = inv.component_name,
+					def_file = inv.def_path,
+					def_line = inv.def_line,
 				}
 			end
 		end
@@ -884,9 +821,8 @@ end
 --- The `regs` list per atom is ordered: each entry is the MIPS reg index that holds the matching field in the source-order pop sequence.
 --- The piece chain uses (DW_OP_regN, DW_OP_piece, ULEB128(field_size)).
 ---
---- Binds fields come from `scan.binds`; no body-text source walk is needed.
---- per-source `scan.binds[i].fields` already carries the typed-field record after the scan-source generalization.
---- @param corpus     table   -- the canonical corpus from `ctx.shared.corpus`
+--- Binds fields come from `scan.binds`; the per-source `scan.binds[i].fields` already carries the typed-field record after the scan-source generalization.
+--- @param corpus     table   -- the corpus from `ctx.shared.corpus`
 --- @param atom_table table[] -- the cross-ref'd atom table from build_atom_table
 --- @param registries table   -- merged registries from collect_per_source_registries
 --- @return table, table      -- (rbind_atoms, rbind_structs)
@@ -895,9 +831,9 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 	local rbind_atoms   = {}
 	local rbind_structs = {}
 
-	-- Index binds by struct name; consume `scan.binds[i].fields` directly (no body-text re-walk).
-	-- The scan-source pass emits each Binds_X's fields as {[type_name, pointer_depth, offset, byte_size, ...]}
-	-- so this pass can build the rbind_structs entry without re-parsing.
+	-- Index binds by struct name; consume `scan.binds[i].fields` directly.
+	-- The scan-source pass emits each Binds_X's fields as {[type_name, pointer_depth, offset, byte_size, ...]},
+	-- so this pass builds the rbind_structs entry without re-parsing.
 	local binds_by_name = {}
 	for _, src in ipairs((corpus and corpus.source_order) or {}) do
 		local scan = src.scan
@@ -973,12 +909,11 @@ end
 -- Section builders (single dispatch table — see guide_metaprogram_ssdl.md §11)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Append per-atom line-program sequences to the existing main .debug_line unit 
+--- Append per-atom line-program sequences to the existing main .debug_line unit
 --- (the final unit, referenced by the main CU's DW_AT_stmt_list).
 ---
 --- This builder extends the main compilation unit.
---- No compilation unit pointed at it through DW_AT_stmt_list, so gdb ignored it. 
---- It also encoded byte 13 as the extended-opcode marker; byte 13 is actually the first special opcode. 
+--- A detached synthetic line unit has no DW_AT_stmt_list referencing it, so gdb ignored it (a previous experiment); byte 13 is the first special opcode, not the extended-opcode marker.
 --- The existing final unit already contains hello_gte_tape.c as file index 11 and ends with a valid end_sequence.
 --- We preserve its bytes, append independent atom sequences, and increase only that unit's DWARF32 unit_length.
 --- @param existing   string -- existing section bytes, byte-for-byte
@@ -1097,8 +1032,8 @@ local function build_dwarf_aranges_section(existing, atom_table)
 
 	if not is_last_unit then
 		-- Malformed: walked past the end of the section without finding a unit whose end aligns with #existing.
-		-- This means a unit's length field overruns the section, or there is no terminator on the last unit.
-		-- For now, return existing unchanged to avoid making it worse; warn so the user can investigate.
+		-- A unit's length field overruns the section, or the last unit has no terminator.
+		-- Return existing unchanged to avoid making it worse; warn so the user can investigate.
 		io.stderr:write("[dwarf_injection] WARN: .debug_aranges layout is malformed (no unit's end aligned with section end at " .. #existing .. " bytes); passing through unchanged\n")
 		return existing
 	end
@@ -1154,10 +1089,8 @@ end
 -- Helpers: per-atom .debug_info synthesis (DW_TAG_subprogram + DW_TAG_variable)
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Build the location bytes (DW_FORM_exprloc) for a register-resident value.
---- DW_OP_reg0..reg31 occupy opcodes 0x50..0x6f. DW_OP_reg15 is 0x5f;
---- 0x90 is DW_OP_regx, not the base of the compact register opcode range.
 --- Build the piece-chain location bytes (DW_FORM_exprloc) for an rbind atom's bind_args.
+--- DW_OP_reg0..reg31 occupy opcodes 0x50..0x6f; DW_OP_reg15 is 0x5f; 0x90 is DW_OP_regx, not the base of the compact register opcode range.
 ---
 --- The location expression is a sequence of (DW_OP_regN, DW_OP_piece, ULEB128(size)) tuples, one per field.
 --- GDB composites the pieces into a struct-shaped value matching the Binds_X layout.
@@ -1190,7 +1123,7 @@ local function piece_chain_exprloc(rbind)
 			local next_off = field_offset_by_name[rbind.regs[i + 1].field]
 			if not next_off then
 				-- Defensive: a load_word references a field not in the Binds_X struct.
-				-- Use struct.bytes as a fallback so the piece chain is still well-formed.
+				-- Fall back to struct.bytes so the piece chain stays well-formed.
 				next_off = rbind.bytes
 			end
 			size = next_off - off
@@ -1320,7 +1253,7 @@ end
 ---     DW_AT_encoding   (DW_FORM_data1)  -- DW_ATE_unsigned
 ---   Abbrev 107 (DW_TAG_subprogram, NO children) — abstract origin.
 ---     DW_AT_name       (DW_FORM_string) -- "mac_yield" etc. (component ident)
----     DW_AT_inline     (DW_FORM_data1)  -- DW_INL_declared_inlined (= 3)
+---     DW_AT_inline     (DW_FORM_data1)  -- DW_INL_inlined (= 1)
 ---     DW_AT_external   (DW_FORM_data1)  -- 1 (visible across the CU)
 ---   Abbrev 108 (DW_TAG_inlined_subroutine, with children):
 ---     DW_AT_abstract_origin (DW_FORM_ref4)    -- → ABBREV_ABSTRACT_SUBPROGRAM
@@ -1364,7 +1297,7 @@ local function build_new_abbrev()
 
 	-- rbind composite.
 	-- DW_FORM_udata (0x0F, ULEB128) is declared at module scope. For small values (struct byte_size, member offsets) 1 byte is enough;
-	-- we emit ULEB128 anyway for spec compliance.
+	-- we emit ULEB128 anyway for spec compliance with the DWARF abbrev encoding rules.
 	local abbrev_struct_type = abbrev(ABBREV_STRUCT_TYPE, DW_TAG_structure_type, true,  -- DW_CHILDREN_yes
 		attr(   DW_AT_name,      DW_FORM_string)
 	  .. attr(DW_AT_byte_size, DW_FORM_udata))
@@ -1384,9 +1317,7 @@ local function build_new_abbrev()
 	  .. attr(DW_AT_byte_size, DW_FORM_data1)
 	  .. attr(DW_AT_encoding,  DW_FORM_data1))
 
-	-- Component step-into abstract + inline DIE abbreviations.
-	local DW_INL_declared_inlined = 0x03   -- DWARF5 §3.33.3: "this subroutine was declared inline"
-	-- Abstract subprograms carry DW_AT_decl_file and DW_AT_decl_line for definition-site resolution.
+	-- Abstract subprograms carry DW_AT_decl_file and DW_AT_decl_line for definition-site resolution,
 	-- even when no inlined_subroutine instance currently maps to it.
 	-- DW_FORM_udata is consistent with the call_file/call_line forms on abbrev 108.
 	local abbrev_abstract_subprogram = abbrev(ABBREV_ABSTRACT_SUBPROGRAM, DW_TAG_subprogram, false,  -- DW_CHILDREN_no
@@ -1427,8 +1358,8 @@ end
 
 
 --- Strip a leading "R_" prefix from an enum alias name.
---- The .debug_str/.debug_info consumers display the local without the C-enum prefix (RR_PrimCursor, not RR_R_PrimCursor)
---- because the C-level identifier `R_PrimCursor` would collide with the enum constant value 15 when the user runs `print R_PrimCursor` in gdb.
+--- The .debug_str/.debug_info consumers display the local without the C-enum prefix (RR_PrimCursor, not RR_R_PrimCursor).
+--- Without the strip, the C-level identifier `R_PrimCursor` would collide with the enum constant value 15 when the user runs `print R_PrimCursor` in gdb.
 --- @param r_name string  -- e.g. "R_PrimCursor"
 --- @return string        -- "PrimCursor" (or the input unchanged if it does not start with "R_")
 local function strip_r_prefix(r_name)
@@ -1474,7 +1405,7 @@ local function build_new_strings(atom_table, registries)
 	-- Register names (one per unique debug-visible R_Name alias from the merged registry,
 	-- filtered to MIPS GPR 0..31 — the same filter that build_inserted_children applies
 	-- for the RR_<name> locals, so .debug_str entries stay in sync with .debug_info).
-	-- Lua's pairs() is non-deterministic; sort the alias names first so the emitted$ .debug_str bytes are byte-identical across runs.
+	-- Lua's pairs() is non-deterministic; sort the alias names first so the emitted .debug_str bytes are byte-identical across runs.
 	local sorted_alias_names = {}
 	for r_name, alias in pairs(registries.register_alias_registry or {}) do
 		if alias.code and alias.code >= 0 and alias.code <= 31 then
@@ -1496,10 +1427,9 @@ end
 --- Build the DWARF DIE bytes to insert into the MAIN CU as children, immediately
 --- before the main CU's root children-terminator (the final 0 byte of the CU).
 ---
---- Insert the DIEs as children of the main compilation unit.
---- This keeps `RR_PrimCursor` and `bind_args` in scope for atom PCs.
---- Inserting the DIEs as children of the main CU puts them in scope for every PC the main CU owns; 
---- including every atom PC (since `.debug_aranges` + `.debug_rnglists` already assign atom PCs to it).
+--- Insert the DIEs as children of the main compilation unit. This keeps `RR_PrimCursor` and `bind_args` in scope for atom PCs.
+--- Inserting the DIEs as children of the main CU puts them in scope for every PC the main CU owns, including every atom PC
+--- (since `.debug_aranges` + `.debug_rnglists` already assign atom PCs to it).
 ---
 --- Layout (matches the pre-build_new_cu exactly; only the insertion point and ref4 basis change):
 ---   1) DW_TAG_base_type "unsigned int" (abbrev 106)
@@ -1530,10 +1460,10 @@ end
 ---        DW_AT_location  = piece-chain (DW_FORM_exprloc)
 ---        DW_AT_type      = ref4 → structure_type DIE
 ---
---- **DOES NOT** emit the final 0 byte (root terminator).
---- build_debug_info_section splices bytes ahead of the root terminator and preserves existing DIE bytes exactly.
+--- This function does NOT emit the final 0 byte (root terminator). build_debug_info_section splices bytes ahead of the root terminator
+--- and preserves existing DIE bytes exactly.
 ---
---- **ref4 basis**: DW_FORM_ref4 is CU-relative (offset from the first byte of the CU header).
+--- ref4 basis: DW_FORM_ref4 is CU-relative (offset from the first byte of the CU header).
 --- Our inserted DIEs live in the main CU, so every ref4 = (target section offset) - main_cu_offset.
 --- Per-die section offsets are tracked via the running `next_offset` cursor (= section offset of the NEXT byte to emit).
 ---
@@ -1550,11 +1480,10 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	registries       = registries       or {}
 
 	-- by_alias: the merged register_alias_registry filtered to aliases whose `code` is a valid MIPS GPR 0..31.
-	-- Aliases absent from the merged registry are not debug-visible and are skipped entirely (no fallback GPR).
+	-- Aliases absent from the merged registry are skipped entirely; absent aliases have no debug-visible fallback GPR.
 	-- by_alias_order: sorted list of by_alias keys, for deterministic iteration order.
-	-- (Lua's pairs() order is implementation-defined and may vary between runs;
-	-- without sorting, the per-atom variable emission order would be non-deterministic
-	-- and the .debug_info bytes would differ across builds.)
+	-- Lua's pairs() order is implementation-defined and varies between runs; without sorting, the per-atom variable emission order
+	-- would be non-deterministic and the .debug_info bytes would differ across builds.
 	local by_alias = {}
 	for r_name, alias in pairs(registries.register_alias_registry or {}) do
 		if alias.code and alias.code >= 0 and alias.code <= 31 then
@@ -1597,6 +1526,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		S.next_offset       = S.next_offset + #s
 	end
 	local function ref4_of(section_offset)
+		if section_offset == nil then return 0 end
 		return section_offset - main_cu_offset
 	end
 
@@ -1607,8 +1537,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	emit("unsigned int\0")                   -- DW_FORM_string (DW_AT_name)
 	emit(string.char(4))                     -- DW_FORM_data1  (DW_AT_byte_size)
 	emit(string.char(DW_ATE_unsigned))       -- DW_FORM_data1  (DW_AT_encoding)
-	-- (The function body below reads S.next_offset directly via the `next_offset` function;
-	-- this keeps offsets synchronized with emitted data.)
+	-- The function body below reads S.next_offset directly via the `next_offset` function;
+	-- this keeps offsets synchronized with emitted data.
 	local function next_offset() return S.next_offset end
 
 	-- Typed local views.
@@ -1641,13 +1571,9 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	table.sort(sorted_typed_types)
 	-- For each non-U4 type, emit a typedef (DW_TAG_typedef) named after the type and referencing the base_type "unsigned int" (4 bytes).
 	-- The typedef gives gdb a named anchor; the pointer_type chain wraps it.
-	-- We use a fresh abbrev for the typedef + the pointer_type. 
-	-- To stay within the existing abbrev budget, we reuse the duplicated main table's abbrev 4 (DW_TAG_typedef) and abbrev 9 (DW_TAG_pointer_type)
-	-- via a synthetic-emit pattern: emit the abbrev code (a ULEB) + attribute bytes using DW_FORM values that match those abbrevs.
-	-- The cleanest path is to define new abbrevs in build_new_abbrev(). 
-	-- We emit fresh DW_TAG_base_type DIEs (the simplest correct shape: byte_size 4, encoding unsigned) 
+	-- The cleanest path is to define new abbrevs in build_new_abbrev(); we emit fresh DW_TAG_base_type DIEs (byte_size 4, encoding unsigned)
 	-- and the variable's DW_AT_type references the pointer chain's outermost base_type.
-	-- The displayed type name is the type_name (e.g. "V4_S2") because we use DW_FORM_string on the field type. 
+	-- The displayed type name is the type_name (e.g. "V4_S2") because we use DW_FORM_string on the field type;
 	-- gdb walks the chain and displays the name.
 	--
 	-- For each (type_name, depth), emit a real structure_type with proper member layout,
@@ -1658,8 +1584,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	-- Each row is {byte_size, members}, where each member is {name, offset, byte_size, type_name}.
 	-- `type_name` is the base type name from `type_name_registry`; "S2" / "S4" need a signed base_type emit too.
 	--
-	-- The table is small + explicit (no introspection of the struct types from production source)
-	-- because the prototype principle treats the typed-view struct layout as data, not derived state.
+	-- The table is small + explicit — the prototype principle treats the typed-view struct layout as data, not derived state.
 	local STRUCT_MEMBER_TABLE = {
 		-- 2-element signed short vector (rare; placeholder for future use).
 		V2_S2 = { byte_size = 4, members = {
@@ -1728,8 +1653,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			local depth = used_typed_views[tn]
 			local type_info = STRUCT_MEMBER_TABLE[tn]
 			if not type_info then
-				-- Unknown typed view — fall back to a generic 4-byte unsigned base_type to keep the wire valid
-				-- (gdb will render as the typename but `print *ptr` will only see the first 4 bytes).
+				-- Unknown typed view: fall back to a generic 4-byte unsigned base_type to keep the wire valid.
+				-- gdb renders as the typename but `print *ptr` only sees the first 4 bytes.
 				local innermost_offset = next_offset()
 				emit(uleb128(ABBREV_BASE_TYPE))
 				emit(tn .. "\0")
@@ -1767,8 +1692,9 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 					emit(elf_dwarf.write_u32_le(ref4_of(member_base_off)))  -- DW_AT_type ref4 → base_type
 				end
 				emit(string.char(DIE_CHILDREN_TERMINATOR)) -- end of structure_type's children (DWARF5 §7.5.3)
-				-- Emit a single DW_TAG_pointer_type (abbrev 110, NOT 9) pointing at the structure_type.
-				-- For depth > 1, we'd chain pointer_type → pointer_type → ... → structure_type; not exercised.
+				-- Emit a single DW_TAG_pointer_type (abbrev 110) pointing at the structure_type. We picked 110 over 9 (the duplicated gcc pointer_type) because
+				-- abbrev 9 carries DW_AT_byte_size + DW_AT_type and gdb would misparse our ref4 as those attributes. Abbrev 110 has only DW_AT_type, so a 4-byte ref4 lands cleanly on the target type.
+				-- For depth > 1, we'd chain pointer_type → pointer_type → ... → structure_type; that path isn't exercised today.
 				if depth == 1 then
 					local outermost_offset = next_offset()
 					emit(uleb128(ABBREV_TYPED_VIEW_POINTER))  -- DW_TAG_pointer_type (abbrev 110; NOT 9)
@@ -1783,8 +1709,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 
 	-- 1b) Emit the void* fallback chain (used by step (f) of the per-RR_<R_Name> precedence chain).
 	-- One DW_TAG_base_type DIE named "void" + one DW_TAG_pointer_type pointing at it.
-	-- Unannotated RR_<R_X> locals reference the outermost pointer_type; gdb displays the value as `(void *) 0x...` 
-	-- (hex) per the prototype principle rather than `unsigned int`.
+	-- Unannotated RR_<R_X> locals reference the outermost pointer_type; gdb displays the value as `(void *) 0x...` (hex)
+	-- per the prototype principle rather than `unsigned int`.
 	-- The void base_type is emitted BEFORE any other typed chain so its ref4 pointer remains stable.
 	-- Follow the SAME pattern as the typed-views chain above: capture the offset BEFORE the uleb tag
 	-- (this is the ref4 target), emit the DIE bytes, then emit the pointer_type pointing at the offset.
@@ -1832,7 +1758,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			emit(uleb128(ABBREV_MEMBER))
 			emit(field.name .. "\0")    -- DW_FORM_string (DW_AT_name)
 			emit(uleb128(field.offset)) -- DW_FORM_udata  (DW_AT_data_member_location)
-			-- typed field.
+			-- typed field:
 			-- For a pointer-typed field, the member's DW_AT_type points at the deepest pointer_type in its chain.
 			-- For U4 (no pointer), it points at the base_type.
 			local field_type_offset
@@ -1890,7 +1816,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	--   (d) atom_phase(<label>)-grouped:            first atom in source-order that shares this label AND has its own atom.rbind provides the Binds_* field types
 	--   (e) enum-site atom_type(<T>) default:       register_alias_registry[R_Name].default_type  (per-alias fallback declared in lottes_tape.h)
 	--   (f) void* fallback:                         the void_chain_offset built in section 1b; gdb renders `(void *) 0x...` (hex)
-	-- If (a)..(e) miss AND no alias registry entry exists for this R_Name, the emission is skipped for that alias entirely.
+	-- An R_Name absent from the registry AND missed by all of (a..e) skips emission for that alias entirely.
 		local atom_view_ctx_fields   = nil  -- populated by step (b); map field_name -> field entry
 		local reg_to_field_ctx       = nil  -- populated by step (b); map GPR index -> field name
 		local atom_view_phase_fields = nil  -- populated by step (d); map field_name -> field entry
@@ -1926,9 +1852,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 				end
 			end
 		end
-		-- step (d) inputs: this atom's `atom_phase(<label>)`;
-		-- find the FIRST atom in the same phase group that has its own rbind and is in source-order (i.e., declared before this atom in any source file).
-		-- Find the per-atom_info entry that has phase == this atom's name.
+		-- step (d) inputs: this atom's `atom_phase(<label>)`. Find the FIRST atom in the same phase group that has its own rbind
+		-- and is in source-order (declared before this atom in any source file); locate it via the per-atom_info entry whose phase == this atom's name.
 		local my_phase_label = nil
 		for _, ai in ipairs(registries.atom_infos or {}) do
 			if ai.atom_name == atom.name and ai.phase then
@@ -1956,9 +1881,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			end
 		end
 
-		-- 5-step precedence chain. The dispatch loop runs the first step that yields a non-nil offset.
-		-- Each step returns the type's section offset or nil if it missed.
-		-- Each precedence rule is one table row and one function.
+		-- 5-step precedence chain. The dispatch loop runs the first step that yields a non-nil offset; each step returns the type's section offset or nil.
 		-- Per-atom precomputed state is captured in upvalues: atom_view, reg_to_field_ctx, atom_view_ctx_fields,
 		-- reg_to_field_phase, atom_view_phase_fields, field_type_by_name, reg_to_field, alias, type_chain_offsets.
 		local PRECEDENCE_STEPS = {
@@ -2001,21 +1924,17 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			end,
 		}
 
-		-- Iterate `by_alias` in sorted order (Lua's pairs() is non-deterministic;
-		-- sorting ensures byte-identical DWARF output across builds).
+		-- Iterate `by_alias` in sorted order; Lua's pairs() is non-deterministic, so sorting ensures byte-identical DWARF output across builds.
 		for _, r_name in ipairs(by_alias_order) do
 			local alias = by_alias[r_name]
 			local rr_name = "RR_" .. strip_r_prefix(r_name)
 			local alias_code = alias.code
 			emit(uleb128(ABBREV_VARIABLE))
 			emit(rr_name .. "\0") -- DW_FORM_string (DW_AT_name)
-			-- DW_FORM_exprloc: ULEB byte count + DW_OP_regN byte.
-			-- DW_OP_reg0..reg31 occupy opcodes 0x50..0x6f; DW_OP_reg15 is 0x5f.
-					-- DW_FORM_exprloc: ULEB byte count + DW_OP_regN byte.
-				-- The `1` is the length prefix — DW_OP_regN occupies exactly 1 byte (the base opcode is 0x50; regN = 0x50 + N).
+			-- DW_FORM_exprloc: ULEB byte count + DW_OP_regN byte. DW_OP_reg0..reg31 occupy opcodes 0x50..0x6f; DW_OP_reg15 is 0x5f.
 			-- `alias_code` is the MIPS GPR index (0..31) from the merged register_alias_registry.
 			emit(uleb128(1) .. string.char(DW_OP_reg0 + alias_code)) -- DW_FORM_exprloc (DW_OP_regN from registry code)
-			-- Precedence chain (a..e); step (f) is the void* fallback (initial value).
+			-- Precedence chain (a..e). Step (f) is the void* fallback initialized below; the chain overrides it when any step yields a non-nil offset.
 			local type_offset = type_chain_offsets["void|1"]
 			for _, step in ipairs(PRECEDENCE_STEPS) do
 				local candidate = step(r_name, alias_code)
@@ -2026,9 +1945,9 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		end
 
 		-- If rbind, emit bind_args variable with PC-ranged location list.
-		-- The loclist is in .debug_loclists, indexed by `DW_FORM_sec_offset` (4-byte section-relative offset).
-		-- The location list uses two PC ranges: [atom.addr, last_load+8) describes every field as tape memory
-		-- (DW_OP_bregN + offset) piece, and [last_load+8, atom.end) where every field is described as a GPR (DW_OP_regN) piece.
+		-- The loclist lives in .debug_loclists and is indexed by `DW_FORM_sec_offset` (4-byte section-relative offset).
+		-- Two PC ranges cover every field: [atom.addr, last_load+8) describes each field as tape memory (DW_OP_bregN + offset) piece,
+		-- and [last_load+8, atom.end) describes each field as a GPR (DW_OP_regN) piece.
 		if atom.rbind then
 			local binds_name = atom.rbind.binds
 			local loclists_offset = loclists_offsets[atom.name] or 0
@@ -2039,20 +1958,24 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		end
 
 		-- Per-component invocation inlined_subroutine instances.
-		-- Each invocation covers a contiguous .word range [start_pos, end_pos] within the atom.
-		-- We compute the corresponding PC range from the atom's start + .word offsets × MIPS_BYTES_PER_WORD.
-		-- Resolve `inv.call_file` to the line-unit file index;
-		-- this preserves call-site attribution across source files.
-		if atom.invocations and not atom.skip_over then
+		-- Each invocation covers a contiguous .word range [start_pos, end_pos] within the atom; we compute the PC range from
+		-- atom start + .word offsets × MIPS_BYTES_PER_WORD. `inv.call_file` resolves to the line-unit file index, preserving call-site attribution across source files.
+		-- Tasks 6+7: a skipped invocation suppresses its synthetic inline frame entirely so source-level `step` cannot descend into it; the per-PC-range non-statement rows in .debug_line (emitted above) provide full skip semantics.
+		if atom.invocations and not atom.debug_skip then
 			for _, inv in ipairs(atom.invocations) do
-				local inv_low  = atom.addr + inv.start_pos * MIPS_BYTES_PER_WORD
-				local inv_high = atom.addr + (inv.end_pos + 1) * MIPS_BYTES_PER_WORD
-				emit(uleb128(ABBREV_INLINED_SUBROUTINE))
-				emit(elf_dwarf.write_u32_le(ref4_of(abstract_offsets[inv.comp_name])))  -- DW_FORM_ref4 → abstract_origin
-				emit(elf_dwarf.write_u32_le(inv_low))    -- DW_FORM_addr (DW_AT_low_pc)
-				emit(elf_dwarf.write_u32_le(inv_high))   -- DW_FORM_addr (DW_AT_high_pc)
-				emit(uleb128(resolve_provenance_file_index(inv.call_file)))            -- DW_FORM_udata (DW_AT_call_file)
-				emit(uleb128(inv.call_line))                                           -- DW_FORM_udata (DW_AT_call_line)
+				if inv.debug_skip then
+					-- Tasks 6+7: this invocation emits no inlined_subroutine DIE; the whole-PC-range non-statement rows in .debug_line provide full skip semantics.
+					-- Stepping from the preceding atom statement lands at the first unskipped row after this invocation's range.
+				else
+					local inv_low  = atom.addr + inv.start_pos * MIPS_BYTES_PER_WORD
+					local inv_high = atom.addr + (inv.end_pos + 1) * MIPS_BYTES_PER_WORD
+					emit(uleb128(ABBREV_INLINED_SUBROUTINE))
+					emit(elf_dwarf.write_u32_le(ref4_of(abstract_offsets[inv.component_name])))  -- DW_FORM_ref4 → abstract_origin
+					emit(elf_dwarf.write_u32_le(inv_low))    -- DW_FORM_addr (DW_AT_low_pc)
+					emit(elf_dwarf.write_u32_le(inv_high))   -- DW_FORM_addr (DW_AT_high_pc)
+					emit(uleb128(resolve_provenance_file_index(inv.call_path)))            -- DW_FORM_udata (DW_AT_call_file)
+					emit(uleb128(inv.call_line))                                           -- DW_FORM_udata (DW_AT_call_line)
+				end
 			end
 		end
 
@@ -2065,11 +1988,9 @@ end
 
 --- Build the new .debug_abbrev: existing + duplicate of the main CU's table + the new declarations 100..106 (with their terminating 0).
 ---
---- **Why duplicate the main table**: a CU can name only one abbrev table via its `debug_abbrev_offset` field.
---- The main CU currently points at the gcc-generated table (codes 1..60+);
---- codes 100..106 are NEW, so they live in a different table. 
---- To keep all main-CU abbreviation codes in one table we DUPLICATE 
---- the gcc-generated codes at a new offset and append our new declarations 100..106 immediately after (with a single shared terminator 0).
+--- Why duplicate the main table: a CU can name only one abbrev table via its `debug_abbrev_offset` field.
+--- The main CU currently points at the gcc-generated table (codes 1..60+); codes 100..106 are NEW, so they live in a different table.
+--- To keep all main-CU abbreviation codes in one table we DUPLICATE the gcc-generated codes at a new offset and append our new declarations 100..106 immediately after (with a single shared terminator 0).
 ---
 --- Result layout (0-based section offsets):
 ---   [0 .. #existing-1]               existing .debug_abbrev (unchanged)
@@ -2088,9 +2009,8 @@ local function build_debug_abbrev_section(existing, main_abbrev_offset)
 	local  table_end = find_abbrev_table_end(existing, main_abbrev_offset)
 	if not table_end then return existing, nil end
 
-	-- Duplicate the main table declarations EXCLUDING its terminating 0 byte.
-	-- (1-indexed sub: existing:sub(main_abbrev_offset + 1, table_end)
-	-- reads bytes from 0-based [main_abbrev_offset .. table_end - 1].)
+	-- Duplicate the main table declarations, excluding its terminating 0 byte.
+	-- (1-indexed sub: existing:sub(main_abbrev_offset + 1, table_end) reads bytes from 0-based [main_abbrev_offset .. table_end - 1].)
 	local main_table_dup = existing:sub(main_abbrev_offset + 1, table_end)
 	local new_abbrevs    = build_new_abbrev()  -- includes its own terminating 0
 
@@ -2103,15 +2023,15 @@ end
 --- @param existing string  -- existing .debug_str bytes, byte-for-byte
 --- @param atom_table table[]
 --- @param registries table  -- merged registries from collect_per_source_registries
---- @return string, integer, table  -- (new_str_bytes, new_strings_offset, string_map)
+--- @return string  -- existing bytes plus the deterministic appended strings
 local function build_debug_str_section(existing, atom_table, registries)
-	local new_strings, string_map = build_new_strings(atom_table, registries)
-	return existing .. new_strings, #existing, string_map
+	local new_strings = build_new_strings(atom_table, registries)
+	return existing .. new_strings
 end
 
 --- Build the new .debug_info: SPLICE inserted DIEs into the MAIN CU as children.
 ---
---- This implementation instead:
+--- This implementation:
 ---   1. Builds the inserted-children bytes (base_type, struct_types, subprograms with their RR_* + bind_args children) via build_inserted_children.
 ---   2. Patches the main CU's `unit_length` field to account for the inserted bytes.
 ---   3. Patches the main CU's `debug_abbrev_offset` field to point at the duplicate abbrev table (offset = #existing_abbrev_before_append).
@@ -2164,14 +2084,13 @@ end
 
 --- Build the .debug_loc: just a terminator.
 --- Atoms don't have stack frames. The .debug_loc section describes per-instruction location adjustments for call-frame-based variables;
---- We use DW_OP_regN which is register-based and doesn't need .debug_loc entries).
---- The section itself must not be empty OR gdb may complain; the DW_LLE_end_of_list marker (per DWARF5 §7.7) is a single byte 0x00.
+--- we use DW_OP_regN which is register-based and needs no .debug_loc entries.
+--- The section must stay non-empty or gdb may complain; the DW_LLE_end_of_list marker (per DWARF5 §7.7) is a single byte 0x00.
 --
--- The actual .debug_loc emission is `string.char(DW_LLE_end_of_list)` inlined
--- at the per-section writers below (the dispatch is in M.run, not a table).
+-- The actual .debug_loc emission is `string.char(DW_LLE_end_of_list)` inlined at the per-section writers below (the dispatch is in M.run, not a table).
 
 -- Per-section output path resolver.
--- Returns the on-disk path for the section's `.bin` blob.
+-- Each entry returns the on-disk path for that section's `.bin` blob.
 local SECTION_WRITERS = {
 	debug_line     = function(out_root, basename) return out_root .. "\\" .. basename .. ".dwarf_line.bin"     end,
 	debug_aranges  = function(out_root, basename) return out_root .. "\\" .. basename .. ".dwarf_aranges.bin"  end,
@@ -2183,16 +2102,12 @@ local SECTION_WRITERS = {
 	debug_loclists = function(out_root, basename) return out_root .. "\\" .. basename .. ".dwarf_loclists.bin" end,
 }
 
--- Write a list of {name, data, was} section records to disk via SECTION_WRITERS.
--- Used twice in M.run (safe-path + production-path).
--- The only difference between the two call sites is the `is_production` flag, which gates the per-section progress line.
--- @param results table[]     -- list of {name=, data=, was=} records to write
--- @param ctx      PassCtx
--- @param basename string     -- output file basename (e.g. "hello_gte")
--- @param is_production bool  -- true → emit progress line; false → silent
--- @param atom_table table    -- used by the progress line (only when is_production)
--- @return table  -- list of {name_bin = path} entries to append to M.run's outputs
-local function write_sections(results, ctx, basename, is_production, atom_table)
+-- Write a list of `{name, data}` section records to disk via SECTION_WRITERS.
+-- @param results table[]  -- list of `{name=, data=}` records to write
+-- @param ctx PassCtx
+-- @param basename string   -- output file basename (e.g. "hello_gte")
+-- @return table             -- list of {name_bin = path} entries to append to M.run's outputs
+local function write_sections(results, ctx, basename)
 	local outputs = {}
 	for _, r in ipairs(results) do
 		local path = SECTION_WRITERS[r.name](ctx.out_root, basename)
@@ -2201,20 +2116,10 @@ local function write_sections(results, ctx, basename, is_production, atom_table)
 			io.stderr:write(string.format("[dwarf_injection] failed to open %s for write\n", path))
 		else
 			f:write(r.data); f:close()
-			if is_production then
-				io.stderr:write(string.format("[dwarf_injection] new .%s = %d bytes (was %d, +%d atoms)\n"
-					, r.name, #r.data, r.was, #atom_table))
-			end
 			outputs[#outputs + 1] = { [r.name .. "_bin"] = path }
 		end
 	end
 	return outputs
-end
-
-local function write_gdbinit(out_root, basename, skip_over, atom_table)
-	local path = out_root .. "\\" .. basename .. ".gdbinit"
-	duffle.write_file_lf(path, build_gdbinit(skip_over, atom_table))
-	return { gdbinit = path }
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -2239,14 +2144,12 @@ function M.run(ctx)
 		return { outputs = {}, errors = {}, warnings = {} }
 	end
 
-	-- Resolve relative ELF path to absolute via the canonical duffle helper.
+	-- Resolve relative ELF path to absolute via `duffle.to_absolute_path`.
 	elf_path = duffle.to_absolute_path(elf_path)
 
-	-- Read the existing DWARF sections directly (no subprocess; lfs + io.open + manual ELF32 section-header walk).
-	-- We need all 8 sections: .debug_line / .debug_aranges / .debug_rnglists get extended
-	-- (additional rows appended to the existing unit), and .debug_info / .debug_abbrev / .debug_str / .debug_loc / .debug_loclists
-	-- get spliced (the main CU's unit_length is patched;
-	-- no new compile unit is appended; debug_loc/debug_loclists may not exist in the source ELF so we add-section them on splice).
+	-- Read the existing DWARF sections directly (no subprocess; io.open + manual ELF32 section-header walk).
+	-- We need all 8 sections: .debug_line / .debug_aranges / .debug_rnglists get extended (additional rows appended to the existing unit),
+	-- and .debug_info / .debug_abbrev / .debug_str / .debug_loc / .debug_loclists get spliced (the main CU's unit_length is patched; no new compile unit is appended; .debug_loc/.debug_loclists may not exist in the source ELF so we add-section them on splice).
 	-- The per-section dispatch is inlined in the writers loop below.
 	local existing_sections = elf_dwarf.read_elf_sections(elf_path, {
 		".debug_line", ".debug_aranges", ".debug_rnglists",
@@ -2255,61 +2158,38 @@ function M.run(ctx)
 		-- reading them just returns "" which is the "missing" case the builder handles.
 		".debug_loc", ".debug_loclists",
 	})
-	io.stderr:write(string.format(
-		"[dwarf_injection] read %d DWARF sections: .debug_line=%d .debug_aranges=%d .debug_rnglists=%d .debug_info=%d .debug_abbrev=%d .debug_str=%d .debug_loc=%d .debug_loclists=%d\n",
-		8,
-		#(existing_sections[".debug_line"]     or ""),
-		#(existing_sections[".debug_aranges"]  or ""),
-		#(existing_sections[".debug_rnglists"] or ""),
-		#(existing_sections[".debug_info"]     or ""),
-		#(existing_sections[".debug_abbrev"]   or ""),
-		#(existing_sections[".debug_str"]      or ""),
-		#(existing_sections[".debug_loc"]      or ""),
-		#(existing_sections[".debug_loclists"] or "")))
-
-	-- Consume source-as-written skip associations from every scanned source,
-	-- then build the atom/provenance table with those generic selections.
-	-- Whole atoms remain symbol-keyed; components are file-qualified internally so a source marker associates
-	-- with its exact component definition even though GDB 12 requires function-only skip entries for the resulting synthetic inline frame.
-	-- `corpus` is the sole canonical source projection;
-	-- the sole source of truth; no `ctx.sources` / `ctx.by_dir` aliases).
+	-- Skip state lives in `corpus.atoms_by_name[*].debug_skip` (whole-atom) and `atom.paths.invocations[*].debug_skip` (per-invocation).
+	-- `corpus` is the sole canonical source projection.
 	local corpus = (ctx.shared and ctx.shared.corpus) or {}
-	local skip_over  = collect_skip_over(corpus)
 	local registries = collect_per_source_registries(corpus)
 	-- Read nm symbols (the ONLY disk-side input to the atom table) and join
 	-- them against `corpus.atoms_by_name` + `atom.paths` for word rows + invocation ancestry.
-	-- Disk source-map/provenance text is NOT consulted (those are diagnostic artifacts; semantic inputs are in memory).
+	-- Disk source-map/provenance text is not consulted (those are diagnostic artifacts; semantic inputs are in memory).
 	local addrs = elf_dwarf.read_nm(ctx.flags.elf_path)
-	local atom_table = build_atom_table(corpus, addrs, skip_over)
-	io.stderr:write(string.format("[dwarf_injection] matched %d atoms between nm + corpus.atoms_by_name\n", #atom_table))
+	local atom_table = build_atom_table(corpus, addrs)
 
-	-- Detect rbind atoms + index Binds_* struct fields (from ctx.sources[i].scan, populated by scan-source pass).
+	-- Detect rbind atoms + index Binds_* struct fields from the corpus.
 	-- The merged registries are threaded through so parse_body_load_pairs resolves R_<reg> via register_alias_registry.
-	local _rbind_atoms, rbind_structs = parse_rbind_atoms(corpus, atom_table, registries)
-	local rbind_count = 0
-	for _ in pairs(_rbind_atoms) do rbind_count = rbind_count + 1 end
-	io.stderr:write(string.format("[dwarf_injection] matched %d rbind atoms across %d Binds_* structs\n",
-		rbind_count, (function() local n = 0; for _ in pairs(rbind_structs) do n = n + 1 end; return n end)()))
+	local _, rbind_structs = parse_rbind_atoms(corpus, atom_table, registries)
 
 	-- Write the .bin files. The build_psyq.ps1 post-link hook splices these into a copy of the ELF via objcopy --update-section.
 	-- Build order:
-	--   0. Validate .debug_info layout (crT CU + DWARF5 main CU + final 0 root terminator).
+	--   0. Validate .debug_info layout (crt CU + DWARF5 main CU + final 0 root terminator).
 	--      If validation fails, write existing sections unchanged and emit no synthetic data.
 	--   1. Build new .debug_abbrev using the main CU's abbrev offset → returns the offset of the duplicate main table (= #existing_abbrev).
 	--   2. Build new .debug_info by splicing inserted children into the main CU (patches main CU's unit_length + debug_abbrev_offset;
-	--      preserves all original DIE bytes; does NOT append a synthetic CU).
+	--      preserves all original DIE bytes; never appends a synthetic CU).
 	--   3. Build .debug_line + .debug_aranges + .debug_rnglists.
 	--   4. Build .debug_loc (just a terminator).
 	--
-	-- .debug_str now also receives the new RR_<R_Name> entries
-	-- (the merged registry drives the strings table to keep .debug_str and .debug_info in sync).
-	-- (the per-section dispatch is inlined in the writers loop below)
+	-- .debug_str also receives the new RR_<R_Name> entries (the merged registry drives the strings table to keep .debug_str and .debug_info in sync).
+	-- The per-section dispatch is inlined in the writers loop below.
 	local basename = ctx.basename or duffle.basename_no_ext(elf_path) or DEFAULT_BASENAME
 	if ctx.out_root and ctx.out_root ~= "" then
 		duffle.ensure_dir(ctx.out_root)
-		local gdbinit_output = write_gdbinit(ctx.out_root, basename, skip_over, atom_table)
 
 		-- Step 0: layout validation. Bail out safely if the .debug_info layout doesn't match what we expect (crt CU + DWARF5 main CU + final 0 byte).
+	-- A layout mismatch means the gcc emission changed; the safest response is to leave existing sections unchanged and emit no synthetic data, so the build's debug-info step never silently produces broken DWARF.
 		local existing_info   = existing_sections[".debug_info"]   or ""
 		local existing_abbrev = existing_sections[".debug_abbrev"] or ""
 		local main_cu_start, main_cu_end_excl, main_abbrev_offset = find_main_cu_layout(existing_info)
@@ -2317,25 +2197,23 @@ function M.run(ctx)
 			io.stderr:write("[dwarf_injection] layout validation failed; writing existing sections unchanged\n")
 			local existing_str = existing_sections[".debug_str"] or ""
 			local results_safe = {
-				{ name = "debug_info",     data = existing_info,       was = #existing_info },
-				{ name = "debug_abbrev",   data = existing_abbrev,     was = #existing_abbrev },
-				{ name = "debug_str",      data = existing_str,                                                       was = #existing_str },
-				{ name = "debug_line",     data = build_dwarf_line_section    (existing_sections[".debug_line"] or "",     atom_table), was = #(existing_sections[".debug_line"]     or "") },
-				{ name = "debug_aranges",  data = build_dwarf_aranges_section (existing_sections[".debug_aranges"] or "",  atom_table), was = #(existing_sections[".debug_aranges"]  or "") },
-				{ name = "debug_rnglists", data = build_dwarf_rnglists_section(existing_sections[".debug_rnglists"] or "", atom_table), was = #(existing_sections[".debug_rnglists"] or "") },
-			{ name = "debug_loc",      data = string.char(DW_LLE_end_of_list),                                                       was = #(existing_sections[".debug_loc"]      or "") },
+				{ name = "debug_info",     data = existing_info },
+				{ name = "debug_abbrev",   data = existing_abbrev },
+				{ name = "debug_str",      data = existing_str },
+				{ name = "debug_line",     data = build_dwarf_line_section    (existing_sections[".debug_line"] or "",     atom_table) },
+				{ name = "debug_aranges",  data = build_dwarf_aranges_section (existing_sections[".debug_aranges"] or "",  atom_table) },
+				{ name = "debug_rnglists", data = build_dwarf_rnglists_section(existing_sections[".debug_rnglists"] or "", atom_table) },
+				{ name = "debug_loc",      data = string.char(DW_LLE_end_of_list) },
 			}
-			local section_outputs = write_sections(results_safe, ctx, basename, false, atom_table)
-			local outputs_safe = { gdbinit_output }
-			for _, o in ipairs(section_outputs) do outputs_safe[#outputs_safe + 1] = o end
-			return { outputs = outputs_safe, errors = {}, warnings = {} }
+			local section_outputs = write_sections(results_safe, ctx, basename)
+			return { outputs = section_outputs, errors = {}, warnings = {} }
 		end
 
 		-- Step 1: duplicate main abbrev table + append new codes 100..109.
 		local new_abbrev, new_abbrev_offset = build_debug_abbrev_section(existing_abbrev, main_abbrev_offset)
 		if not new_abbrev_offset then
 			io.stderr:write("[dwarf_injection] main abbrev-table validation failed; refusing to emit malformed DWARF\n")
-			return { outputs = { gdbinit_output }, errors = {}, warnings = {"main abbrev-table validation failed"} }
+			return { outputs = {}, errors = {}, warnings = {"main abbrev-table validation failed"} }
 		end
 
 		-- Step 1b: compute per-atom loclist offsets BEFORE building .debug_info
@@ -2345,36 +2223,29 @@ function M.run(ctx)
 		-- Step 2: splice inserted children into the main CU (patches unit_length + abbrev_offset; no synthetic CU).
 		local new_info  = build_debug_info_section(existing_info, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets, registries)
 
-		-- Step 2b: rebuild .debug_str now that we know which RR_<R_Name> entries
-		-- get emitted (this aligns with build_debug_info_section's by_alias loop).
-		local new_str, new_str_offset, string_map = build_debug_str_section(existing_sections[".debug_str"] or "", atom_table, registries)
+		-- Step 2b: rebuild .debug_str now that we know which RR_<R_Name> entries get emitted.
+	-- This aligns with build_debug_info_section's by_alias loop.
+		local new_str = build_debug_str_section(existing_sections[".debug_str"] or "", atom_table, registries)
 
 		-- Step 3-5: independent sections.
 		local results = {
-			{ name = "debug_abbrev",   data = new_abbrev,                                                                            was = #existing_abbrev },
-			{ name = "debug_info",     data = new_info,                                                                              was = #existing_info },
-			{ name = "debug_str",      data = new_str,                                                                               was = #(existing_sections[".debug_str"]      or "") },
-			{ name = "debug_line",     data = build_dwarf_line_section    (existing_sections[".debug_line"] or "",     atom_table),  was = #(existing_sections[".debug_line"]     or "") },
-			{ name = "debug_aranges",  data = build_dwarf_aranges_section (existing_sections[".debug_aranges"] or "",  atom_table),  was = #(existing_sections[".debug_aranges"]  or "") },
-			{ name = "debug_rnglists", data = build_dwarf_rnglists_section(existing_sections[".debug_rnglists"] or "", atom_table),  was = #(existing_sections[".debug_rnglists"] or "") },
-			{ name = "debug_loc",      data = string.char(DW_LLE_end_of_list),                                                       was = #(existing_sections[".debug_loc"]      or "") },
-			{ name = "debug_loclists", data = build_debug_loclists_section(atom_table, registries),                                 was = 0 },
+			{ name = "debug_abbrev",   data = new_abbrev },
+			{ name = "debug_info",     data = new_info },
+			{ name = "debug_str",      data = new_str },
+			{ name = "debug_line",     data = build_dwarf_line_section    (existing_sections[".debug_line"] or "",     atom_table) },
+			{ name = "debug_aranges",  data = build_dwarf_aranges_section (existing_sections[".debug_aranges"] or "",  atom_table) },
+			{ name = "debug_rnglists", data = build_dwarf_rnglists_section(existing_sections[".debug_rnglists"] or "", atom_table) },
+			{ name = "debug_loc",      data = string.char(DW_LLE_end_of_list) },
+			{ name = "debug_loclists", data = build_debug_loclists_section(atom_table, registries) },
 		}
 
-		local section_outputs = write_sections(results, ctx, basename, true, atom_table)
-		local outputs = { gdbinit_output }
-		for _, o in ipairs(section_outputs) do outputs[#outputs + 1] = o end
-		return {
-			outputs  = outputs,
-			errors   = {},
-			warnings = {},
-		}
+		local section_outputs = write_sections(results, ctx, basename)
+		return { outputs = section_outputs, errors = {}, warnings = {} }
 	end
 	return { outputs = {}, errors = {}, warnings = {} }
 end
 
--- Test-only exports expose the emission and offset paths.
--- tests drive the real emission and offset computation paths.
+-- Test-only exports expose the real emission + offset paths so tests exercise them end-to-end.
 M.compute_loclists_offsets_for_test     = compute_loclists_offsets
 M.build_debug_loclists_section_for_test = build_debug_loclists_section
 M.tape_piece_size_for_test              = tape_piece_size
