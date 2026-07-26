@@ -83,6 +83,7 @@ WORD_COUNT(mac_insert_ot_tag_f3, 11)
 ,	store_word(  R_AT, R_T1,         O_(PolyTag,code))        /* OrderingTable[OTZ] = PrimCursor */
 WORD_COUNT(mac_insert_ot_tag_g4, 11)
 
+/* atom_dbg_skip */
 #define mac_pack_color_word(off, cmd, r, g, b) \
 	load_upper_i(R_AT, (cmd) << 8  | (b)) \
 ,	or_i_self(   R_AT, ((g)  << 8) | (r)) \

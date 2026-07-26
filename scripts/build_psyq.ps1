@@ -140,7 +140,7 @@ function compile-unit { param(
 		$f_arch_no_shared,
 		$f_arch_no_stack_prot
 	)
-	# $compile_args    += $f_std_c23
+	$compile_args    += $f_std_c11
 	$compile_args    += ($f_include + $path_psyq_imyu_inc)
 	$compile_args    += ($f_include + $path_nugget)
 

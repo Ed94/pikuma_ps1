@@ -157,7 +157,7 @@ MipsAtomComp_(ac_insert_ot_tag_g4) {
 /* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given
  * byte offset. Internal helper used by the *_format_*_color macros. */
 FI_ MipsAtom ac_pack_color_word(U4 off, U4 cmd, U1 r, U1 g, U1 b)
-MipsAtomComp_Proc_(ac_pack_color_word, {
+atom_dbg_skip MipsAtomComp_Proc_(ac_pack_color_word, {
 	load_upper_i(R_AT, (cmd) << 8  | (b)),
 	or_i_self(   R_AT, ((g)  << 8) | (r)),
 	store_word(  R_AT, R_PrimCursor, (off)),
