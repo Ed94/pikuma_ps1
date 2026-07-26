@@ -159,9 +159,8 @@ local DW_AT_decl_line        = 0x3B   -- DWARF5 §7.7.1: DW_AT_decl_line
 -- Both live in the existing gcc-generated line unit; their 1-based indices are stable across rebuilds because the include order
 -- in code/gte_hello/hello_gte.c determines the unit's file table.
 -- gcc only adds a file to the line table when it has actual line-number entries;
--- headers that are pure macros/typedefs (dsl.h, memory.h, math.h, mips.h, gp.h, gte.h, etc.)
--- never appear. lottes_tape.h is the FIRST include that emits line entries
--- (MipsAtomComp_ declarations), so it is the FIRST entry after the primary file.
+-- headers that are pure macros/typedefs (dsl.h, memory.h, math.h, mips.h, gp.h, gte.h, etc.) never appear.
+-- lottes_tape.h is the FIRST include that emits line entries (MipsAtomComp_ declarations), so it is the FIRST entry after the primary file.
 local PROVENANCE_BASENAME_TO_FILE_INDEX = {
 	["hello_gte_tape.c"] = ATOM_SOURCE_FILE_INDEX,  -- = 11
 	["lottes_tape.h"]    = 2,
@@ -423,13 +422,13 @@ end
 ---   - Extended opcode marker byte = 0.
 ---   - Extended opcodes: marker byte + ULEB128 size + sub_opcode + payload.
 ---
---- Statement-state rules (atom_dbg_step_ux_20260725 — per-row policy):
+--- Statement-state rules:
 ---   * A marked whole atom emits one opaque is_stmt=false range row and no nested component rows; its subprogram symbol/range remains available.
 ---   * Per-row policy at every other PC:
 ---       - Call-site row of any invocation's first word:  is_stmt = true   (unconditional; `want_call = true`).
 ---       - Body row of any invocation (first or subsequent): is_stmt = not inv.debug_skip  (`want_body = not inv.debug_skip`).
 ---       - RAW word (no containing invocation):            is_stmt = true   (unconditional).
----   * The previous per-word `marked_idx` ancestor walk (Tasks 6+7) and the GDB 12 zero-instruction-prologue duplicate row at atom entry are DELETED; the new
+---   * The previous per-word `marked_idx` ancestor walk and the GDB 12 zero-instruction-prologue duplicate row at atom entry are DELETED; the new
 ---     first-word emission IS the entry statement.
 ---   * Whole-atom suppression wins over component markers; no nested inversion.
 --- @param atom table  -- {name, addr, size_bytes, words, entries, invocations, debug_skip, word_events}
@@ -472,20 +471,16 @@ local function build_atom_sequence(atom)
 		})
 	end
 
-	-- Per-word invocation ancestry (atom_dbg_step_ux_20260725):
-	--   * `innermost_idx[idx]` = deepest active invocation at idx (nil for RAW words). Used to pick body_lines[k] for body rows.
-	--   * `ancestry_idx[idx]`  = full active ancestry at idx, ordered outermost-first (widest range first; innermost = last entry).
-	--                            Consumed at the first word of every invocation (atom entry + every `idx == inv.start_pos + 1`).
-	--                            Drives the nested-display rule: the outer invocation's call-site + body_lines[1] rows are
-	--                            re-emitted at the inner's first word PC so the debugger displays the outer body line (not
-	--                            the inner body line) when stepping into the inner. PROBLEM B fix.
+	-- Per-word invocation ancestry:
+	--   * `innermost_idx[idx]`: Deepest active invocation at idx (nil for RAW words). Used to pick body_lines[k] for body rows.
+	--   * `ancestry_idx[idx]`:  Full active ancestry at idx, ordered outermost-first (widest range first; innermost = last entry).
+	--      Consumed at the first word of every invocation (atom entry + every `idx == inv.start_pos + 1`).
+	--      Drives the nested-display rule: the outer invocation's call-site + body_lines[1] rows are
+	--      re-emitted at the inner's first word PC so the debugger displays the outer body line
+	--      (not the inner body line) when stepping into the inner. PROBLEM B fix.
 	--
-	-- `start_pos` / `end_pos` are 0-based emitted-word positions stamped at construction/close time by
-	-- `duffle.emit_invoke_begin` / `duffle.emit_invoke_end`; missing values are a corpus-plumbing bug, so we let the index
-	-- expression fail loud with arithmetic-on-nil rather than silently producing `0+1=1` for a missing start_pos.
-	--
-	-- The previous per-word `marked_idx` array (Tasks 6+7) is DELETED: a marked invocation's body rows are now driven
-	-- by the per-invocation `inv.debug_skip` predicate at the emit site, not by a precomputed ancestry flag.
+	-- `start_pos` / `end_pos` are 0-based emitted-word positions stamped at construction/close time by `duffle.emit_invoke_begin` / `duffle.emit_invoke_end`;
+	-- Missing values are a corpus-plumbing bug, so we let the index expression fail loud with arithmetic-on-nil rather than silently producing `0+1=1` for a missing start_pos.
 	local invs          = atom.invocations or {}
 	local innermost_idx = {}
 	local ancestry_idx  = {}
@@ -505,6 +500,36 @@ local function build_atom_sequence(atom)
 		ancestry_idx[idx] = active
 		if #active > 0 then
 			innermost_idx[idx] = active[#active]
+		end
+	end
+
+	-- atom_dbg_step_ux_20260725 (gdb 12.1 fix): per-invocation `body_first_line` cache.
+	-- Maps invocation_id -> the line in the PARENT'S source where the body's FIRST CONTENT lives.
+	--   * If the invocation's body has any NESTED invocations (parent_id == top_inv.id), the body's
+	--     first content is the call_line of the earliest nested invocation (by start_pos).
+	--   * Otherwise (only RAW words in the body), it's the line of the first raw word = body_lines[1].
+	-- This is the value the multi-row PC's body_lines[1] row must reference for source-order display:
+	-- `anc.body_lines[1]` is the line of the FIRST WORD (which for an outer whose body starts with a
+	-- nested expansion is inside the inner's expansion = wrong for display purposes); `anc.body_first_line`
+	-- is the body's first content line in the parent's source (= correct for display).
+	local body_first_line_of = {}
+	for _, top_inv in ipairs(invs) do
+		local earliest_nested_call_line = nil
+		local earliest_nested_start_pos = nil
+		for _, cand in ipairs(invs) do
+			if cand.parent_id == top_inv.id and cand.call_line ~= nil then
+				if earliest_nested_start_pos == nil or cand.start_pos < earliest_nested_start_pos then
+					earliest_nested_start_pos = cand.start_pos
+					earliest_nested_call_line = cand.call_line
+				end
+			end
+		end
+		if earliest_nested_call_line ~= nil then
+			body_first_line_of[top_inv.id] = earliest_nested_call_line
+		elseif top_inv.body_lines and top_inv.body_lines[1] ~= nil then
+			body_first_line_of[top_inv.id] = top_inv.body_lines[1]
+		else
+			body_first_line_of[top_inv.id] = 0
 		end
 	end
 
@@ -546,15 +571,10 @@ local function build_atom_sequence(atom)
 	local entry_1         = atom.entries[1]
 	local entry_1_ancestry = ancestry_idx[1]
 
-	-- atom_dbg_step_ux_20260725: the call-site row at atom entry is ALWAYS is_stmt=true
-	-- (PROBLEM A fix). The previous `not marked_idx[1]` predicate suppressed this row when any
-	-- ancestor was marked; that behavior made source-level stepping skip past the call line entirely.
-	-- The new contract is `want_call = true` unconditionally.
-	--
-	-- If atom entry 1 starts inside an invocation, walk the ancestry and emit a call-site row + (when
-	-- applicable) a body_lines[1] row for every active ancestor. For a non-nested invocation this is
-	-- just the one pair; for nested invocations this emits the outer call-site + body_lines[1] rows
-	-- BEFORE the inner pair so the debugger displays the outer body line at the inner's first word
+	-- If atom entry 1 starts inside an invocation, walk the ancestry and emit a call-site row + (when applicable)
+	-- a body_lines[1] row for every active ancestor. For a non-nested invocation this is just the one pair;
+	-- for nested invocations this emits the outer call-site + body_lines[1] rows BEFORE the inner pair so the debugger displays
+	-- the outer body line at the inner's first word
 	-- (PROBLEM B fix).
 	--
 	-- A marked OUTERMOST ancestor's body_lines[1] row is suppressed at this PC (the existing full-skip
@@ -568,6 +588,9 @@ local function build_atom_sequence(atom)
 		-- Atom starts in an invocation. Walk the ancestry outermost-first.
 		-- Each ancestor emits one call-site row (statement) and one body_lines[1] row
 		-- (statement iff unmarked; suppressed for marked outermost).
+		-- The body_lines[1] row references body_first_line_of[anc.id] (= the body's first content
+		-- line in the parent's source), NOT anc.body_lines[1] (= the line of the first WORD,
+		-- which is wrong when the outer's body starts with a nested call).
 		for ai, anc in ipairs(entry_1_ancestry) do
 			assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
 			assert(anc.body_lines[1] ~= nil
@@ -577,7 +600,7 @@ local function build_atom_sequence(atom)
 			emit_row(resolve_provenance_file_index(anc.call_path), anc.call_line,    true)
 			local is_outermost = (ai == 1)
 			if not (is_outermost and anc.debug_skip) then
-				emit_row(resolve_provenance_file_index(anc.def_path),  anc.body_lines[1], not anc.debug_skip)
+				emit_row(resolve_provenance_file_index(anc.def_path),  body_first_line_of[anc.id] or anc.body_lines[1], not anc.debug_skip)
 			end
 		end
 	end
@@ -601,6 +624,11 @@ local function build_atom_sequence(atom)
 			-- This re-emits the outer ancestor's call-site + body rows at the inner's first word PC
 			-- for debugger context: source-level stepping now shows the outer body line (not the
 			-- inner body line) when stepping into the inner. PROBLEM B fix.
+			-- The body_lines[1] row references body_first_line_of[anc.id] (= the body's first content
+			-- line in the parent's source), NOT anc.body_lines[1] (= the line of the first WORD,
+			-- which is wrong when the outer's body starts with a nested call: gdb 12.1 picks the
+			-- displayed line as the LAST row at the same PC in byte-stream order, so the disc=1 row's
+			-- value matters for what's shown when stepping into the nested case).
 			local ancestry = ancestry_idx[idx]
 			for ai, anc in ipairs(ancestry) do
 				assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
@@ -612,7 +640,7 @@ local function build_atom_sequence(atom)
 				emit_row(resolve_provenance_file_index(anc.call_path), anc.call_line,    true)
 				local is_outermost = (ai == 1)
 				if not (is_outermost and anc.debug_skip) then
-					emit_row(resolve_provenance_file_index(anc.def_path),  anc.body_lines[1], not anc.debug_skip)
+					emit_row(resolve_provenance_file_index(anc.def_path),  body_first_line_of[anc.id] or anc.body_lines[1], not anc.debug_skip)
 				end
 			end
 		elseif inv then
@@ -652,7 +680,7 @@ end
 --- The atom table is built entirely from in-memory state. Disk source-map and provenance text artifacts are diagnostic outputs, not semantic inputs;
 --- the DWARF injection pass must remain correct regardless of their on-disk content.
 ---
---- Skip-state ownership (Tasks 6+7):
+--- Skip-state ownership:
 ---   * Whole-atom skip is read from the `atom.debug_skip` field (stamped by `scan_source.run` when the bare `atom_dbg_skip` marker
 ---     immediately precedes the declaration; `corpus.atoms_by_name` exposes it directly).
 ---   * Invocation skip is read from `atom.paths.invocations[*].debug_skip` (stamped by `duffle.emit_invoke_begin`
@@ -713,7 +741,7 @@ local function build_atom_table(corpus, addrs)
 		-- Using `start_word` would shift every `words_into` lookup by the marker count and break the call-site + body row pairing at the first word of every invocation.
 		atom.invocations = invocations_proj
 		for _, inv in ipairs(atom.invocations) do
-			-- Tasks 6+7: `debug_skip` flag is already stamped by `duffle.emit_invoke_begin` from `corpus.components[name].debug_skip`.
+			-- `debug_skip` flag is already stamped by `duffle.emit_invoke_begin` from `corpus.components[name].debug_skip`.
 			-- Normalize to boolean for downstream dispatch. A missing value is a corpus-plumbing bug; the fail-loud error was raised at the construction site.
 			inv.debug_skip = inv.debug_skip == true
 			assert(type(inv.start_pos) == "number"
@@ -1960,11 +1988,11 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		-- Per-component invocation inlined_subroutine instances.
 		-- Each invocation covers a contiguous .word range [start_pos, end_pos] within the atom; we compute the PC range from
 		-- atom start + .word offsets × MIPS_BYTES_PER_WORD. `inv.call_file` resolves to the line-unit file index, preserving call-site attribution across source files.
-		-- Tasks 6+7: a skipped invocation suppresses its synthetic inline frame entirely so source-level `step` cannot descend into it; the per-PC-range non-statement rows in .debug_line (emitted above) provide full skip semantics.
+		-- A skipped invocation suppresses its synthetic inline frame entirely so source-level `step` cannot descend into it; the per-PC-range non-statement rows in .debug_line (emitted above) provide full skip semantics.
 		if atom.invocations and not atom.debug_skip then
 			for _, inv in ipairs(atom.invocations) do
 				if inv.debug_skip then
-					-- Tasks 6+7: this invocation emits no inlined_subroutine DIE; the whole-PC-range non-statement rows in .debug_line provide full skip semantics.
+					-- This invocation emits no inlined_subroutine DIE; the whole-PC-range non-statement rows in .debug_line provide full skip semantics.
 					-- Stepping from the preceding atom statement lands at the first unskipped row after this invocation's range.
 				else
 					local inv_low  = atom.addr + inv.start_pos * MIPS_BYTES_PER_WORD

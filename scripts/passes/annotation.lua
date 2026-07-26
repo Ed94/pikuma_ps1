@@ -328,7 +328,7 @@ local function check_skip_marker(marker, _pipe_ctx, findings)
 	local kind = marker.marker_kind
 	local line = marker.marker_line
 
-	-- Tasks 6+7 left `scan.debug_skip_markers` with production records for `atom_dbg_skip` only; other identifiers take the walker's unrelated branch.
+	-- Left `scan.debug_skip_markers` with production records for `atom_dbg_skip` only; other identifiers take the walker's unrelated branch.
 
 	if marker.has_parens then
 		findings.errors[#findings.errors + 1] = {

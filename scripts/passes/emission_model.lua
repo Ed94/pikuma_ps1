@@ -157,8 +157,6 @@ local function project_atom(atom_record, src, corpus)
 	local body  = atom_record.body or ""
 	local wc    = corpus.word_counts or {}
 	local cbi   = corpus.component_body_index or {}
-	-- Stamp invocation-level `debug_skip` during construction (Task 5 of atom_component_skip_semantics_20260725).
-	-- I found the declaration metadata in `corpus.components`; the walker forwards that registry to `emit_invoke_begin` in `duffle.lua`.
 	-- That construction site stamps `invocation.debug_skip` while appending each record to `proj.invocations`.
 	local proj  = duffle.project_emission(body, cbi, wc, corpus.components)
 	local paths = {
