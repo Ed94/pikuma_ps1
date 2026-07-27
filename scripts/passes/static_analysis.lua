@@ -44,12 +44,9 @@
 ---       module = "passes.static_analysis",
 ---       kind   = "diagnostic",
 ---       deps   = {"word-counts", "components"},
----       out    = { { kind = "report", path_template = "<out_root>/<basename>.static_analysis.txt" } }
 ---     }
---- `kind = "diagnostic"` keeps every finding visible in the report; the orchestrator does not exit non-zero on static-analysis errors.
+--- `kind = "diagnostic"` keeps every finding visible in the projection; the orchestrator does not exit non-zero on static-analysis errors.
 --- Annotation and header-output validation remain build-stopping.
----
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -2180,203 +2177,6 @@ local function validate(ctx, src, corpus_pipe_ctx)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Per-directory output: build/gen/<dir_basename>.static_analysis.txt
--- ════════════════════════════════════════════════════════════════════════════
-
---- Per-directory emit. Aggregates atoms + findings across every source in `dir_sources`
---- and writes a single report to `<out_root>/<dir_basename>.static_analysis.txt`.
---- Called only when at least one atom was found (the caller in M.run handles the skip).
----
---- `info` is finding-level info only (kind == "info" findings); the scanned/cycles summary rows
---- live in `summaries` and are rendered as trailing summary lines after `Module findings:`.
-local function emit_module_static_analysis_txt(ctx, dir, dir_sources, atoms, findings, errors, warnings, info, summaries)
-	-- Module basename = last component of `dir` ("code/duffle" -> "duffle").
-	local dir_basename = dir:match("([^/\\]+)$") or dir
-	local out_path     = ctx.out_root .. "/" .. dir_basename .. ".static_analysis.txt"
-	duffle.ensure_dir(ctx.out_root)
-
-	local lines = {}
-	local function add(s) lines[#lines + 1] = s end
-
-	add("========================================================")
-	add("STATIC ANALYSIS PASS -- module " .. dir_basename)
-	add("========================================================")
-	add(string.format("Sources: %d", #dir_sources))
-	for _, s in ipairs(dir_sources) do
-		add("  " .. s.path)
-	end
-	add("")
-
-	-- Tally atoms by kind for the header summary
-	local n_atoms, n_bare, n_proc = 0, 0, 0
-	for _, a in ipairs(atoms) do
-		n_atoms = n_atoms + 1
-		if     a.kind == "comp_bare" then n_bare = n_bare + 1
-		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
-		end
-	end
-	local header_atoms = string.format("Atoms: %d", n_atoms)
-	if n_bare > 0 or n_proc > 0 then
-		header_atoms = header_atoms .. string.format("  (atoms: %d, comp_bare: %d, comp_proc: %d)",
-			n_atoms - n_bare - n_proc, n_bare, n_proc)
-	end
-	-- Header carries the per-severity counts; info is its own column, not a warning.
-	-- (`Info: N` is the byte-asserted field that the focused test matches; do not collapse it into Warnings.)
-	add(string.format("%s   Findings: %d   Errors: %d   Warnings: %d   Info: %d",
-		header_atoms, #findings, #errors, #warnings, #info))
-	add("")
-
-	-- Group findings by atom (with source prefix when multi-source module)
-	local multi_source = #dir_sources > 1
-	local by_atom      = {}
-	for _, f in ipairs(findings) do
-		by_atom[f.atom] = by_atom[f.atom] or {}
-		by_atom[f.atom][#by_atom[f.atom] + 1] = f
-	end
-
-	if next(by_atom) == nil then
-		add("  (no findings -- every atom passed all checks)")
-	else
-		add("── Findings by atom ─────────────────────────────────────")
-		for _, a in ipairs(atoms) do
-			local fs = by_atom[a.name]
-			if fs then
-				local label = a.name
-				if multi_source and a.source_path then
-					label = string.format("%s  (%s)", a.name, a.source_path:match("([^/\\]+)$") or a.source_path)
-				end
-				add(string.format("  %s   line %d", label, a.line))
-				for _, f in ipairs(fs) do
-					add(string.format("      [%s] %s", f.check, f.msg))
-				end
-			end
-		end
-	end
-
-	add("")
-	add("── Errors ──────────────────────────────────────────────")
-	if #errors == 0 then add("  (none)") end
-	for _, e in ipairs(errors) do
-		add(string.format("  X line %d  %s", e.line, e.msg))
-	end
-
-	add("")
-	add("── Warnings ────────────────────────────────────────────")
-	if #warnings == 0 then add("  (none)") end
-	for _, w in ipairs(warnings) do
-		add(string.format("  ! line %d  %s", w.line, w.msg))
-	end
-
-	-- Finding-level Info section.
-	-- Rendered between Warnings and the per-atom cycle table so the next `── ` line after `── Info` is the per-atom cycle counts section;
-	-- the trailing scan/cycle summary rows (rendered after Module findings) stay outside this section.
-	add("")
-	add("── Info ────────────────────────────────────────────────")
-	if #info == 0 then add("  (none)") end
-	for _, i_ in ipairs(info) do
-		add(string.format("  i line %d  %s", i_.line, i_.msg))
-	end
-
-	-- Per-atom cycle counts (path-aware). For each atom:
-	--   min   = shortest path through the body (earliest exit)
-	--   max   = longest path through the body (full fall-through)
-	--   br    = number of branch instructions
-	--   paths = number of distinct paths reached
-	-- Both min and max are best-case (no stalls); BD-slot nops are absorbed into branch costs (MIPS semantics).
-	add("")
-	add("── Per-atom cycle counts (path-aware, best case, no stalls) ─")
-	if #atoms == 0 then
-		add("  (no atoms)")
-	else
-		-- Sort atoms by max cycles descending for quick scanning.
-		local sorted = {}
-		for _, a in ipairs(atoms) do sorted[#sorted + 1] = a end
-		table.sort(sorted, function(x, y) return ((x.paths or {}).cycles_max or 0) > ((y.paths or {}).cycles_max or 0) end)
-		for _, a in ipairs(sorted) do
-			local p           = a.paths or {}
-			local br_count    = p.branches or 0
-			local path_count  = p.paths or 0
-			local loops_tag   = p.has_loops and "  [loop!]" or ""
-			local unknown_tag = ""
-			if p.unknown_macros and #p.unknown_macros > 0 then
-				unknown_tag = string.format("  [unknown: %s]",
-					table.concat(p.unknown_macros, ", "))
-			end
-			local name_label = a.name
-			if multi_source and a.source_path then
-				name_label = string.format("%s  (%s)", a.name, a.source_path:match("([^/\\]+)$") or a.source_path)
-			end
-			if br_count > 0 then
-				add(string.format("  %-44s  min=%4d  max=%4d  br=%d  paths=%d  (line %d)%s%s",
-					name_label, p.cycles_min or 0, p.cycles_max or 0, br_count, path_count,
-					a.line, loops_tag, unknown_tag))
-			else
-				add(string.format("  %-44s  %4d cycles  (line %d, no branches)%s%s",
-					name_label, p.cycles_min or 0, a.line, loops_tag, unknown_tag))
-			end
-		end
-	end
-
-	add("")
-	add("── Per-source scan summary ──────────────────────────────")
-	-- One line per source that contributed atoms.
-	-- The line includes the source basename + per-source atom count + (if path-aware cycle data is present) the min..max cycle range.
-	-- Sources with 0 atoms are skipped (they're just header files that declared no MipsAtom_ — they're already listed in the module's "Sources:" section above).
-	for _, src in ipairs(dir_sources) do
-		local src_atoms = {}
-		for _, a in ipairs(atoms) do
-			if a.source_path == src.path then
-				src_atoms[#src_atoms + 1] = a
-			end
-		end
-		if #src_atoms == 0 then
-			goto continue
-		end
-		local atom_count = #src_atoms
-		local mn, mx     = math.huge, -1
-		for _, a in ipairs(src_atoms) do
-			local p = a.paths or {}
-			if (p.cycles_min or 0) < mn then mn = p.cycles_min or 0 end
-			if (p.cycles_max or 0) > mx then mx = p.cycles_max or 0 end
-		end
-		local path_str
-		if mx > 0 then
-			path_str = string.format("  cycles=%d..%d", mn, mx)
-		else
-			path_str = string.format("  %d cycles", mn)
-		end
-		add(string.format("  %-30s  %d atom%s%s",
-			src.basename, atom_count,
-			atom_count == 1 and "" or "s",
-			path_str))
-		::continue::
-	end
-
-	-- Module-level findings summary (across all sources).
-	-- Info has its own count; it remains separate from warnings.
-	local total_errs  = #errors
-	local total_warns = #warnings
-	local total_infos = #info
-	add("")
-	add(string.format("Module findings:  %d error(s), %d warning(s), %d info", total_errs, total_warns, total_infos))
-
-	-- Per-source "scanned:" / "cycles:" summary lines (each line includes the source basename for traceability).
-	-- These are kept SEPARATE from the finding-level Info section above so the report's Info section is signal-only
-	-- (true findings), not a mix of findings + rollups.
-	-- The downstream test (`test_control_transfer_delay_slot.lua`)
-	-- asserts that the Info section contains NEITHER `scanned:` NOR `cycles:` lines.
-	if summaries and #summaries > 0 then
-		add("")
-		for _, s in ipairs(summaries) do
-			add(string.format("  %s", s.msg))
-		end
-	end
-
-	duffle.write_file(out_path, table.concat(lines, "\n") .. "\n")
-	return out_path
-end
-
--- ════════════════════════════════════════════════════════════════════════════
 -- M.run — orchestrator entry
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -2431,21 +2231,30 @@ function M.run(ctx)
 			for _, s  in ipairs(result.summaries or {}) do dir_summaries[#dir_summaries + 1] = s end
 		end
 
-		-- Skip directories with zero atoms. A directory with only headers / no MipsAtom_ is "nothing to report".
-		if #all_atoms == 0 then
-			-- Still aggregate errors/warnings/info so orchestrator sees them, but don't write a file.
-			for _, e in ipairs(dir_errors) do errors  [#errors   + 1] = e end
-			for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
-			for _, i_ in ipairs(dir_info) do info[#info + 1] = i_ end
-		else
-			local out_path = emit_module_static_analysis_txt(ctx, dir, dir_sources, all_atoms, all_findings, dir_errors, dir_warnings, dir_info, dir_summaries)
-			if out_path then
-				table.insert(outputs, { static_analysis_txt = out_path })
-			end
-			for _, e in ipairs(dir_errors) do errors  [#errors   + 1] = e end
-			for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
-			for _, i_ in ipairs(dir_info) do info[#info + 1] = i_ end
-		end
+		-- Stash per-module results on the corpus for `report.lua` to consume.
+		-- Avoids re-running validate() in the report pass + avoids rebuilding corpus_pipe_ctx.
+		-- Pattern matches `corpus.atoms_by_name` / `corpus.word_counts` / `corpus.components`
+		-- (one writer: `static_analysis.lua`; one reader: `report.lua`).
+		-- Module basename = last component of `dir` ("code/duffle" -> "duffle").
+		local dir_basename = dir:match("([^/\\]+)$") or dir
+		corpus.static_analysis_results = corpus.static_analysis_results or {}
+		corpus.static_analysis_results[dir_basename] = {
+			atoms     = all_atoms,
+			findings  = all_findings,
+			errors    = dir_errors,
+			warnings  = dir_warnings,
+			info      = dir_info,
+			summaries = dir_summaries,
+			sources   = dir_sources,
+		}
+
+		-- Aggregate per-dir errors/warnings/info into the orchestrator totals.
+		-- Hoisted out of any per-dir file-emit so `report.lua` can drop the on-disk file emitter without losing the cross-module rollup.
+		for _, e in ipairs(dir_errors)   do errors  [#errors   + 1] = e end
+		for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
+		for _, i_ in ipairs(dir_info)     do info    [#info     + 1] = i_ end
+		-- (No per-dir emit: per-module findings are stashed on `corpus.static_analysis_results` above. 
+		-- `report.lua` reads that projection to render `<module>.atom_meta_report.md` without re-running validate().)
 	end
 
 	-- Result exposes at least {outputs, errors, warnings, info}.

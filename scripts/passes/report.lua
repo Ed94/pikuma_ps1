@@ -7,9 +7,6 @@
 ---
 --- The annotation pass emits `errors.h` files per module and the canonical `corpus.sources_by_dir` projection groups sources by directory.
 --- This pass iterates the canonical dir projection directly and re-validates each source via `annotation.validate()` to get the detailed per-source results.
----
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -18,17 +15,21 @@
 -- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
 -- Bootstrap: see `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
--- Uses `debug.getinfo` to find this file's own directory, so it works
--- both standalone and when require'd from the orchestrator.
+-- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- Load the annotation pass so we can re-validate each source against the canonical corpus projection.
 -- The annotation pass exposes `M.validate`, which returns the per-source AnnotationResult (atoms / annots / macros / binds / errors / warnings)
 -- that the report pass renders into the per-module `<dir_basename>.annotations.txt` output.
 local annotation    = dofile(_bootstrap_dir .. "annotation.lua")
+
+-- Load atoms_source_map for the `render_source_map` / `render_provenance` module functions (used by `render_module_atoms_md` to produce `<module>.atoms.md` without re-walking source tokens).
+-- The pass itself emits no per-source files anymore; we only consume the two pure renderers here.
+-- Defined BEFORE the renderer functions below so their upvalues resolve to this local (not the global `atoms_source_map`, which is nil).
+local atoms_source_map = dofile(_bootstrap_dir .. "atoms_source_map.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -148,328 +149,451 @@ local function source_basename(path)
 	return path:match(BASENAME_PATTERN) or path
 end
 
---- (internal) Format a single annotation entry as one rendered line.
---- @param a AnnotEntry
---- @param src_name string
+-- ════════════════════════════════════════════════════════════════════════════
+-- Markdown renderers (consolidated-report-files refactor, 2026-07-26)
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- Render the thin project-wide summary (`build/atom_meta_report.summary.md`).
+--- @param all_results { module:string, atoms:integer, annots:integer, binds:integer,
+---                       macros:integer, findings:integer, errors:integer,
+---                       warnings:integer, info:integer }[]
 --- @return string
-local function format_annot_line(a, src_name)
-	if a.error then
-		return string.format("  ✗ line %d  %s  [ERROR: %s]  [%s]", a.line, a.macro or "?", a.error, src_name)
-	end
-	local line = string.format("  ●  line %d  %s  [%s]", a.line, a.name, src_name)
-	if a.binds       then line = line .. "  binds="   .. a.binds end
-	if #a.reads  > 0 then line = line .. "  reads={"  .. table.concat(a.reads,  ",") .. "}" end
-	if #a.writes > 0 then line = line .. "  writes={" .. table.concat(a.writes, ",") .. "}" end
-	return line
-end
-
---- (internal) Tally totals across all results in a module.
---- @param results AnnotationResult[]
---- @return integer, integer, integer, integer, integer, integer
-local function tally_module_totals(results)
-	local total_atoms, total_annots, total_binds, total_macros = 0, 0, 0, 0
-	local total_errors, total_warnings = 0, 0
-	for _, r in ipairs(results) do
-		total_atoms    = total_atoms    + #r.atoms
-		total_annots   = total_annots   + #r.annots
-		total_binds    = total_binds    + #r.binds
-		total_macros   = total_macros   + #r.macros
-		total_errors   = total_errors   + #r.errors
-		total_warnings = total_warnings + #r.warnings
-	end
-	return total_atoms, total_annots, total_binds, total_macros, total_errors, total_warnings
-end
-
--- (internal) Section renderer: per-source atom declarations.
-local function render_module_atoms_section(add, results)
-	add(SECTION_HEADER_ATOMS)
-	for _, r in ipairs(results) do
-		local src_name = source_basename(r.source)
-		for _, a in ipairs(r.atoms) do
-			add(string.format("  MipsAtom_(%s)   line %d   [%s]", a.name, a.line, src_name))
-		end
-	end
-	add("")
-end
-
--- (internal) Section renderer: per-source annotation entries.
-local function render_module_annots_section(add, results)
-	add(SECTION_HEADER_ANNOTS)
-	for _, r in ipairs(results) do
-		local src_name = source_basename(r.source)
-		for _, a in ipairs(r.annots) do
-			add(format_annot_line(a, src_name))
-		end
-	end
-	add("")
-end
-
--- (internal) Section renderer: per-source Binds_* struct declarations.
-local function render_module_binds_section(add, results)
-	add(SECTION_HEADER_BINDS)
-	for _, r in ipairs(results) do
-		local src_name = source_basename(r.source)
-		for _, b in ipairs(r.binds) do
-			add(string.format("  %s   line %d   %d bytes   [%s]", b.name, b.line, b.bytes, src_name))
-			for _, f in ipairs(b.fields) do
-				add(string.format("    +%2d: %s", f.offset, f.name))
-			end
-		end
-	end
-	add("")
-end
-
--- (internal) Section renderer: per-source macro word-count declarations.
-local function render_module_macros_section(add, results)
-	add(SECTION_HEADER_MACROS)
-	for _, r in ipairs(results) do
-		local src_name = source_basename(r.source)
-		for _, m in ipairs(r.macros) do
-			add(string.format("  %s  line %d  words=%d  [%s]", m.name, m.line, m.words, src_name))
-		end
-	end
-	add("")
-end
-
--- (internal) Section renderer: per-source errors (one-line + "(none)" if empty).
-local function render_module_errors_section(add, results, total_errors)
-	add(SECTION_HEADER_ERRORS)
-	if total_errors == 0 then
-		add("  (none)")
-	else
-		for _, r in ipairs(results) do
-			local src_name = source_basename(r.source)
-			for _, e in ipairs(r.errors) do
-				add(string.format("  ✗ line %d  %s  [%s]", e.line, e.msg, src_name))
-			end
-		end
-	end
-	add("")
-end
-
--- (internal) Section renderer: per-source warnings (one-line + "(none)" if empty).
-local function render_module_warnings_section(add, results, total_warnings)
-	add(SECTION_HEADER_WARNINGS)
-	if total_warnings == 0 then
-		add("  (none)")
-	else
-		for _, r in ipairs(results) do
-			local src_name = source_basename(r.source)
-			for _, w in ipairs(r.warnings) do
-				add(string.format("  ⚠ line %d  %s  [%s]", w.line, w.msg, src_name))
-			end
-		end
-	end
-	add("")
-end
-
--- ════════════════════════════════════════════════════════════════════════════
--- SECTION_RENDERERS — data-driven section dispatch (the plex pattern)
--- ════════════════════════════════════════════════════════════════════════════
---
--- Each entry maps a section to its (header, render_fn). The render_fn signature:
---   render_fn(add, results, totals)
---     add    -- the `add(line)` closure from the surrounding report renderer
---     results -- AnnotationResult[] (per-source results)
---     totals -- {atoms, annots, binds, macros, errors, warnings} counts
---
--- Sections that need to render "(none)" vs iterate use totals.errors / totals.warnings;
--- other sections ignore the totals arg.
--- Adding a new section = 1 row here + 1 render_<thing>_section function.
-local SECTION_RENDERERS = {
-	{ header = SECTION_HEADER_ATOMS,    render = render_module_atoms_section     },
-	{ header = SECTION_HEADER_ANNOTS,   render = render_module_annots_section    },
-	{ header = SECTION_HEADER_BINDS,    render = render_module_binds_section     },
-	{ header = SECTION_HEADER_MACROS,   render = render_module_macros_section    },
-	{ header = SECTION_HEADER_ERRORS,   render = function(add, results, totals) return render_module_errors_section(add, results, totals.errors)   end },
-	{ header = SECTION_HEADER_WARNINGS, render = function(add, results, totals) return render_module_warnings_section(add, results, totals.warnings) end },
-}
-
---- Render the per-MODULE annotation report (one `<dir_basename>.annotations.txt`).
---- @param dir string                  -- module directory path
---- @param sources SourceFile[]        -- sources in this module
---- @param results AnnotationResult[]  -- per-source validate() results
---- @return string                     -- the rendered report text
-local function render_module_report(dir, sources, results)
-	local lines = {}
-	local function add(s) lines[#lines + 1] = s end
-
-	add(RULE_THICK)
-	add("ANNOTATION PASS — module " .. source_basename(dir))
-	add(RULE_THICK)
-	add(string.format("Sources: %d", #sources))
-	for _, s in ipairs(sources) do add("  " .. s.path) end
-	add("")
-
-	local total_atoms, total_annots, total_binds, total_macros, total_errors, total_warnings = tally_module_totals(results)
-	add(string.format("Atoms: %d   Annotations: %d   Binds structs: %d   Macro decls: %d",
-		total_atoms, total_annots, total_binds, total_macros))
-	add("")
-
-	-- Bundle the totals so the section renderers don't need separate parameter lists.
-	-- Errors/warnings sections need their total count to decide "(none)" vs iterate.
-	-- Sections without totals (atoms/annots/binds/macros) ignore this arg.
-	local totals = {
-		atoms    = total_atoms,  annots = total_annots,  binds  = total_binds,
-		macros   = total_macros, errors = total_errors,  warnings = total_warnings,
+local function render_project_summary(all_results)
+	local lines = {
+		"# Project summary",
+		"> Auto-generated by ps1_meta.lua (passes/report.lua).",
+		"",
+		"| module | atoms | annots | binds | macros | findings | errors | warnings | info |",
+		"|--------|-------|--------|-------|--------|----------|--------|----------|------|",
 	}
-
-	-- THE per-section dispatch. ONE loop over SECTION_RENDERERS.
-	-- Each renderer writes its header + content via the `add` closure (pre-bound above).
-	-- Adding a new section = 1 row here + 1 render_<thing>_section function.
-	for _, section in ipairs(SECTION_RENDERERS) do
-		section.render(add, results, totals)
+	local totals = { atoms = 0, annots = 0, binds = 0, macros = 0,
+		findings = 0, errors = 0, warnings = 0, info = 0 }
+	for _, e in ipairs(all_results) do
+		lines[#lines + 1] = string.format(
+			"| %s | %d | %d | %d | %d | %d | %d | %d | %d |",
+			e.module, e.atoms, e.annots, e.binds, e.macros,
+			e.findings, e.errors, e.warnings, e.info)
+		totals.atoms    = totals.atoms    + e.atoms
+		totals.annots   = totals.annots   + e.annots
+		totals.binds    = totals.binds    + e.binds
+		totals.macros   = totals.macros   + e.macros
+		totals.findings = totals.findings + e.findings
+		totals.errors   = totals.errors   + e.errors
+		totals.warnings = totals.warnings + e.warnings
+		totals.info     = totals.info     + e.info
 	end
-
+	lines[#lines + 1] = string.format(
+		"| **TOTAL** | %d | %d | %d | %d | %d | %d | %d | %d |",
+		totals.atoms, totals.annots, totals.binds, totals.macros,
+		totals.findings, totals.errors, totals.warnings, totals.info)
 	return table.concat(lines, "\n") .. "\n"
 end
 
--- ════════════════════════════════════════════════════════════════════════════
--- Per-project summary
--- ════════════════════════════════════════════════════════════════════════════
-
---- Render the per-project summary (`build/gen/annotation_validation.txt`).
---- Aggregates totals across all sources; lists per-source error counts if any source has errors.
---- @param all_results AnnotationResult[]
+--- Render the per-module verbose source-map markdown (`build/<module>.atoms.md`).
+--- Per-source sub-section, per-atom stanza with sourcemap + provenance rows.
+--- Pulls sourcemap + provenance from `atoms_source_map` (no second source walk).
+--- @param dir string
+--- @param dir_sources SourceFile[]
+--- @param wc table<string, integer>
 --- @return string
-local function render_project_report(all_results)
-	local lines = {}
+local function render_module_atoms_md(dir, dir_sources, wc)
+	local dir_basename = source_basename(dir)
+	local lines = {
+		"# " .. dir_basename .. " — atoms (verbose source map)",
+		"> Per-word call-site + provenance. Auto-generated.",
+		"",
+	}
+	for _, src in ipairs(dir_sources) do
+		local src_name = source_basename(src.path)
+		lines[#lines + 1] = "## " .. src_name
+		lines[#lines + 1] = ""
+		-- For each atom with a projection, render its sourcemap + provenance.
+		local atoms_list = {}
+		for _, atom in ipairs((src.scan or {}).atoms or {}) do
+			if atom.paths then atoms_list[#atoms_list + 1] = atom end
+		end
+		for _, atom in ipairs((src.scan or {}).raw_atoms or {}) do
+			if atom.paths then atoms_list[#atoms_list + 1] = atom end
+		end
+		if #atoms_list == 0 then
+			lines[#lines + 1] = "_(no atom projections)_"
+			lines[#lines + 1] = ""
+		else
+			-- Per-source forward-slash path (same one `emit_atom_stanza` / `emit_provenance_stanza` would derive;
+			-- computed once per `## <source>` heading and reused by each atom's `WORD N CALL ...` field).
+			local rel_path = src.path:gsub("\\\\", "/")
+			for _, atom in ipairs(atoms_list) do
+				lines[#lines + 1] = string.format(
+					"### atom: %s (line %d, %d words)",
+					atom.name, atom.line or 0, #(atom.paths.items or {}))
+				lines[#lines + 1] = ""
+				lines[#lines + 1] = "**Sourcemap** — per-word call site:"
+				lines[#lines + 1] = "```"
+				-- Per-atom invariant: call the per-atom renderers, NOT the per-source ones.
+				-- The per-source renderers enumerate every atom in `src`;
+				-- calling them in a per-atom loop would repeat the whole source under every `### atom:` heading.
+				lines[#lines + 1] = atoms_source_map.render_atom_source_map(atom):gsub("\n+$", "")
+				lines[#lines + 1] = "```"
+				lines[#lines + 1] = ""
+				lines[#lines + 1] = "**Provenance** — per-word definition + body:"
+				lines[#lines + 1] = "```"
+				lines[#lines + 1] = atoms_source_map.render_atom_provenance(atom, wc, rel_path):gsub("\n+$", "")
+				lines[#lines + 1] = "```"
+				lines[#lines + 1] = ""
+			end
+		end
+	end
+	return table.concat(lines, "\n") .. "\n"
+end
+
+--- Render the consolidated per-module markdown (`build/<module>.atom_meta_report.md`).
+--- Aggregates annotation + static-analysis content across all sources in `dir`.
+--- Annotations come from re-running `annotation.validate()` per source (the existing pattern);
+--- static-analysis comes from `corpus.static_analysis_results[dir_basename]` (populated by `static_analysis.lua` — no second corpus_pipe_ctx build).
+--- @param dir string
+--- @param dir_sources SourceFile[]
+--- @param annot_results AnnotationResult[]
+--- @param sa_results table                 -- corpus.static_analysis_results[dir_basename]
+--- @return string
+local function render_module_meta_report(dir, dir_sources, annot_results, sa_results)
+	local dir_basename = source_basename(dir)
+	local lines = {
+		"# " .. dir_basename .. " — atom meta report",
+		"> Auto-generated by ps1_meta.lua (passes/report.lua). Do not edit.",
+		"",
+	}
 	local function add(s) lines[#lines + 1] = s end
 
-	local total_atoms, total_annots, total_macros, total_binds = 0, 0, 0, 0
-	local total_errors, total_warnings = 0, 0
-	for _, r in ipairs(all_results) do
-		total_atoms    = total_atoms    + #r.atoms
-		total_annots   = total_annots   + #r.annots
-		total_macros   = total_macros   + #r.macros
-		total_binds    = total_binds    + #r.binds
-		total_errors   = total_errors   + #r.errors
-		total_warnings = total_warnings + #r.warnings
+	-- Module summary table.
+	local n_atoms        = 0
+	local n_annot        = 0
+	local n_binds        = 0
+	local n_macros       = 0
+	local n_bare, n_proc = 0, 0
+	for _, r in ipairs(annot_results) do
+		n_atoms  = n_atoms  + #r.atoms
+		n_annot  = n_annot  + #r.annots
+		n_binds  = n_binds  + #r.binds
+		n_macros = n_macros + #r.macros
+	end
+	for _, a in ipairs(sa_results.atoms or {}) do
+		if     a.kind == "comp_bare" then n_bare = n_bare + 1
+		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
+		end
 	end
 
-	add(RULE_THICK)
-	add("ANNOTATION VALIDATION — project summary")
-	add(RULE_THICK)
-	add("")
-	add(string.format("Atoms:        %d", total_atoms))
-	add(string.format("Annotations:  %d", total_annots))
-	add(string.format("Macros:       %d", total_macros))
-	add(string.format("Binds:        %d", total_binds))
-	add("")
-	add(string.format("Errors:       %d", total_errors))
-	add(string.format("Warnings:     %d", total_warnings))
+	add("## Module summary"); add("")
+	add("| metric | value |"); add("|--------|-------|")
+	add(string.format("| sources | %d |", #dir_sources))
+	add(string.format("| atoms | %d (atoms: %d, comp_bare: %d, comp_proc: %d) |",
+		#(sa_results.atoms or {}),
+		#(sa_results.atoms or {}) - n_bare - n_proc, n_bare, n_proc))
+	add(string.format("| annotations | %d |", n_annot))
+	add(string.format("| binds structs | %d |", n_binds))
+	add(string.format("| macro decls | %d |", n_macros))
+	add(string.format("| findings | %d (errors: %d, warnings: %d, info: %d) |",
+		#(sa_results.findings or {}),
+		#(sa_results.errors   or {}),
+		#(sa_results.warnings or {}),
+		#(sa_results.info     or {})))
 	add("")
 
-	if total_errors > 0 then
-		add("Per-source error counts:")
-		for _, r in ipairs(all_results) do
-			if #r.errors > 0 then
-				local src_name = source_basename(r.source)
-				add(string.format("  %s : %d error(s)", src_name, #r.errors))
+	-- Sources
+	add("## Sources"); add("")
+	for _, s in ipairs(dir_sources) do add("- `" .. s.path .. "`") end
+	add("")
+
+	-- Atoms (annotation)
+	add("## Atoms"); add("")
+	add("| kind | name | source | line |"); add("|------|------|--------|------|")
+	for _, r in ipairs(annot_results) do
+		local src_name = source_basename(r.source)
+		for _, a in ipairs(r.atoms) do
+			add(string.format("| atom | %s | %s | %d |", a.name, src_name, a.line))
+		end
+	end
+	add("")
+
+	-- Annotations
+	add("## Annotations"); add("")
+	if #annot_results == 0 then
+		add("_(none)_")
+	else
+		add("| source | line | name | binds | reads | writes |")
+		add("|--------|------|------|-------|-------|--------|")
+		for _, r in ipairs(annot_results) do
+			local src_name = source_basename(r.source)
+			for _, a in ipairs(r.annots) do
+				local binds  = a.binds  or "—"
+				local reads  = (#a.reads  > 0 and table.concat(a.reads,  ",")) or "—"
+				local writes = (#a.writes > 0 and table.concat(a.writes, ",")) or "—"
+				add(string.format("| %s | %d | %s | %s | %s | %s |",
+					src_name, a.line, a.name, binds, reads, writes))
+			end
+		end
+	end
+	add("")
+
+	-- Binds_* structs
+	add("## Binds_* structs"); add("")
+	if #annot_results == 0 then
+		add("_(none)_")
+	else
+		for _, r in ipairs(annot_results) do
+			local src_name = source_basename(r.source)
+			for _, b in ipairs(r.binds) do
+				add(string.format("### %s (%s:%d, %d bytes)",
+					b.name, src_name, b.line, b.bytes))
+				for _, f in ipairs(b.fields) do
+					add(string.format("- `+%d %s`", f.offset, f.name))
+				end
+				add("")
+			end
+		end
+	end
+
+	-- Macro decls
+	add("## Macro word-count declarations"); add("")
+	if #annot_results == 0 then
+		add("_(none)_")
+	else
+		add("| source | line | macro declaration |")
+		add("|--------|------|-------------------|")
+		for _, r in ipairs(annot_results) do
+			local src_name = source_basename(r.source)
+			for _, m in ipairs(r.macros) do
+				add(string.format("| %s | %d | %s |",
+					src_name, m.line, m.name))
+			end
+		end
+	end
+	add("")
+
+	-- Findings by atom (static-analysis)
+	add("## Static analysis — findings by atom"); add("")
+	local by_atom = {}
+	for _, f in ipairs(sa_results.findings or {}) do
+		by_atom[f.atom] = by_atom[f.atom] or {}
+		by_atom[f.atom][#by_atom[f.atom] + 1] = f
+	end
+	if next(by_atom) == nil then
+		add("_(no findings)_")
+	else
+		for _, a in ipairs(sa_results.atoms or {}) do
+			local fs = by_atom[a.name]
+			if fs then
+				add(string.format("### %s", a.name))
+				for _, f in ipairs(fs) do
+					add(string.format("- `[%s] %s`", f.check, f.msg))
+				end
+				add("")
+			end
+		end
+	end
+
+	-- Errors / Warnings / Info
+	local function add_findings(label, entries)
+		add(string.format("## %s", label))
+		if #entries == 0 then
+			add("_(none)_")
+		else
+			for _, e in ipairs(entries) do
+				add(string.format("- line %d  %s", e.line, e.msg))
 			end
 		end
 		add("")
 	end
+	add_findings("Errors",   sa_results.errors   or {})
+	add_findings("Warnings", sa_results.warnings or {})
+	add_findings("Info",     sa_results.info     or {})
+
+	-- Per-atom cycle counts (path-aware)
+	add("## Per-atom cycle counts (path-aware, best case, no stalls)"); add("")
+	add("| atom | source | min | max | branches | paths | notes |")
+	add("|------|--------|-----|-----|----------|-------|-------|")
+	local sorted = {}
+	for _, a in ipairs(sa_results.atoms or {}) do sorted[#sorted + 1] = a end
+	table.sort(sorted, function(x, y)
+		return ((x.paths or {}).cycles_max or 0) > ((y.paths or {}).cycles_max or 0)
+	end)
+	for _, a in ipairs(sorted) do
+		local p        = a.paths or {}
+		local src_name = a.source_path and source_basename(a.source_path) or ""
+		local notes   = ""
+		if p.has_loops then notes = notes .. " [loop!]" end
+		if p.unknown_macros and #p.unknown_macros > 0 then
+			notes = notes .. " [unknown: " .. table.concat(p.unknown_macros, ", ") .. "]"
+		end
+		add(string.format("| %s | %s | %d | %d | %d | %d | %s |",
+			a.name, src_name,
+			p.cycles_min or 0, p.cycles_max or 0,
+			p.branches or 0, p.paths or 0, notes))
+	end
+	add("")
+
+	-- Per-source scan summary
+	add("## Per-source scan summary"); add("")
+	for _, src in ipairs(dir_sources) do
+		local src_atoms = {}
+		for _, a in ipairs(sa_results.atoms or {}) do
+			if a.source_path == src.path then src_atoms[#src_atoms + 1] = a end
+		end
+		if #src_atoms > 0 then
+			local mn, mx = math.huge, -1
+			for _, a in ipairs(src_atoms) do
+				local p = a.paths or {}
+				if (p.cycles_min or 0) < mn then mn = p.cycles_min or 0 end
+				if (p.cycles_max or 0) > mx then mx = p.cycles_max or 0 end
+			end
+			local path_str
+			if mx > 0 then
+				path_str = string.format("  cycles=%d..%d", mn, mx)
+			else
+				path_str = string.format("  %d cycles", mn)
+			end
+			add(string.format("- `%s` — %d atom%s%s",
+				src.basename, #src_atoms,
+				#src_atoms == 1 and "" or "s", path_str))
+		end
+	end
+	add("")
 
 	return table.concat(lines, "\n") .. "\n"
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Orchestration helpers
+-- REPORT_RENDERERS — data-driven report dispatch (one row per file kind)
 -- ════════════════════════════════════════════════════════════════════════════
-
---- (internal) Re-validate every source in a directory against the canonical corpus projection.
---- Calls `annotation.validate()` per source to produce the per-source AnnotationResult (atoms / annots / macros / binds / errors / warnings)
---- that the report renderer consumes. Eeach report pass run is reproducible from the corpus.
---- Returns the list of module results + the flat list of all results (for the project-wide summary).
---- @param ctx PassCtx
---- @param dir_sources SourceFile[]
---- @return AnnotationResult[], AnnotationResult[]
-local function lookup_module_results(ctx, dir_sources)
-	local module_results = {}
-	local all_results    = {}
-	for _, src in ipairs(dir_sources) do
-		if src.scan then
-			local result = annotation.validate(ctx, src, nil)
-			result.source = src.path                                    -- tag for downstream rendering
-			module_results[#module_results + 1] = result
-			all_results[#all_results + 1] = result
-		end
-	end
-	return module_results, all_results
-end
-
---- (internal) Does this module's results contain anything worth emitting?
---- @param module_results AnnotationResult[]
---- @return boolean
-local function module_has_content(module_results)
-	for _, r in ipairs(module_results) do
-		if #r.atoms  > 0 or #r.annots > 0 or #r.binds    > 0
-		or #r.macros > 0 or #r.errors > 0 or #r.warnings > 0 then
-			return true
-		end
-	end
-	return false
-end
-
---- (internal) Log a debug message if `_G[DEBUG_FLAG]` is truthy.
---- @param fmt string
-local function debug_log(fmt, ...)
-	if _G[DEBUG_FLAG] then
-		io.stderr:write(string.format("[%s] " .. fmt, PASS_NAME, ...))
-	end
-end
+-- `once = true` means render once at the project level (not per-module).
+-- `basename(dir_basename)` yields the file's basename for that kind.
+-- `gather(ctx, dir, dir_sources [, all_modules])` returns the rendered string.
+local REPORT_RENDERERS = {
+	{
+		name     = "atom_meta_report",
+		ext      = "md",
+		basename = function(dir_basename) return dir_basename .. ".atom_meta_report" end,
+		once     = false,
+		gather   = function(ctx, dir, dir_sources)
+			-- Annotations: re-run `annotation.validate()` per source (the existing pattern).
+			local annot_results = {}
+			for _, src in ipairs(dir_sources) do
+				if src.scan then
+					local r = annotation.validate(ctx, src, nil)
+					r.source = src.path
+					annot_results[#annot_results + 1] = r
+				end
+			end
+			-- Static-analysis: read stashed projection (no re-validate).
+			local dir_basename = dir:match("([^/\\]+)$") or dir
+			local sa_results   = (ctx.shared.corpus.static_analysis_results or {})[dir_basename] or {}
+			return render_module_meta_report(dir, dir_sources, annot_results, sa_results)
+		end,
+	},
+	{
+		name     = "atoms",
+		ext      = "md",
+		basename = function(dir_basename) return dir_basename .. ".atoms" end,
+		once     = false,
+		gather   = function(ctx, dir, dir_sources)
+			return render_module_atoms_md(dir, dir_sources,
+				ctx.shared.corpus.word_counts or {})
+		end,
+	},
+	{
+		name     = "summary",
+		ext      = "md",
+		basename = function(_dir_basename) return "atom_meta_report.summary" end,
+		once     = true,
+		gather   = function(_ctx, _dir, _dir_sources, all_modules)
+			return render_project_summary(all_modules)
+		end,
+	},
+}
 
 -- ════════════════════════════════════════════════════════════════════════════
--- M — module exports
+-- M — public pass surface
 -- ════════════════════════════════════════════════════════════════════════════
 
 local M = {}
 
---- Run the report pass. 
---- Renders one `<dir_basename>.annotations.txt` per source-directory that has content, plus the project-wide `annotation_validation.txt` summary.
+--- Run the report pass. Emits 1 `atom_meta_report.summary.md` per build + 2 `atom_meta_report.md` + 2 `atoms.md` files per module (duffle + gte_hello).
+--- Reads `corpus.static_analysis_results` (added in Phase 1) to populate per-module findings without re-running validate().
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
-	local outputs  = {}
-	local errors   = {}
-	local warnings = {}
+	local outputs = {}
+	local corpus  = ctx.shared and ctx.shared.corpus
+	local by_dir  = (corpus and corpus.sources_by_dir) or {}
 
-	-- Module grouping comes from `corpus.sources_by_dir` (the canonical projection).
-	-- Iterate it directly; no private cache, no per-pass stash.
-	local corpus = ctx.shared and ctx.shared.corpus
-	local by_dir = (corpus and corpus.sources_by_dir) or {}
+	-- `out_path_root`: when the conventional `out_root` is `build/gen` (any spelling — relative, absolute, separator variants).
+	-- Write the md files to `build/` (parent of `gen/`) instead of nested under `gen/`.
+	-- Mirrors the `gdb_tape_atoms_runtime.gdb` relocation.
+	local function ends_with_gen(p)
+		return type(p) == "string" and (p:match("[/\\]gen[/\\]?$") ~= nil
+			or p == "build/gen" or p == "build\\gen")
+	end
+	local out_root_effective = ends_with_gen(ctx.out_root)
+		and ctx.out_root:gsub("[/\\]gen[/\\]?$", "")
+		or ctx.out_root
 
-	duffle.ensure_dir(ctx.out_root)
+	duffle.ensure_dir(out_root_effective)
 
-	local all_results_for_summary = {}
+	-- Aggregator for the project-wide `once = true` summary renderer.
+	local all_modules = {}
+
 	for dir, dir_sources in pairs(by_dir) do
 		local dir_basename = dir:match("([^/\\]+)$") or dir
-		debug_log("dir=%s basename=%s sources=%d\n", dir, dir_basename, #dir_sources)
 
-		if #dir_sources > 0 then
-			local module_results, all_results = lookup_module_results(ctx, dir_sources)
-			for _, r in ipairs(all_results) do
-				all_results_for_summary[#all_results_for_summary + 1] = r
+		-- Per-renderer dispatch for the per-module renderers (once = false).
+		for _, renderer in ipairs(REPORT_RENDERERS) do
+			if not renderer.once then
+				local body     = renderer.gather(ctx, dir, dir_sources)
+				local out_path = out_root_effective .. "/" .. renderer.basename(dir_basename) .. "." .. renderer.ext
+				duffle.write_file(out_path, body)
+				outputs[#outputs + 1] = { kind = renderer.name, path = out_path }
 			end
+		end
 
-			if module_has_content(module_results) then
-				local out_path = ctx.out_root .. "/" .. dir_basename .. ".annotations.txt"
-				duffle.write_file(out_path, render_module_report(dir, dir_sources, module_results))
-				outputs[#outputs + 1] = { annotations_txt = out_path }
-			else
-				debug_log("  -> no content; skipping\n")
+		-- For the summary, compute per-module totals once (re-validating annotations per source — same pattern as the meta_report renderer).
+		local annot_results = {}
+		for _, src in ipairs(dir_sources) do
+			if src.scan then
+				local r = annotation.validate(ctx, src, nil)
+				r.source = src.path
+				annot_results[#annot_results + 1] = r
 			end
+		end
+		local n_annot, n_binds, n_macros = 0, 0, 0
+		for _, r in ipairs(annot_results) do
+			n_annot  = n_annot  + #r.annots
+			n_binds  = n_binds  + #r.binds
+			n_macros = n_macros + #r.macros
+		end
+		local sa_results = (corpus.static_analysis_results or {})[dir_basename] or {}
+		all_modules[#all_modules + 1] = {
+			module   = dir_basename,
+			atoms    = #(sa_results.atoms or {}),
+			annots   = n_annot,
+			binds    = n_binds,
+			macros   = n_macros,
+			findings = #(sa_results.findings or {}),
+			errors   = #(sa_results.errors   or {}),
+			warnings = #(sa_results.warnings or {}),
+			info     = #(sa_results.info     or {}),
+		}
+	end
+
+	-- Project-wide renderer (once = true): write the summary file.
+	for _, renderer in ipairs(REPORT_RENDERERS) do
+		if renderer.once then
+			local body     = renderer.gather(ctx, nil, nil, all_modules)
+			local out_path = out_root_effective .. "/" .. renderer.basename("") .. "." .. renderer.ext
+			duffle.write_file(out_path, body)
+			outputs[#outputs + 1] = { kind = renderer.name, path = out_path }
 		end
 	end
 
-	if #all_results_for_summary > 0 then
-		local summary_path = ctx.out_root .. "/annotation_validation.txt"
-		duffle.write_file(summary_path, render_project_report(all_results_for_summary))
-		outputs[#outputs + 1] = { summary_txt = summary_path }
-	end
-
-	return { outputs = outputs, errors = errors, warnings = warnings }
+	return { outputs = outputs, errors = {}, warnings = {} }
 end
 
 return M

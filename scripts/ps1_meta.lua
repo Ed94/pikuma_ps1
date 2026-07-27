@@ -2,16 +2,13 @@
 ---
 --- Dispatches to pass modules under `scripts/passes/`, resolving dependencies topologically (Kahn's algorithm + cycle detection).
 ---
---- **Architecture**:
----   - **PASSES table** — declarative dep graph (data, not code).
----   - **FLAG_HANDLERS table** — maps CLI flags to handlers.
----   - **parse_args** → **build_ctx** (resolves unity/direct includes or exact sources; no semantic scanning) → **topo_sort** → **dispatch_passes**.
+--- Architecture:
+---   - PASSES table: Declarative dep graph (data, not code).
+---   - FLAG_HANDLERS table: Maps CLI flags to handlers.
+---   - parse_args → build_ctx (resolves unity/direct includes or exact sources) → topo_sort → dispatch_passes.
 ---   - The first pass in the dep graph is `scan-source` (see `passes/scan_source.lua`).
 ---     It calls `duffle.scan_source` once per source to produce the fat `SourceScan` payload, which is attached to each `src.scan`. 
 ---     Every other pass that reads source structure depends on `scan-source` and consumes `src.scan` as a read-only. 
----
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible.
 ---
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -160,7 +157,7 @@ local PASSES = {
 	report = {
 		module = "passes.report",
 		kind   = "report",
-		deps   = {"annotation", "static-analysis"},
+		deps   = {"annotation", "static-analysis", "atoms-source-map"},  -- +atoms-source-map (consolidated-report-files refactor, 2026-07-26)
 		groups = { "pre-link" },
 	},
 }
@@ -206,7 +203,8 @@ end
 
 -- Pass-kind taxonomy: Which kinds stop the build on errors?
 --
--- Report severity is independent from process exit policy. A "diagnostic" pass still writes every `error`/`warning` finding into its report file,
+-- Report severity is independent from process exit policy.
+-- A "diagnostic" pass still writes every `error`/`warning` finding into its report file,
 -- but `report_validation_errors` returns early for non-stopping kinds, so nothing is printed to stderr and the orchestrator does not exit non-zero.
 -- Adding a new pass kind requires listing it here explicitly; an unknown kind must not silently fall back to "true".
 local PASS_KIND_STOP_ON_ERROR = {

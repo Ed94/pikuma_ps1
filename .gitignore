@@ -17,3 +17,5 @@ toolchain/PSn00bSDK
 .vscode/settings.json
 toolchain/lfs
 toolchain/lpeg
+
+scratch
