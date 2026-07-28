@@ -350,10 +350,10 @@ function build-graphis_hello {
 }
 # build-graphis_hello
 
-function build-gte_hello {
+function build-hello_gte {
 	$includes += @()
 
-	$path_module        = join-path $path_code   'gte_hello'
+	$path_module        = join-path $path_code   'hello_gte'
 	$path_duffle        = join-path $path_code   'duffle'
 	$path_atom_metadata = join-path $path_duffle 'word_count.metadata.h'
 	$path_build_gen     = join-path $path_build   'gen'
@@ -458,7 +458,7 @@ function build-gte_hello {
 		}
 	}
 }
-build-gte_hello
+build-hello_gte
 
 
 # NO idea if this works yet...

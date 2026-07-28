@@ -50,32 +50,31 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	nop2, gte_cmdw_rotate_translate_perspective_triple, // required cpu -> gte delay slot
 	gte_cmdw_nclip,
 
-	gte_mv_from_data_r(R_T0, C2_MAC0),
-	nop, 
+	gte_mv_from_data_r(R_T0, C2_MAC0), nop,
 	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)), nop,
+		store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
+		shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
+		load_word(R_V0, R_AT, O_(V3_S2, x)),   load_word(R_V1, R_AT, O_(V3_S2, z)),
+		gte_mv_to_data_r(R_V0, C2_VXY0),       gte_mv_to_data_r(R_V1, C2_VZ0),
 
-	store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
+		mac_gte_store_g4_p012(),
+		gte_cmdw_rotate_translate_perspective_single,
+		mac_gte_store_g4_p3(),
 
-	shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
-	load_word(R_V0, R_AT, O_(V3_S2, x)),   load_word(R_V1, R_AT, O_(V3_S2, z)),
-	gte_mv_to_data_r(R_V0, C2_VXY0),       gte_mv_to_data_r(R_V1, C2_VZ0),
+		gte_cmdw_avg_sort_z4,
+		gte_mv_from_data_r(R_T1, C2_OTZ),
+		add_ui(      R_AT, R_0,  OrderingTbl_Len),
+		set_lt_u(    R_AT, R_T1, R_AT),
 
-	mac_gte_store_g4_p012(),
-	gte_cmdw_rotate_translate_perspective_single,
-	mac_gte_store_g4_p3(),
-
-	gte_cmdw_avg_sort_z4,
-	gte_mv_from_data_r(R_T1, C2_OTZ),
-
-	add_ui(      R_AT, R_0,  OrderingTbl_Len),
-	set_lt_u(    R_AT, R_T1, R_AT),
-	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
-	mac_format_g4_color(
-		/* c0 magenta */ 0xFF, 0x00, 0xFF,
-		/* c1 yellow  */ 0xFF, 0xFF, 0x00,
-		/* c2 cyan    */ 0x00, 0xFF, 0xFF,
-		/* c3 green   */ 0x00, 0xFF, 0x00),
-	mac_insert_ot_tag_g4(),
+		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
+			mac_insert_ot_tag_g4(),
+			mac_format_g4_color(
+				/* c0 magenta */ 0xFF, 0x00, 0xFF,
+				/* c1 yellow  */ 0xFF, 0xFF, 0x00,
+				/* c2 cyan    */ 0x00, 0xFF, 0xFF,
+				/* c3 green   */ 0x00, 0xFF, 0x00),
+		// end: branch(bounds_chk)
+// end: branch(cull)
 
 atom_label(cube_g4_face_exit)
 	add_ui_self(R_PrimCursor, S_(Poly_G4)),     /* 9 words = Poly_G4 */
