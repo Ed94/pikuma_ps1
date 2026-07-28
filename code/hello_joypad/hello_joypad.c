@@ -20,10 +20,10 @@
 #include "duffle/lottes_tape.h"
 #include "duffle/word_count.metadata.h"
 
-#	include "gen/hello_gte.offsets.h"
-#include "hello_gte.h"
+#	include "gen/hello_joypad.offsets.h"
+#include "hello_joypad.h"
 
-#include "hello_gte.tape.c"
+#include "hello_joypad.tape.c"
 
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
 typedef Array_(OrderingTable_Buffer, 2);

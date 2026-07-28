@@ -4,7 +4,7 @@
 #	include "duffle/atom_dsl.h"
 #	include "duffle/lottes_tape.h"
 #	include "duffle/word_count.metadata.h"
-#	include "gen/gte_hello.offsets.h"
+#	include "gen/hello_gte.offsets.h"
 #	include "hello_gte.h"
 #endif
 

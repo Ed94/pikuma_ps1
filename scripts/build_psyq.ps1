@@ -458,8 +458,112 @@ function build-hello_gte {
 		}
 	}
 }
-build-hello_gte
+# build-hello_gte
 
+function build-hello_joypad {
+	$includes += @()
+
+	$path_module        = join-path $path_code   'hello_joypad'
+	$path_duffle        = join-path $path_code   'duffle'
+	$path_atom_metadata = join-path $path_duffle 'word_count.metadata.h'
+	$path_build_gen     = join-path $path_build  'gen'
+
+	$src_c = join-path $path_module 'hello_joypad.c'
+	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen
+
+	$assemble_args = @()
+	$assemble_args += $f_debug
+	$assemble_args += $f_optimize_none
+	$assemble_args += ($f_include + $path_code)
+
+	$src_asm_crt    = join-path $path_nugget_common 'crt0/crt0.s'
+	$module_asm_crt = join-path $path_build         'crt0.o'
+	assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
+
+	$module_c = join-path $path_build  'hello_joypad_c.o'
+
+	$compile_args = @()
+	$compile_args += $f_debug
+	$compile_args += $f_optimize_none
+	# $compile_args += $f_optimize_intrinsics
+	# $compile_args += $f_optimize_size
+	# $compile_args += $f_optimize_debug
+	$compile_args += ($f_include + $path_code)
+	compile-unit $src_c $module_c $includes $compile_args
+
+	$elf = join-path $path_build 'hello_joypad.elf'
+	$exe = join-path $path_build 'hello_joypad.ps-exe'
+
+	$link_args = @()
+	$link_args += $f_debug
+	# $link_args += $f_optimize_size
+	$link_modules = @(
+		$module_asm_crt,
+		$module_c
+	)
+	link-modules $link_modules $elf $link_args
+	make-binary $elf $exe
+
+	# Post-link: gdb-runtime + dwarf-injection in a single Lua invocation (one luajit cold start).
+	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen -passes @('--post-link') ` -extra_args @('--elf', $elf)
+
+	$dwarfLineBin     = join-path $path_build_gen 'hello_joypad.dwarf_line.bin'
+	$dwarfArangesBin  = join-path $path_build_gen 'hello_joypad.dwarf_aranges.bin'
+	$dwarfRnglistsBin = join-path $path_build_gen 'hello_joypad.dwarf_rnglists.bin'
+	$injectElf        = join-path $path_build 'hello_joypad.dwarf-injected.elf'
+	if ((Test-Path $dwarfLineBin) -and (Test-Path $dwarfArangesBin) -and (Test-Path $dwarfRnglistsBin))
+	{
+		Write-Host "[build] DWARF-injecting $elf -> $injectElf"
+		Copy-Item -LiteralPath $elf -Destination $injectElf -Force
+		# Objcopy call: 3x --update-section for (line, aranges, rnglists).
+		$f_args = @(
+			"--update-section=.debug_line=$dwarfLineBin",
+			"--update-section=.debug_aranges=$dwarfArangesBin",
+			"--update-section=.debug_rnglists=$dwarfRnglistsBin"
+		)
+		& $Objcopy @f_args $injectElf 2>&1 | Out-Null
+		if ($LASTEXITCODE -ne 0) {
+			Write-Warning "[build] objcopy F' splice failed (exit $LASTEXITCODE); removing $injectElf"
+			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
+			return;
+		}
+
+		$dwarfInfoBin     = join-path $path_build_gen 'hello_joypad.dwarf_info.bin'
+		$dwarfAbbrevBin   = join-path $path_build_gen 'hello_joypad.dwarf_abbrev.bin'
+		$dwarfStrBin      = join-path $path_build_gen 'hello_joypad.dwarf_str.bin'
+		$dwarfLocBin      = join-path $path_build_gen 'hello_joypad.dwarf_loc.bin'
+		$dwarfLoclistsBin = join-path $path_build_gen 'hello_joypad.dwarf_loclists.bin'
+		$g_args = @(
+			"--update-section=.debug_info=$dwarfInfoBin",
+			"--update-section=.debug_abbrev=$dwarfAbbrevBin",
+			"--update-section=.debug_str=$dwarfStrBin",
+			"--add-section=.debug_loc=$dwarfLocBin",
+			"--add-section=.debug_loclists=$dwarfLoclistsBin"
+		)
+		& $Objcopy @g_args $injectElf 2>&1 | Out-Null
+		if ($LASTEXITCODE -ne 0) {
+			Write-Warning "[build] objcopy G' splice failed (exit $LASTEXITCODE); removing $injectElf"
+			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
+			return;
+		}
+
+		# Baked atoms execute from RAM but are emitted as C data arrays, so their ELF sections lack SHF_EXECINSTR.
+		# GDB discards line rows for non-code sections. Mark only the debug-copy sections executable.
+		# The original ELF and PS-EXE remain byte/flag unchanged.
+		& $Objcopy `
+			--set-section-flags ".rodata=alloc,load,readonly,code,contents" `
+			--set-section-flags ".data=alloc,load,data,code,contents" `
+			$injectElf 2>&1 | Out-Null
+		if ($LASTEXITCODE -ne 0) {
+			Write-Warning "[build] atom-section flag update failed (exit $LASTEXITCODE); removing $injectElf"
+			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
+		} 
+		else {
+			Write-Host "[build] DWARF-injected ELF: $injectElf"
+		}
+	}
+}
+build-hello_joypad
 
 # NO idea if this works yet...
 function Send-ToEmulator { param( [string]$exePath )

@@ -153,6 +153,7 @@ local DW_AT_inline           = 0x20   -- DWARF5 §7.7.1: DW_AT_inline (used by a
 local DW_AT_decl_file        = 0x3A   -- DWARF5 §7.7.1: DW_AT_decl_file (1-based file index into the CU's file table)
 local DW_AT_decl_line        = 0x3B   -- DWARF5 §7.7.1: DW_AT_decl_line
 
+-- TODO(Ed): Remove this HARDCODE
 -- File index lookup table for the existing main line unit (Unit 2).
 -- Provenance paths come back with mixed slashes; we normalize to basename and look up against the line unit's actual file table.
 -- Current scope has two provenance basenames: hello_gte_tape.c (the atom's call site) and lottes_tape.h (the component definition).
@@ -162,7 +163,8 @@ local DW_AT_decl_line        = 0x3B   -- DWARF5 §7.7.1: DW_AT_decl_line
 -- headers that are pure macros/typedefs (dsl.h, memory.h, math.h, mips.h, gp.h, gte.h, etc.) never appear.
 -- lottes_tape.h is the FIRST include that emits line entries (MipsAtomComp_ declarations), so it is the FIRST entry after the primary file.
 local PROVENANCE_BASENAME_TO_FILE_INDEX = {
-	["hello_gte_tape.c"] = ATOM_SOURCE_FILE_INDEX,  -- = 11
+	["hello_joypad.tape.c"] = ATOM_SOURCE_FILE_INDEX,  -- = 11
+	["hello_gte.tape.c"] = ATOM_SOURCE_FILE_INDEX,  -- = 11
 	["lottes_tape.h"]    = 2,
 }
 
