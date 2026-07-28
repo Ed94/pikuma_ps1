@@ -115,11 +115,8 @@ WORD_COUNT(mac_format_g4_color, 12)
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
  * G4 triangle portion to p0/p1/p2.
  * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). 
- * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2
- * get overwritten with v3 (RTPS writes only to SXY2, but to keep the
- * three registers aligned with v0/v1/v2 you must store before RTPS).
- * The macro name declares the pipeline position; check #6 (GTE state-
- * machine validation) verifies the call site matches the declaration. */
+ * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2 get overwritten with v3
+ * (RTPS writes only to SXY2, but to keep the three registers aligned with v0/v1/v2 you must store before RTPS). */
 #define mac_gte_store_g4_p012_post_rtpt_pre_rtps(...) \
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0)) \
 ,	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)) \
@@ -128,10 +125,8 @@ WORD_COUNT(mac_gte_store_g4_p012_post_rtpt_pre_rtps, 3)
 
 /* atom_dbg_skip */
 /* Words: 1; Stores the V3 screen coord to the G4's p3 slot.
- * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its
- * single-vertex result to SXY2; SXY0 still holds v0.screen from the
- * earlier RTPT — DO NOT read SXY0 here, that's the bug this name
- * prevents).
+ * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its single-vertex result to SXY2;
+ * SXY0 still holds v0.screen from the earlier RTPT.
  */
 #define mac_gte_store_g4_p3_post_rtps(...) \
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))

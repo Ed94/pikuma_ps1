@@ -5,9 +5,9 @@
 #pragma region hello_gte_tape
 
 
-// --- atom: cube_g4_face (87 words) ---
+// --- atom: cube_g4_face (79 words) ---
 
-#define _atom_offset_cull_cube_g4_face_exit           48
+#define _atom_offset_cull_cube_g4_face_exit           44
 #define _atom_offset_bounds_chk_cube_g4_face_exit     12
 
 enum {

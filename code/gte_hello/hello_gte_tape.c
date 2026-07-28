@@ -47,12 +47,11 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)),
 
 	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
-	nop2, gte_cmdw_rotate_translate_perspective_triple,
-	nop2, gte_cmdw_nclip,
+	nop2, gte_cmdw_rotate_translate_perspective_triple, // required cpu -> gte delay slot
+	gte_cmdw_nclip,
 
-	nop2,  gte_mv_from_data_r(R_T0, C2_MAC0),
-	nop,
-	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)), nop,
+	gte_mv_from_data_r(R_T0, C2_MAC0),
+	nop, branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)), nop,
 
 	store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
 	mac_format_g4_color(
@@ -69,8 +68,8 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	nop2, gte_cmdw_rotate_translate_perspective_single,
 	mac_gte_store_g4_p3_post_rtps(),
 
-	nop2, gte_cmdw_avg_sort_z4,
-	nop2, gte_mv_from_data_r(R_T1, C2_OTZ),
+	gte_cmdw_avg_sort_z4,
+	gte_mv_from_data_r(R_T1, C2_OTZ),
 
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),
 	set_lt_u(    R_AT, R_T1, R_AT),
