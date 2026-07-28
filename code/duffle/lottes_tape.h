@@ -170,7 +170,7 @@ atom_dbg_skip MipsAtomComp_Proc_(ac_format_f3_color, { mac_pack_color_word(O_(Po
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
-atom_dbg_skip MipsAtomComp_(ac_gte_store_f3_post_rtpt) {
+atom_dbg_skip MipsAtomComp_(ac_gte_store_f3) {
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)),
 	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)),
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2)),
@@ -195,7 +195,7 @@ MipsAtomComp_Proc_(ac_format_g4_color, {
  * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). 
  * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2 get overwritten with v3
  * (RTPS writes only to SXY2, but to keep the three registers aligned with v0/v1/v2 you must store before RTPS). */
-atom_dbg_skip MipsAtomComp_(ac_gte_store_g4_p012_post_rtpt_pre_rtps) {
+atom_dbg_skip MipsAtomComp_(ac_gte_store_g4_p012) {
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0)),
 	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)),
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2)),
@@ -205,7 +205,7 @@ atom_dbg_skip MipsAtomComp_(ac_gte_store_g4_p012_post_rtpt_pre_rtps) {
  * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its single-vertex result to SXY2;
  * SXY0 still holds v0.screen from the earlier RTPT.
  */
-atom_dbg_skip MipsAtomComp_(ac_gte_store_g4_p3_post_rtps) { gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3)) };
+atom_dbg_skip MipsAtomComp_(ac_gte_store_g4_p3) { gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3)) };
 
 #pragma endregion Macro Atom Components
 

@@ -51,22 +51,18 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	gte_cmdw_nclip,
 
 	gte_mv_from_data_r(R_T0, C2_MAC0),
-	nop, branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)), nop,
+	nop, 
+	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)), nop,
 
 	store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
-	mac_format_g4_color(
-		/* c0 magenta */ 0xFF, 0x00, 0xFF,
-		/* c1 yellow  */ 0xFF, 0xFF, 0x00,
-		/* c2 cyan    */ 0x00, 0xFF, 0xFF,
-		/* c3 green   */ 0x00, 0xFF, 0x00),
-	mac_gte_store_g4_p012_post_rtpt_pre_rtps(),
 
 	shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
 	load_word(R_V0, R_AT, O_(V3_S2, x)),   load_word(R_V1, R_AT, O_(V3_S2, z)),
 	gte_mv_to_data_r(R_V0, C2_VXY0),       gte_mv_to_data_r(R_V1, C2_VZ0),
 
-	nop2, gte_cmdw_rotate_translate_perspective_single,
-	mac_gte_store_g4_p3_post_rtps(),
+	mac_gte_store_g4_p012(),
+	gte_cmdw_rotate_translate_perspective_single,
+	mac_gte_store_g4_p3(),
 
 	gte_cmdw_avg_sort_z4,
 	gte_mv_from_data_r(R_T1, C2_OTZ),
@@ -74,6 +70,11 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),
 	set_lt_u(    R_AT, R_T1, R_AT),
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
+	mac_format_g4_color(
+		/* c0 magenta */ 0xFF, 0x00, 0xFF,
+		/* c1 yellow  */ 0xFF, 0xFF, 0x00,
+		/* c2 cyan    */ 0x00, 0xFF, 0xFF,
+		/* c3 green   */ 0x00, 0xFF, 0x00),
 	mac_insert_ot_tag_g4(),
 
 atom_label(cube_g4_face_exit)
@@ -102,11 +103,11 @@ MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri), atom_phase(f
 	mac_yield()
 };
 
-atom_dbg_skip
+// atom_dbg_skip
 internal
 MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
-	, atom_writes(R_PrimCursor, R_FaceCursr)
+	, atom_writes(R_PrimCursor, R_FaceCursor)
 ) {
 	mac_load_tri_indices(  R_T0, R_T1, R_T2),
 	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
@@ -117,8 +118,7 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot. 
 	/* Format Primitive */
-	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
-	mac_gte_store_f3_post_rtpt(),
+	mac_gte_store_f3(),
 
 	/* Calculate Depth */
 	gte_avg_sort_z3,
@@ -127,8 +127,8 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	add_ui(      R_AT, R_0,  OrderingTbl_Len),
 	set_lt_u(    R_AT, R_T1, R_AT),
 	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
-	/* Insert into Ordering Table Linked List */
-	mac_insert_ot_tag_f3(),
+	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
+	mac_insert_ot_tag_f3(),                 /* Insert into Ordering Table Linked List */
 	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 		// Note(Ed): No bounds checking, should be checked before atom runs.
 

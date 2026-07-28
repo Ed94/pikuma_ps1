@@ -98,11 +98,11 @@ WORD_COUNT(mac_format_f3_color, 3)
 /* atom_dbg_skip */
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
-#define mac_gte_store_f3_post_rtpt(...) \
+#define mac_gte_store_f3(...) \
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)) \
 ,	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)) \
 ,	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2))
-WORD_COUNT(mac_gte_store_f3_post_rtpt, 3)
+WORD_COUNT(mac_gte_store_f3, 3)
 
 #define mac_format_g4_color(r0, g0, b0, r1, g1, b1, r2, g2, b2, r3, g3, b3) \
 	mac_pack_color_word(O_(Poly_G4,c0), gp0_cmd_poly_g4, r0,g0,b0) \
@@ -117,18 +117,18 @@ WORD_COUNT(mac_format_g4_color, 12)
  * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). 
  * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2 get overwritten with v3
  * (RTPS writes only to SXY2, but to keep the three registers aligned with v0/v1/v2 you must store before RTPS). */
-#define mac_gte_store_g4_p012_post_rtpt_pre_rtps(...) \
+#define mac_gte_store_g4_p012(...) \
 	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0)) \
 ,	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)) \
 ,	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2))
-WORD_COUNT(mac_gte_store_g4_p012_post_rtpt_pre_rtps, 3)
+WORD_COUNT(mac_gte_store_g4_p012, 3)
 
 /* atom_dbg_skip */
 /* Words: 1; Stores the V3 screen coord to the G4's p3 slot.
  * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its single-vertex result to SXY2;
  * SXY0 still holds v0.screen from the earlier RTPT.
  */
-#define mac_gte_store_g4_p3_post_rtps(...) \
+#define mac_gte_store_g4_p3(...) \
 	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3))
-WORD_COUNT(mac_gte_store_g4_p3_post_rtps, 1)
+WORD_COUNT(mac_gte_store_g4_p3, 1)
 

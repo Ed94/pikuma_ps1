@@ -1180,8 +1180,7 @@ M.GTE_COMMAND_INPUTS = {
 --   * "mac_result"       : generic MAC output (nclip, op, mvmva)
 --
 -- Consumers:
---   * passes/static_analysis.lua::analyze_hardware_relations (the walker reads this after a GTE command to update
---     `forward_state.post_command_roles` for `gte_role_mismatch`).
+--   * passes/static_analysis.lua::analyze_hardware_relations (the walker reads this after a GTE command to update `forward_state.post_command_roles` for `gte_role_mismatch`).
 --   * passes/static_analysis.lua::check_gte_role_mismatch (per-atom CHECK_RULES reader; renders role mismatches).
 -- This table is consumed by the hardware-relation analyzer and the gte_role_mismatch check.
 M.GTE_COMMAND_OUTPUTS = {
@@ -1294,8 +1293,7 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 }
 
 -- GTE component result contracts were removed: the `_post_<cmd>` naming convention was a soft convention
--- (the user did not want it formalized via static-analysis enforcement). A proper `atom_info` directive for
--- ordering semantics is a future TODO.
+-- (the user did not want it formalized via static-analysis enforcement). A proper `atom_info` directive for ordering semantics is a future TODO.
 
 -- Operand-class table for the COP2->GPR load-delay check.
 --
@@ -1424,20 +1422,21 @@ M.GP0_CMD_BY_SHAPE = {
 	["g4"]  = 0x38, ["gt4"] = 0x3C,
 }
 
+-- TODO(Ed): REMOVE THIS HARDCODE, THIS SHOULD BE RESOLVED AUTOMATICALLY
 -- Per-macro prim-buffer contribution: how many 32-bit words each macro writes to the primitive being built in main RAM.
 -- (This counts RAM-side prim-buffer words, not .text instruction words.)
 -- The sum across `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X` calls in an atom body must equal
 -- `GP0_CMD_SIZE[GP0_CMD_BY_SHAPE[shape]]`.
 M.GP0_MACRO_CONTRIB = {
-	["mac_format_f3_color"]                         = 1,
-	["mac_format_g3_color"]                         = 3,
-	["mac_format_g4_color"]                         = 4,
-	["mac_gte_store_f3_post_rtpt"]                  = 3,
-	["mac_gte_store_g3_post_rtpt"]                  = 3,
-	["mac_gte_store_g4_p012_post_rtpt_pre_rtps"]    = 3,
-	["mac_gte_store_g4_p3_post_rtps"]               = 1,
-	["mac_insert_ot_tag_f3"]                        = 1,
-	["mac_insert_ot_tag_g4"]                        = 1,
+	["mac_format_f3_color"]      = 1,
+	["mac_format_g3_color"]      = 3,
+	["mac_format_g4_color"]      = 4,
+	["mac_gte_store_f3"]         = 3,
+	["mac_gte_store_g3"]         = 3,
+	["mac_gte_store_g4_p012"]    = 3,
+	["mac_gte_store_g4_p3"]      = 1,
+	["mac_insert_ot_tag_f3"]     = 1,
+	["mac_insert_ot_tag_g4"]     = 1,
 }
 
 -- Per-macro cycle cost (best-case, no stalls). Used by the static-analysis pass to emit per-atom cycle budgets.
@@ -1560,20 +1559,23 @@ M.INSTRUCTION_LATENCY = {
 	["gte_load_v1"]         = 2,
 	["gte_load_v2"]         = 2,
 	["gte_load_v0v1v2"]     = 6,
+
+	-- TODO(Ed): REMOVE THIS HARDCODE, THIS SHOULD BE RESOLVED AUTOMATICALLY
 	-- mac_* helpers (cycle cost = sum of the expanded instructions)
 	-- mac_yield transfers control; cycle budget is 0 (the next atom absorbs the cost).
-	["mac_yield"]                                = 0,
-	["mac_pack_color_word"]                      = 3,  -- lui + ori + sw
-	["mac_format_f3_color"]                      = 3,  -- = mac_pack_color_word
-	["mac_format_g4_color"]                      = 12, -- 4 x mac_pack_color_word
-	["mac_load_tri_indices"]                     = 3, -- 3 x lhu
-	["mac_gte_load_tri_verts"]                   = 18, -- 3 x {sll, addu, lw, lw, mtc2, mtc2}
-	["mac_gte_store_f3_post_rtpt"]               = 3,
-	["mac_gte_store_g3_post_rtpt"]               = 3,
-	["mac_gte_store_g4_p012_post_rtpt_pre_rtps"] = 3,
-	["mac_gte_store_g4_p3_post_rtps"]            = 1,
-	["mac_insert_ot_tag_f3"]                     = 11,  -- 11 .word slots in the macro body
-	["mac_insert_ot_tag_g4"]                     = 11,
+	["mac_yield"]              = 0,
+	["mac_pack_color_word"]    = 3,  -- lui + ori + sw
+	["mac_format_f3_color"]    = 3,  -- = mac_pack_color_word
+	["mac_format_g4_color"]    = 12, -- 4 x mac_pack_color_word
+	["mac_load_tri_indices"]   = 3,  -- 3 x lhu
+	["mac_gte_load_tri_verts"] = 18, -- 3 x {sll, addu, lw, lw, mtc2, mtc2}
+	["mac_gte_store_f3"]       = 3,
+	["mac_gte_store_g3"]       = 3,
+	["mac_gte_store_g4_p012"]  = 3,
+	["mac_gte_store_g4_p3"]    = 1,
+	["mac_insert_ot_tag_f3"]   = 11,  -- 11 .word slots in the macro body
+	["mac_insert_ot_tag_g4"]   = 11,
+
 	-- Annotation markers (emit no code; pure metaprogram hints)
 	["atom_label"]          = 0,
 	["atom_offset"]         = 0,
