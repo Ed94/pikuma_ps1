@@ -39,6 +39,11 @@
 --- The report header includes `Info: N` alongside Findings / Errors / Warnings, and a dedicated
 --- `── Info` section renders finding-level info between `── Warnings` and the per-atom cycle counts.
 ---
+--- The structural handshake checks (`mac_yield_uniformity`, `hazard_nop_use`, `control_transfer_delay_slot_use`) skip atoms/components with `debug_skip == true`.
+--- The `atom_dbg_skip` marker designates runtime-helper declarations whose structure is fixed by the tape runtime (e.g. `tape_exit`, `ac_yield`).
+--- Flagging them as "missing mac_yield" or "BD slot is redundant" is signal noise, not a logic failure. 
+--- Other checks (transfer_hazards, gpu_portstore_shape, abi_handoff, enum_alias_membership, …) still apply to debug_skip declarations because real hazards / typos can still surface in them.
+---
 --- The orchestrator (`ps1_meta.lua`) wires this module in via the PASSES table:
 ---   `["static-analysis"] = {
 ---       module = "passes.static_analysis",
@@ -144,6 +149,38 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field tokens     Token[]   -- the tokens in the atom body, annotated
 --- @field findings   Finding[] -- findings for this atom
 --- @field total_cycles integer -- sum of token cycle costs
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Per-word-event helpers
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- Pick the source-line field that best represents "where in the user's source file is this word?".
+--
+-- `word_events` (populated by `passes/emission_model.lua::stamp_root_provenance`) carry four line fields:
+--   * `call_line`  — physical line in the ROOT atom's source (the line of the `mac_X(...)` call site that triggered this emission, or `body_line` for direct words in the atom body)
+--   * `body_line`  — physical line in the body containing the emitted word (the atom body for direct words; the component body for words expanded inside `mac_X(...)`)
+--   * `def_line`   — line of the COMPONENT's declaration in its source file (only meaningful for words emitted inside a component expansion)
+--   * `line`       — body-relative line in the source text (not a physical source line; rarely useful in rendered findings)
+--
+-- For component-expanded words (e.g. the BD-slot nop of `jump_reg(R_AtomJmp)` inside `mac_yield()`),
+-- `body_line` points into the COMPONENT's source file (e.g. `lottes_tape.h:110` for `ac_yield`'s body).
+-- The user editing their atom body expects the line to point at THEIR source — i.e. the line where `mac_yield()`
+-- was called (e.g. `hello_gte_tape.c:35`). That line is `call_line`.
+--
+-- For direct words in the atom body (no invocation wrapping them), `call_line == body_line` already,
+-- so `call_line` works for both cases.
+local function line_for_word_event(ev)
+    if ev == nil then return 0 end
+    return ev.call_line or ev.body_line or ev.line or ev.def_line or 0
+end
+
+-- True iff the given atom/component declaration has the bare `atom_dbg_skip` marker.
+-- Used by the structural handshake checks (`mac_yield_uniformity`, `hazard_nop_use`,
+-- `control_transfer_delay_slot_use`) to exempt runtime-helper declarations (`tape_exit`, `ac_yield`,
+-- and the `ac_*` macro components) from findings whose contract they intentionally don't satisfy.
+local function is_runtime_helper(atom)
+    return atom and atom.debug_skip == true
+end
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- classify_tokens — per-token classification
@@ -548,11 +585,12 @@ local function append_cu2_finding(atom, event, forward, transition,
 	local event_ident = event.encoder or event.ident or "?"
 	local policy      = duffle.CU2_TRANSITION_POLICY or {}
 	local evidence    = policy.evidence or {}
+	local event_line  = line_for_word_event(event)
 	atom.paths.hazards[#atom.paths.hazards + 1] = {
 		check                = "transfer_hazards",
 		kind                 = kind,
 		atom                 = atom.name,
-		line                 = event.body_line or event.line or event.def_line or 0,
+		line                 = event_line,
 		source               = event.def_path or event.source or "",
 		relation_id          = "mtc0_cu2_visibility",
 		semantic             = "MTC0",
@@ -616,10 +654,11 @@ local function consume_cu2_transition(atom, event, ev_word, forward)
 
 	local gap = ev_word - transition.producer_word - 1
 	local target = transition.target_state
+	local event_line = line_for_word_event(event)
 	if target == "unknown" then
 		append_cu2_finding(atom, event, forward, transition, gap, "info", "unknown",
 			string.format("%s at line %d uses COP2 after an MTC0 Status write whose CU2 value is unknown (gap=%d, configured boundary=%d)"
-				, atom.name, event.body_line or event.line or event.def_line or 0
+				, atom.name, event_line
 				, gap, transition.required
 			)
 		)
@@ -632,7 +671,7 @@ local function consume_cu2_transition(atom, event, ev_word, forward)
 		local verb = target == "enabled" and "enable" or "disable"
 		append_cu2_finding(atom, event, forward, transition, gap, "warning", "conservative",
 			string.format("%s at line %d uses COP2 before the SR.CU2 %s transition has settled (gap=%d, required=%d; timing is conservative)"
-				, atom.name, event.body_line or event.line or event.def_line or 0
+				, atom.name, event_line
 				, verb, gap, transition.required
 			)
 		)
@@ -650,7 +689,7 @@ local function consume_cu2_transition(atom, event, ev_word, forward)
 			string.format(
 				"%s at line %d: COP2 unavailable after SR.CU2 was disabled"
 				.. " (gap=%d, required=%d)",
-				atom.name, event.body_line or event.line or event.def_line or 0,
+				atom.name, event_line,
 				gap, transition.required))
 		forward.cu2_state = "disabled"
 	end
@@ -705,7 +744,7 @@ local function analyze_hardware_relations(atom)
 
 	for _, ev in ipairs(events) do
 		local ev_ident  = ev.encoder   or ev.ident  or "?"
-		local ev_line   = ev.body_line or ev.line   or ev.def_line or 0
+		local ev_line   = line_for_word_event(ev)
 		local ev_source = ev.def_path  or ev.source or ""
 		local ev_args   = ev.args      or {}
 		-- `word_events` use `i` as the 0-based word index across the entire expansion.
@@ -864,7 +903,7 @@ local function analyze_hardware_relations(atom)
 
 		-- ── 4. Update semantic role state and stage post-command latch relations. ──
 		-- A GTE command emits outputs with semantic roles (latest_screen_xy, otz, latest_color, etc.) per `duffle.GTE_COMMAND_OUTPUTS`.
-		-- The walker records these on `forward_state.post_command_roles[<register>]` so the `gte_result_position` reader can later detect a reader that picks the wrong register.
+		-- The walker records these on `forward_state.post_command_roles[<register>]` so the `gte_role_mismatch` reader can later detect a reader that picks the wrong register.
 		--
 		-- The walker also stages POST-COMMAND LATCH relations (kind = "command_latch_input"): a subsequent MTC2/CTC2 overwrite of a latched output before the measured boundary is a hazard.
 		-- The relation kind is intentionally separate from the preceding MTC2 → command relation (`MTC2` / `CTC2` / `LWC2`).
@@ -977,7 +1016,7 @@ local function check_gte_input_latch(atom, _pipe_ctx, findings)
 end
 
 -- ─────────────────────────────────────────────────────────────────────────
--- Check #1e: gte_result_position (READER for forward_state semantic roles).
+-- Check #1e: gte_role_mismatch (READER for forward_state semantic roles).
 --
 -- A GTE command emits outputs with semantic roles (latest_screen_xy, otz, latest_color, etc.) per `duffle.GTE_COMMAND_OUTPUTS`.
 -- The forward walker records `forward_state.post_command_roles[<register>]` after each command.
@@ -985,42 +1024,15 @@ end
 -- A subsequent MFC2 (or any encoder that reads a C2 register) that picks the WRONG register for the active role emits a `result_role_mismatch` warning.
 -- For example, reading `C2_SXY0` after RTPS is wrong: the `latest_screen_xy` role is `C2_SXY2`.
 --
+-- Note: the OLD `gte_result_position` check also emitted table-gap info findings for `_post_<cmd>` components missing a row in `duffle.GTE_COMPONENT_RESULT_CONTRACTS`. That table-gap check was based on the `_post_<cmd>` NAMING convention rather than hardware truth, and was removed (the user did not want naming to encode ordering semantics; a proper `atom_info` directive for ordering semantics is a future TODO).
+--
 -- The first `transfer_hazards` reader comment above records the projection contract.
 -- ─────────────────────────────────────────────────────────────────────────
 
-local function check_gte_result_position(atom, _pipe_ctx, findings)
+local function check_gte_role_mismatch(atom, _pipe_ctx, findings)
 	local  forward = atom.paths and atom.paths.forward_state
 	if not forward or not forward.post_command_roles then return end
 	local events = atom.paths.word_events or {}
-
-	-- Build a set of known _post_<cmd> component names whose contract rows we have to verify
-	-- (table-gap detection: a missing row key is itself an info finding).
-	-- The names are the BODY-LEVEL component calls that appear in atom body text;
-	-- The walker doesn't expose body tokens to the reader, so we scan the events' root_call_text.
-	local contracts = duffle.GTE_COMPONENT_RESULT_CONTRACTS or {}
-	local component_names_seen = {}
-	for _, ev in ipairs(events) do
-		local root_call = ev.root_call_text or ev.call_text or ""
-		local name      = root_call:match("^([%w_]+)") or ""
-		if name:find("_post_") then component_names_seen[name] = true end
-	end
-	for component_name in pairs(component_names_seen) do
-		-- Strip any trailing parenthesized argument list / whitespace.
-		local bare = component_name:match("^([%w_]+)") or component_name
-		if contracts[bare] == nil then
-			findings[#findings + 1] = {
-				check          = "gte_result_position",
-				kind           = "info",
-				atom           = atom.name,
-				line           = 0,
-				source         = "",
-				relation_id    = "table_gap",
-				component_name = bare,
-				msg = string.format("%s: component %q has no GTE_COMPONENT_RESULT_CONTRACTS row (unknown _post_<cmd> contract)"
-					, atom.name, bare),
-			}
-		end
-	end
 
 	-- For each word event whose encoder is `gte_mv_from_data_r`, look up the register being read in `forward_state.post_command_roles`.
 	-- If a role is set, the reader's register must match the role's register (the registered "latest_<role>" target).
@@ -1044,11 +1056,12 @@ local function check_gte_result_position(atom, _pipe_ctx, findings)
 				-- This is a semantic mismatch.
 				if reg ~= latest_screen_xy_entry.command_register
 					and (reg == "C2_SXY0" or reg == "C2_SXY1") then
+					local ev_line = line_for_word_event(ev)
 					findings[#findings + 1] = {
-						check       = "gte_result_position",
+						check       = "gte_role_mismatch",
 						kind        = "warning",
 						atom        = atom.name,
-						line        = ev.body_line or ev.line or ev.def_line or 0,
+						line        = ev_line,
 						source      = ev.def_path or ev.source or "",
 						relation_id = "result_role_mismatch",
 						semantic    = "result_position",
@@ -1059,7 +1072,7 @@ local function check_gte_result_position(atom, _pipe_ctx, findings)
 						producer_word = latest_screen_xy_entry.producer_word,
 						producer_line = latest_screen_xy_entry.producer_line,
 						msg = string.format("%s at line %d: reading %s after %s but the %s role is C2_SXY2 (not %s)"
-							, atom.name, ev.body_line or ev.line or ev.def_line or 0
+							, atom.name, ev_line
 							, reg, latest_screen_xy_entry.command
 							, latest_screen_xy_entry.role
 							, reg),
@@ -1081,6 +1094,13 @@ end
 -- Branch/jump delay-slot NOPs belong to `control_transfer_delay_slot_use`, so this check leaves them unclassified.
 -- The fixed `mac_yield()` handshake (`jump_reg(R_AtomJmp), nop`) is preserved as suppressed.
 --
+-- Both classifications emit at `info` severity: `modeled-required` documents the model boundary and `modeled-redundant`
+-- is a soft observation ("you have a redundant nop; consider replacing it").
+-- Neither is a logic failure, so neither rises to `warning`.
+--
+-- `atom_dbg_skip` runtime helpers (`tape_exit`, `ac_yield`, the `ac_*` macro components) are exempt:
+-- their structural nops are part of the fixed handshake and not author choices.
+--
 -- The first `transfer_hazards` reader comment above records the projection contract.
 -- ─────────────────────────────────────────────────────────────────────────
 
@@ -1088,6 +1108,9 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 	local forward = atom.paths and atom.paths.forward_state
 	local events  = atom.paths.word_events or {}
 	if not events or #events == 0 then return end
+	-- Runtime-helper atoms / components (e.g. tape_exit, ac_yield) carry `debug_skip = true` from the bare
+	-- `atom_dbg_skip` marker; their structural nops are part of the fixed handshake and not author choices.
+	if is_runtime_helper(atom) then return end
 
 	-- The walker does not currently snapshot the pending state per event; we replay the same forward walk cheaply here.
 	-- The replay is observation-only (no staging); the only output is one finding per non-BD-slot nop with its classification.
@@ -1097,20 +1120,16 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 		local ev_ident = ev.encoder or ""
 		local ev_args  = ev.args or {}
 		local ev_word  = ev.i or 0
+		local ev_line  = line_for_word_event(ev)
 
 		-- Classify the nop BEFORE its event is applied to the pending state.
 		if ev_ident == "nop" and prev_ev ~= nil then
 			-- Skip BD-slot nops: they are exclusively owned by control_transfer_delay_slot_use.
-			local prev_ident  = prev_ev.encoder or ""
-			local prev_args   = prev_ev.args or {}
-			local bd_policies = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
-			local is_bd_slot  = false
-			local policy      = bd_policies[prev_ident]
-			if policy then
-				local arg1       = prev_args[1]
-				local suppressed = policy.suppress_arg1 and policy.suppress_arg1[arg1] or nil
-				if not suppressed then is_bd_slot = true end
-			end
+			-- Every BD-slot nop is structural; this check never reports on it.
+			-- (The earlier `if not suppressed then is_bd_slot = true end` form inverted the suppression — the `mac_yield()` handshake's `jump_reg(R_AtomJmp)` was incorrectly flagged.)
+			local prev_ident   = prev_ev.encoder or ""
+			local bd_policies  = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
+			local is_bd_slot   = bd_policies[prev_ident] ~= nil
 			if not is_bd_slot then
 				-- Find a pending modeled relation that this nop would retire.
 				local retired = nil
@@ -1154,7 +1173,7 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 						check                = "hazard_nop_use",
 						kind                 = "info",
 						atom                 = atom.name,
-						line                 = ev.body_line or ev.line or ev.def_line or 0,
+						line                 = ev_line,
 						source               = ev.def_path or ev.source or "",
 						nop_classification   = "modeled-required",
 						nop_word_index       = ev_word,
@@ -1162,7 +1181,7 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 						producer_destination = retired.destination,
 						consumer_token       = would_be_consumer or "<would-be-consumer>",
 						msg = string.format("%s at line %d: nop at word %d is modeled-required (retires %s for %s)"
-							, atom.name, ev.body_line or ev.line or ev.def_line or 0, ev_word, retired.relation.id, retired.destination
+							, atom.name, ev_line, ev_word, retired.relation.id, retired.destination
 						),
 					}
 				else
@@ -1170,16 +1189,16 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 					local slot_kind = "plain"
 					findings[#findings + 1] = {
 						check              = "hazard_nop_use",
-						kind               = "warning",
+						kind               = "info",
 						atom               = atom.name,
-						line               = ev.body_line or ev.line or ev.def_line or 0,
+						line               = ev_line,
 						source             = ev.def_path or ev.source or "",
 						nop_classification = "modeled-redundant",
 						nop_word_index     = ev_word,
 						retired_relation   = nil,
 						slot_kind          = slot_kind,
 						msg = string.format("%s at line %d: nop at word %d is modeled-redundant (no pending modeled relation)"
-							, atom.name, ev.body_line or ev.line or ev.def_line or 0, ev_word
+							, atom.name, ev_line, ev_word
 						),
 					}
 				end
@@ -1251,6 +1270,9 @@ end
 -- Suppress the finding when `policy.suppress_arg1[first_arg]` is non-nil.
 -- The only current suppression is `jump_reg(R_AtomJmp)`, the fixed `mac_yield()` handshake.
 --
+-- `atom_dbg_skip` runtime helpers (`tape_exit`, `ac_yield`, the `ac_*` macro components) are exempt:
+-- their BD slots are part of the fixed handshake (`jump_reg(rret_addr), nop` for tape_exit, `jump_reg(R_AtomJmp), nop` for ac_yield).
+--
 -- `pipe_ctx` is unused; the uniform `(atom, pipe_ctx, findings)` signature is preserved so the check plugs into
 -- the existing CHECK_RULES dispatch without modifying the per-atom loop or analyze_atom_paths.
 -- `passes/emission_model` already normalizes `nop2` to two `nop` events and `atom_label` to zero events, so no special-case branching is needed for either.
@@ -1259,6 +1281,9 @@ end
 local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
 	local  events = atom.paths.word_events or {}
 	if not events or #events == 0 then return end
+	-- Runtime-helper atoms / components (e.g. tape_exit, ac_yield) carry `debug_skip = true` from the bare
+	-- `atom_dbg_skip` marker; their structural BD slots are part of the fixed handshake.
+	if is_runtime_helper(atom) then return end
 	local policies = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
 	for event_idx, event in ipairs(events) do
 		-- Canonical word_events use `encoder` as the leading identifier of the emitting token).
@@ -1273,9 +1298,9 @@ local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
 				local slot       = events[event_idx + 1]
 				local slot_ident = slot and (slot.encoder or slot.ident) or "<missing>"
 				if slot == nil or (slot.encoder or slot.ident) == "nop" then
-					-- Each word event carries `body_line` as the physical source line.
-					-- Use `body_line`, then `def_line`, then 0.
-					local ev_line = event.body_line or event.line or event.def_line or 0
+					-- Prefer `call_line` (the line of the `mac_X(...)` call site in the atom body) so the rendered
+					-- finding points at the user's source, not at the vendored component body.
+					local ev_line = line_for_word_event(event)
 					findings[#findings + 1] = {
 						atom  = atom.name,
 						line  = ev_line,
@@ -1300,8 +1325,17 @@ end
 --- Empty bodies are not currently flagged — runtime infrastructure atoms like 
 --- `MipsAtom_(yield) { mac_yield() }` and `MipsAtom_(tape_exit) { jump_reg(rret_addr), nop }` 
 --- are valid as-is; mac_yield at the end is the contract.
+---
+--- Runtime helpers carrying the bare `atom_dbg_skip` marker (`tape_exit`, `ac_yield`, the `ac_*` macro components) are exempt:
+--- they intentionally do not follow the standard "1 yield at the end" contract. `tape_exit` performs its own `jump_reg(rret_addr),
+--- nop` to return from the tape runner; `ac_yield` IS the `mac_yield()` implementation.
+--- Flagging them as "missing mac_yield" is signal noise, not a logic failure.
+---
 --- Uses the standard `(atom, pipe_ctx, findings)` signature; `pipe_ctx` is unused.
 local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
+	-- Runtime-helper atoms / components (e.g. tape_exit, ac_yield) carry `debug_skip = true` from the bare
+	-- `atom_dbg_skip` marker; they intentionally break the "1 yield at the end" contract.
+	if is_runtime_helper(atom) then return end
 	-- Per-kind semantics:
 	--   MipsAtom_          (baked atom): exactly 1 mac_yield at the end of the body. Control transfer is the atom's job.
 	--   MipsAtomComp_      (bare static-array component): ZERO mac_yield.
@@ -1932,7 +1966,7 @@ end
 local CHECK_RULES = {
 	{ name = "transfer_hazards",               per_atom   = check_transfer_hazards               },
 	{ name = "gte_input_latch",                per_atom   = check_gte_input_latch                },
-	{ name = "gte_result_position",            per_atom   = check_gte_result_position            },
+	{ name = "gte_role_mismatch",              per_atom   = check_gte_role_mismatch              },
 	{ name = "hazard_nop_use",                 per_atom   = check_hazard_nop_use                 },
 	{ name = "control_transfer_delay_slot_use",per_atom   = check_control_transfer_delay_slot_use},
 	{ name = "mac_yield_uniformity",           per_atom   = check_mac_yield_uniformity           },

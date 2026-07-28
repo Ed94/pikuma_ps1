@@ -24,7 +24,7 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- Load the annotation pass so we can re-validate each source against the canonical corpus projection.
 -- The annotation pass exposes `M.validate`, which returns the per-source AnnotationResult (atoms / annots / macros / binds / errors / warnings)
 -- that the report pass renders into the per-module `<dir_basename>.annotations.txt` output.
-local annotation    = dofile(_bootstrap_dir .. "annotation.lua")
+local annotation = dofile(_bootstrap_dir .. "annotation.lua")
 
 -- Load atoms_source_map for the `render_source_map` / `render_provenance` module functions (used by `render_module_atoms_md` to produce `<module>.atoms.md` without re-walking source tokens).
 -- The pass itself emits no per-source files anymore; we only consume the two pure renderers here.
@@ -45,8 +45,7 @@ local SECTION_HEADER_MACROS    = "── Macro word-count declarations ───
 local SECTION_HEADER_ERRORS    = "── Errors ──────────────────────────────────────────────"
 local SECTION_HEADER_WARNINGS  = "── Warnings ────────────────────────────────────────────"
 
--- Lua pattern that captures the basename (last path segment) of a
--- forward- or back-slash separated path.
+-- Lua pattern that captures the basename (last path segment) of a forward- or back-slash separated path.
 local BASENAME_PATTERN = "([^/\\]+)$"
 
 -- Debug flag name — set to truthy in `_G` to enable verbose logging.

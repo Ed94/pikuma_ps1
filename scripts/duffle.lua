@@ -1181,9 +1181,9 @@ M.GTE_COMMAND_INPUTS = {
 --
 -- Consumers:
 --   * passes/static_analysis.lua::analyze_hardware_relations (the walker reads this after a GTE command to update
---     `forward_state.post_command_roles` for `gte_result_position`).
---   * passes/static_analysis.lua::check_gte_result_position (per-atom CHECK_RULES reader; renders role mismatches).
--- This table is consumed by the hardware-relation analyzer and result-position check.
+--     `forward_state.post_command_roles` for `gte_role_mismatch`).
+--   * passes/static_analysis.lua::check_gte_role_mismatch (per-atom CHECK_RULES reader; renders role mismatches).
+-- This table is consumed by the hardware-relation analyzer and the gte_role_mismatch check.
 M.GTE_COMMAND_OUTPUTS = {
 	-- RTPS: writes one screen coordinate (the perspective-divide result) into C2_SXY2.
 	-- The FIFO side effects leave SXY0 / SXY1 untouched, so `latest_screen_xy` is C2_SXY2.
@@ -1293,32 +1293,9 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 	},
 }
 
--- GTE component result contracts (immutable; keyed by bare component name).
---
--- Register-role claims that the `_post_<cmd>` suffix alone cannot infer live here.
--- The bare name (the component name stripped of the `_post_<cmd>` suffix) is the key; the row carries the expected
--- command, the expected role, and the expected C2 register.
---
--- Known rows:
---   * `gte_store_g4_p3_post_rtps`: post-RTPS polygon-emit slot reads the newest projected screen coordinate from C2_SXY2.
---     C2_SXY0 is wrong (C2_SXY0 is an older FIFO entry, never the newest post-RTPS result).
---
--- Unknown `_post_<cmd>` components (a `<name>_post_<cmd>`-suffixed component whose bare `<name>` is not a row key) emit one
--- `table_gap` info finding so downstream consumers can detect when the contract table is incomplete for an authored atom body.
---
--- Consumers:
---   * passes/static_analysis.lua::check_gte_result_position (renders result-position findings).
---   * passes/static_analysis.lua::emit_table_gap_warning    (called once per atom body; surfaces the missing-row diagnostic).
--- This table is consumed by the result-position check.
-M.GTE_COMPONENT_RESULT_CONTRACTS = {
-	-- Post-RTPS g4 p3 store contract: writes the latest screen XY (C2_SXY2) into the primitive's p3 slot.
-	-- Reading from C2_SXY0 is a semantic mismatch — C2_SXY0 is the oldest post-RTPS SXY, not the newest one.
-	["gte_store_g4_p3_post_rtps"] = {
-		command  = "gte_cmdw_rtps",
-		role     = "latest_screen_xy",
-		register = "C2_SXY2",
-	},
-}
+-- GTE component result contracts were removed: the `_post_<cmd>` naming convention was a soft convention
+-- (the user did not want it formalized via static-analysis enforcement). A proper `atom_info` directive for
+-- ordering semantics is a future TODO.
 
 -- Operand-class table for the COP2->GPR load-delay check.
 --
