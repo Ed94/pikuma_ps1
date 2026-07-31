@@ -13,6 +13,7 @@
 #include "duffle/mips.h"
 #include "duffle/gp.h"
 #include "duffle/gte.h"
+#include "duffle/pad.h"
 
 #	include "duffle/gen/duffle.macs.h"
 #	include "duffle/gen/duffle.offsets.h"
@@ -24,6 +25,7 @@
 #include "hello_joypad.h"
 
 #include "hello_joypad.tape.c"
+
 
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
 typedef Array_(OrderingTable_Buffer, 2);
@@ -99,6 +101,7 @@ typedef Struct_(Ent_Floor) {
 	A2_V3_S2 faces;
 };
 
+
 enum { 
 	Scratchpad_Len = 1024, 
 	MemTape_Len    = 512,
@@ -116,10 +119,16 @@ typedef Struct_(SMemory) {
 	Ent_Cube  cube;
 	Ent_Floor floor;
 
+	U4 pad_state;
+
 	U4_V scratchpad; // d-cache
 };
 global SMemory smem;
 extern SMemory smem;
+
+#define pad0_signal_(btn_id) smem.pad_state & pad0_(btn_id)
+#define pad1_signal_(btn_id) smem.pad_state & pad1_(btn_id)
+
 
 // TODO(Ed):
 FI_ U4* spad_warm(MipsAtom atom) {
@@ -190,6 +199,31 @@ void render(void) {
 GCC_OPTIMIZATION_DISABLE
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
+	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
+
+	smem.pad_state = pad_read(0);
+
+	if (0) // Pad Input
+	{
+		if (pad0_signal_(Pad_Left)) {
+			smem.cube.rot.y  += 30;
+			smem.floor.rot.y += 5;
+		}
+		if (pad0_signal_(Pad_Right)) {
+			smem.cube.rot.y  -= 30;
+			smem.floor.rot.y -= 5;
+		}
+	}
+	if (1) // Pad Input (Tape version)
+	{
+		tb.used = 0; tb_scope_run(& tb) {
+			tb_emit(& tb, pad_input_demo);
+				tb_data(& tb, smem.pad_state);
+				tb_data(& tb, u4_(& smem.cube.rot));
+				tb_data(& tb, u4_(& smem.floor.rot));
+		}
+	}
+
 	orderingtbl_clear_reverse(ordering_buf, OrderingTbl_Len);
 
 	// Update the position based on acceleration and velocity
@@ -213,7 +247,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	A2_S2 p;    //???
 	S4 flag; //????
 
-	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
 
 	// Draw Cube
 	if (0)
@@ -285,7 +318,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		}
 		tape_run(tb_slice(tb));
 
-		smem.cube.rot.y += 30;
+		// smem.cube.rot.y += 30;
 	}
 	// Draw Floor
 	if (0)
@@ -376,7 +409,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		tape_run(tb_slice(tb));// Fire off the tape.
 
 		// C-side state (pa->used) has already been updated by the tape!
-		smem.floor.rot.y += 5;
+		// smem.floor.rot.y += 5;
 	}
 	// --- TAPE DIAGNOSTICS ---
 	if (0)
@@ -402,22 +435,27 @@ int main(void)
 	smem = (SMemory){0};
 	smem.scratchpad = C_(U4_V, 0x1F800000);
 	smem.primitives.used = 0;
-	ent_cube128_init(& smem.cube.verts, & smem.cube.faces); {
-		Ent_Cube* cube = & smem.cube;
-		cube->rot    = v3s2(0, 0, 0);
-		// cube->pos    = v3s4(0, 0, 900);
-		cube->scale  = v3s4_fp_one();
-		cube->accel  = v3s4(0, 1, 0);
-		cube->pos    = v3s4(0, -400, 1800);
+	{
+		ent_cube128_init(& smem.cube.verts, & smem.cube.faces); {
+			Ent_Cube* cube = & smem.cube;
+			cube->rot    = v3s2(0, 0, 0);
+			// cube->pos    = v3s4(0, 0, 900);
+			cube->scale  = v3s4_fp_one();
+			cube->accel  = v3s4(0, 1, 0);
+			cube->pos    = v3s4(0, -400, 1800);
+		}
+		ent_floor_init(& smem.floor.verts, & smem.floor.faces); {
+			Ent_Floor* floor = & smem.floor;
+			floor->rot   = v3s2(0, 0, 0);
+			floor->pos   = v3s4(0, 450, 1800);
+			floor->scale = v3s4_fp_one();
+		}
 	}
-	ent_floor_init(& smem.floor.verts, & smem.floor.faces); {
-		Ent_Floor* floor = & smem.floor;
-		floor->rot   = v3s2(0, 0, 0);
-		floor->pos   = v3s4(0, 450, 1800);
-		floor->scale = v3s4_fp_one();
+	{
+		// gknown gp_screen_init();
+		gp_screen_init_c11(& smem.screen_buf, & smem.active_buf_id);
+		pad_init(0);
 	}
-	// gknown gp_screen_init();
-	gp_screen_init_c11(& smem.screen_buf, & smem.active_buf_id);
 	while (1) {
 		gknown S4* active_buf_id  = & smem.active_buf_id;
 		gknown U4* ordering_buf   = r_(smem.ordering_tbl)[active_buf_id[0]];

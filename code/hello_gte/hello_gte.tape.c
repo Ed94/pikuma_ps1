@@ -116,20 +116,22 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	/* Culling (Branch forward if Backface) */
 	gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot. 
-	/* Format Primitive */
-	mac_gte_store_f3(),
+		/* Format Primitive */
+		mac_gte_store_f3(),
 
-	/* Calculate Depth */
-	gte_avg_sort_z3,
-	gte_mv_from_data_r(R_T1, C2_OTZ),
-	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
-	add_ui(      R_AT, R_0,  OrderingTbl_Len),
-	set_lt_u(    R_AT, R_T1, R_AT),
-	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
-	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
-	mac_insert_ot_tag_f3(),                 /* Insert into Ordering Table Linked List */
-	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
-		// Note(Ed): No bounds checking, should be checked before atom runs.
+		/* Calculate Depth */
+		gte_avg_sort_z3,
+		gte_mv_from_data_r(R_T1, C2_OTZ),
+		/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
+		add_ui(      R_AT, R_0,  OrderingTbl_Len),
+		set_lt_u(    R_AT, R_T1, R_AT),
+		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
+			mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
+			mac_insert_ot_tag_f3(),                 /* Insert into Ordering Table Linked List */
+			add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
+				// Note(Ed): No bounds checking, should be checked before atom runs.
+		// end: branch(bounds_chk)
+// end: branch(culling)
 
 /* Advance Input Cursor & Yield (Both branch targets land here) */
 atom_label(floor_f3_face_exit)

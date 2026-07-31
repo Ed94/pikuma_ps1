@@ -16,6 +16,49 @@
 
 #pragma region Baked Atoms
 
+enum {
+	R_PadState  = R_T4 atom_reg atom_type(U4),
+	R_PadSignal = R_T0 atom_reg atom_type(U4),
+	R_CubeRot   = R_T1 atom_reg atom_type(V3_S2*),
+	R_FloorRot  = R_T2 atom_reg atom_type(V3_S2*),
+};
+typedef Struct_(Binds_PadInputDemo) {
+	U4     pad_state;
+	V3_S2* cube_rot;
+	V3_S2* floor_rot;
+};
+internal MipsAtom_(pad_input_demo) atom_info(atom_bind(Binds_PadInputDemo)
+, atom_reads(R_PadState, R_CubeRot, R_FloorRot)
+, atom_writes(           R_CubeRot, R_FloorRot)
+) {
+	load_word(R_PadState, R_TapePtr, O_(Binds_PadInputDemo,pad_state)),
+	load_word(R_CubeRot,  R_TapePtr, O_(Binds_PadInputDemo,cube_rot)),
+	load_word(R_FloorRot, R_TapePtr, O_(Binds_PadInputDemo,floor_rot)),
+	add_ui_self(          R_TapePtr, S_(Binds_PadInputDemo)),
+
+	and_i(R_PadSignal, R_PadState, pad0_(Pad_Left)),
+	branch_le_zero(R_PadSignal, atom_offset(pad_left, exit_pad_left)),
+		load_half( R_T5, R_CubeRot,  O_(V3_S2,y)), // BD-Slot occupied
+		load_half( R_T6, R_FloorRot, O_(V3_S2,y)),
+		add_si(    R_T5, R_T5, 30),
+		add_si(    R_T6, R_T6, 5),
+		store_half(R_T5, R_CubeRot,  O_(V3_S2,y)),
+		store_half(R_T6, R_FloorRot, O_(V3_S2,y)),
+	atom_label(exit_pad_left)
+
+	and_i(R_PadSignal, R_PadState, pad0_(Pad_Right)),
+	branch_le_zero(R_PadSignal, atom_offset(pad_right, exit_pad_right)),
+		load_half( R_T5, R_CubeRot,  O_(V3_S2,y)), // BD-Slot occupied
+		load_half( R_T6, R_FloorRot, O_(V3_S2,y)),
+		add_si(    R_T5, R_T5, -30),
+		add_si(    R_T6, R_T6, -5),
+		store_half(R_T5, R_CubeRot,  O_(V3_S2,y)),
+		store_half(R_T6, R_FloorRot, O_(V3_S2,y)),
+	atom_label(exit_pad_right)
+
+	mac_yield(),
+};
+
 typedef Struct_(Binds_CubeTri) {
 	U4     PrimCursor;
 	V4_S2* FaceCursor;
@@ -116,20 +159,22 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	/* Culling (Branch forward if Backface) */
 	gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot. 
-	/* Format Primitive */
-	mac_gte_store_f3(),
+		/* Format Primitive */
+		mac_gte_store_f3(),
 
-	/* Calculate Depth */
-	gte_avg_sort_z3,
-	gte_mv_from_data_r(R_T1, C2_OTZ),
-	/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
-	add_ui(      R_AT, R_0,  OrderingTbl_Len),
-	set_lt_u(    R_AT, R_T1, R_AT),
-	branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
-	mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
-	mac_insert_ot_tag_f3(),                 /* Insert into Ordering Table Linked List */
-	add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
-		// Note(Ed): No bounds checking, should be checked before atom runs.
+		/* Calculate Depth */
+		gte_avg_sort_z3,
+		gte_mv_from_data_r(R_T1, C2_OTZ),
+		/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
+		add_ui(      R_AT, R_0,  OrderingTbl_Len),
+		set_lt_u(    R_AT, R_T1, R_AT),
+		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
+			mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
+			mac_insert_ot_tag_f3(),                 /* Insert into Ordering Table Linked List */
+			add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
+				// Note(Ed): No bounds checking, should be checked before atom runs.
+		// end: branch(bounds_chk)
+	// end: branch(culling)
 
 /* Advance Input Cursor & Yield (Both branch targets land here) */
 atom_label(floor_f3_face_exit)

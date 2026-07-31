@@ -5,6 +5,16 @@
 #pragma region hello_joypad.tape
 
 
+// --- atom: pad_input_demo (24 words) ---
+
+#define _atom_offset_pad_left_exit_pad_left           6
+#define _atom_offset_pad_right_exit_pad_right         6
+
+enum {
+    atom_offset_pad_left_exit_pad_left = _atom_offset_pad_left_exit_pad_left,
+    atom_offset_pad_right_exit_pad_right = _atom_offset_pad_right_exit_pad_right,
+};
+
 // --- atom: cube_g4_face (77 words) ---
 
 #define _atom_offset_cull_cube_g4_face_exit           42

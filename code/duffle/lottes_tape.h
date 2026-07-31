@@ -60,7 +60,7 @@ enum {
 atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 
 /* Generalized Tape Engine Runner */
-NI_ void tape_run(Slice_MipsCode tape) { register U4* tp rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
+FI_ void tape_run(Slice_MipsCode tape) { register U4* tp rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
 	asm_words(
 			add_ui(     R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
 		, store_word( R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
@@ -93,7 +93,10 @@ FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4
 
 FI_ Slice_MipsCode tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Slice_MipsCode){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Slice_MipsCode tb_slice(TapeBuilder  tb) {                        return (Slice_MipsCode){ C_(U4*,tb.ptr),  tb.used }; }
-#define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,tape_exit))
+#define tb_scope(tb)     for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,tape_exit))
+
+FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_slice(tb[0])); }
+#define tb_scope_run(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_scope_run_end(tb))
 
 #pragma endregion Tape Drive
 
@@ -132,7 +135,7 @@ MipsAtomComp_(ac_insert_ot_tag_f3) {
 	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
 	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (5 - 1) << 24 = 4 << 24
 	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
-	or_u(        R_AT, R_AT, R_V0),                            // Merge length
+	or(          R_AT, R_AT, R_V0),                            // Merge length
 	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
 	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
 	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
@@ -147,7 +150,7 @@ MipsAtomComp_(ac_insert_ot_tag_g4) {
 	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
 	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (9 - 1) << 24 = 8 << 24
 	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
-	or_u(        R_AT, R_AT, R_V0),                            // Merge length
+	or(          R_AT, R_AT, R_V0),                            // Merge length
 	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
 	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
 	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
