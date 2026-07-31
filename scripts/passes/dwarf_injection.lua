@@ -71,9 +71,15 @@ local DW_LNE_set_address  = DWARF_LINE_OPS.DW_LNE_set_address
 local DW_RLE_end_of_list   = DWARF5_RNGLISTS.end_of_list
 local DW_RLE_start_length  = DWARF5_RNGLISTS.start_length
 
--- File index 11 in the existing main line unit is hello_gte_tape.c.
--- The injector extends that unit rather than appending an unreferenced unit.
-local ATOM_SOURCE_FILE_INDEX = 11
+-- File-index lookup for the existing main line unit (Unit 2).
+-- Populated at pass start by `init_file_index_lookup(elf_path)` from the runtime ELF (see `elf_dwarf.read_line_unit_file_table`).
+-- The hardcoded indices and the `PROVENANCE_BASENAME_TO_FILE_INDEX` table that previously lived here were retired in `conductor/tracks/dwarf_file_index_lookup_20260731/`
+-- (red of the
+-- `TODO(Ed): Remove this HARDCODE` from line 156); the runtime lookup reads the
+-- actual gcc-emitted `.debug_line` file table instead.
+local _file_index_by_basename = nil  -- [basename] = 1-based line-table file index
+local _file_path_by_index    = nil  -- [1-based index] = full source path (diagnostics / future consumers)
+local _default_atom_source_index = nil  -- any valid index used in opaque-row fallbacks
 
 -- RR_<R_Name> debug-visible variables come from the merged register_alias_registry filtered to aliases whose code is a valid MIPS GPR 0..31
 -- (see collect_per_source_registries + by_alias in build_inserted_children).
@@ -98,9 +104,8 @@ local ABBREV_INLINED_SUBROUTINE  = 0x6C   -- 108: DW_TAG_inlined_subroutine with
 -- (each field transitions from tape memory to GPR at load_pc + 8 = MIPS I load-delay slot boundary).
 local ABBREV_BIND_VAR_LOCLIST = 0x6D   -- 109: DW_TAG_variable no children + DW_AT_type = ref4 + DW_AT_location = sec_offset
 -- Typed-view pointer_type (for the synthetic V4_S2* / V3_S2* / U4* / void* chains).
--- MUST be a fresh abbrev code in the appended table — emitting uleb128(9) collides with GCC's
--- existing abbrev 9 (a pointer_type that carries DW_AT_byte_size + DW_AT_type), so gdb misparses
--- our 4-byte ref4 as (byte_size, type[0..2]) and lands the cursor mid-attribute.
+-- MUST be a fresh abbrev code in the appended table — emitting uleb128(9) collides with GCC's existing abbrev 9
+-- (a pointer_type that carries DW_AT_byte_size + DW_AT_type), so gdb misparses our 4-byte ref4 as (byte_size, type[0..2]) and lands the cursor mid-attribute.
 local ABBREV_TYPED_VIEW_POINTER = 0x6E   -- 110: DW_TAG_pointer_type no children + DW_AT_type = ref4 (typed-view / U4 / void chain)
 
 -- DWARF5 §7.7.3 loclist opcodes.
@@ -153,46 +158,66 @@ local DW_AT_inline           = 0x20   -- DWARF5 §7.7.1: DW_AT_inline (used by a
 local DW_AT_decl_file        = 0x3A   -- DWARF5 §7.7.1: DW_AT_decl_file (1-based file index into the CU's file table)
 local DW_AT_decl_line        = 0x3B   -- DWARF5 §7.7.1: DW_AT_decl_line
 
--- TODO(Ed): Remove this HARDCODE
--- File index lookup table for the existing main line unit (Unit 2).
--- Provenance paths come back with mixed slashes; we normalize to basename and look up against the line unit's actual file table.
--- Current scope has two provenance basenames: hello_gte_tape.c (the atom's call site) and lottes_tape.h (the component definition).
--- Both live in the existing gcc-generated line unit; their 1-based indices are stable across rebuilds because the include order
--- in code/gte_hello/hello_gte.c determines the unit's file table.
--- gcc only adds a file to the line table when it has actual line-number entries;
--- headers that are pure macros/typedefs (dsl.h, memory.h, math.h, mips.h, gp.h, gte.h, etc.) never appear.
--- lottes_tape.h is the FIRST include that emits line entries (MipsAtomComp_ declarations), so it is the FIRST entry after the primary file.
-local PROVENANCE_BASENAME_TO_FILE_INDEX = {
-	["hello_joypad.tape.c"] = ATOM_SOURCE_FILE_INDEX,  -- = 11
-	["hello_gte.tape.c"] = ATOM_SOURCE_FILE_INDEX,  -- = 11
-	["lottes_tape.h"]    = 2,
-}
+-- Replaced the hardcoded `ATOM_SOURCE_FILE_INDEX = 11` and the `PROVENANCE_BASENAME_TO_FILE_INDEX` table below with a runtime lookup
+-- (`init_file_index_lookup` + `resolve_provenance_file_index`) that reads the actual `.debug_line` file table from the post-link ELF.
+
+--- Populate the module-level file-index lookup table from the `.debug_line` section of the post-link ELF pointed at by `elf_path`.
+--- This MUST be called exactly once at pass start (from `M.run`) before any `resolve_provenance_file_index` invocation;
+--- downstream callers handle a nil table as "no file info available; fall back to errors".
+---
+--- The lookup uses `elf_dwarf.read_line_unit_file_table` (which parses both DWARF3 and DWARF5 line-program units — 
+--- the crt0.s assembler-side DWARF5 unit may emit non-standard form codes for paths and is intentionally skipped).
+--- @param elf_path string|nil
+local function init_file_index_lookup(elf_path)
+	if not elf_path or elf_path == "" then return end
+	local b2i, _basenames, paths = elf_dwarf.read_line_unit_file_table(elf_path)
+	if type(b2i) ~= "table" or type(paths) ~= "table" then
+		io.stderr:write("[dwarf_injection] read_line_unit_file_table returned no file table for: " .. tostring(elf_path) .. "\n")
+		return
+	end
+	_file_index_by_basename = b2i
+	_file_path_by_index    = paths
+	-- Pick any valid index for the opaque-row fallbacks at lines 466 + 570
+	-- (both sites legitimately want "any file index"; gdb resolves whatever index we emit to whatever that file's line happens to be).
+	for idx in pairs(paths) do
+		_default_atom_source_index = idx
+		break
+	end
+end
 
 --- Resolve an absolute provenance path to the line-unit file index used by the emitting line program.
---- Normalizes mixed `/` and `\` separators to a basename and looks it up against the known file table.
+--- Normalizes mixed `/` and `\` separators to a basename and looks it up against the runtime-computed file table populated by `init_file_index_lookup`.
 ---
---- Fails loudly on an unknown provenance basename: adding a new component source file requires extending
---- `PROVENANCE_BASENAME_TO_FILE_INDEX` so the line-program emission contract stays explicit.
---- Silent fallback to ATOM_SOURCE_FILE_INDEX would mask the new-file case by misattributing component rows to the atom's source file.
---- @param path string  -- absolute provenance path (e.g. "C:/.../lottes_thttps://www.youtube.com/watch?v=ORM4yLkdKx8ape.h" or "C:\\...\\lottes_tape.h")
+--- Fails loudly on an unknown provenance basename: adding a new component source file will produce a clear error message naming the missing basename and listing the .debug_line file table contents, 
+--- so the user can either confirm the gcc include order, the unity-root, or the `.debug_line` file table contents.
+--- Silent fallback would mask the new-file case by misattributing component rows to an arbitrary source file.
+--- @param path string  -- absolute provenance path (mixed slashes accepted)
 --- @return integer  -- 1-based line-unit file index
 local function resolve_provenance_file_index(path)
+	if _file_index_by_basename == nil then
+		error("[dwarf_injection] resolve_provenance_file_index called before init_file_index_lookup. "
+			.. "Is M.run being entered correctly (with --elf)?")
+	end
 	if path == nil or path == "" then
 		error("[dwarf_injection] resolve_provenance_file_index: empty path")
 	end
-	-- Normalize backslashes → forward slashes (paths arrive with mixed separators from the provenance file: forward slashes from Lua's io.lines;
-	-- backslashes if the input ever round-trips through Windows shell expansion).
+	-- Normalize backslashes → forward slashes (paths arrive with mixed separators from the provenance file).
 	local normalized = path:gsub("\\", "/")
 	-- Take the last path component (the basename).
 	local basename = normalized:match("([^/]+)$") or normalized
-	local idx      = PROVENANCE_BASENAME_TO_FILE_INDEX[basename]
-	if idx == nil then
-		error(string.format(
-			"[dwarf_injection] resolve_provenance_file_index: unknown provenance basename '%s' (from '%s'). "
-			.. "Extend PROVENANCE_BASENAME_TO_FILE_INDEX in passes/dwarf_injection.lua.",
-			basename, path))
+	local idx = _file_index_by_basename[basename]
+	if idx ~= nil then return idx end
+	-- Last-resort exact-path match (handles paths that don't reduce to a known basename).
+	for i, p in pairs(_file_path_by_index) do
+		if p and p:gsub("\\", "/") == normalized then return i end
 	end
-	return idx
+	-- Build an error message listing the known basenames for fast diagnostics.
+	local known = {}
+	for k in pairs(_file_index_by_basename) do known[#known + 1] = k end
+	table.sort(known)
+	error(string.format("[dwarf_injection] resolve_provenance_file_index: unknown provenance basename '%s' (from '%s'). "
+		.. "Known basenames in the .debug_line file table (%d): %s"
+		, basename, path, #known, table.concat(known, ", ")))
 end
 
 local DW_FORM_addr           = 0x01
@@ -463,7 +488,7 @@ local function build_atom_sequence(atom)
 	if atom.debug_skip then
 		return table.concat({
 			set_address(atom.addr),
-			set_file(ATOM_SOURCE_FILE_INDEX),
+			set_file(resolve_provenance_file_index(atom.src_path)),
 			advance_line(atom.entries[1].line - 1),
 			negate_stmt(),
 			copy_op(),
@@ -510,10 +535,9 @@ local function build_atom_sequence(atom)
 	--   * If the invocation's body has any NESTED invocations (parent_id == top_inv.id), the body's
 	--     first content is the call_line of the earliest nested invocation (by start_pos).
 	--   * Otherwise (only RAW words in the body), it's the line of the first raw word = body_lines[1].
-	-- This is the value the multi-row PC's body_lines[1] row must reference for source-order display:
-	-- `anc.body_lines[1]` is the line of the FIRST WORD (which for an outer whose body starts with a
-	-- nested expansion is inside the inner's expansion = wrong for display purposes); `anc.body_first_line`
-	-- is the body's first content line in the parent's source (= correct for display).
+	-- This is the value the multi-row PC's body_lines[1] row must reference for source-order display: `anc.body_lines[1]` is the line of the FIRST WORD 
+	-- (which for an outer whose body starts with a nested expansion is inside the inner's expansion = wrong for display purposes);
+	-- `anc.body_first_line` is the body's first content line in the parent's source (= correct for display).
 	local body_first_line_of = {}
 	for _, top_inv in ipairs(invs) do
 		local earliest_nested_call_line = nil
@@ -567,7 +591,7 @@ local function build_atom_sequence(atom)
 		parts[#parts + 1] = copy_op()
 	end
 
-	local call_file_idx = ATOM_SOURCE_FILE_INDEX
+	local call_file_idx = resolve_provenance_file_index(atom.src_path)
 
 	-- --- Atom entry (idx 1) -------------------------------------------------
 	local entry_1         = atom.entries[1]
@@ -576,13 +600,11 @@ local function build_atom_sequence(atom)
 	-- If atom entry 1 starts inside an invocation, walk the ancestry and emit a call-site row + (when applicable)
 	-- a body_lines[1] row for every active ancestor. For a non-nested invocation this is just the one pair;
 	-- for nested invocations this emits the outer call-site + body_lines[1] rows BEFORE the inner pair so the debugger displays
-	-- the outer body line at the inner's first word
-	-- (PROBLEM B fix).
+	-- the outer body line at the inner's first word (PROBLEM B fix).
 	--
-	-- A marked OUTERMOST ancestor's body_lines[1] row is suppressed at this PC (the existing full-skip
-	-- contract is preserved for the marked outer range); its call-site row IS still emitted as a
-	-- statement. Marked INNER ancestors always emit their body_lines[1] row with is_stmt=false
-	-- (the per-invocation `want_body = not inv.debug_skip` predicate).
+	-- A marked OUTERMOST ancestor's body_lines[1] row is suppressed at this PC (the existing full-skip contract is preserved for the marked outer range);
+	-- Its call-site row IS still emitted as a statement.
+	-- Marked INNER ancestors always emit their body_lines[1] row with is_stmt=false (the per-invocation `want_body = not inv.debug_skip` predicate).
 	if #entry_1_ancestry == 0 then
 		-- RAW word at atom entry: single call-site row, always a statement target.
 		emit_row(call_file_idx, entry_1.line, true)
@@ -590,9 +612,8 @@ local function build_atom_sequence(atom)
 		-- Atom starts in an invocation. Walk the ancestry outermost-first.
 		-- Each ancestor emits one call-site row (statement) and one body_lines[1] row
 		-- (statement iff unmarked; suppressed for marked outermost).
-		-- The body_lines[1] row references body_first_line_of[anc.id] (= the body's first content
-		-- line in the parent's source), NOT anc.body_lines[1] (= the line of the first WORD,
-		-- which is wrong when the outer's body starts with a nested call).
+		-- The body_lines[1] row references body_first_line_of[anc.id] (= the body's first content line in the parent's source),
+		-- NOT anc.body_lines[1] (= the line of the first WORD, which is wrong when the outer's body starts with a nested call).
 		for ai, anc in ipairs(entry_1_ancestry) do
 			assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
 			assert(anc.body_lines[1] ~= nil
@@ -617,20 +638,18 @@ local function build_atom_sequence(atom)
 
 		if inv and idx == inv.start_pos + 1 then
 			-- First word of the innermost active invocation (PROBLEM B fix — nested-display rule).
-			-- Walk the active ancestry outermost-first; for each ancestor emit a call-site row
-			-- (statement) + a body_lines[1] row. The inner-most invocation's call-site + body pair
-			-- become the LAST two rows in the sequence. Marked outermost ancestors suppress their
-			-- body_lines[1] row at this PC (the existing full-skip contract is preserved for the
-			-- marked outer range); all OTHER ancestors emit body_lines[1] with is_stmt = not debug_skip.
+			-- Walk the active ancestry outermost-first; for each ancestor emit a call-site row (statement) + a body_lines[1] row.
+			-- The inner-most invocation's call-site + body pair become the LAST two rows in the sequence.
+			-- Marked outermost ancestors suppress their body_lines[1] row at this PC (the existing full-skip contract is preserved for the marked outer range);
+			-- all OTHER ancestors emit body_lines[1] with is_stmt = not debug_skip.
 			--
 			-- This re-emits the outer ancestor's call-site + body rows at the inner's first word PC
-			-- for debugger context: source-level stepping now shows the outer body line (not the
-			-- inner body line) when stepping into the inner. PROBLEM B fix.
-			-- The body_lines[1] row references body_first_line_of[anc.id] (= the body's first content
-			-- line in the parent's source), NOT anc.body_lines[1] (= the line of the first WORD,
-			-- which is wrong when the outer's body starts with a nested call: gdb 12.1 picks the
-			-- displayed line as the LAST row at the same PC in byte-stream order, so the disc=1 row's
-			-- value matters for what's shown when stepping into the nested case).
+			-- for debugger context: source-level stepping now shows the outer body line
+			-- (not the inner body line) when stepping into the inner. PROBLEM B fix.
+			-- The body_lines[1] row references body_first_line_of[anc.id] (= the body's first content line in the parent's source), 
+			-- NOT anc.body_lines[1] (= the line of the first WORD, which is wrong when the outer's body starts with a nested call: 
+			-- gdb 12.1 picks the displayed line as the LAST row at the same PC in byte-stream order,
+			-- so the disc=1 row's value matters for what's shown when stepping into the nested case).
 			local ancestry = ancestry_idx[idx]
 			for ai, anc in ipairs(ancestry) do
 				assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
@@ -649,10 +668,9 @@ local function build_atom_sequence(atom)
 			-- Subsequent body word of the innermost active invocation: `body_lines[k]` is indexed by the 1-based offset of this word inside the invocation.
 			-- Both `idx` (1-based DWARF entry index) and `inv.start_pos` (0-based emitted-word position stamped at `emit_invoke_begin`) come from the same
 			-- monotonic counter, so `idx - inv.start_pos` is exactly the 1-based k (the first word of the invocation has `idx == inv.start_pos + 1`, hence `k == 1`).
-			-- atom_dbg_step_ux_20260725: `want_body = not inv.debug_skip`. The previous `want = not marked_idx[idx]`
-			-- (which suppressed ALL body rows when any ancestor was marked) is replaced by the per-invocation
-			-- predicate. Marked invocations emit non-statement body rows at every body word; unmarked
-			-- invocations emit statement body rows.
+			-- atom_dbg_step_ux_20260725: `want_body = not inv.debug_skip`.
+			-- The previous `want = not marked_idx[idx]` (which suppressed ALL body rows when any ancestor was marked) is replaced by the per-invocation predicate.
+			-- Marked invocations emit non-statement body rows at every body word; unmarked invocations emit statement body rows.
 			assert(inv.body_lines, "missing body_lines: emitter did not run emission-model")
 			local words_into = idx - inv.start_pos
 			assert(inv.body_lines[words_into] ~= nil
@@ -706,7 +724,9 @@ local function build_atom_table(corpus, addrs)
 	local atoms_by_name = corpus.atoms_by_name or {}
 
 	-- Per-atom ingest. Returns nil if the atom is absent from the corpus; the caller skips it via the `if atom then ...` guard.
-	local function ingest_atom(name, info)
+	-- `src_path` is the absolute source path that declared this atom; the build_atom_table iteration below threads `src.path` through.
+	-- This is consumed by `build_atom_sequence::set_file(...)` for opaque-row fallbacks + raw-word rows (atoms where no invocation ancestry exists).
+	local function ingest_atom(name, info, src_path)
 		local atom_record = atoms_by_name[name]
 		if not atom_record then return nil end
 
@@ -732,6 +752,7 @@ local function build_atom_table(corpus, addrs)
 			words      = #word_events,
 			entries    = entries,
 			debug_skip = atom_record.debug_skip == true,
+			src_path   = src_path or "",
 		}
 
 		-- Consume invocation records from `atom.paths.invocations`. It is the single producer of per-invocation body_lines, per-invocation debug_skip,
@@ -755,9 +776,26 @@ local function build_atom_table(corpus, addrs)
 	end
 
 	local out = {}
-	for name, info in pairs(addrs) do
-		local atom = ingest_atom(name, info)
-		if atom then out[#out + 1] = atom end
+	-- Walk every source's atom list (which preserves source order + per-source src_path).
+	-- Cross-ref with the nm symbol table; atoms absent from `addrs` are skipped (an atom
+	-- declared in source but not emitted as a symbol is a metaprogram or atom-info bug, not
+	-- a source-correlation bug — emit_no_emit would catch it upstream).
+	for _, src in ipairs((corpus and corpus.source_order) or {}) do
+		local src_path = src.path or ""
+		for _, atom_rec in ipairs(((src.scan or {}).atoms) or {}) do
+			local info = addrs[atom_rec.name or atom_rec.raw_name]
+			if info then
+				local atom = ingest_atom(atom_rec.name or atom_rec.raw_name, info, src_path)
+				if atom then out[#out + 1] = atom end
+			end
+		end
+		for _, atom_rec in ipairs(((src.scan or {}).raw_atoms) or {}) do
+			local info = addrs[atom_rec.name or atom_rec.raw_name]
+			if info then
+				local atom = ingest_atom(atom_rec.name or atom_rec.raw_name, info, src_path)
+				if atom then out[#out + 1] = atom end
+			end
+		end
 	end
 	table.sort(out, function(a, b) return a.addr < b.addr end)
 	return out
@@ -2188,6 +2226,10 @@ function M.run(ctx)
 		-- reading them just returns "" which is the "missing" case the builder handles.
 		".debug_loc", ".debug_loclists",
 	})
+	-- Resolve the per-file line-table indices from the same .debug_line bytes;
+	-- this MUST run before any atom sequence is emitted (build_atom_sequence below
+	-- calls resolve_provenance_file_index when populating call-site / body rows).
+	init_file_index_lookup(elf_path)
 	-- Skip state lives in `corpus.atoms_by_name[*].debug_skip` (whole-atom) and `atom.paths.invocations[*].debug_skip` (per-invocation).
 	-- `corpus` is the sole canonical source projection.
 	local corpus = (ctx.shared and ctx.shared.corpus) or {}

@@ -74,41 +74,7 @@
 			]
 		},
 		{
-			"name": "Debug: Hello GTE Psy-Q!",
-			"type": "gdb",
-			"request": "attach",
-			"target": "localhost:3333",
-			"remote": true,
-			"cwd": "${workspaceRoot}/build",
-			"valuesFormatting": "parseText",
-			"registerLimit": "1-32",
-			"frameFilters": false,
-			"showDevDebugOutput": false,
-			"printCalls": false,
-			"stopAtConnect": true,
-			"gdbpath": "gdb-multiarch",
-			"windows": {
-				"gdbpath": "gdb-multiarch.exe"
-			},
-			"osx": {
-				"gdbpath": "gdb"
-			},
-			"executable": "${workspaceRoot}/build/hello_gte.elf",
-			"setupCommands": [
-				{ "text": "set mi-async off" },
-				{ "text": "set remotetimeout 0" },
-				{ "text": "set logging file build/gen/hello_gte.gdb.log" },
-				{ "text": "set logging redirect on" }
-			],
-			"autorun": [
-				"monitor reset shellhalt",
-				"load hello_gte.elf",
-				"tbreak main",
-				"continue"
-			]
-		},
-		{
-			"name": "Debug: Hello GTE Psy-Q! (atoms debug — DWARF-injected)",
+			"name": "Debug: Hello GTE!",
 			"type": "gdb",
 			"request": "attach",
 			"target": "localhost:3333",
@@ -137,6 +103,41 @@
 			"autorun": [
 				"monitor reset shellhalt",
 				"load build/hello_gte.dwarf-injected.elf",
+				"source scripts/gdb/gdb_tape_atoms.gdb",
+				"tbreak main",
+				"continue"
+			]
+		},
+		{
+			"name": "Debug: Hello Joypad!",
+			"type": "gdb",
+			"request": "attach",
+			"target": "localhost:3333",
+			"remote": true,
+			"cwd": "${workspaceRoot}",
+			"valuesFormatting": "parseText",
+			"registerLimit": "1-32",
+			"frameFilters": false,
+			"showDevDebugOutput": false,
+			"printCalls": false,
+			"stopAtConnect": true,
+			"gdbpath": "gdb-multiarch",
+			"windows": {
+				"gdbpath": "gdb-multiarch.exe"
+			},
+			"osx": {
+				"gdbpath": "gdb"
+			},
+			"executable": "${workspaceRoot}/build/hello_joypad.dwarf-injected.elf",
+			"setupCommands": [
+				{ "text": "set mi-async off" },
+				{ "text": "set remotetimeout 0" },
+				{ "text": "set logging file build/gen/hello_joypad.gdb.log" },
+				{ "text": "set logging redirect on" }
+			],
+			"autorun": [
+				"monitor reset shellhalt",
+				"load build/hello_joypad.dwarf-injected.elf",
 				"source scripts/gdb/gdb_tape_atoms.gdb",
 				"tbreak main",
 				"continue"

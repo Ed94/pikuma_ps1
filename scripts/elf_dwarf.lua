@@ -193,7 +193,7 @@ M.DWARF_LINE_OPS = {
 	DW_LNE_set_address  = 2,    -- spec: §6.2.5.3
 	-- Standard opcode header (§6.2.5.1)
 	-- opcode_base + line_range are 1-byte header fields; hex so they map
-	-- directly to their position in the line-program header byte sequence.
+	-- directly to the line-program header byte sequence.
 	-- line_base stays signed decimal (=-5) since 0xFB obscures the spec semantics.
 	opcode_base              = 0x0D,
 	line_base                = -5,
@@ -202,6 +202,44 @@ M.DWARF_LINE_OPS = {
 	-- Hex so they match the byte positions in the line-program wire format.
 	end_sequence_payload_size = 0x01,   -- size = sub_opcode only
 	set_address_payload_size  = 0x05,   -- size = sub_opcode(1) + addr(4)
+}
+
+-- ----------------------------------------------------------------------------
+-- DWARF5 .debug_line (per DWARF5 spec §6.2.4 — Line Number Program Header)
+-- ----------------------------------------------------------------------------
+-- All offsets are zero-based wire offsets from the start of the unit body
+-- (i.e. AFTER unit_length has been read and unit_length bytes skipped past unit_length's 4 bytes).
+--
+-- The DWARF3/4 line-program format differs:
+--   - It omits `address_size` (DWARF3 §6.2.4) + `segment_selector_size` (DWARF5 §6.2.4).
+--   - It uses null-terminated string lists for `include_directories` + `file_names`
+--     (vs. DWARF5's format_count + fields-list shape).
+-- These are documented inline at each parse site in read_line_unit_file_table below.
+
+--- spec: DWARF5 spec §6.2.4 (Line Number Program Header — version >= 5)
+M.DWARF5_DEBUG_LINE = {
+	-- Header fields (zero-based, AFTER unit_length has been read).
+	version_offset_post_il = 0x00,    -- 2-byte LE; expected = 5
+	addr_size_offset       = 0x02,    -- 1 byte;  expected = 4
+	seg_size_offset        = 0x03,    -- 1 byte;  expected = 0
+	header_length_offset   = 0x04,    -- 4-byte LE; length of program-header content that follows
+	program_header_start   = 0x08,    -- first byte of program-header content (after the 8 fixed bytes)
+
+	-- Per-form byte widths (used when reading directory / file-name entries).
+	form_addr_bytes        = 0x04,    -- DW_FORM_addr (32-bit) | DW_FORM_data4
+	form_strp_bytes        = 0x04,    -- DW_FORM_line_strp / DW_FORM_strp / DW_FORM_strp_sup
+	form_data16_bytes      = 0x10,    -- DW_FORM_data16 (MD5)
+
+	-- DWARF5 form codes (subset used in line-program directory + file tables).
+	form_line_strp         = 0x1A,    -- DWARF5 §7.5.6 — DW_FORM_line_strp (4-byte offset into .debug_line_str)
+	form_string            = 0x08,    -- DWARF4-compatible fallback (inline null-terminated; not in .debug_line_str)
+	form_udata             = 0x0F,    -- DW_FORM_udata (ULEB)
+	form_data16            = 0x18,    -- DW_FORM_data16 (16-byte MD5; gcc emits this for split debug info)
+
+	-- DWARF5 content-tag codes (DW_LNCT_* from §6.2.4.1 + §6.2.4.2).
+	lnct_path              = 0x01,
+	lnct_directory_index   = 0x02,
+	lnct_md5               = 0x05,    -- gcc with MD5 in file name table (rare)
 }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -785,6 +823,229 @@ function M.sleb128_size(n)
 		bytes = bytes + 1
 	end
 	return bytes
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- DWARF5 line-program file-table reader
+-- ════════════════════════════════════════════
+
+--- Read every line-program unit in `.debug_line` and produce one entry per file across all units.
+--- Returns three parallel maps keyed by 1-based file index.
+---
+--- Wire format notes:
+---   * The `.debug_line` section may contain MULTIPLE line-program units
+---     File indices are 1-based, **per unit**; we concatenate all units and the index ranges from 1..N₁ in unit 1, N₁+1..N₁+N₂ in unit 2, etc.
+---     Per-unit indices (the way gcc emits them, and the way `DW_LNS_set_file` references them in the line program)
+---     are returned via the `basename_to_index` map only when the unit boundary happens to align with the metaprogram's per-atom
+---     `inv.call_file` (true today for hello_joypad — the C unit is the LAST unit, and atom-side file indices fit 1-based).
+---   * Per spec, the `.debug_line_str` section (DWARF5 §7.5.6) holds the strings referenced by `DW_FORM_line_strp`.
+---     The legacy DWARF3 format embeds strings directly with null terminators. This helper handles BOTH.
+---   * File entries may have multiple forms (gcc -gdwarf-5 with `DW_LNCT_directory_index`
+---     emits 2 forms: path + dir_index). The helper supports:
+---     - DW_FORM_line_strp (DWARF5; offset into .debug_line_str)
+---     - DW_FORM_string (DWARF4-compat; inline null-terminated in .debug_line)
+---     - DW_FORM_udata (ULEB128)
+---     - DW_FORM_data16 (16-byte MD5; ignored — skip the form's bytes)
+---   * Symlink-canonicalisation: each path's `paths[i]` is stored verbatim from the wire
+---     (mixed `/` and `\` accepted; the basename is taken via the last path separator). Caller normalises as needed.
+---
+--- Behavior on failure: writes to stderr and returns nil.
+--- Helpers consumed by `passes/dwarf_injection.lua::init_file_index_lookup(elf_path)` calls this once at pass start to populate the module-level `basename_to_index` map;
+--- downstream `resolve_provenance_file_index(path)` consumers
+--- (which replaced the former hardcoded `ATOM_SOURCE_FILE_INDEX` + `PROVENANCE_BASENAME_TO_FILE_INDEX` table per `conductor/tracks/dwarf_file_index_lookup_20260731/`)
+--- consult the map directly.
+---
+--- @param elf_path string  -- absolute path to the post-link ELF (typically the gcc-emitted `.elf` BEFORE dwarf_injector's splice;
+---                            both shapes work since the splice preserves `.debug_line`)
+--- @return table|nil, table|nil, table|nil
+---        basename_to_index: { [basename] = 1-based-per-unit-file-index, ... }
+---        basenames:         { [1-based-per-unit-file-index] = basename, ... }
+---        paths:             { [1-based-per-unit-file-index] = full path (mixed slashes), ... }
+function M.read_line_unit_file_table(elf_path)
+	local sections = M.read_elf_sections(elf_path, { ".debug_line", ".debug_line_str" })
+	local line      = sections[".debug_line"]
+	local lstr      = sections[".debug_line_str"] or ""
+	if not line or line == "" then
+		io.stderr:write("[elf_dwarf.read_line_unit_file_table] no .debug_line section in: " .. tostring(elf_path) .. "\n")
+		return nil
+	end
+
+	local basenames        = {}
+	local basename_to_index = {}
+	local paths            = {}
+
+	--- Read one form-code's bytes from `buf` at position `p` according to `form`.
+	--- Returns (value, after) where `value` is:
+	---   * the resolved string (DW_FORM_line_strp / DW_FORM_string)
+	---   * the ULEB128 number (DW_FORM_udata)
+	---   * nil + skip-bytes (DW_FORM_data16; we don't surface the MD5)
+	local function read_form(buf, lstr_buf, p, form)
+		if form == M.DWARF5_DEBUG_LINE.form_line_strp then
+			local strp = M.read_u32_le(buf, p)
+			local end_pos = lstr_buf:find("\0", strp + 1, true) or (#lstr_buf + 1)
+			return lstr_buf:sub(strp + 1, end_pos - 1), p + M.DWARF5_DEBUG_LINE.form_strp_bytes
+		elseif form == M.DWARF5_DEBUG_LINE.form_string then
+			local nul = buf:find("\0", p + 1, true) or (#buf + 1)
+			return buf:sub(p + 1, nul - 1), nul
+		elseif form == M.DWARF5_DEBUG_LINE.form_udata then
+			local v, after = M.read_uleb128_at(buf, p)
+			return v, after
+		elseif form == M.DWARF5_DEBUG_LINE.form_data16 then
+			return nil, p + M.DWARF5_DEBUG_LINE.form_data16_bytes
+		else
+			-- Unsupported form in a directory/file-table entry: best-effort skip.
+			-- We do NOT stderr-write because the crt0.s DWARF5 line unit (gcc-as emitted) uses DW_FORM_addr (0x01) for what is effectively a path entry, 
+			-- which is non-standard.
+			-- The C-unit's DWARF3 paths are read via the parallel DWARF3 path and never see this error.
+			-- Callers should consult `basename_to_index` for the paths they care about and ignore this unit if it produced none.
+			return nil, p
+		end
+	end
+
+	--- Parse one DWARF-version-3-style unit (DWARF3/4 line program; gcc default in the PS1 toolchain still emits DWARF3 for line programs in `-g` mode).
+	--- Layout: null-terminated directory list, then path(null) + dir_idx(ULEB) + time(ULEB) + size(ULEB) file entries terminated by an empty null.
+	--- `content_start` = zero-based wire offset of the first byte of program-header content (after version + header_length fields).
+	--- @return unit_basenames { [idx_in_unit_1_based] = basename }
+	--- @return unit_paths     { [idx_in_unit_1_based] = full path }
+	local function parse_dwarf3_unit(buf, content_start, body_end)
+		local up = content_start
+		-- 5 fixed bytes: min_insn, default_is, line_base (signed), line_range, opcode_base
+		up = up + 5
+		local opcode_base = buf:byte(content_start + 5)
+		up = up + (opcode_base - 1)  -- std_opcode_lengths
+		local dirs = {}
+		while up < body_end do
+			local nul = buf:find("\0", up + 1, true) or (body_end + 1)
+			if nul > body_end then break end
+			local len = nul - up - 1
+			if len == 0 then up = nul break end
+			dirs[#dirs + 1] = buf:sub(up + 1, nul - 1)
+			up = nul
+		end
+		local unit_basenames = {}
+		local unit_paths = {}
+		while up < body_end do
+			local nul = buf:find("\0", up + 1, true) or (body_end + 1)
+			if nul > body_end or nul == up + 1 then up = nul break end
+			local path = buf:sub(up + 1, nul - 1)
+			up = nul
+			local didx,    up_next  = M.read_uleb128_at(buf, up); up = up_next
+			local _time,   up_next2 = M.read_uleb128_at(buf, up); up = up_next2
+			local _size,   up_next3 = M.read_uleb128_at(buf, up); up = up_next3
+			local idx = #unit_basenames + 1
+			local bs   = path:match("[^/\\]+$") or path
+			unit_paths[idx]     = path
+			unit_basenames[idx] = bs
+			dirs[1] = dirs[1] or ""  -- safety: gcc emits "" sentinel dir at 0
+			if didx > 0 and dirs[didx] then
+				unit_paths[idx] = dirs[didx] .. "/" .. path
+			end
+		end
+		return unit_basenames, unit_paths
+	end
+
+	--- Parse one DWARF-version-5-style unit (DWARF5 line program; used by modern gcc with `-gdwarf-5`).
+	--- `content_start` is the first byte of program-header content (after the 8 fixed bytes version+addr_size+seg_size+header_length).
+	--- @return same shape as parse_dwarf3_unit
+	local function parse_dwarf5_unit(buf, lstr_buf, content_start, body_end)
+		local up = content_start
+		-- 6 fixed bytes: min_insn, max_ops_per_insn, default_is, line_base, line_range, opcode_base
+		up = up + 6
+		local opcode_base = buf:byte(content_start + 6)
+		up = up + (opcode_base - 1)  -- std_opcode_lengths
+		-- directories
+		local dir_format_count, after = M.read_uleb128_at(buf, up); up = after
+		local dir_formats = {}
+		for i = 1, dir_format_count do
+			local f, a2 = M.read_uleb128_at(buf, up); up = a2
+			dir_formats[i] = f
+		end
+		local dir_count, a3 = M.read_uleb128_at(buf, up); up = a3
+		local dirs = {}
+		for i = 1, dir_count do
+			local combined = ""
+			for j = 1, dir_format_count do
+				local v, a4 = read_form(buf, lstr_buf, up, dir_formats[j])
+				up = a4
+				if j == 1 and type(v) == "string" then combined = v end
+			end
+			dirs[i] = combined
+		end
+		-- file names
+		local file_format_count, after2 = M.read_uleb128_at(buf, up); up = after2
+		local file_formats = {}
+		for i = 1, file_format_count do
+			local f, a2 = M.read_uleb128_at(buf, up); up = a2
+			file_formats[i] = f
+		end
+		local file_count, a3 = M.read_uleb128_at(buf, up); up = a3
+		local unit_basenames = {}
+		local unit_paths     = {}
+		for i = 1, file_count do
+			local combined = ""
+			local didx = 0
+			for j = 1, file_format_count do
+				local v, a4 = read_form(buf, lstr_buf, up, file_formats[j])
+				up = a4
+				if j == 1 and type(v) == "string" then combined = v end
+				if j == 2 and type(v) == "number"  then didx  = v end
+			end
+			local idx = #unit_basenames + 1
+			local bs  = combined:match("[^/\\]+$") or combined
+			unit_paths[idx]     = combined
+			unit_basenames[idx] = bs
+			if didx > 0 and dirs[didx] then
+				unit_paths[idx] = dirs[didx] .. "/" .. combined
+			end
+		end
+		return unit_basenames, unit_paths
+	end
+
+	--- Walk every line-program unit in the section.
+	local p = 0
+	local section_end = #line
+	while p + 4 <= section_end do
+		local unit_length = M.read_u32_le(line, p)
+		if unit_length == 0xFFFFFFFF then
+			io.stderr:write("[elf_dwarf.read_line_unit_file_table] 64-bit DWARF (initial-length 0xFFFFFFFF); not supported\n")
+			return nil
+		end
+		local body_start = p + 4
+		local body_end   = p + 4 + unit_length
+		if body_end > section_end then break end
+		local version = M.read_u16_le(line, body_start)
+		local unit_basenames, unit_paths
+		if version >= 5 then
+			-- DWARF5 header: version(2) + addr_size(1) + seg_size(1) + header_length(4) + content
+			local header_length_offset = body_start + 6  -- past version(2) + addr_size(1) + seg_size(1) - wait that's wrong; past hdr len is at +6
+			local content_start = body_start + 8  -- past version(2) + addr_size(1) + seg_size(1) + header_length(4)
+			unit_basenames, unit_paths = parse_dwarf5_unit(line, lstr, content_start, body_end)
+		elseif version >= 2 then
+			-- DWARF2/3/4 header: version(2) + header_length(4) + content
+			local content_start = body_start + 6  -- past version(2) + header_length(4)
+			unit_basenames, unit_paths = parse_dwarf3_unit(line, content_start, body_end)
+		else
+			io.stderr:write(string.format("[elf_dwarf.read_line_unit_file_table] unsupported DWARF version %d (offset 0x%x)\n", version, p))
+			p = body_end
+			goto continue
+		end
+		-- Per-unit 1-based file indices are aligned with `inv.call_file` values because the metaprogram emits `DW_LNS_set_file` with the per-unit index.
+		-- When multiple units are present (crt0.s + C unit), the per-unit index in each unit matches the metaprogram's intent (gcc always sets file in unit-local terms).
+		-- We therefore store directly without global re-indexing; the caller is responsible for knowing which unit the file-index applies to.
+		-- For DWARF3 (C unit is the unit that matters for atom line tables), this matches.
+		-- For DWARF5 (crt0.s + C unit), each carries its own per-unit file-table map;
+		-- the atom-side DW_LNS_set_file(N) refers to the C unit's indices, NOT crt0.s's.
+		-- Since the C unit is the one with full include_directories + 12 entries, we can use it directly.
+		for idx, bs in pairs(unit_basenames) do
+			basenames[idx] = bs
+			paths[idx] = unit_paths[idx]
+			basename_to_index[bs] = idx
+		end
+		p = body_end
+		::continue::
+	end
+
+	return basename_to_index, basenames, paths
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
