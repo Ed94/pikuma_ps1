@@ -32,12 +32,42 @@ typedef Slice_MipsCode MipsAtom;
 
 /* Register aliases */
 enum {
-	R_AtomJmp  = R_T9 atom_reg,  /* debug-visible; tape yield handshake scratch */
-	R_TapePtr  = R_T8 atom_reg,  /* The Instruction Stream Pointer */
-	R_InCursor = R_T4,
+	R_AtomJmp  = R_T8 atom_reg,  /* debug-visible; tape yield handshake scratch */
+	R_TapePtr  = R_T9 atom_reg,  /* The Instruction Stream Pointer */
 /* Stringification codes for the GCC inline assembler clobber lists. */
-#define R_TapePtr_Code     R_T8_Code
-#define R_InCursor_Code    R_T4_Code
+#define R_AtomJmp_Code R_T8_Code
+#define R_TapePtr_Code R_T9_Code
+
+// R_InCursor = R_T4,
+// #define R_InCursor_Code    R_T4_Code
+
+// Reserved Registers (Callee-saved):
+// - R_T9: Holds the Tape Ptr which we need to increment
+//         If we hit a wall with register allocations we can clobber V0 & V1 (return values), defering as opt-in by user.
+// - R_RA: Not sure??
+// Needed by ac_yield but can be used as atom scratch:
+// - R_T8: Will be used as the atom jump register.
+
+// All allocatable registers for mips atoms:
+	R_TScratchVolatile = R_AT, // This one is reserved for psuedo instructions, but you can technically use it.
+	R_TScratch0  = R_T0,
+	R_TScratch1  = R_T1,
+	R_TScratch2  = R_T2,
+	R_TScratch3  = R_T3,
+	R_TScratch4  = R_T4,
+	R_TScratch5  = R_T5,
+	R_TScratch6  = R_T6,
+	R_TScratch7  = R_T7,
+	R_TScratch8 =  R_T8,
+	// Note(Ed): We can technically clobber these, but don't unless we hit a bottleneck.
+	// R_TScratch10 = R_V0,
+	// R_TScratch10 = R_V1,
+	// R_TScratch11 = R_A0,
+	// R_TScratch12 = R_A1,
+	// R_TScratch13 = R_A3,
+	// TODO(Ed): Review S0-S7, they are technically avaialble, we just have to snapshot them at the ABI boundary.
+	// TODO(Ed): This is technically a waste of cycles for most work? so maybe only do this for expensive atoms on-demand or atom phases.
+// TODO(Ed): Sort out the other available registers... (Not sure how much is left avail)
 };
 
 #pragma region Tape Drive
@@ -48,25 +78,26 @@ enum {
 /* The 'Exit' Atom */
 atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 
+//TODO(Ed): Do we backup R_S0-7 here? Have it in a heavier tape run as a opt-in? Same with V0-1 and A0-3?
 /* Generalized Tape Engine Runner */
-FI_ void tape_run(Slice_MipsCode tape) { register U4* tp rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
+FI_ void tape_run(Slice_MipsCode tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
+		// Removed, not needed
+		/*add_ui(     R_SP, R_SP, -MipsStackAlignment)*/ /* Allocate stack space */
+		/*, store_word( R_RA, R_SP,           0)*/       /* Safely backup $ra to the stack */
 	asm_words(
-			add_ui(     R_SP, R_SP, -MipsStackAlignment) /* Allocate stack space */
-		, store_word( R_RA, R_SP,           0)         /* Safely backup $ra to the stack */
-		, load_word(  R_AtomJmp, R_TapePtr, 0)         /* Bootstrap the first jump */
+		  load_word(  R_AtomJmp, R_TapePtr, 0)         /* Bootstrap the first jump */
 		, add_ui_self(R_TapePtr, S_(MipsCode))         /* Advance tape */
 		, call_reg(   R_AtomJmp)                       /* jalr $t9 */
 		, nop                                          /* Branch delay slot */
-		, load_word(  R_RA, R_SP, 0)                   /* Restore $ra from stack */
-		, add_ui_self(R_SP, MipsStackAlignment)        /* Deallocate stack space */
 	)
-	asm_rpins, r_use(tp)
+		// Removed, not needed
+		/*, load_word(  R_RA, R_SP, 0)*              /* Restore $ra from stack */
+		/*, add_ui_self(R_SP, MipsStackAlignment)*/  /* Deallocate stack space */
+	asm_rpins, r_use(tape_ptr)
 	asm_clobber: 
 			rlit(R_AT)
-		, rlit(R_V0), rlit(R_V1)
-		, rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3)
-		, rlit(R_T4), rlit(R_T5), rlit(R_T6), rlit(R_T7)
-		, rlit(R_T9)
+		, rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4)
+		, rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8)
 		, clb_mem_drain 
 ); }
 

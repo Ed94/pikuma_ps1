@@ -13,10 +13,10 @@ enum {
 typedef Struct_(DrawEnv_Packed) { U4 tag; U4 code[15]; };
 typedef Struct_(DrawEnv) {
 	Rect_S2 clip_area;
-	A2_S2   drawing_offset;
+	V2_S2   drawing_offset[2];
 	Rect_S2 texture_window;
 	S2      texture_page;
-	B1      flag_dither;	
+	B1      flag_dither;
 	B1      flag_draw_on_display;
 	B1      enable_auto_clear;
 	RGB8    initial_bg_color;
@@ -32,6 +32,7 @@ typedef Struct_(DisplayEnv) {
 };
 typedef Array_(DrawEnv,    2);
 typedef Array_(DisplayEnv, 2);
+
 typedef Struct_(DoubleBuffer) {
 	A2_DrawEnv    draw;
 	A2_DisplayEnv display;

@@ -9,6 +9,27 @@
 #define WORD_COUNT(name, count)  enum { words_##name = (count) };
 #endif
 
+/* atom_dbg_skip */
+#define mac_store_v2s2(rt_x, rt_y, base, offset) \
+	store_half(rt_x, base, offset + O_(V2_S2,x)) \
+,	store_half(rt_y, base, offset + O_(V2_S2,y))
+WORD_COUNT(mac_store_v2s2, 2)
+
+/* atom_dbg_skip */
+#define mac_store_rects2(rt_x, rt_y, rt_width, rt_height, base, offset) \
+	store_half(rt_x,      base, offset + O_(Rect_S2,x)) \
+,	store_half(rt_y,      base, offset + O_(Rect_S2,y)) \
+,	store_half(rt_width,  base, offset + O_(Rect_S2,width)) \
+,	store_half(rt_height, base, offset + O_(Rect_S2,height))
+WORD_COUNT(mac_store_rects2, 4)
+
+/* atom_dbg_skip */
+#define mac_store_rgb8(rr, rg, rb, base, offset) \
+	store_byte(rr, base, offset + O_(DrawEnv,initial_bg_color.r)) \
+,	store_byte(rg, base, offset + O_(DrawEnv,initial_bg_color.g)) \
+,	store_byte(rb, base, offset + O_(DrawEnv,initial_bg_color.b))
+WORD_COUNT(mac_store_rgb8, 3)
+
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	load_upper_i(reg_transfer, cmd >> 16) \
 ,	or_i_self(   reg_transfer, cmd & 0xFFFF) \

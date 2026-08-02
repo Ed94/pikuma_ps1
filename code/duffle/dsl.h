@@ -135,16 +135,17 @@ enum { false = 0, true  = 1, true_overflow, };
 
 typedef void Proc_(VoidFn) (void);
 
-#define kilo(n)         (C_(U4, n) << 10)
-#define mega(n)         (C_(U4, n) << 20)
-#define giga(n)         (C_(U4, n) << 30)
-#define tera(n)         (C_(U4, n) << 40)
-#define null             C_(U4,    0)
-#define nullptr          C_(void*, 0)
-#define O_(type, field) (C_(U4, & C_(type*,0)->field))
- 
-#define OT_(field)       O_(typeof_ptr(& field), filed))
-#define S_(data)         C_(U4, sizeof(data))
+#define kilo(n)                (C_(U4, n) << 10)
+#define mega(n)                (C_(U4, n) << 20)
+#define giga(n)                (C_(U4, n) << 30)
+#define tera(n)                (C_(U4, n) << 40)
+
+#define null                    C_(U4,    0)
+#define nullptr                 C_(void*, 0)
+#define O_(type, field)         C_(U4, & C_(type*,0)->field)
+#define OA_(type, member, idx)  C_(U4, & C_(type*,0)->member[idx])
+#define OT_(field)              O_(typeof_ptr(& field), filed))
+#define S_(data)                C_(U4, sizeof(data))
 
 #define sop_1(op,a,b) C_(U1, s1_(a) op s1_(b))
 #define sop_2(op,a,b) C_(U2, s2_(a) op s2_(b))

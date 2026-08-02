@@ -431,8 +431,9 @@ int main(void)
 {
 	smem = (SMemory){0};
 	smem.scratchpad = C_(U4_V, 0x1F800000);
-	smem.primitives.used = 0;
-	{
+	// smem.primitives.used = 0;
+	// smem.active_buf_id   = 0;
+	/*Persistent Entity Setup*/{
 		ent_cube128_init(& smem.cube.verts, & smem.cube.faces); {
 			Ent_Cube* cube = & smem.cube;
 			cube->rot    = v3s2(0, 0, 0);
@@ -448,23 +449,12 @@ int main(void)
 			floor->scale = v3s4_fp_one();
 		}
 	}
-	{
+	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape)); {
 		reset_graph(0);
-		// TODO(Ed): Move to an atom
-		{
-			smem.active_buf_id = 0;
-			displayenv_init(& r_(smem.screen_buf.display)[0], 0, 0,           ScreenRes_X, ScreenRes_Y);
-			drawenv_init   (& r_(smem.screen_buf.draw   )[0], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
-			displayenv_init(& r_(smem.screen_buf.display)[1], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
-			drawenv_init   (& r_(smem.screen_buf.draw   )[1], 0, 0,           ScreenRes_X, ScreenRes_Y);
-			smem.screen_buf.draw[0].enable_auto_clear = true;
-			smem.screen_buf.draw[1].enable_auto_clear = true;
-			smem.screen_buf.draw[0].initial_bg_color = rgb8( .r = 7, .g = 7,  .b = 7 );
-			smem.screen_buf.draw[1].initial_bg_color = rgb8( .r = 7, .g = 7,  .b = 7 );
-		}
-		TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
-		register U4* io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
+		register U4*           io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
+		register DoubleBuffer* screen_buf   rgcc(R_ScreenBuf)   = & smem.screen_buf;
 		tb.used = 0; tb_scope_run(& tb) {
+			tb_emit(& tb, screen_env_init);
 			tb_emit(& tb, gp_screen_init);
 		}
 		pad_init(0);

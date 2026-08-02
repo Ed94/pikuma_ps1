@@ -406,8 +406,8 @@ typedef Struct_(RGB8) { B1 r; B1 g; B1 b; };
 
 /* ---------- PolyTag (the OT-link header; 1 word) ---------- */
 // enum {
-	// PolyTag_len_bits  =  8,
-	// PolyTag_addr_bits = 24,
+// 	PolyTag_len_bits  =  8,
+// 	PolyTag_addr_bits = 24,
 // };
 typedef Struct_(PolyTag) {
 	union {
@@ -569,6 +569,9 @@ enum {
 	gp0_tpage_color_4bpp  = 0x0,
 	gp0_tpage_color_8bpp  = 0x1,
 	gp0_tpage_color_16bpp = 0x2,
+
+	/* Default TPage value libpsyx's SetDefDrawEnv writes (matches the `li v1, 10; sh v1, 20(v0)` sequence at C11_only.elf:0x8001273C). */
+	gp0_tpage_default    = 10,
 
 	/* TPage semi-transparency mode payload values (NOT bit positions). */
 	gp0_tpage_semi_trans_none  = 0x0,

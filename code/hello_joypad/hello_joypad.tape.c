@@ -15,6 +15,25 @@
 
 #pragma region MACs (Mips Atom components)
 
+
+FI_ MipsAtom ac_store_v2s2(U4 rt_x, U4 rt_y, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_v2s2, {
+	store_half(rt_x, base, offset + O_(V2_S2,x)),
+	store_half(rt_y, base, offset + O_(V2_S2,y)),
+})
+
+FI_ MipsAtom ac_store_rects2(U4 rt_x, U4 rt_y, U4 rt_width, U4 rt_height, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_rects2, {
+	store_half(rt_x,      base, offset + O_(Rect_S2,x)),
+	store_half(rt_y,      base, offset + O_(Rect_S2,y)),
+	store_half(rt_width,  base, offset + O_(Rect_S2,width)),
+	store_half(rt_height, base, offset + O_(Rect_S2,height)),
+})
+
+FI_ MipsAtom ac_store_rgb8(U1 rr, U1 rg, U1 rb, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_rgb8, {
+	store_byte(rr, base, offset + O_(DrawEnv,initial_bg_color.r)),
+	store_byte(rg, base, offset + O_(DrawEnv,initial_bg_color.g)),
+	store_byte(rb, base, offset + O_(DrawEnv,initial_bg_color.b)),	
+})
+
 FI_ MipsAtom ac_gcmd_push(U4 cmd, U4 reg_transfer, U4 reg_base, U2 port)
 MipsAtomComp_Proc_(ac_gcmd_push, {
 	load_upper_i(reg_transfer, cmd >> 16),
@@ -35,9 +54,7 @@ MipsAtomComp_Proc_(ac_put_disp_env, {
 
 FI_ MipsAtom ac_put_draw_env(U4 reg_transfer, U4 reg_base, U2 port)
 MipsAtomComp_Proc_(ac_put_draw_env, {
-	/* DR_ENV (16-word packet) — emitted at boot by the gp_screen_init atom. 
-	* The values below are pre-baked for the demo's buffer 0: auto_clear=true, bg=(7,7,7), clip=(0,240,320,240), ofs=(0,0), tw=(0,0,0,0).
-	*
+	/*
 	* ORIGIN: each code word corresponds to the EXACT value libpsyx's PutDrawEnv function would compute for the same DrawEnv settings.
 	* References:
 	*   - libpsyx source: `toolchain/psyq-4_7/lib/libgpu.a` (binary, function `PutDrawEnv`)
@@ -93,11 +110,70 @@ MipsAtomComp_Proc_(ac_put_draw_env, {
 #pragma region Baked Atoms
 
 enum {
+	R_ScreenX   = R_T5 atom_reg atom_type(U2),
+	R_ScreenY   = R_T6 atom_reg atom_type(U2),
+	R_ScreenBuf = R_T7 atom_reg, /* Caller-pinned: &smem.screen_buf */
+#define R_ScreenBuf_Code R_T7_Code
+};
+//screen_env_init. Mirrors the libpsyx's SetDefDispEnv + SetDefDrawEnv + the manual enable_auto_clear / initial_bg_color writes.
+internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
+,	atom_reads(R_T0, R_ScreenX, R_ScreenY, R_ScreenBuf)
+, atom_writes(R_T0, R_ScreenX, R_ScreenY)
+) {
+	/* display[0] = (0, 0, 320, 240); rest of struct zeroed. */
+	add_ui(R_ScreenX, R_0, ScreenRes_X), add_ui(R_ScreenY, R_0, ScreenRes_Y),
+	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DisplayEnv,display_area.width) + OA_(DoubleBuffer,display,0)),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,display_area) + OA_(DoubleBuffer,display,0)),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,screen)       + OA_(DoubleBuffer,display,0)),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace)   + OA_(DoubleBuffer,display,0)),
+
+	/* display[1] = (0, 240, 320, 240); rest of struct zeroed. */
+	mac_store_rects2(R_0, R_ScreenY, R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DisplayEnv,display_area) + OA_(DoubleBuffer,display,1)),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,screen)     + OA_(DoubleBuffer,display,1)),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace) + OA_(DoubleBuffer,display,1)),
+
+	mac_store_rects2(R_0, R_ScreenY, R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area)         + OA_(DoubleBuffer,draw,0)), /* draw[0].clip_area = (0, 240, 320, 240). C11's SetDefDrawEnv writes clip.y = y_arg. */
+	mac_store_v2s2(  R_0, R_ScreenY,                       R_ScreenBuf, O_(DrawEnv,drawing_offset[0]) + OA_(DoubleBuffer,draw,0)), /* draw[0].drawing_offset[0] = (0, 240); C11 passes y_arg as ofs. */
+
+	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area.width) + OA_(DoubleBuffer,draw,1)),
+
+	/* draw[0].texture_window = (0, 0, 0, 0); two word-zeroes cover the full 8-byte tw field. */
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.x)     + OA_(DoubleBuffer,draw,0)),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.width) + OA_(DoubleBuffer,draw,0)),
+
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,drawing_offset[0].x)  + OA_(DoubleBuffer,draw,1)),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.x)     + OA_(DoubleBuffer,draw,1)),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.width) + OA_(DoubleBuffer,draw,1)),
+
+	/* draw[0].texture_page = 10 (gp0_tpage_default). C11 SetDefDrawEnv at C11_only.elf:0x8001273C writes the same 0x0A. . */
+	add_ui(R_T0, R_0, gp0_tpage_default), 
+	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + OA_(DoubleBuffer,draw,0)),
+	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + OA_(DoubleBuffer,draw,1)),
+
+	/* draw[0] control bytes: flag_dither=1, flag_draw_on_display=1 (the dfe bit per psx-spx; libpsyx sets it via `SetDefDrawEnv`'s conditional at C11_only.elf:0x80012728), enable_auto_clear=1. Each byte is named;
+	 * the previous `store_word(R_0, ..., +20)` overwrote all four with zero. */
+	add_ui(R_T0, R_0, 1),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_dither)          + OA_(DoubleBuffer,draw,0)),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_draw_on_display) + OA_(DoubleBuffer,draw,0)),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,enable_auto_clear)    + OA_(DoubleBuffer,draw,0)),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_dither)          + OA_(DoubleBuffer,draw,1)),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_draw_on_display) + OA_(DoubleBuffer,draw,1)),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,enable_auto_clear)    + OA_(DoubleBuffer,draw,1)),
+
+	/* draw[0].initial_bg_color = (r=7, g=7, b=7). */
+	add_ui(R_T0, R_0, 7), 
+	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + OA_(DoubleBuffer,draw,0)),
+	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + OA_(DoubleBuffer,draw,1)),
+
+	mac_yield(),
+};
+
+enum {
 	R_IO_BaseAddr = R_T4 atom_reg, /* Caller-pinned: IO_BASE_ADDR = 0x1F800000 */
 #define R_IO_BaseAddr_Code R_T4_Code
 };
-internal MipsAtom_(gp_screen_init) atom_info(atom_phase(screen_init)) {
-	store_word(R_0, R_IO_BaseAddr, GPIO_PORT1_OFFSET),                  /* GP1(00h) Reset */
+internal MipsAtom_(gp_screen_init) atom_info(atom_phase(screen_init), atom_reads(R_IO_BaseAddr)) {
+	store_word(R_0, R_IO_BaseAddr, GPIO_PORT1_OFFSET),                                   /* GP1(00h) Reset */
 	mac_gcmd_push(gp1_word_ResetCmdBuffer(),   R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(01h) ClearFIFO */
 	mac_gcmd_push(gp1_word_AcknowledgeIRQ(),   R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(02h) AckIRQ */
 	mac_gcmd_push(gp1_word_DisplayOn(),        R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(03h) Display ON */
@@ -170,7 +246,7 @@ typedef Struct_(Binds_CubeTri) {
 };
 internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri), atom_phase(cube_g4)
 ,	atom_reads(R_TapePtr)
-,	atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
+,	atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase, R_TapePtr)
 ){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
 	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)),
@@ -237,7 +313,7 @@ typedef Struct_(Binds_FloorTri) {
 internal
 MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri), atom_phase(floor_f3)
 	, atom_reads(R_TapePtr)
-	, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
+	, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase, R_TapePtr)
 ){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
 	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)),
