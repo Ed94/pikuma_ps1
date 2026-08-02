@@ -21,10 +21,13 @@
 #include "duffle/lottes_tape.h"
 #include "duffle/word_count.metadata.h"
 
+#include "psyq.h"
+
 #	include "gen/hello_joypad.macs.h"
 #	include "gen/hello_joypad.offsets.h"
 #include "hello_joypad.h"
 
+#include "psyq.c"
 #include "hello_joypad.tape.c"
 
 

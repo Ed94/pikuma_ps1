@@ -8,6 +8,7 @@
 #	include "duffle/gte.h"
 #	include "duffle/gp.h"
 #	include "duffle/word_count.metadata.h"
+#	include "psyq.h"
 #	include "gen/hello_joypad.offsets.h"
 #	include "gen/hello_joypad.macs.h"
 #	include "hello_joypad.h"
@@ -112,7 +113,7 @@ MipsAtomComp_Proc_(ac_put_draw_env, {
 enum {
 	R_ScreenX   = R_T5 atom_reg atom_type(U2),
 	R_ScreenY   = R_T6 atom_reg atom_type(U2),
-	R_ScreenBuf = R_T7 atom_reg, /* Caller-pinned: &smem.screen_buf */
+	R_ScreenBuf = R_T7 atom_reg, /* Caller-pinned: & smem.screen_buf */
 #define R_ScreenBuf_Code R_T7_Code
 };
 //screen_env_init. Mirrors the libpsyx's SetDefDispEnv + SetDefDrawEnv + the manual enable_auto_clear / initial_bg_color writes.
