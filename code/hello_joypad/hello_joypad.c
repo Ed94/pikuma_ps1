@@ -21,6 +21,7 @@
 #include "duffle/lottes_tape.h"
 #include "duffle/word_count.metadata.h"
 
+#	include "gen/hello_joypad.macs.h"
 #	include "gen/hello_joypad.offsets.h"
 #include "hello_joypad.h"
 
@@ -171,10 +172,6 @@ void gp_screen_init_c11(DoubleBuffer* screen_buf, S4* active_buf_id)
 
 	// Initialize and setup the GTE geometry offsets
 	geom_init();
-	// NOTE: geom_set_offset/geom_set_screen are kept as-is (the libgte versions
-	// are known to be broken in this PSYQ 4.7 build — see report 2026-07-09).
-	// The user's research wants the C-side non-tape reference to work as a
-	// known-good baseline for comparison against the tape.
 	geom_set_offset(ScreenRes_CenterX, ScreenRes_CenterY);
 	geom_set_screen(ScreenZ);
 
@@ -452,8 +449,24 @@ int main(void)
 		}
 	}
 	{
-		// gknown gp_screen_init();
-		gp_screen_init_c11(& smem.screen_buf, & smem.active_buf_id);
+		reset_graph(0);
+		// TODO(Ed): Move to an atom
+		{
+			smem.active_buf_id = 0;
+			displayenv_init(& r_(smem.screen_buf.display)[0], 0, 0,           ScreenRes_X, ScreenRes_Y);
+			drawenv_init   (& r_(smem.screen_buf.draw   )[0], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
+			displayenv_init(& r_(smem.screen_buf.display)[1], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
+			drawenv_init   (& r_(smem.screen_buf.draw   )[1], 0, 0,           ScreenRes_X, ScreenRes_Y);
+			smem.screen_buf.draw[0].enable_auto_clear = true;
+			smem.screen_buf.draw[1].enable_auto_clear = true;
+			smem.screen_buf.draw[0].initial_bg_color = rgb8( .r = 7, .g = 7,  .b = 7 );
+			smem.screen_buf.draw[1].initial_bg_color = rgb8( .r = 7, .g = 7,  .b = 7 );
+		}
+		TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
+		register U4* io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
+		tb.used = 0; tb_scope_run(& tb) {
+			tb_emit(& tb, gp_screen_init);
+		}
 		pad_init(0);
 	}
 	while (1) {

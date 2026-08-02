@@ -444,18 +444,15 @@ enum { _BitOffsets = 0
 #define load_imm_1w_s0(rt, imm) add_si((rt)), R_0, (imm))
 
 /* load_imm_2w — unconditional 2-word `li` form: `lui` + (ori | addi).
- *
  * Granular companion to `load_imm`: skips the compile-time range checks and always emits 2 .words. Use this when:
  *   - you know `imm` is > 0xFFFF (otherwise you're wasting a word), OR
- *   - `imm` is not a compile-time constant and you want predictable
- *     2-word emission without the `__builtin_constant_p` branches.
+ *   - `imm` is not a compile-time constant and you want predictable 2-word emission without the `__builtin_constant_p` branches.
  *
  * The lo16 strategy is still chosen at expansion time on the lo half:
  *   lo16 in 0x0000..0x7FFF  →  addi (sign-ext is harmless, the lui already cleared bits 15..0)
  *   lo16 in 0x8000..0xFFFF  →  ori  (zero-extends to preserve the intended bit pattern)
  *
- * For situations where you need to bypass even this choice 
- * (e.g. to force a specific encoding for a known discontiguous high/low pair),
+ * For situations where you need to bypass even this choice (e.g. to force a specific encoding for a known discontiguous high/low pair),
  * see `load_imm_2w_ori_forced` and `load_imm_2w_addi_forced` below.
  * Statement-level (not expression-level): emits its own `asm volatile(...)`.
  */

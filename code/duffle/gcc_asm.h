@@ -50,17 +50,13 @@
 #define asm_words(...) m_expand(glue(GCC_ASM_INL_, GCC_ASM_COUNT_ARGS(__VA_ARGS__))(__VA_ARGS__))
 // Very nasty macro expansion. See the Cruft pragma region after all the DSL defines
 
-/* reg_str(n) — Stringify an integer register id into the GCC asm
- * string form (e.g. 12 → "$12"). Use this anywhere GCC's parser
- * expects a literal string identifying a register: clobber lists,
- * asm templates, etc. The two-level macro is the standard preprocessor
- * idiom for forcing one level of expansion before stringify — without
- * it, `#n` would stringify the macro name `R_T4` to `"R_T4"` instead
- * of expanding `R_T4` to its value first.
+/* reg_str(n) — Stringify an integer register id into the GCC asm string form (e.g. 12 → "$12").
+ * Use this anywhere GCC's parser expects a literal string identifying a register: clobber lists,
+ * asm templates, etc. The two-level macro is the standard preprocessor idiom for forcing one level of expansion before stringify —
+ * without it, `#n` would stringify the macro name `R_T4` to `"R_T4"` instead of expanding `R_T4` to its value first.
  *
- * For declaring a register variable bound to a specific GPR, use the
- * `rgcc(n)` bundle from gcc_asm.h instead — it adds the `__asm__()`
- * qualifier around the string.
+ * For declaring a register variable bound to a specific GPR, use the `rgcc(n)` bundle from gcc_asm.h instead —
+ * it adds the `__asm__()` qualifier around the string.
  *
  *   register V3_S2* p0 __asm__(reg_str(R_T4)) = ...;        // verbose
  *   register V3_S2* p0 rgcc(R_T4) = ...;                    // bundled
@@ -85,21 +81,19 @@
  *  - The string "$12" is derived from it via reg_str, so they cannot drift apart.
  *  - Spelling `__asm__(reg_str(R_T4_Code))` at every call site is noise.
  *
- *  tmpl defined in dsl.h (the token-paste glue). 
+ *  tmpl defined in dsl.h (token-paste glue). 
  *  rgcc define here (gcc_asm.h) because the `__asm__` keyword is GCC-specific. 
- *  Anyone porting to a different compiler's asm dialect overrides rgcc, 
+ *  Anyone porting to a different compiler's asm dialect overrides rgcc,
  *  and the integer→string derivation in rlit can be retargeted in one place.
  *
  *  For clobber lists and asm-template strings, use the bare `rlit(R_T4_Code)`.
  * ------------------------------------------------------------------------ */
 #define rgcc(n) __asm__(rlit(n))
 
-/* rgcc_ref(n) — GCC operand-reference form "%N". Not currently used
- * by the placeholder-pun macros (the .word bodies are fully baked
- * at compile time and have no runtime operand references), but kept
- * here for completeness in case a future asm template needs to refer
- * to a runtime input by position. Mirror of rgcc but produces "%N"
- * instead of "$N". */
+/* rgcc_ref(n) — GCC operand-reference form "%N". Not currently used by the placeholder-pun macros
+ * (the .word bodies are fully baked at compile time and have no runtime operand references),
+ * but kept here for completeness in case a future asm template needs to refer to a runtime input by position.
+ * Mirror of rgcc but produces "%N" instead of "$N". */
 #define rgcc_ref_(n)   "%" #n
 #define rgcc_ref(n)    rgcc_ref_(n)
 
@@ -147,11 +141,9 @@
     9,  8,  7,  6,  5,  4,  3,  2,  1,  0))
 
 /* --- 2. String Concatenation Helpers --- *
- * NOTE: we use `%0`, `%1`, ... not `%c0`, `%c1`, ... because GCC's
- * asm-parser rejects `%cN` in this position with "invalid use of '%c'".
- * The `%cN` form is for printing *character* constants; for arbitrary
- * integer immediates (the only kind `"i"(...)` produces), the plain
- * `%N` form is the right one. Both expand to the bare immediate.
+ * NOTE: we use `%0`, `%1`, ... not `%c0`, `%c1`, ... because GCC's asm-parser rejects `%cN` in this position with "invalid use of '%c'".
+ * The `%cN` form is for printing *character* constants; for arbitrary integer immediates (the only kind `"i"(...)` produces),
+ * the plain `%N` form is the right one. Both expand to the bare immediate.
  */
 #define GCC_ASM_W1                  "%0"
 #define GCC_ASM_W2   GCC_ASM_W1   ", %1"

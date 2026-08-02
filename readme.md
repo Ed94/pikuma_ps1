@@ -7,12 +7,12 @@ A rest from the usual.
 ## Dependencies
 
 I will be programming from a Windows 11 machine (may eventually try this on the Steam Deck...):
-![system_info](./docs/assets/system_info.png)
 
 [armips](https://github.com/Kingcom/armips)
 
 * Supports doing bare-metal assembly for the ps1
 * `scoop install armips` or just clone and build..
+* Was used early in the course. Now I just use an macro asm dsl in C11.
 
 [luajit-2.1](https://github.com/LuaJIT/LuaJIT.git)
 
@@ -73,3 +73,9 @@ scoop install luajit
 ![hello_psyq!](./docs/assets/pcsx-redux_2025-08-05_23-01-19.png)
 ![cube!](./docs/assets/pcsx-redux_2025-10-11_03-04-01.png)
 ![cube and floor!](./docs/assets/pcsx-redux_2026-07-10_22-47-02.png)
+
+Win 11 machine:
+
+![system_info](./docs/assets/system_info.png)
+
+Still haven't gotten around to trying this on linux...

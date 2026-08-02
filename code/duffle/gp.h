@@ -39,8 +39,8 @@
 /* ============================================================================
  *  Hardware MMIO Addresses
  *  ============================================================================
- *  PSX GPU has two 32-bit ports in the I/O register region at KSEG2
- *  0x1F800000+. GP0 (offset 0x10) is the data port (commands + params).
+ *  PSX GPU has two 32-bit ports in the I/O register region at KSEG2 0x1F800000+.
+ *  GP0 (offset 0x10) is the data port (commands + params).
  *  GP1 (offset 0x14) is the control port (status, ctrl writes).
  * ============================================================================ */
 /* IO base address (KSEG2 0x1F800000+ for the I/O register region).
@@ -49,18 +49,18 @@
  *   `lui $reg, 0x1F80` (1 word) then `sw $data, GPIO_PORT*_OFFSET($reg)` (1 word). 
  * Mirrors the `IO_BASE_ADDR equ 0x1F80` + `gpio_port0 equ 0x1810` pattern from graphics_hello/gp.s. */
 enum {
-    IO_BASE_ADDR      = 0x1F800000,  /* full 32-bit I/O region base */
-    IO_BASE_ADDR_HI16 = 0x1F80,      /* fits in a single `lui $reg, 0x1F80` */
+	IO_BASE_ADDR      = 0x1F800000,  /* full 32-bit I/O region base */
+	IO_BASE_ADDR_HI16 = 0x1F80,      /* fits in a single `lui $reg, 0x1F80` */
 
-    /* Offsets from IO_BASE_ADDR to each port. Used by tape-side macros
-     * that pin a register to IO_BASE_ADDR and access ports via offsets:
-     *   sw $data, GPIO_PORT0_OFFSET($io_base)   ; write GP0
-     *   sw $data, GPIO_PORT1_OFFSET($io_base)   ; write GP1 */
-    GPIO_PORT0_OFFSET = 0x1810,
-    GPIO_PORT1_OFFSET = 0x1814,
+	/* Offsets from IO_BASE_ADDR to each port. Used by tape-side macros
+		* that pin a register to IO_BASE_ADDR and access ports via offsets:
+		*   sw $data, GPIO_PORT0_OFFSET($io_base)   ; write GP0
+		*   sw $data, GPIO_PORT1_OFFSET($io_base)   ; write GP1 */
+	GPIO_PORT0_OFFSET = 0x1810,
+	GPIO_PORT1_OFFSET = 0x1814,
 
-    HW_GP0_ADDR = (IO_BASE_ADDR_HI16 << 16) | GPIO_PORT0_OFFSET,
-    HW_GP1_ADDR = (IO_BASE_ADDR_HI16 << 16) | GPIO_PORT1_OFFSET,
+	HW_GP0_ADDR = (IO_BASE_ADDR_HI16 << 16) | GPIO_PORT0_OFFSET,
+	HW_GP1_ADDR = (IO_BASE_ADDR_HI16 << 16) | GPIO_PORT1_OFFSET,
 };
 
 #define HW_GP0 C_(U4 V_*, HW_GP0_ADDR)
@@ -73,66 +73,64 @@ enum {
  *  GP0 command byte constants + Layer 1 (GPU bitfield shifts)
  *  ============================================================================
  *  8-bit GP0 opcodes (the upper byte of a primitive's first word). These are the BYTE only.
- *  The layer-1 bitfield-layout constants live in the same enum block so the encoder can reference them by name. 
  *  NO macro body past this point uses a raw shift or raw mask.
- *  Every shift/width/mask is named here, named once.
  *  Mirrors the OPCODE_SHIFT / RS_SHIFT / REG_MASK convention from mips.h.
  * ============================================================================ */
 enum {
-    gp0_cmd_Nop             = 0x00,
+	gp0_cmd_Nop             = 0x00,
 
-    /* Cache management */
-    gp0_cmd_ClearCache      = 0x01,
-    gp0_cmd_FillVram        = 0x02,
-    gp0_cmd_CopyVram        = 0x80,
-    gp0_cmd_CopyVramChained = 0x81,
-    gp0_cmd_ReadVram        = 0xC0,
+	/* Cache management */
+	gp0_cmd_ClearCache      = 0x01,
+	gp0_cmd_FillVram        = 0x02,
+	gp0_cmd_CopyVram        = 0x80,
+	gp0_cmd_CopyVramChained = 0x81,
+	gp0_cmd_ReadVram        = 0xC0,
 
-    /* Polygons */
-    gp0_cmd_poly_f3         = 0x20,  /* Flat Triangle           */
-    gp0_cmd_poly_ft3        = 0x24,  /* Flat Textured Triangle  */
-    gp0_cmd_poly_g3         = 0x30,  /* Gouraud Triangle        */
-    gp0_cmd_poly_gt3        = 0x34,  /* Gouraud Textured Tri    */
-    gp0_cmd_poly_f4         = 0x28,  /* Flat Quad               */
-    gp0_cmd_poly_ft4        = 0x2C,  /* Flat Textured Quad      */
-    gp0_cmd_poly_g4         = 0x38,  /* Gouraud Quad            */
-    gp0_cmd_poly_gt4        = 0x3C,  /* Gouraud Textured Quad   */
+	/* Polygons */
+	gp0_cmd_poly_f3         = 0x20,  /* Flat Triangle           */
+	gp0_cmd_poly_ft3        = 0x24,  /* Flat Textured Triangle  */
+	gp0_cmd_poly_g3         = 0x30,  /* Gouraud Triangle        */
+	gp0_cmd_poly_gt3        = 0x34,  /* Gouraud Textured Tri    */
+	gp0_cmd_poly_f4         = 0x28,  /* Flat Quad               */
+	gp0_cmd_poly_ft4        = 0x2C,  /* Flat Textured Quad      */
+	gp0_cmd_poly_g4         = 0x38,  /* Gouraud Quad            */
+	gp0_cmd_poly_gt4        = 0x3C,  /* Gouraud Textured Quad   */
 
-    /* Lines */
-    gp0_cmd_line_f2         = 0x40,
-    gp0_cmd_line_g2         = 0x50,
+	/* Lines */
+	gp0_cmd_line_f2         = 0x40,
+	gp0_cmd_line_g2         = 0x50,
 
-    /* Sprites + Tiles + Rects */
-    gp0_cmd_sprt_1          = 0x64,
-    gp0_cmd_sprt_8          = 0x74,
-    gp0_cmd_sprt_16         = 0x7C,
-    gp0_cmd_tile_1          = 0x60,
-    gp0_cmd_tile_8          = 0x68,
-    gp0_cmd_tile_16         = 0x70,
+	/* Sprites + Tiles + Rects */
+	gp0_cmd_sprt_1          = 0x64,
+	gp0_cmd_sprt_8          = 0x74,
+	gp0_cmd_sprt_16         = 0x7C,
+	gp0_cmd_tile_1          = 0x60,
+	gp0_cmd_tile_8          = 0x68,
+	gp0_cmd_tile_16         = 0x70,
 
-    /* State setters (not drawing primitives; set render context). */
-    gp0_cmd_DrawModeSetting      = 0xE1,  /* TPage / draw-mode (semi-trans, dither, etc.) */
-    gp0_cmd_SetTextureWindow     = 0xE2,
-    gp0_cmd_SetDrawArea_TopLeft  = 0xE3,
-    gp0_cmd_SetDrawArea_BotRight = 0xE4,
-    gp0_cmd_SetDrawOffset        = 0xE5,
-    gp0_cmd_SetMaskBit           = 0xE6,
+	/* State setters (not drawing primitives; set render context). */
+	gp0_cmd_DrawModeSetting      = 0xE1,  /* TPage / draw-mode (semi-trans, dither, etc.) */
+	gp0_cmd_SetTextureWindow     = 0xE2,
+	gp0_cmd_SetDrawArea_TopLeft  = 0xE3,
+	gp0_cmd_SetDrawArea_BotRight = 0xE4,
+	gp0_cmd_SetDrawOffset        = 0xE5,
+	gp0_cmd_SetMaskBit           = 0xE6,
 
-    /* bitfield shifts / widths / masks ----
-     * Generic GP0/GP1 command byte (upper 8 bits of every word sent to either port). */
-    gp0_cmd_shift = 24,
-    gp0_cmd_width =  8,
-    gp0_cmd_mask  = 0xFF,
+	/* bitfield shifts / widths / masks ----
+		* Generic GP0/GP1 command byte (upper 8 bits of every word sent to either port). */
+	gp0_cmd_shift = 24,
+	gp0_cmd_width =  8,
+	gp0_cmd_mask  = 0xFF,
 
-    /* Color word layout (lives in Poly_F3.color, Poly_G4.c0..c3, etc.):
-     *   bits 31..24 = command byte
-     *   bits 23..16 = BLUE
-     *   bits 15..08 = GREEN
-     *   bits 07..00 = RED     (PSX GPU is BGR, NOT RGB) */
-    gp0_color_cmd_shift   = 24, gp0_color_cmd_width   = 8, gp0_color_cmd_mask   = 0xFF,
-    gp0_color_blue_shift  = 16, gp0_color_blue_width  = 8, gp0_color_blue_mask  = 0xFF,
-    gp0_color_green_shift =  8, gp0_color_green_width = 8, gp0_color_green_mask = 0xFF,
-    gp0_color_red_shift   =  0, gp0_color_red_width   = 8, gp0_color_red_mask   = 0xFF,
+	/* Color word layout (lives in Poly_F3.color, Poly_G4.c0..c3, etc.):
+		*   bits 31..24 = command byte
+		*   bits 23..16 = BLUE
+		*   bits 15..08 = GREEN
+		*   bits 07..00 = RED     (PSX GPU is BGR, NOT RGB) */
+	gp0_color_cmd_shift   = 24, gp0_color_cmd_width   = 8, gp0_color_cmd_mask   = 0xFF,
+	gp0_color_blue_shift  = 16, gp0_color_blue_width  = 8, gp0_color_blue_mask  = 0xFF,
+	gp0_color_green_shift =  8, gp0_color_green_width = 8, gp0_color_green_mask = 0xFF,
+	gp0_color_red_shift   =  0, gp0_color_red_width   = 8, gp0_color_red_mask   = 0xFF,
 };
 
 /* ============================================================================
@@ -171,10 +169,13 @@ enum {
 #define gp0_word_poly_gt4(r,g,b) enc_color_word(gp0_cmd_poly_gt4, (r),(g),(b))
 
 /* Cache management — bare-cmd words (no color/range payload). */
-#define gp0_word_clear_cache() enc_gp0_cmd_word(gp0_cmd_ClearCache)
-#define gp0_word_fill_vram()   enc_gp0_cmd_word(gp0_cmd_FillVram)
-#define gp0_word_copy_vram()   enc_gp0_cmd_word(gp0_cmd_CopyVram)
-#define gp0_word_read_vram()   enc_gp0_cmd_word(gp0_cmd_ReadVram)
+#define gp0_word_clear_cache()       enc_gp0_cmd_word(gp0_cmd_ClearCache)
+#define gp0_word_fill_vram()         enc_gp0_cmd_word(gp0_cmd_FillVram)
+#define gp0_word_copy_vram()         enc_gp0_cmd_word(gp0_cmd_CopyVram)
+#define gp0_word_read_vram()         enc_gp0_cmd_word(gp0_cmd_ReadVram)
+
+/* NOP — bare-cmd word (no effect; used as DR_ENV padding). */
+#define gp0_word_nop()               enc_gp0_cmd_word(gp0_cmd_Nop)
 
 /* ============================================================================
  *  GP1 command byte constants + Layer 1 (display-mode + range + draw-area bitfield shifts)
@@ -184,58 +185,57 @@ enum {
  *  (cmd byte in the upper 8 bits via `enc_gp0_cmd(cmd)`).
  * ============================================================================ */
 enum {
-    gp1_cmd_Reset                  = 0x00,
-    gp1_cmd_ResetCmdBuffer         = 0x01,
-    gp1_cmd_AcknowledgeIRQ         = 0x02,
-    gp1_cmd_DisplayEnable          = 0x03,
-    gp1_cmd_DMADirection           = 0x04,
-    gp1_cmd_StartDisplayArea       = 0x05,
-    gp1_cmd_HorizontalDisplayRange = 0x06,
-    gp1_cmd_VerticalDisplayRange   = 0x07,
-    gp1_cmd_DisplayMode            = 0x08,
-    /* Note: GP1 only has commands 0x00..0x08. 
-		 * The state-setter commands (SetTextureWindow, * SetDrawArea*, SetDrawOffset, SetMaskBit) 
-		 * live in the GP0 enum as * 0xE1..0xE6.
-		 * DrawArea word builders are below as GP0s * macros (since they emit GP0 commands). */
+	gp1_cmd_Reset                  = 0x00,
+	gp1_cmd_ResetCmdBuffer         = 0x01,
+	gp1_cmd_AcknowledgeIRQ         = 0x02,
+	gp1_cmd_DisplayEnable          = 0x03,
+	gp1_cmd_DMADirection           = 0x04,
+	gp1_cmd_StartDisplayArea       = 0x05,
+	gp1_cmd_HorizontalDisplayRange = 0x06,
+	gp1_cmd_VerticalDisplayRange   = 0x07,
+	gp1_cmd_DisplayMode            = 0x08,
+	/* Note: GP1 only has commands 0x00..0x08. 
+		* The state-setter commands (SetTextureWindow, * SetDrawArea*, SetDrawOffset, SetMaskBit) 
+		* live in the GP0 enum as * 0xE1..0xE6.
+		* DrawArea word builders are below as GP0s * macros (since they emit GP0 commands). */
 
-    /* ---- Display-mode payload flags (per PSX-SPX §"GP1 Display Mode").
-     * Bit positions match the encoder shifts below; values are the
-     * *payload* bits only (the cmd byte is OR'd in by enc_gp1_disp_mode_word). */
-    gp1_disp_HRes_256   = 0x0,
-    gp1_disp_HRes_320   = 0x1,
-    gp1_disp_HRes_512   = 0x2,
-    gp1_disp_HRes_640   = 0x3,
-    gp1_disp_VRes_240   = 0x0,
-    gp1_disp_VRes_480   = 0x1,
-    gp1_disp_Color15    = 0x0,
-    gp1_disp_Color24    = 0x1,
-    gp1_disp_VInterlace = 0x1,
+	/* ---- Display-mode payload flags (per PSX-SPX §"GP1 Display Mode").
+		* Bit positions match the encoder shifts below; values are the *payload* bits only (cmd byte is OR'd in by enc_gp1_disp_mode_word). */
+	gp1_disp_HRes_256   = 0x0,
+	gp1_disp_HRes_320   = 0x1,
+	gp1_disp_HRes_512   = 0x2,
+	gp1_disp_HRes_640   = 0x3,
+	gp1_disp_VRes_240   = 0x0,
+	gp1_disp_VRes_480   = 0x1,
+	gp1_disp_Color15    = 0x0,
+	gp1_disp_Color24    = 0x1,
+	gp1_disp_VInterlace = 0x1,
 
-    /* ---- Layer 1: GP1 display-mode + range + draw-area shifts/masks ---- */
-    gp1_disp_hres_shift      =  0, gp1_disp_hres_width      = 2, gp1_disp_hres_mask      = 0x3,
-    gp1_disp_vres_shift      =  2, gp1_disp_vres_width      = 1, gp1_disp_vres_mask      = 0x1,
-    gp1_disp_color_shift     =  4, gp1_disp_color_width     = 1, gp1_disp_color_mask     = 0x1,
-    gp1_disp_interlace_shift =  5, gp1_disp_interlace_width = 1, gp1_disp_interlace_mask = 0x1,
+	/* ---- Layer 1: GP1 display-mode + range + draw-area shifts/masks ---- */
+	gp1_disp_hres_shift      =  0, gp1_disp_hres_width      = 2, gp1_disp_hres_mask      = 0x3,
+	gp1_disp_vres_shift      =  2, gp1_disp_vres_width      = 1, gp1_disp_vres_mask      = 0x1,
+	gp1_disp_color_shift     =  4, gp1_disp_color_width     = 1, gp1_disp_color_mask     = 0x1,
+	gp1_disp_interlace_shift =  5, gp1_disp_interlace_width = 1, gp1_disp_interlace_mask = 0x1,
 
-    /* GP1 horizontal display range: bits 0..11 = X2, bits 12..23 = X1 */
-    gp1_hrange_x1_shift = 12, gp1_hrange_x1_width = 12, gp1_hrange_x1_mask = 0xFFF,
-    gp1_hrange_x2_shift =  0, gp1_hrange_x2_width = 12, gp1_hrange_x2_mask = 0xFFF,
+	/* GP1 horizontal display range: bits 0..11 = X2, bits 12..23 = X1 */
+	gp1_hrange_x1_shift = 12, gp1_hrange_x1_width = 12, gp1_hrange_x1_mask = 0xFFF,
+	gp1_hrange_x2_shift =  0, gp1_hrange_x2_width = 12, gp1_hrange_x2_mask = 0xFFF,
 
-    /* GP1 vertical display range: bits 0..9 = Y2, bits 10..19 = Y1 */
-    gp1_vrange_y1_shift = 10, gp1_vrange_y1_width = 10, gp1_vrange_y1_mask = 0x3FF,
-    gp1_vrange_y2_shift =  0, gp1_vrange_y2_width = 10, gp1_vrange_y2_mask = 0x3FF,
+	/* GP1 vertical display range: bits 0..9 = Y2, bits 10..19 = Y1 */
+	gp1_vrange_y1_shift = 10, gp1_vrange_y1_width = 10, gp1_vrange_y1_mask = 0x3FF,
+	gp1_vrange_y2_shift =  0, gp1_vrange_y2_width = 10, gp1_vrange_y2_mask = 0x3FF,
 
-    /* GP1 draw area (top-left or bottom-right): bits 0..9 = X, bits 10..19 = Y
-     * (10-bit signed — caller pre-signs and masks with the named mask) */
-    gp1_draw_x_shift =  0, gp1_draw_x_width = 10, gp1_draw_x_mask = 0x3FF,
-    gp1_draw_y_shift = 10, gp1_draw_y_width = 10, gp1_draw_y_mask = 0x3FF,
+	/* GP1 draw area (top-left or bottom-right): bits 0..9 = X, bits 10..19 = Y
+		* (10-bit signed — caller pre-signs and masks with the named mask) */
+	gp1_draw_x_shift =  0, gp1_draw_x_width = 10, gp1_draw_x_mask = 0x3FF,
+	gp1_draw_y_shift = 10, gp1_draw_y_width = 10, gp1_draw_y_mask = 0x3FF,
 };
 
 /* ---- Layer 1.5: GP1 per-field encoders ---- */
-#define enc_gp1_disp_hres(h)      (((h) & gp1_disp_hres_mask)     << gp1_disp_hres_shift)
-#define enc_gp1_disp_vres(v)      (((v) & gp1_disp_vres_mask)     << gp1_disp_vres_shift)
-#define enc_gp1_disp_color(c)     (((c) & gp1_disp_color_mask)    << gp1_disp_color_shift)
-#define enc_gp1_disp_interlace(i) (((i) & gp1_disp_interlace_mask << gp1_disp_interlace_shift)
+#define enc_gp1_disp_hres(h)      (((h) & gp1_disp_hres_mask)      << gp1_disp_hres_shift)
+#define enc_gp1_disp_vres(v)      (((v) & gp1_disp_vres_mask)      << gp1_disp_vres_shift)
+#define enc_gp1_disp_color(c)     (((c) & gp1_disp_color_mask)     << gp1_disp_color_shift)
+#define enc_gp1_disp_interlace(i) (((i) & gp1_disp_interlace_mask) << gp1_disp_interlace_shift)
 
 #define enc_gp1_hrange_x1(x1) (((x1) & gp1_hrange_x1_mask) << gp1_hrange_x1_shift)
 #define enc_gp1_hrange_x2(x2) (((x2) & gp1_hrange_x2_mask) << gp1_hrange_x2_shift)
@@ -255,6 +255,11 @@ enum {
 #define enc_gp0_draw_area_br_word(x, y)    (enc_gp0_cmd(gp0_cmd_SetDrawArea_BotRight) | enc_gp1_draw_x(x) | enc_gp1_draw_y(y))
 
 /* ---- Layer 3: GP1 semantic word builders ---- */
+#define gp1_word_Reset()             enc_gp0_cmd_word(gp1_cmd_Reset)
+#define gp1_word_ResetCmdBuffer()    enc_gp0_cmd_word(gp1_cmd_ResetCmdBuffer)
+#define gp1_word_AcknowledgeIRQ()    enc_gp0_cmd_word(gp1_cmd_AcknowledgeIRQ)
+#define gp1_word_StartDisplayArea()  enc_gp0_cmd_word(gp1_cmd_StartDisplayArea)
+
 #define gp1_word_display_enable(on)                         (enc_gp0_cmd(gp1_cmd_DisplayEnable) | ((on) & 1))
 #define gp1_word_display_disable()                          gp1_word_display_enable(0)
 #define gp1_word_display_mode_320x240_15bit_ntsc            enc_gp1_disp_mode_word(gp1_disp_HRes_320, gp1_disp_VRes_240, gp1_disp_Color15, 0)
@@ -279,31 +284,36 @@ enum {
 #define gp1_word_display_enabled   enc_gp0_cmd_word(gp1_cmd_DisplayEnable)
 #define gp1_word_display_disabled (enc_gp0_cmd_word(gp1_cmd_DisplayEnable) | 1)
 
+#define gp1_word_DisplayOn()       gp1_word_display_enable(0)
+#define gp1_word_DisplayOff()      gp1_word_display_enable(1)
+
 /* ---- DMA direction (2-bit payload on DMADirection cmd 0x04) ---- */
 enum {
-    gp1_dma_dir_Off            = 0,
-    gp1_dma_dir_FIFO           = 1,
-    gp1_dma_dir_CPU_to_GPU     = 2,
-    gp1_dma_dir_GPUREAD_to_CPU = 3,
+	gp1_dma_dir_Off            = 0,
+	gp1_dma_dir_FIFO           = 1,
+	gp1_dma_dir_CPU_to_GPU     = 2,
+	gp1_dma_dir_GPUREAD_to_CPU = 3,
 };
 #define gp1_word_dma_direction(dir) (enc_gp0_cmd(gp1_cmd_DMADirection) | ((dir) & 0x3))
+#define gp1_word_dma_to_gpu()       gp1_word_dma_direction(gp1_dma_dir_CPU_to_GPU)
+#define gp1_word_dma_read_cpu()     gp1_word_dma_direction(gp1_dma_dir_GPUREAD_to_CPU)
 
 /* ---- Standard display ranges (NTSC + PAL pre-baked) ---- */
 /* Horizontal range values are in video clock units (8 units/pixel); vertical range values are scanline numbers. */
 enum {
-    /* NTSC horizontal range: X1=608, X2=3168 */
-    gp1_hrange_NTSC_x1 = 0x260,
-    gp1_hrange_NTSC_x2 = 0xC60,
-    /* PAL horizontal range (same as NTSC for most CRTs) */
-    gp1_hrange_PAL_x1  = 0x260,
-    gp1_hrange_PAL_x2  = 0xC60,
+	/* NTSC horizontal range: X1=608, X2=3168 */
+	gp1_hrange_NTSC_x1 = 0x260,
+	gp1_hrange_NTSC_x2 = 0xC60,
+	/* PAL horizontal range (same as NTSC for most CRTs) */
+	gp1_hrange_PAL_x1  = 0x260,
+	gp1_hrange_PAL_x2  = 0xC60,
 
-    /* NTSC vertical range: Y1=24, Y2=264 */
-    gp1_vrange_NTSC_y1 = 24,
-    gp1_vrange_NTSC_y2 = 264,
-    /* PAL vertical range: Y1=24, Y2=504 */
-    gp1_vrange_PAL_y1  = 24,
-    gp1_vrange_PAL_y2  = 504,
+	/* NTSC vertical range: Y1=24, Y2=264 */
+	gp1_vrange_NTSC_y1 = 24,
+	gp1_vrange_NTSC_y2 = 264,
+	/* PAL vertical range: Y1=24, Y2=504 */
+	gp1_vrange_PAL_y1  = 24,
+	gp1_vrange_PAL_y2  = 504,
 };
 
 #define gp1_word_horizontal_range_ntsc enc_gp1_hrange_word(gp1_hrange_NTSC_x1, gp1_hrange_NTSC_x2)
@@ -314,14 +324,49 @@ enum {
 /* ---- Draw-mode setting (TPage / draw-area allowance) ---- */
 /* The "drawing enabled" word is the standard post-init state. */
 enum {
-    gp0_DrawMode_DrawToDispBit = 10,
+	/* Per psx-spx, the standard 0xE1 layout has dfe at bit 10. But libpsyx's PutDrawEnv
+	 * uses bit 19 (in the "unused" 14-23 range) for dfe in the DR_ENV code[0] — and the
+	 * PSX hardware honors bit 19 in the DR_ENV context (not bit 10). So we need a
+	 * separate bit definition for the DR_ENV-specific DrawMode. */
+	gp0_DrawMode_DrawToDispBit         = 10,   // standard psx-spx bit 10 (dfe)
+	gp0_DrawMode_DR_ENV_DrawToDispBit  = 19,   // libpsyx DR_ENV code[0] (dfe in DR_ENV context)
+	gp0_DrawMode_DR_ENV_isbgBit        = 19,   // libpsyx uses bit 19 for isbg too
 };
 #define gp0_word_draw_mode_drawing_allowed (enc_gp0_cmd(gp0_cmd_DrawModeSetting) | (1 << gp0_DrawMode_DrawToDispBit))
 
-/* ---- DrawArea pre-baked at origin (0,0) and full screen (320x240) ---- */
+/* DR_ENV-specific DrawMode variants (libpsyx SetDrawEnv layout).
+ * The DR_ENV is a 16-word packet emitted at boot by gp_screen_init's ac_put_draw_env_demo
+ * atom component. Within the DR_ENV, the 0xE1 command is reused in three different bit
+ * configurations:
+ *   code[0] = `gp0_word_draw_mode_drawing_allowed` (dfe=1; standard post-init state)
+ *   code[6] = `gp0_word_dr_env_bg_color_cmd(isbg, r, g, b)` (initial-bg-color path)
+ *   code[7] = `gp0_word_dr_env_draw_mode(isbg)` (isbg-flag path)
+ * Bits 0-23 of the 0xE1 word are the payload; bits 24-31 are the cmd byte (0xE1). */
+#define gp0_word_dr_env_bg_color_cmd(isbg, r, g, b) (enc_gp0_cmd(gp0_cmd_DrawModeSetting) | (1 << gp0_DrawMode_DrawToDispBit) | ((isbg) ? gp0_dr_env_isbg_bit : 0) | enc_gp0_color_r(r) | enc_gp0_color_g(g) | enc_gp0_color_b(b))
+#define gp0_word_dr_env_draw_mode(isbg)             (enc_gp0_cmd(gp0_cmd_DrawModeSetting) | (1 << gp0_DrawMode_DrawToDispBit) | ((isbg) ? gp0_dr_env_isbg_bit : 0))
+
+/* State-setter bare-cmd words (no immediate payload; the GPU uses the current state machine already programmed). */
+#define gp0_word_set_texture_window() enc_gp0_cmd_word(gp0_cmd_SetTextureWindow)
+#define gp0_word_set_draw_offset()    enc_gp0_cmd_word(gp0_cmd_SetDrawOffset)
+#define gp0_word_set_mask_bit()       enc_gp0_cmd_word(gp0_cmd_SetMaskBit)
+
+/* DR_ENV code[5] Mask (0xE6 cmd + isbg bit). The isbg bit is set so the GPU knows the auto-clear path is active (paired with code[6] + code[7]). */
+#define gp0_word_dr_env_mask() (gp0_word_set_mask_bit() | gp0_dr_env_isbg_bit)
+
+/* DR_ENV pre-baked constants (libpsyx PutDrawEnv layout).
+ * DR_ENV is a 16-word packet: tag = (length << 24) | addr, where length = 15 (15 code words follow) and addr = 0 (chain to nothing). */
+enum {
+	PolyTag_len_bits  =  8,
+	PolyTag_addr_bits = 24,
+
+	gp0_dr_env_tag      = (15 << 24) | 0x00FFFFFF,
+	gp0_dr_env_isbg_bit = (1 << gp0_DrawMode_DR_ENV_isbgBit),
+};
+
+/* ---- DrawArea at origin (0,0) and full screen (320x240) ---- */
 #define gp0_word_draw_area_top_left_origin      enc_gp0_draw_area_tl_word(0, 0)
-#define gp0_word_draw_area_bottom_right_320x240 enc_gp0_draw_area_br_word(320, 240)
-#define gp0_word_draw_area_bottom_right_640x480 enc_gp0_draw_area_br_word(640, 480)
+#define gp0_word_draw_area_bottom_right_320x240 enc_gp0_draw_area_br_word(319, 239)
+#define gp0_word_draw_area_bottom_right_640x480 enc_gp0_draw_area_br_word(639, 479)
 
 #pragma endregion GPU Ports & Commands
 
@@ -332,9 +377,9 @@ enum {
  *  Read from HW_GP1; the lower bits are DMA-block-size (variable-width).
  * ============================================================================ */
 enum {
-    gp1_Status_BitReady          = 31,
-    gp1_Status_BitSendingDMA     = 25,
-    gp1_Status_DMABlockSizeShift =  0,
+	gp1_Status_BitReady          = 31,
+	gp1_Status_BitSendingDMA     = 25,
+	gp1_Status_DMABlockSizeShift =  0,
 };
 
 #define gp1_status_is_ready()       ((HW_GP1[0] >> gp1_Status_BitReady)      & 1)
@@ -360,10 +405,10 @@ typedef Struct_(RGB8) { B1 r; B1 g; B1 b; };
 #define rgb8(r,g,b) ((RGB8){r,g,b})
 
 /* ---------- PolyTag (the OT-link header; 1 word) ---------- */
-enum {
-    PolyTag_len_bits  =  8,
-    PolyTag_addr_bits = 24,
-};
+// enum {
+	// PolyTag_len_bits  =  8,
+	// PolyTag_addr_bits = 24,
+// };
 typedef Struct_(PolyTag) {
 	union {
 		U4 code;
@@ -387,95 +432,95 @@ typedef Struct_(PolyTag) {
 
 /* ---------- Poly_F3 (Flat Triangle; 5 words) ---------- */
 typedef Struct_(Poly_F3) {
-    U4   tag;
-    RGB8 color;
-    B1   code;
-    union {
-        struct { V2_S2 p0; V2_S2 p1; V2_S2 p2; };
-        A3_V2_S2 points;
-    };
+	U4   tag;
+	RGB8 color;
+	B1   code;
+	union {
+		struct { V2_S2 p0; V2_S2 p1; V2_S2 p2; };
+		A3_V2_S2 points;
+	};
 };
 
 /* ---------- Poly_F4 (Flat Quad; 6 words) ---------- */
 typedef Struct_(Poly_F4) {
-    U4   tag;
-    RGB8 color;
-    B1   code;
-    union {
-        struct { V2_S2 p0; V2_S2 p1; V2_S2 p2; V2_S2 p3; };
-        A4_V2_S2 points;
-    };
+	U4   tag;
+	RGB8 color;
+	B1   code;
+	union {
+		struct { V2_S2 p0; V2_S2 p1; V2_S2 p2; V2_S2 p3; };
+		A4_V2_S2 points;
+	};
 };
 
 /* ---------- Poly_G3 (Gouraud Triangle; 7 words) ---------- */
 typedef Struct_(Poly_G3) {
-    U4    tag; RGB8 c0; B1 code;
-    V2_S2 p0;  RGB8 c1; B1 pad1;
-    V2_S2 p1;  RGB8 c2; B1 pad2;
-    V2_S2 p2;
+	U4    tag; RGB8 c0; B1 code;
+	V2_S2 p0;  RGB8 c1; B1 pad1;
+	V2_S2 p1;  RGB8 c2; B1 pad2;
+	V2_S2 p2;
 };
 
 /* ---------- Poly_G4 (Gouraud Quad; 9 words) ---------- */
 typedef Struct_(Poly_G4) {
-    U4    tag; RGB8 c0; B1 code;
-    V2_S2 p0;  RGB8 c1; B1 pad1;
-    V2_S2 p1;  RGB8 c2; B1 pad2;
-    V2_S2 p2;  RGB8 c3; B1 pad3;
-    V2_S2 p3;
+	U4    tag; RGB8 c0; B1 code;
+	V2_S2 p0;  RGB8 c1; B1 pad1;
+	V2_S2 p1;  RGB8 c2; B1 pad2;
+	V2_S2 p2;  RGB8 c3; B1 pad3;
+	V2_S2 p3;
 };
 
 /* ---------- Poly_FT3 (Flat Textured Triangle; placeholder layout) ---------- */
 /* TODO(Ed): verify the textured-variant layout against PSX-SPX when needed. */
 typedef Struct_(Poly_FT3) {
-    U4   tag;
-    RGB8 color;
-    B1   code;
-    U4   tpage;
-    U4   clut;
-    V2_S2 p0; U1 u0; U1 v0;
-    V2_S2 p1; U1 u1; U1 v1;
-    V2_S2 p2; U1 u2; U1 v2;
+	U4   tag;
+	RGB8 color;
+	B1   code;
+	U4   tpage;
+	U4   clut;
+	V2_S2 p0; U1 u0; U1 v0;
+	V2_S2 p1; U1 u1; U1 v1;
+	V2_S2 p2; U1 u2; U1 v2;
 };
 
 /* ---------- Poly_FT4 (Flat Textured Quad) ---------- */
 typedef Struct_(Poly_FT4) {
-    U4   tag;
-    RGB8 color;
-    B1   code;
-    U4   tpage;
-    U4   clut;
-    V2_S2 p0; U1 u0; U1 v0;
-    V2_S2 p1; U1 u1; U1 v1;
-    V2_S2 p2; U1 u2; U1 v2;
-    V2_S2 p3; U1 u3; U1 v3;
+	U4   tag;
+	RGB8 color;
+	B1   code;
+	U4   tpage;
+	U4   clut;
+	V2_S2 p0; U1 u0; U1 v0;
+	V2_S2 p1; U1 u1; U1 v1;
+	V2_S2 p2; U1 u2; U1 v2;
+	V2_S2 p3; U1 u3; U1 v3;
 };
 
 /* ---------- Poly_GT3 (Gouraud Textured Triangle) ---------- */
 typedef Struct_(Poly_GT3) {
-    U4    tag; RGB8 c0; B1 code;
-    V2_S2 p0;  RGB8 c1; B1 pad1;
-    V2_S2 p1;  RGB8 c2; B1 pad2;
-    V2_S2 p2;
-    U4    tpage;
-    U4    clut;
-    V2_S2 tp0; U1 u0; U1 v0;
-    V2_S2 tp1; U1 u1; U1 v1;
-    V2_S2 tp2; U1 u2; U1 v2;
+	U4    tag; RGB8 c0; B1 code;
+	V2_S2 p0;  RGB8 c1; B1 pad1;
+	V2_S2 p1;  RGB8 c2; B1 pad2;
+	V2_S2 p2;
+	U4    tpage;
+	U4    clut;
+	V2_S2 tp0; U1 u0; U1 v0;
+	V2_S2 tp1; U1 u1; U1 v1;
+	V2_S2 tp2; U1 u2; U1 v2;
 };
 
 /* ---------- Poly_GT4 (Gouraud Textured Quad) ---------- */
 typedef Struct_(Poly_GT4) {
-    U4    tag; RGB8 c0; B1 code;
-    V2_S2 p0;  RGB8 c1; B1 pad1;
-    V2_S2 p1;  RGB8 c2; B1 pad2;
-    V2_S2 p2;  RGB8 c3; B1 pad3;
-    V2_S2 p3;
-    U4    tpage;
-    U4    clut;
-    V2_S2 tp0; U1 u0; U1 v0;
-    V2_S2 tp1; U1 u1; U1 v1;
-    V2_S2 tp2; U1 u2; U1 v2;
-    V2_S2 tp3; U1 u3; U1 v3;
+	U4    tag; RGB8 c0; B1 code;
+	V2_S2 p0;  RGB8 c1; B1 pad1;
+	V2_S2 p1;  RGB8 c2; B1 pad2;
+	V2_S2 p2;  RGB8 c3; B1 pad3;
+	V2_S2 p3;
+	U4    tpage;
+	U4    clut;
+	V2_S2 tp0; U1 u0; U1 v0;
+	V2_S2 tp1; U1 u1; U1 v1;
+	V2_S2 tp2; U1 u2; U1 v2;
+	V2_S2 tp3; U1 u3; U1 v3;
 };
 
 /* ---------- Primitive setters (C-level) ----------
@@ -510,26 +555,26 @@ typedef Struct_(Poly_GT4) {
  *    bits 12..31  = reserved (zero)
  * ============================================================================ */
 enum {
-    /* ---- Layer 1: TPage bitfield shifts / widths / masks ---- */
-    gp0_tpage_x_shift            =  0, gp0_tpage_x_width            =  4, gp0_tpage_x_mask            = 0xF,
-    gp0_tpage_y_shift            =  4, gp0_tpage_y_width            =  1, gp0_tpage_y_mask            = 0x1,
-    gp0_tpage_semi_trans_shift   =  5, gp0_tpage_semi_trans_width   =  2, gp0_tpage_semi_trans_mask   = 0x3,
-    gp0_tpage_color_depth_shift  =  7, gp0_tpage_color_depth_width  =  2, gp0_tpage_color_depth_mask  = 0x3,
-    gp0_tpage_dither_shift       =  9, gp0_tpage_dither_width       =  1, gp0_tpage_dither_mask       = 0x1,
-    gp0_tpage_draw_to_disp_shift = 10, gp0_tpage_draw_to_disp_width =  1, gp0_tpage_draw_to_disp_mask = 0x1,
-    gp0_tpage_tex_disable_shift  = 11, gp0_tpage_tex_disable_width  =  1, gp0_tpage_tex_disable_mask  = 0x1,
+	/* ---- Layer 1: TPage bitfield shifts / widths / masks ---- */
+	gp0_tpage_x_shift            =  0, gp0_tpage_x_width            =  4, gp0_tpage_x_mask            = 0xF,
+	gp0_tpage_y_shift            =  4, gp0_tpage_y_width            =  1, gp0_tpage_y_mask            = 0x1,
+	gp0_tpage_semi_trans_shift   =  5, gp0_tpage_semi_trans_width   =  2, gp0_tpage_semi_trans_mask   = 0x3,
+	gp0_tpage_color_depth_shift  =  7, gp0_tpage_color_depth_width  =  2, gp0_tpage_color_depth_mask  = 0x3,
+	gp0_tpage_dither_shift       =  9, gp0_tpage_dither_width       =  1, gp0_tpage_dither_mask       = 0x1,
+	gp0_tpage_draw_to_disp_shift = 10, gp0_tpage_draw_to_disp_width =  1, gp0_tpage_draw_to_disp_mask = 0x1,
+	gp0_tpage_tex_disable_shift  = 11, gp0_tpage_tex_disable_width  =  1, gp0_tpage_tex_disable_mask  = 0x1,
 
-    /* TPage color-depth payload values (NOT bit positions — these go in
-     * the 2-bit field at gp0_tpage_color_depth_shift). */
-    gp0_tpage_color_4bpp  = 0x0,
-    gp0_tpage_color_8bpp  = 0x1,
-    gp0_tpage_color_16bpp = 0x2,
+	/* TPage color-depth payload values (NOT bit positions — these go in
+	 * the 2-bit field at gp0_tpage_color_depth_shift). */
+	gp0_tpage_color_4bpp  = 0x0,
+	gp0_tpage_color_8bpp  = 0x1,
+	gp0_tpage_color_16bpp = 0x2,
 
-    /* TPage semi-transparency mode payload values (NOT bit positions). */
-    gp0_tpage_semi_trans_none  = 0x0,
-    gp0_tpage_semi_trans_alpha = 0x1,
-    gp0_tpage_semi_trans_add   = 0x2,
-    gp0_tpage_semi_trans_sub   = 0x3,
+	/* TPage semi-transparency mode payload values (NOT bit positions). */
+	gp0_tpage_semi_trans_none  = 0x0,
+	gp0_tpage_semi_trans_alpha = 0x1,
+	gp0_tpage_semi_trans_add   = 0x2,
+	gp0_tpage_semi_trans_sub   = 0x3,
 };
 
 /* ---- Layer 1.5: TPage per-field encoders. Mirrors enc_gte_sf/mx/v in gte.h. ---- */
@@ -543,19 +588,19 @@ enum {
 
 /* ---- Layer 2: TPage composite encoder. Mirrors enc_gte_cmdw in gte.h ---- */
 #define enc_gp0_tpage_word(x, y, semi_trans, color_depth, dither, draw_to_disp, tex_disable) \
-    (enc_gp0_tpage_x(x)                       \
-   | enc_gp0_tpage_y(y)                       \
-   | enc_gp0_tpage_semi_trans(semi_trans)     \
-   | enc_gp0_tpage_color_depth(color_depth)   \
-   | enc_gp0_tpage_dither(dither)             \
-   | enc_gp0_tpage_draw_to_disp(draw_to_disp) \
-   | enc_gp0_tpage_tex_disable(tex_disable))
+	 (enc_gp0_tpage_x(x)                       \
+	| enc_gp0_tpage_y(y)                       \
+	| enc_gp0_tpage_semi_trans(semi_trans)     \
+	| enc_gp0_tpage_color_depth(color_depth)   \
+	| enc_gp0_tpage_dither(dither)             \
+	| enc_gp0_tpage_draw_to_disp(draw_to_disp) \
+	| enc_gp0_tpage_tex_disable(tex_disable))
 
 typedef Struct_(TexturePage) { U4 raw; };
 
 /* ---- Layer 3: TPage semantic word builder ---- */
 #define gp0_word_tpage(x, y, semi_trans, color_depth, dither, draw_to_disp, tex_disable) \
-    enc_gp0_tpage_word((x), (y), (semi_trans), (color_depth), (dither), (draw_to_disp), (tex_disable))
+	enc_gp0_tpage_word((x), (y), (semi_trans), (color_depth), (dither), (draw_to_disp), (tex_disable))
 #pragma endregion TPage
 
 #pragma region CLUT
@@ -569,12 +614,12 @@ typedef Struct_(TexturePage) { U4 raw; };
  *    bits 24..31  = command byte — 0x20 (4bpp load) or 0x25 (8bpp load)
  * ============================================================================ */
 enum {
-    /* ---- Layer 1: CLUT bitfield shifts / widths / masks ---- */
-    gp0_clut_y_shift = 0, gp0_clut_y_width = 6, gp0_clut_y_mask = 0x3F,
-    gp0_clut_x_shift = 6, gp0_clut_x_width = 9, gp0_clut_x_mask = 0x1FF,
-    /* CLUT-load cmd-byte variants — the upper byte of the GP0 word. */
-    gp0_clut_cmd_Load4bpp = 0x20,
-    gp0_clut_cmd_Load8bpp = 0x25,
+	/* ---- Layer 1: CLUT bitfield shifts / widths / masks ---- */
+	gp0_clut_y_shift = 0, gp0_clut_y_width = 6, gp0_clut_y_mask = 0x3F,
+	gp0_clut_x_shift = 6, gp0_clut_x_width = 9, gp0_clut_x_mask = 0x1FF,
+	/* CLUT-load cmd-byte variants — the upper byte of the GP0 word. */
+	gp0_clut_cmd_Load4bpp = 0x20,
+	gp0_clut_cmd_Load8bpp = 0x25,
 };
 
 /* ---- Layer 1.5: CLUT per-field encoders ---- */
@@ -615,26 +660,26 @@ enum {
  *  Stoppped for now at the struct + enum level.
  * ============================================================================ */
 enum {
-    tim_file_id_magic = 0x10,
-    tim_type_4bpp     = 0x00,
-    tim_type_8bpp     = 0x01,
-    tim_type_16bpp    = 0x02,
-    tim_type_32bpp    = 0x03,
-    tim_type_mixed    = 0x04,
-    tim_flag_has_clut = 0x08,
+	tim_file_id_magic = 0x10,
+	tim_type_4bpp     = 0x00,
+	tim_type_8bpp     = 0x01,
+	tim_type_16bpp    = 0x02,
+	tim_type_32bpp    = 0x03,
+	tim_type_mixed    = 0x04,
+	tim_flag_has_clut = 0x08,
 };
 
 typedef Struct_(TIM_Header) {
-    U4 file_id;       /* always 0x10 = "TIM" magic */
-    U4 version;       /* ignored; always 0 */
-    U4 flags;         /* bits 0..2 = type, bit 3 = has_clut */
+	U4 file_id;       /* always 0x10 = "TIM" magic */
+	U4 version;       /* ignored; always 0 */
+	U4 flags;         /* bits 0..2 = type, bit 3 = has_clut */
 };
 typedef Struct_(TIM_SectionHeader) {
-    U4 section_length;  /* bytes in this section including this header */
-    U2 org_x;           /* origin in VRAM */
-    U2 org_y;
-    U2 width;           /* width in pixels */
-    U2 height;          /* height in pixels */
+	U4 section_length;  /* bytes in this section including this header */
+	U2 org_x;           /* origin in VRAM */
+	U2 org_y;
+	U2 width;           /* width in pixels */
+	U2 height;          /* height in pixels */
 };
 #pragma endregion TIM File Format
 

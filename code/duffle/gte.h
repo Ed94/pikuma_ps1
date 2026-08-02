@@ -17,9 +17,8 @@
  *            gte_lw_v0_xy(base) (gte + lw + v0 + xy)
  *            load_upper_i       (load-upper + immediate, unique verb)
  *
- *  Vendor mnemonics (gte_mtc2, gte_mfc2, gte_lwc2, gte_swc2, etc.) are
- *  NOT in this header. They live in the opt-in `gte_vendor_sym.h` for
- *  users who prefer the textbook MIPS assembly mnemonics.
+ *  Vendor mnemonics (gte_mtc2, gte_mfc2, gte_lwc2, gte_swc2, etc.) are NOT in this header.
+ *  They are in the opt-in `gte_vendor_sym.h` for users who prefer the textbook MIPS assembly mnemonics.
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -34,20 +33,16 @@
  *  gte.h — Geometry Transformation Engine (COP2) for the PS1
  * ============================================================================
  *
- *  Hand-rolled DSL for emitting GTE/MIPS instruction words as raw `.word`
- *  constants from C. No GCC inline-assembly string syntax in the code body.
+ *  Hand-rolled DSL for emitting GTE/MIPS instruction words as raw `.word` constants from C.
+ *  No GCC inline-assembly string syntax in the code body.
  *
  *  STYLE NOTES
  *  -----------
- *  - Per-field encoders are named `enc_gte_<field>(value)` and each one
- *    self-masks its argument before shifting. Mirrors the `enc_op / enc_rs
- *    / enc_rt / ...` family in mips.h.
- *  - The composite `enc_gte_cmdw(sf, mx, v, cv, lm, cmd)` is a flat OR of
- *    the per-field encoders, plus the COP2/CO base.
- *  - Pre-baked shortcuts (`gte_cmd_rtpt`, `gte_cmd_rtps`, …) are defined
- *    for the common cases so call sites read like assembly source.
- *  - All register/field values are enums (not `#define`s) so they show up
- *    in debugger symbol tables and IDE autocomplete.
+ *  - Per-field encoders are named `enc_gte_<field>(value)` and each one self-masks its argument before shifting.
+ *    Mirrors the `enc_op / enc_rs / enc_rt / ...` family in mips.h.
+ *  - The composite `enc_gte_cmdw(sf, mx, v, cv, lm, cmd)` is a flat OR of the per-field encoders, plus the COP2/CO base.
+ *  - Pre-baked shortcuts (`gte_cmd_rtpt`, `gte_cmd_rtps`, …) are defined for the common cases so call sites read like assembly source.
+ *  - All register/field values are enums (not `#define`s) so they show up in debugger symbol tables and IDE autocomplete.
  *
  *  SEE ALSO
  *  --------
@@ -58,8 +53,7 @@
 
 /* --- GTE Data Registers (Coprocessor 2) ---
  * Preprocessor-visible integer ids for the COP2 data register file.
- * Each enum value is bound to a parallel `_Code` `#define` so the
- * preprocessor can stringify the integer (for `reg_str`/`rgcc` paths).
+ * Each enum value is bound to a parallel `_Code` `#define` so the preprocessor can stringify the integer (for `reg_str`/`rgcc` paths).
  * Same pattern as the GPR `_Code` set in mips.h. */
 #define C2_VXY0_Code  0
 #define C2_VZ0_Code   1
@@ -192,10 +186,8 @@ enum {
 
 /* --- GTE Control Register Indices (for ctc2/cfc2) ---
  * Preprocessor-visible integer ids for the COP2 control register file.
- * Each enum value is bound to a parallel `_Code` `#define` so the
- * preprocessor can stringify the integer (for `reg_str`/`rgcc` paths).
- * Same pattern as the GPR `_Code` set in mips.h. Note: indices 21-23
- * are reserved/unused on real hardware, so there's a gap. */
+ * Each enum value is bound to a parallel `_Code` `#define` so the preprocessor can stringify the integer (for `reg_str`/`rgcc` paths).
+ * Same pattern as the GPR `_Code` set in mips.h. Note: indices 21-23 are reserved/unused on real hardware, so there's a gap. */
 #define gte_cr_RT11_Code  0
 #define gte_cr_RT12_Code  1  /* packed with RT13 in bits 16..31 */
 #define gte_cr_RT13_Code  2  /* packed with RT22 in bits 16..31 */
@@ -223,8 +215,9 @@ enum {
 #define gte_cr_RFC_Code  27
 #define gte_cr_GFC_Code  28
 #define gte_cr_BFC_Code  29
-#define gte_cr_OFX_Code  30
-#define gte_cr_OFY_Code  31
+#define gte_cr_OFX_Code  24
+#define gte_cr_OFY_Code  25
+#define gte_cr_H_Code    26
 
 enum {
 	gte_cr_RT11 = gte_cr_RT11_Code, gte_cr_RT12 = gte_cr_RT12_Code, gte_cr_RT13 = gte_cr_RT13_Code,
@@ -246,21 +239,16 @@ enum { _C2_OPS_ = 0
 
 /* COP2 transfer sub-opcodes (5-bit field in the `rs` slot of enc_gte_tx).
  *
- * Spans the 2x2 {From, To} × {Data, Control} register classes that the
- * GTE exposes:
- *
+ * Spans the 2x2 {From, To} × {Data, Control} register classes that the GTE exposes:
  *   bit 1 (0x02): register class — 0 = data,  1 = control
  *   bit 2 (0x04): direction      — 0 = read,  1 = write
  *
- * The values 0x00 (sub_mfc2) and 0x04 (sub_mtc2) are the same 5-bit
- * numbers as the general MIPS `cop_mf` / `cop_mt` defined in mips.h
- * (which target the data register file on any coprocessor). They are
- * re-aliased here so the four-way table reads like the spec mnemonics
- * (MFC2 / CFC2 / MTC2 / CTC2) and so the encoding lives next to its
- * only consumer (this header).
+ * The values 0x00 (sub_mfc2) and 0x04 (sub_mtc2) are the same 5-bit numbers as the general MIPS `cop_mf` / `cop_mt` defined in mips.h
+ * (which target the data register file on any coprocessor).
+ * They are re-aliased here so the four-way table reads like the spec mnemonics (MFC2 / CFC2 / MTC2 / CTC2)
+ * and so the encoding lives next to its only consumer (this header).
  *
- * Vendor mnemonic aliases (gte_mfc2 / gte_mtc2 / gte_cfc2 / gte_ctc2)
- * live in gte_vendor_sym.h. */
+ * Vendor mnemonic aliases (gte_mfc2 / gte_mtc2 / gte_cfc2 / gte_ctc2) live in gte_vendor_sym.h. */
 enum { _C2_TX_SUBS_ = 0
 	, sub_mfc2 = 0x00 /* MFC2: Move From Coprocessor 2 data   reg */
 	, sub_cfc2 = 0x02 /* CFC2: Copy From Coprocessor 2 ctrl   reg */
@@ -270,11 +258,11 @@ enum { _C2_TX_SUBS_ = 0
 
 /* COP2 (GTE) Transfer Format: mfc2 / cfc2 / mtc2 / ctc2 rt, rd
  * Layout: [op_cop2:6][sub:5][rt:5][rd:5][0:11]
- *   - sub: one of sub_mfc2 / sub_cfc2 / sub_mtc2 / sub_ctc2
- *   - rt:  GPR source/dest
- *   - rd:  COP2 register index (0..31):
- *            data class → C2_VXY0_Code..C2_LZCR_Code (gte_in_v0_xy..gte_math_accum2 aliases)
- *            ctrl class → gte_cr_RT11_Code..gte_cr_OFY_Code */
+ *  - sub: one of sub_mfc2 / sub_cfc2 / sub_mtc2 / sub_ctc2
+ *  - rt:  GPR source/dest
+ *  - rd:  COP2 register index (0..31):
+ *    data class → C2_VXY0_Code..C2_LZCR_Code (gte_in_v0_xy..gte_math_accum2 aliases)
+ *    ctrl class → gte_cr_RT11_Code..gte_cr_OFY_Code */
 #define enc_gte_tx(sub, rt, rd) (enc_op(op_cop2) | enc_rs(sub) | enc_rt(rt) | enc_rd(rd))
 
 
@@ -314,8 +302,8 @@ enum { _C2_TX_SUBS_ = 0
  * `swc2` is redundant when we're already inside the `gte_` namespace.
  *   gte_lw rt, base, off  →  lwc2 rt, off(base)
  *   gte_sw rt, base, off  →  swc2 rt, off(base)
- * For the typical user-facing vector-level load (xy + z as two
- * instructions), use the higher-level `gte_load_vN` macros below. */
+ * For the typical user-facing vector-level load (xy + z as two instructions),
+ * use the higher-level `gte_load_vN` macros below. */
 #define gte_lw(rt, base, off) enc_gte_lw(rt, base, off)
 #define gte_sw(rt, base, off) enc_gte_sw(rt, base, off)
 
@@ -323,13 +311,12 @@ enum { _C2_TX_SUBS_ = 0
  * Opcode is always MIPS_OP_COP2, RS is always 1 (CO).
  * The lower 25 bits are the GTE-specific command payload.
  *
- * The granular `enc_gte_<field>(x)` macros below mirror the `enc_op`/`enc_rs`
- * pattern in mips.h: each one self-masks and shifts its own field, so a
- * caller can build up a GTE command piece by piece (handy for state-driven
- * MVMVA emitters that vary one field at a time).
+ * The granular `enc_gte_<field>(x)` macros below mirror the `enc_op`/`enc_rs` pattern in mips.h:
+ * Each one self-masks and shifts its own field, so a caller can build up a GTE command piece by piece
+ * (handy for state-driven MVMVA emitters that vary one field at a time).
  *
- * `ENC_GTE_CMD` is the all-in-one convenience for emitting a full command
- * word in one go. It just ORs the per-field encoders together. */
+ * `ENC_GTE_CMD` is the all-in-one convenience for emitting a full command word in one go.
+ * It just ORs the per-field encoders together. */
 #define gte_cmd_base (enc_op(op_cop2) | (1 << 25))
 
 /* Per-field encoders. Each one does (value & mask) << shift on its own. */
@@ -359,12 +346,13 @@ enum { _C2_TX_SUBS_ = 0
  * Decomposition (per the `enc_gte_<field>` definitions above):
  *   gte_cmdw_<name> = gte_cmd_base | enc_gte_cmd(<cmd>)
  
- * The SF/MX/V/CV/LM fields are all zero in the common cases 
+ * The SF / MX / V / CV / LM fields are all zero in the common cases 
  * (standard rotation-matrix, no scaling factor, V0 vector, translation vector, no clamp),
  * so the only varying bits are the `cmd` field.
  *
- * Naming follows the file's convention: `gte_cmd_*` is the raw 6-bit `cmd` field id, `gte_cmdw_*`
- *  is the fully-encoded 32-bit instruction word ready to drop into a `.word` directive.
+ * Naming convention:
+ * - `gte_cmd_*` : Raw 6-bit `cmd` field id 
+ * - `gte_cmdw_* : 32-bit instruction word ready to drop into a `.word` directive.
  *
  * --------------------------------------------------------------------------
  *  PsyQ-compatibility note (RTPS/RTPT):
@@ -380,7 +368,7 @@ enum { _C2_TX_SUBS_ = 0
  *  `nclip` ends up wrong, and the triangle is culled.
  *
  *  So for RTPS and RTPT we OR-in the `0x28` "PsyQ compat" pattern to match the working bit pattern everyone has shipped for 25 years.
- *  NCLIP/OP/MVMVA stay spec-clean — their reserved bits really are zero in the original PsyQ source.
+ *  NCLIP / OP / MVMVA stay spec-clean — their reserved bits really are zero in the original PsyQ source.
  * --------------------------------------------------------------------------
  */
 #define gte_cmdw_psyq_compat  (1u << 21 | enc_gte_sf(gte_sf_integer))
@@ -413,20 +401,16 @@ enum { _C2_TX_SUBS_ = 0
 
 /**
  * @brief Loads a single SVECTOR to GTE vector register V0
- *
  * @details Loads values from an SVECTOR struct to GTE data registers C2_VXY0
  * (XY at offset 0) and C2_VZ0 (Z at offset 4) using `lwc2`.
  *
- * Uses string-style GCC inline asm with `%0` substitution because the 
- * base register `r0` is a runtime GPR chosen by the compiler.
+ * Uses string-style GCC inline asm with `%0` substitution because the base register `r0` is a runtime GPR chosen by the compiler.
  * It cannot be encoded into a static `.word` constant.
  *
- * Usage:
- *   asm_gte_load_v0(svector_ptr);
+ * Usage: asm_gte_load_v0(svector_ptr);
  */
 
 /* lwc2 encoding helpers parameterized on the base GPR.
- *
  * gte_lw_v0_xy(base)  → lwc2 $0,  0(base)   ; C2_VXY0
  * gte_lw_v0_z(base)   → lwc2 $1,  4(base)   ; C2_VZ0
  * gte_lw_v1_xy(base)  → lwc2 $2,  0(base)   ; C2_VXY1
@@ -435,8 +419,7 @@ enum { _C2_TX_SUBS_ = 0
  * gte_lw_v2_z(base)   → lwc2 $5,  4(base)   ; C2_VZ2
  *
  * `base` is the GPR number to bake into the .word constant's `rs` field.
- * These are pure compile-time integers; the C compiler constant-folds
- * them into .word directives. */
+ * These are pure compile-time integers; the C compiler constant-folds them into .word directives. */
 
 enum {
 	GTE_Z_Offset = 4
@@ -459,8 +442,8 @@ enum {
  *     gte_load_v0(p_in_12, R_T4);   // R_T4 = 12, base is $12
  *
  * Then `"r"(r_ptr)` inside the asm binds to $12 (the only register `p_in_12` can live in),
- * which is exactly the register the .word constants expect. A `"$12"` clobber would conflict with the register-variable binding
- * ("asm specifier for variable conflicts with asm clobber list"), so we omit it.
+ * which is exactly the register the .word constants expect.
+ * A `"$12"` clobber would conflict with the register-variable binding ("asm specifier for variable conflicts with asm clobber list"), so we omit it.
  * The other ABI-clobbers ($2/$8/$9/$31) stay because the GTE instructions don't touch caller-saved GPRs but the kernel does treat them as volatile.
  *
  * WHICH REGISTER TO PICK
@@ -499,10 +482,8 @@ enum {
 
 /* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — prelude to gte_cmd_rtpt.
  *
- * Loads all three GTE input vectors (6 words) from three separate pointers,
- * one per GTE vector register, each loaded from its own base GPR.
- * Caller must bind each `pN` to `bN` via a register variable.
- *
+ * Loads all three GTE input vectors (6 words) from three separate pointers, one per GTE vector register,
+ * each loaded from its own base GPR. Caller must bind each `pN` to `bN` via a register variable.
  *   register V3_S2* p0 rgcc(R_T4) = verts[0].ptr;  // → __asm__("$12")
  *   register V3_S2* p1 rgcc(R_T5) = verts[1].ptr;  // → __asm__("$13")
  *   register V3_S2* p2 rgcc(R_T6) = verts[2].ptr;  // → __asm__("$14")
@@ -521,29 +502,20 @@ enum {
 
 /**
  * @brief Rotate, Translate and Perspective Triple (23 cycles)
- *
- * @details Performs rotation, translation and perspective calculation of three
- * vertices at once. The equation performed is the same as gte_rtps() only
- * repeated three times for each vertex. The result of the first vertex is
- * stored in GTE data register C2_SXY0, the second vector in C2_SXY1 then
- * C2_SXY2.
+ * @details Performs rotation, translation and perspective calculation of three vertices at once.
+ * The equation performed is the same as gte_rtps() only repeated three times for each vertex.
+ * The result of the first vertex is stored in GTE data register C2_SXY0, the second vector in C2_SXY1 then C2_SXY2.
  *
  * Encoder-style emission (no inline-asm strings in the code body):
- *   1. Two `nop` words fill the COP2 pipeline latency — the GTE
- *      takes ~8 cycles per perspective divide, and the nops let any
- *      preceding lwc2/swc2 retire before RTPT starts reading its
- *      inputs from V0/V1/V2.
- *   2. The RTPT command word itself is `gte_cmdw_rtpt` (see the
- *      pre-baked encoders above) — `0x0280030` decoded as
- *      `op_cop2` | CO(1) | cmd=RTPT, with all SF/MX/V/CV/LM fields
- *      zero (standard rotation, no scaling, V0 vector, translation
- *      vector, no clamp).
+ *   1. Two `nop` words fill the COP2 pipeline latency — the GTE takes ~8 cycles per perspective divide, 
+ *      and the nops let any preceding lwc2/swc2 retire before RTPT starts reading its inputs from V0/V1/V2.
+ *   2. The RTPT command word itself is `gte_cmdw_rtpt` (see the pre-baked encoders above) — 
+ *      `0x0280030` decoded as `op_cop2` | CO(1) | cmd=RTPT, with all SF/MX/V/CV/LM fields zero
+ *      (standard rotation, no scaling, V0 vector, translation vector, no clamp).
  *
- * Clobbers the caller-saved GPRs via `clbr_volatile_gprs` (per the kernel
- * ABI) plus the standard "memory" barrier. Does not clobber any COP2
- * data/control register — those have to be saved by the caller if
- * they need to survive across the call (RTPT writes SXY0..2, SZ0..3,
- * OTZ, MAC0..3, IR0..3, etc.).
+ * Clobbers the caller-saved GPRs via `clbr_volatile_gprs` (per the kernel ABI)
+ * plus the standard "memory" barrier. Does not clobber any COP2 data/control register — 
+ * those have to be saved by the caller if they need to survive across the call (RTPT writes SXY0..2, SZ0..3, OTZ, MAC0..3, IR0..3, etc.).
  */
 #define gte_rtpt()                        \
 	asm volatile(                           \
@@ -559,32 +531,24 @@ enum {
 
 /**
  * @brief Normal clipping (8 cycles)
- *
- * @details Computes the sign of three screen coordinates (C2_SXY0-2) used for
- * backface culling. If the value of C2_MAC0 is negative, the coordinates are
- * inverted and thus the triangle is back facing.
+ * @details Computes the sign of three screen coordinates (C2_SXY0-2) used for backface culling.
+ * If the value of C2_MAC0 is negative, the coordinates are inverted and thus the triangle is back facing.
  *
  * The following equation is performed when executing this GTE command:
- *
  *     MAC0 = SX0*SY1 + SX1*SY2 + SX2*SY0 - SX0*SY2 - SX1*SY0 - SX2*SY1
- *
  * Encoder-style emission (no inline-asm strings in the code body):
- *   1. Two `nop` words fill the COP2 pipeline latency - the GTE
- *      pipeline takes a few cycles per op, and the nops let any
- *      preceding lwc2/swc2/RTPT retire before NCLIP starts reading
- *      its inputs from SXY0/SXY1/SXY2.
- *   2. The NCLIP command word itself is `gte_cmdw_nclip` (see the
- *      pre-baked encoders above) - `0x01400006` decoded as
- *      `op_cop2` | CO(1) | cmd=NCLIP, with all SF/MX/V/CV/LM fields
- *      zero. NCLIP is spec-clean in the original PsyQ source
- *      (unlike RTPS/RTPT which carry the `gte_cmdw_psyq_compat`
- *      quirk), so `gte_cmdw_nclip` does NOT OR in any reserved bits.
+ *   1. Two `nop` words fill the COP2 pipeline latency
+ *      - the GTE pipeline takes a few cycles per op, and the nops let any preceding
+ *      lwc2/swc2/RTPT retire before NCLIP starts reading its inputs from SXY0/SXY1/SXY2.
+ *   2. The NCLIP command word itself is `gte_cmdw_nclip` (see the pre-baked encoders above)
+ *      - `0x01400006` decoded as  `op_cop2` | CO(1) | cmd=NCLIP, with all SF/MX/V/CV/LM fields zero.
+ *      NCLIP is spec-clean in the original PsyQ source (unlike RTPS/RTPT which carry the `gte_cmdw_psyq_compat` quirk),
+ *      so `gte_cmdw_nclip` does NOT OR in any reserved bits.
  *
- * Clobbers the caller-saved GPRs via `clbr_volatile_gprs` (per the kernel
- * ABI) plus the standard "memory" barrier. Does not clobber any COP2
- * data/control register - those have to be saved by the caller if
- * they need to survive across the call (NCLIP writes MAC0 only; it
- * is purely a sign-of-double-product computation on SXY0..2).
+ * Clobbers the caller-saved GPRs via `clbr_volatile_gprs` (per the kernel ABI) plus the standard "memory" barrier.
+ * Does not clobber any COP2 data/control register.
+ * Those have to be saved by the caller if they need to survive across the call (NCLIP writes MAC0 only;
+ * it is purely a sign-of-double-product computation on SXY0..2).
  */
 #define gte_nclip()                       \
 	asm volatile(                           \
@@ -610,13 +574,10 @@ enum {
 		"cop2 0x0158002D;")
 
 /* asm_gte_matrix_set_rotation(r0)
+ * Loads the 3x3 rotation matrix at `r0` into the GTE's rotation-matrix control registers (RT11..RT22, indices 0..4) via ctc2.
  *
- * Loads the 3x3 rotation matrix at `r0` into the GTE's rotation-matrix
- * control registers (RT11..RT22, indices 0..4) via ctc2.
- *
- * Memory layout at r0: five contiguous 32-bit words (offsets 0..16),
- * each holding two packed 16-bit matrix elements. The first 1.5 rows
- * of a standard PSX SDK MATRIX struct (where each row is laid out as
+ * Memory layout at r0: five contiguous 32-bit words (offsets 0..16), each holding two packed 16-bit matrix elements.
+ * The first 1.5 rows of a standard PSX SDK MATRIX struct (where each row is laid out as
  * [RT_xx, RT_xy] | [RT_xz, pad] | ...).
  *
  * Generated MIPS (mirrors the source macro):
@@ -631,27 +592,22 @@ enum {
  *   ctc2 $13,  $3         ; → C2_RT21
  *   ctc2 $14,  $4         ; → C2_RT22
  *
- * Same contract as gte_load_v0: caller MUST bind `r0` to $12 via a
- * register variable (`rgcc(R_T4)`) for the `lw $12, off(...)`
- * instructions to read from the right base. The `"r"(r0)` constraint
- * alone doesn't force a specific GPR — it just lets GCC pick one.
- * The .word constants here bake R_T4/R_T5/R_T6 into the `rs` field
- * of each lw, so the lw instructions will only do the right thing
- * if $12/$13/$14 hold the matrix base at runtime.
+ * Same contract as gte_load_v0: caller MUST bind `r0` to $12 via a register variable (`rgcc(R_T4)`) for the `lw $12, off(...)`
+ * instructions to read from the right base. The `"r"(r0)` constraint alone doesn't force a specific GPR — it just lets GCC pick one.
+ * The .word constants here bake R_T4/R_T5/R_T6 into the `rs` field of each lw, so the lw instructions will 
+ * only do the right thing if $12 / $13 / $14 hold the matrix base at runtime.
  *
  *   M3_S2* m = ...;
  *   register M3_S2* m_in_12 rgcc(R_T4) = m;
  *   asm_gte_matrix_set_rotation(m_in_12);
  *
- * We clobber $12/$13/$14 (the ones we use as scratch inside the
- * inline asm) plus the system clobbers; we don't clobber `r0` because
- * the `rgcc` binding already says "this variable lives in $12".
+ * We clobber $12/$13/$14 (the ones we use as scratch inside the inline asm)
+ * plus the system clobbers; we don't clobber `r0` because the `rgcc` binding already says "this variable lives in $12".
  *
- * WARNING: Incomplete by design. The source macro only writes RT11..RT22
- * (5 of 9 rotation elements); RT23 and the entire RT3x row are left
- * untouched. Real libpsn00b SetRotMatrix writes all 9. Use only when the
- * GTE's remaining rotation entries are already correct, or you will
- * get stale-RT2x/RT3x artifacts in RTPS/RTPT/MVMVA output.
+ * WARNING: Incomplete by design. The source macro only writes RT11..RT22 (5 of 9 rotation elements);
+ * RT23 and the entire RT3x row are left untouched.
+ * Real libpsn00b SetRotMatrix writes all 9. Use only when the GTE's remaining rotation entries are already correct,
+ * or you will get stale-RT2x/RT3x artifacts in RTPS/RTPT/MVMVA output.
  */
 #define asm_gte_matrix_set_rotation(r0) \
 	asm volatile(                         \

@@ -2,19 +2,124 @@
 #	include "duffle/gen/duffle.macs.h"
 #	include "duffle/gen/duffle.offsets.h"
 #	include "duffle/atom_dsl.h"
+#	include "duffle/pad.h"
 #	include "duffle/lottes_tape.h"
+#	include "duffle/mips.h"
+#	include "duffle/gte.h"
+#	include "duffle/gp.h"
 #	include "duffle/word_count.metadata.h"
 #	include "gen/hello_joypad.offsets.h"
+#	include "gen/hello_joypad.macs.h"
 #	include "hello_joypad.h"
 #endif
 
 #pragma region MACs (Mips Atom components)
 
+FI_ MipsAtom ac_gcmd_push(U4 cmd, U4 reg_transfer, U4 reg_base, U2 port)
+MipsAtomComp_Proc_(ac_gcmd_push, {
+	load_upper_i(reg_transfer, cmd >> 16),
+	or_i_self(   reg_transfer, cmd & 0xFFFF),
+	store_word(  reg_transfer, reg_base, port),
+})
 
+FI_ MipsAtom ac_put_disp_env(U4 reg_transfer, U4 reg_base, U2 port)
+MipsAtomComp_Proc_(ac_put_disp_env, {
+	// Emits 5 GP0 commands for buffer 0 (display_area = (0,0,320,240)).
+	// Sequence per libpsyx PutDispEnv: DrawArea TL → DrawArea BR → Mask → DrawArea TL → DrawArea BR
+	mac_gcmd_push(gp0_word_draw_area_top_left_origin,      reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_draw_area_bottom_right_320x240, reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_set_mask_bit(),                 reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_draw_area_top_left_origin,      reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_draw_area_bottom_right_320x240, reg_transfer, reg_base, port),
+})
+
+FI_ MipsAtom ac_put_draw_env(U4 reg_transfer, U4 reg_base, U2 port)
+MipsAtomComp_Proc_(ac_put_draw_env, {
+	/* DR_ENV (16-word packet) — emitted at boot by the gp_screen_init atom. 
+	* The values below are pre-baked for the demo's buffer 0: auto_clear=true, bg=(7,7,7), clip=(0,240,320,240), ofs=(0,0), tw=(0,0,0,0).
+	*
+	* ORIGIN: each code word corresponds to the EXACT value libpsyx's PutDrawEnv function would compute for the same DrawEnv settings.
+	* References:
+	*   - libpsyx source: `toolchain/psyq-4_7/lib/libgpu.a` (binary, function `PutDrawEnv`)
+	*   - PSX-SPX doc:     https://problemkaputt.de/psx-spx.htm#gputdrawingcommands
+	*   - PSYQ SDK:        `setdrawenv` / `makelongdr_env` source
+	*   - NOCASH PSX spec: §"GP0(E1h) Draw Mode setting" through §"DR_ENV"
+	*
+	* The 16-word format is documented in the PSYQ SDK manual and on NOCASH's PSX-spec.txt. The libpsyx reference is at:
+	*   ./toolchain/psyq-4_7/lib/libgpu.a
+	*   (binary; the PutDrawEnv implementation builds the 16-word DR_ENV from the user's DRAWENV struct and emits it via GP0 GPU commands.)
+	*
+	* Word indices (libpsyx PutDrawEnv / SetDrawEnv order):
+	*   tag      = (length << 24) | addr                — 16-word packet (1 tag + 15 code)
+	*   code[0]  = DrawMode (dfe=1, dtd=0, tpage=0)     — must come first per libpsyx
+	*   code[1]  = TextureWindow (tw=(0,0))             — bare-cmd word; GPU uses current state
+	*   code[2]  = DrawArea top-left (clip.x=0, clip.y=240)
+	*   code[3]  = DrawArea bottom-right (clip.x+w=320, clip.y+h=480)
+	*   code[4]  = DrawOffset (ofs=(0,0))               — bare-cmd word
+	*   code[5]  = Mask (dtd=0, dfe=1, isbg=1)          — 0xE6 cmd + isbg bit
+	*   code[6]  = Initial-bg-color (isbg=1, r=7, g=7, b=7)
+	*   code[7]  = DrawMode (isbg=1, tpage=0)           — re-asserts DrawMode with isbg
+	*   code[8..10]  = padding (NOP)                    — 3 words to fill the packet
+	*   code[11..12] = TextureWindow bottom-right       — defaults to (0,0,0,0)
+	*   code[13..14] = padding (NOP)                    — completes the 16-word packet
+	*/
+	mac_gcmd_push(gp0_dr_env_tag,                            reg_transfer, reg_base, port), /* tag (length=15 << 24, addr=0) — packet header for the DR_ENV sequence. The GPU needs this to recognize the next 15 words as a DR_ENV packet and trigger the isbg auto-clear. */
+	mac_gcmd_push(gp0_word_draw_mode_drawing_allowed,        reg_transfer, reg_base, port), /* code[0]  DrawMode (dfe=1, dtd=0, tpage=0) */
+	mac_gcmd_push(gp0_word_set_texture_window(),             reg_transfer, reg_base, port), /* code[1]  TextureWindow (tw=(0,0)) */
+	mac_gcmd_push(enc_gp0_draw_area_tl_word(0, ScreenRes_Y), reg_transfer, reg_base, port), /* code[2]  DrawArea top-left (clip.x=0, clip.y=ScreenRes_Y=240) */
+	mac_gcmd_push(gp0_word_draw_area_bottom_right_320x240,   reg_transfer, reg_base, port), /* code[3]  DrawArea bottom-right (clip.x+w=320, clip.y+h=480) */
+
+	mac_gcmd_push(gp0_word_set_draw_offset(),               reg_transfer, reg_base, port), /* code[4]  DrawOffset (ofs=(0,0)) — bare-cmd word; the GPU uses the current state machine. */
+	mac_gcmd_push(gp0_word_dr_env_mask(),                   reg_transfer, reg_base, port), /* code[5]  Mask (dtd=0, dfe=1, isbg=1) — 0xE6 cmd + isbg bit. */
+	mac_gcmd_push(gp0_word_dr_env_bg_color_cmd(1, 7, 7, 7), reg_transfer, reg_base, port), /* code[6]  Initial-bg-color + auto-clear (isbg=1, r=7, g=7, b=7). */
+	mac_gcmd_push(gp0_word_dr_env_draw_mode(1),             reg_transfer, reg_base, port), /* code[7]  Re-assert DrawMode with isbg=1 (isbg-flag set; the 0xE1 cmd byte plus isbg only). */
+
+	/* code[8..10]  Padding (NOP — GPU discards; the DR_ENV requires 16 words total). */
+	mac_gcmd_push(gp0_word_nop(), reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_nop(), reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_nop(), reg_transfer, reg_base, port),
+
+	/* code[11..12]  TextureWindow bottom-right (tw.x+tw.w=0, tw.y+tw.h=0) — libpsyx emits twice. */
+	mac_gcmd_push(gp0_word_set_texture_window(), reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_set_texture_window(), reg_transfer, reg_base, port),
+
+	/* code[13..14]  Padding (NOP) — completes the 16-word packet. */
+	mac_gcmd_push(gp0_word_nop(), reg_transfer, reg_base, port),
+	mac_gcmd_push(gp0_word_nop(), reg_transfer, reg_base, port),
+})
 
 #pragma endregion MACs
 
 #pragma region Baked Atoms
+
+enum {
+	R_IO_BaseAddr = R_T4 atom_reg, /* Caller-pinned: IO_BASE_ADDR = 0x1F800000 */
+#define R_IO_BaseAddr_Code R_T4_Code
+};
+internal MipsAtom_(gp_screen_init) atom_info(atom_phase(screen_init)) {
+	store_word(R_0, R_IO_BaseAddr, GPIO_PORT1_OFFSET),                  /* GP1(00h) Reset */
+	mac_gcmd_push(gp1_word_ResetCmdBuffer(),   R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(01h) ClearFIFO */
+	mac_gcmd_push(gp1_word_AcknowledgeIRQ(),   R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(02h) AckIRQ */
+	mac_gcmd_push(gp1_word_DisplayOn(),        R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(03h) Display ON */
+	mac_gcmd_push(gp1_word_dma_to_gpu(),       R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(04h) DMADirection=2 (CPU→GPU). libpsyx's per-frame PutDrawEnv/DrawOTag use DMA2; without this the DMA queue never drains. */
+	mac_gcmd_push(gp1_word_StartDisplayArea(), R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),  /* GP1(05h) StartDisplayArea (X=0, Y=0) */
+
+	/* GP1: DisplayMode + Display Ranges */
+	mac_gcmd_push(gp1_word_display_mode_320x240_15bit_ntsc, R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),
+	mac_gcmd_push(gp1_word_horizontal_range_ntsc,           R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),
+	mac_gcmd_push(gp1_word_vertical_range_ntsc,             R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),
+
+	/* GTE: SetGeomOffset (OFX, OFY) — ScreenRes_CenterX, ScreenRes_CenterY. */
+	load_upper_i(R_T5, ScreenRes_CenterX), gte_mv_to_ctrl_r(R_T5, gte_cr_OFX_Code),
+	load_upper_i(R_T5, ScreenRes_CenterY), gte_mv_to_ctrl_r(R_T5, gte_cr_OFY_Code),
+
+	/* GTE: SetGeomScreen (H) — CR26 (per PSX-SPX / libpsyx), value is the raw projection-plane distance, NOT shifted. */
+	add_ui(R_T5, R_0, ScreenZ), gte_mv_to_ctrl_r(R_T5, gte_cr_H_Code),
+
+	/* GP1: DisplayEnable — bit 0 = 0 (Display ON). */
+	mac_gcmd_push(gp1_word_DisplayOn(), R_T5, R_IO_BaseAddr, GPIO_PORT1_OFFSET),
+	mac_yield(),
+};
 
 enum {
 	R_PadState  = R_T4 atom_reg atom_type(U4),
@@ -29,15 +134,14 @@ typedef Struct_(Binds_PadInputDemo) {
 };
 internal MipsAtom_(pad_input_demo) atom_info(atom_bind(Binds_PadInputDemo)
 , atom_reads(R_PadState, R_CubeRot, R_FloorRot)
-, atom_writes(           R_CubeRot, R_FloorRot)
+, atom_writes(R_CubeRot, R_FloorRot)
 ) {
 	load_word(R_PadState, R_TapePtr, O_(Binds_PadInputDemo,pad_state)),
 	load_word(R_CubeRot,  R_TapePtr, O_(Binds_PadInputDemo,cube_rot)),
 	load_word(R_FloorRot, R_TapePtr, O_(Binds_PadInputDemo,floor_rot)),
 	add_ui_self(          R_TapePtr, S_(Binds_PadInputDemo)),
 
-	and_i(R_PadSignal, R_PadState, pad0_(Pad_Left)),
-	branch_le_zero(R_PadSignal, atom_offset(pad_left, exit_pad_left)),
+	and_i(R_PadSignal, R_PadState, pad0_(Pad_Left)), branch_le_zero(R_PadSignal, atom_offset(pad_left, exit_pad_left)),
 		load_half( R_T5, R_CubeRot,  O_(V3_S2,y)), // BD-Slot occupied
 		load_half( R_T6, R_FloorRot, O_(V3_S2,y)),
 		add_si(    R_T5, R_T5, 30),
@@ -46,8 +150,7 @@ internal MipsAtom_(pad_input_demo) atom_info(atom_bind(Binds_PadInputDemo)
 		store_half(R_T6, R_FloorRot, O_(V3_S2,y)),
 	atom_label(exit_pad_left)
 
-	and_i(R_PadSignal, R_PadState, pad0_(Pad_Right)),
-	branch_le_zero(R_PadSignal, atom_offset(pad_right, exit_pad_right)),
+	and_i(R_PadSignal, R_PadState, pad0_(Pad_Right)), branch_le_zero(R_PadSignal, atom_offset(pad_right, exit_pad_right)),
 		load_half( R_T5, R_CubeRot,  O_(V3_S2,y)), // BD-Slot occupied
 		load_half( R_T6, R_FloorRot, O_(V3_S2,y)),
 		add_si(    R_T5, R_T5, -30),

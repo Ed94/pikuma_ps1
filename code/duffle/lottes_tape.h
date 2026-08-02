@@ -32,23 +32,12 @@ typedef Slice_MipsCode MipsAtom;
 
 /* Register aliases */
 enum {
-	R_AtomJmp    = R_T9 atom_reg,  /* debug-visible; tape yield handshake scratch */
-	R_TapePtr    = R_T8 atom_reg,  /* The Instruction Stream Pointer */
-	R_InCursor   = R_T4,
-
-	R_PrimCursor = R_T7 atom_reg atom_type(U4 *),    /* VRAM output cursor (primitive buffer) */
-	R_FaceCursor = R_T4 atom_reg atom_type(V4_S2 *), /* Cube face-index cursor (V4_S2*); floor context switches to V3_S2* via atom_phase */
-	R_VertBase   = R_T5 atom_reg atom_type(V3_S2 *), /* Base address of the vertex array */
-	R_OtBase     = R_T6 atom_reg atom_type(U4 *),    /* Base address of the Ordering Table */
-
+	R_AtomJmp  = R_T9 atom_reg,  /* debug-visible; tape yield handshake scratch */
+	R_TapePtr  = R_T8 atom_reg,  /* The Instruction Stream Pointer */
+	R_InCursor = R_T4,
 /* Stringification codes for the GCC inline assembler clobber lists. */
 #define R_TapePtr_Code     R_T8_Code
 #define R_InCursor_Code    R_T4_Code
-
-#define R_PrimCursor_Code  R_T7_Code
-#define R_FaceCursor_Code  R_T4_Code
-#define R_VertBase_Code    R_T5_Code
-#define R_OtBase_Code      R_T6_Code
 };
 
 #pragma region Tape Drive
@@ -76,8 +65,7 @@ FI_ void tape_run(Slice_MipsCode tape) { register U4* tp rgcc(R_TapePtr) = u4_r(
 			rlit(R_AT)
 		, rlit(R_V0), rlit(R_V1)
 		, rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3)
-		/* Tell GCC the tape engine owns and destroys the workspace registers */
-		, rlit(R_PrimCursor), rlit(R_FaceCursor), rlit(R_VertBase), rlit(R_OtBase)
+		, rlit(R_T4), rlit(R_T5), rlit(R_T6), rlit(R_T7)
 		, rlit(R_T9)
 		, clb_mem_drain 
 ); }
@@ -111,6 +99,17 @@ atom_dbg_skip MipsAtomComp_(ac_yield) {
 	load_word(R_AtomJmp, R_TapePtr, 0),
 	add_ui_self(         R_TapePtr, S_(MipsCode)),
 	jump_reg( R_AtomJmp), nop,
+};
+
+enum {
+	R_PrimCursor = R_T7 atom_reg atom_type(U4*),    /* VRAM output cursor (primitive buffer) */
+	R_FaceCursor = R_T4 atom_reg atom_type(V4_S2*), /* Cube face-index cursor (V4_S2*); floor context switches to V3_S2* via atom_phase */
+	R_VertBase   = R_T5 atom_reg atom_type(V3_S2*), /* Base address of the vertex array */
+	R_OtBase     = R_T6 atom_reg atom_type(U4*),    /* Base address of the Ordering Table */
+#define R_PrimCursor_Code  R_T7_Code
+#define R_FaceCursor_Code  R_T4_Code
+#define R_VertBase_Code    R_T5_Code
+#define R_OtBase_Code      R_T6_Code
 };
 
 /* Words: 3; Loads 3 S2 indices from the face array */
