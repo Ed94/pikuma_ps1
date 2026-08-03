@@ -81,18 +81,12 @@ atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 //TODO(Ed): Do we backup R_S0-7 here? Have it in a heavier tape run as a opt-in? Same with V0-1 and A0-3?
 /* Generalized Tape Engine Runner */
 FI_ void tape_run(Slice_MipsCode tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
-		// Removed, not needed
-		/*add_ui(     R_SP, R_SP, -MipsStackAlignment)*/ /* Allocate stack space */
-		/*, store_word( R_RA, R_SP,           0)*/       /* Safely backup $ra to the stack */
 	asm_words(
-		  load_word(  R_AtomJmp, R_TapePtr, 0)         /* Bootstrap the first jump */
-		, add_ui_self(R_TapePtr, S_(MipsCode))         /* Advance tape */
-		, call_reg(   R_AtomJmp)                       /* jalr $t9 */
-		, nop                                          /* Branch delay slot */
+		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
+		, add_ui_self(R_TapePtr, S_(MipsCode)) /* Advance tape */
+		, call_reg(   R_AtomJmp)               /* jalr $t9 */
+		, nop                                  /* Branch delay slot */
 	)
-		// Removed, not needed
-		/*, load_word(  R_RA, R_SP, 0)*              /* Restore $ra from stack */
-		/*, add_ui_self(R_SP, MipsStackAlignment)*/  /* Deallocate stack space */
 	asm_rpins, r_use(tape_ptr)
 	asm_clobber: 
 			rlit(R_AT)

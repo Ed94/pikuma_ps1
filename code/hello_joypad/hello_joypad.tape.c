@@ -199,7 +199,7 @@ internal MipsAtom_(gp_screen_init) atom_info(atom_phase(screen_init), atom_reads
 };
 
 enum {
-	R_PadState  = R_T4 atom_reg atom_type(U4),
+	R_PadInState  = R_T4 atom_reg atom_type(U4),
 	R_PadSignal = R_T0 atom_reg atom_type(U4),
 	R_CubeRot   = R_T1 atom_reg atom_type(V3_S2*),
 	R_FloorRot  = R_T2 atom_reg atom_type(V3_S2*),
@@ -210,15 +210,15 @@ typedef Struct_(Binds_PadInputDemo) {
 	V3_S2* floor_rot;
 };
 internal MipsAtom_(pad_input_demo) atom_info(atom_bind(Binds_PadInputDemo)
-, atom_reads(R_PadState, R_CubeRot, R_FloorRot)
+, atom_reads(R_PadInState, R_CubeRot, R_FloorRot)
 , atom_writes(R_CubeRot, R_FloorRot)
 ) {
-	load_word(R_PadState, R_TapePtr, O_(Binds_PadInputDemo,pad_state)),
+	load_word(R_PadInState, R_TapePtr, O_(Binds_PadInputDemo,pad_state)),
 	load_word(R_CubeRot,  R_TapePtr, O_(Binds_PadInputDemo,cube_rot)),
 	load_word(R_FloorRot, R_TapePtr, O_(Binds_PadInputDemo,floor_rot)),
 	add_ui_self(          R_TapePtr, S_(Binds_PadInputDemo)),
 
-	and_i(R_PadSignal, R_PadState, pad0_(Pad_Left)), branch_le_zero(R_PadSignal, atom_offset(pad_left, exit_pad_left)),
+	and_i(R_PadSignal, R_PadInState, pad0_(Pad_Left)), branch_le_zero(R_PadSignal, atom_offset(pad_left, exit_pad_left)),
 		load_half( R_T5, R_CubeRot,  O_(V3_S2,y)), // BD-Slot occupied
 		load_half( R_T6, R_FloorRot, O_(V3_S2,y)),
 		add_si(    R_T5, R_T5, 30),
@@ -227,7 +227,7 @@ internal MipsAtom_(pad_input_demo) atom_info(atom_bind(Binds_PadInputDemo)
 		store_half(R_T6, R_FloorRot, O_(V3_S2,y)),
 	atom_label(exit_pad_left)
 
-	and_i(R_PadSignal, R_PadState, pad0_(Pad_Right)), branch_le_zero(R_PadSignal, atom_offset(pad_right, exit_pad_right)),
+	and_i(R_PadSignal, R_PadInState, pad0_(Pad_Right)), branch_le_zero(R_PadSignal, atom_offset(pad_right, exit_pad_right)),
 		load_half( R_T5, R_CubeRot,  O_(V3_S2,y)), // BD-Slot occupied
 		load_half( R_T6, R_FloorRot, O_(V3_S2,y)),
 		add_si(    R_T5, R_T5, -30),
@@ -374,6 +374,41 @@ internal MipsAtom_(sync_primitive_arena) atom_info(atom_bind(Binds_SyncPrimitive
 	sub_u(     R_T0, R_PrimCursor, R_T0), // R_T0    = R_PrimCursor - binds.cursor
 	store_word(R_T0, R_AT, 0),            // R_AT[0] = R_T0
 	mac_yield()
+};
+
+/* ----- pad_sio_init -----
+ * Boot-time SIO0 init. Caller pins R_T6 = sio_base_addr0.
+ * Issues SIO CTRL=0x0040 (reset), MODE=0x000D, BAUD=0x0088.
+ * (Phase 2 fills the body.)
+ */
+internal MipsAtom_(pad_sio_init) atom_info(atom_phase(pad_init)
+, atom_reads(R_T5, R_PadSioBase)
+, atom_writes(R_T5)
+) {
+	mac_yield(),
+};
+
+/* ----- pad_sio_step -----
+ * Per-frame bounded raw-SIO transaction. Reads PadState pointers + SIO
+ * base addresses from Binds_PadSioStep; writes per-port status +
+ * buttons + axes into smem.pad[0..1]. (Phase 3 fills the body.)
+ */
+internal MipsAtom_(pad_sio_step) atom_info(atom_bind(Binds_PadSioStep)
+, atom_reads(R_TapePtr, R_PadSioBase, R_PadState, R_PadStatus, R_PadCountdown)
+, atom_writes(R_PadStatus, R_PadCountdown)
+) {
+	mac_yield(),
+};
+
+/* ----- pad_apply_input -----
+ * Reads pad[0].buttons + pad[0].left_x; applies the input-semantics
+ * deltas to cube_rot.y + floor_rot.y. (Phase 4 fills the body.)
+ */
+internal MipsAtom_(pad_apply_input) atom_info(atom_bind(Binds_PadApplyInput)
+, atom_reads(R_T0, R_T1, R_T2, R_T5)
+, atom_writes(R_T1, R_T2)
+) {
+	mac_yield(),
 };
 
 #pragma endregion Baked Atoms
