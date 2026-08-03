@@ -125,10 +125,14 @@ typedef Struct_(SMemory) {
 
 	U4 pad_state;
 
+	PadState     pad[2];             /* raw_sio_pad_poll_20260802 — per-port */
+	PadSioInit    pad_sio_init;       /* raw_sio_pad_poll_20260802 — boot init */
+
 	U4_V scratchpad; // d-cache
 };
 global SMemory smem;
 extern SMemory smem;
+U4 scratch_for_atom_diag_pin;   /* raw_sio_pad_poll_20260802 — diag atom scratch */
 
 #define pad0_signal_(btn_id) smem.pad_state & pad0_(btn_id)
 #define pad1_signal_(btn_id) smem.pad_state & pad1_(btn_id)
@@ -201,8 +205,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 {
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
 
-	smem.pad_state = pad_read(0);
-
 	if (0) // Pad Input
 	{
 		if (pad0_signal_(Pad_Left)) {
@@ -217,8 +219,16 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	if (1) // Pad Input (Tape version)
 	{
 		tb.used = 0; tb_scope_run(& tb) {
-			tb_emit(& tb, pad_input_demo);
-				tb_data(& tb, smem.pad_state);
+			/* Per-frame SIO0 poll: pad_sio_step polls both ports; pad_apply_input applies rotation */
+			tb_emit(& tb, pad_sio_init);
+			tb_emit(& tb, pad_sio_step);
+				tb_data(& tb, u4_(& smem.pad[0]));
+				tb_data(& tb, u4_(& smem.pad[1]));
+				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[0]));
+				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[1]));
+			/* Per-frame rotation apply: consume pad[0].buttons + pad[0].left_x */
+			tb_emit(& tb, pad_apply_input);
+				tb_data(& tb, u4_(& smem.pad[0]));
 				tb_data(& tb, u4_(& smem.cube.rot));
 				tb_data(& tb, u4_(& smem.floor.rot));
 		}
@@ -454,13 +464,26 @@ int main(void)
 	}
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape)); {
 		reset_graph(0);
-		register U4*           io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
-		register DoubleBuffer* screen_buf   rgcc(R_ScreenBuf)   = & smem.screen_buf;
+		pad_sio_init_setup(& smem.pad_sio_init, & smem.pad[0], & smem.pad[1]);
+		/* raw_sio_pad_poll_20260802 — pin the SIO base for the boot atom.
+		 * Use the KSEG1 constant directly (not via pad_sio_init.sio_base_addr[0])
+		 * because rgcc binds the register to the variable's storage, not the
+		 * value-at-call-site. Reading the field at tape-emit time would require
+		 * an extra load, which the atom body can't do implicitly. */
+		register U4 pad_io_base rgcc(R_PadSioBase) = pad_IO_KSEG1_BASE;
+		register U4* io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
+		register U4* r_diag_scratch rgcc(R_DiagPinScratch) = & scratch_for_atom_diag_pin;
+		register DoubleBuffer* screen_buf rgcc(R_ScreenBuf) = & smem.screen_buf;
 		tb.used = 0; tb_scope_run(& tb) {
 			tb_emit(& tb, screen_env_init);
 			tb_emit(& tb, gp_screen_init);
+			tb_emit(& tb, pad_sio_init);
+			tb_emit(& tb, pad_sio_step);  /* initial baseline */
+				tb_data(& tb, u4_(& smem.pad[0]));
+				tb_data(& tb, u4_(& smem.pad[1]));
+				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[0]));
+				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[1]));
 		}
-		pad_init(0);
 	}
 	while (1) {
 		gknown S4* active_buf_id  = & smem.active_buf_id;
@@ -471,4 +494,14 @@ int main(void)
 		gp_display_frame(& smem.screen_buf, active_buf_id, ordering_buf, pa);
 	};
 	return 0;
+}
+
+/* raw_sio_pad_poll_20260802 — populate the boot-time pad SIO context.
+ * Populates the two PadState pointers + the KSEG1 SIO base address. */
+void pad_sio_init_setup(PadSioInit* init, PadState* s0, PadState* s1)
+{
+	init->sio_base_addr[0] = pad_IO_KSEG1_BASE;
+	init->sio_base_addr[1] = pad_IO_KSEG1_BASE;
+	init->pad_state_ptr[0]  = s0;
+	init->pad_state_ptr[1]  = s1;
 }

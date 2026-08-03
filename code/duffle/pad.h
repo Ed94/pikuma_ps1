@@ -33,8 +33,6 @@ enum {
 #define pad0_(btn_id) (btn_id << Pad0)
 #define pad1_(btn_id) (btn_id << Pad1)
 
-void pad_init(U4 mode) asm("PadInit");
-U4   pad_read(U4 id)   asm("PadRead");
 
 /* ============================================================
  * SIO0 raw controller polling surface (Phase 1 scaffolding)
@@ -130,10 +128,12 @@ enum {
 	R_PadState     = R_T7 atom_reg,  /* caller-pinned PadState* */
 	R_PadStatus    = R_T4 atom_reg,  /* scratch for status reads */
 	R_PadCountdown = R_T5 atom_reg,  /* scratch for countdown budget */
-#define R_PadSioBase_Code    R_T6_Code
-#define R_PadState_Code      R_T7_Code
-#define R_PadStatus_Code     R_T4_Code
-#define R_PadCountdown_Code  R_T5_Code
+	R_DiagPinScratch = R_T3 atom_reg, /* raw_sio_pad_poll_20260802 — diag scratch address */
+#define R_PadSioBase_Code       R_T6_Code
+#define R_PadState_Code         R_T7_Code
+#define R_PadStatus_Code        R_T4_Code
+#define R_PadCountdown_Code     R_T5_Code
+#define R_DiagPinScratch_Code  R_T3_Code
 };
 
 /* Address of SIO0 block in KSEG1 (the PS1-side uncached mirror) */

@@ -180,29 +180,18 @@ function link-modules { param([string[]]$link_modules, [string]  $elf, [string[]
 	$link_args += ($f_link_pass_through_prefix + $f_link_mapfile + $map)
 
 	$link_args += ($f_link_pass_through_prefix + $f_link_start_group)
+	# raw_sio_pad_poll_20260802 — Task 5.1c surgical library-list trim.
+	# The 16 removed entries (c2, card, cd, comb, ds, gs, gun, hmd, math,
+	# mcrd, mcx, press, sio, snd, spu, tap) had LOAD lines in the map but
+	# ZERO .o files pulled in — they were unused. The 5 kept libraries
+	# (api, c, etc, gpu, gte) are required by the C-side calls in
+	# hello_joypad.c (reset_graph, draw_sync, vsync, etc.).
 	$libraries = @(
 		"api",
 		"c",
-		"c2",
-		"card",
-		"cd",
-		"comb",
-		"ds",
 		"etc",
 		"gpu",
-		"gs",
-		"gte",
-		"gun",
-		"hmd",
-		"math",
-		"mcrd",
-		"mcx",
-		"pad",
-		"press",
-		"sio",
-		"snd",
-		"spu",
-		"tap"
+		"gte"
 	)
 	foreach ($lib in $libraries) {
 		$link_args += ($f_link_lib + $lib)

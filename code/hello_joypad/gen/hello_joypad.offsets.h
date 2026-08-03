@@ -35,5 +35,165 @@ enum {
     atom_offset_bounds_chk_floor_f3_face_exit = _atom_offset_bounds_chk_floor_f3_face_exit,
 };
 
+// --- atom: pad_sio_step (398 words) ---
+
+#define _atom_offset_settle_pre_port0_settle_pre_port0  -3
+#define _atom_offset_settle_post_port0_settle_post_port0  -3
+#define _atom_offset_wait_ack0_port0_ack0_received_port0  12
+#define _atom_offset_continue_wait_ack0_port0_wait_ack0_port0  -6
+#define _atom_offset_skip_port0_from_ack0_port1_start  160
+#define _atom_offset_wait_ackrel0_port0_ack_released_port0  12
+#define _atom_offset_continue_wait_ackrel0_port0_wait_ackrel0_port0  -6
+#define _atom_offset_skip_port0_from_ackrel0_port1_start  142
+#define _atom_offset_wait_ack1_port0_ack1_received_port0  12
+#define _atom_offset_continue_wait_ack1_port0_wait_ack1_port0  -6
+#define _atom_offset_skip_port0_from_ack1_port1_start  123
+#define _atom_offset_wait_ackrel1_port0_ack_released1_port0  12
+#define _atom_offset_continue_wait_ackrel1_port0_wait_ackrel1_port0  -6
+#define _atom_offset_skip_port0_from_ackrel1_port1_start  105
+#define _atom_offset_wait_ack2_port0_ack2_received_port0  12
+#define _atom_offset_continue_wait_ack2_port0_wait_ack2_port0  -6
+#define _atom_offset_skip_port0_from_ack2_port1_start  86
+#define _atom_offset_wait_ackrel2_port0_ack_released2_port0  12
+#define _atom_offset_continue_wait_ackrel2_port0_wait_ackrel2_port0  -6
+#define _atom_offset_skip_port0_from_ackrel2_port1_start  68
+#define _atom_offset_wait_ack3_port0_ack3_received_port0  12
+#define _atom_offset_continue_wait_ack3_port0_wait_ack3_port0  -6
+#define _atom_offset_skip_port0_from_ack3_port1_start  49
+#define _atom_offset_wait_ackrel3_port0_ack_released3_port0  12
+#define _atom_offset_continue_wait_ackrel3_port0_wait_ackrel3_port0  -6
+#define _atom_offset_skip_port0_from_ackrel3_port1_start  31
+#define _atom_offset_wait_rx4_port0_rx4_received_port0  12
+#define _atom_offset_continue_wait_rx4_port0_wait_rx4_port0  -6
+#define _atom_offset_skip_port0_from_rx4_port1_start  12
+#define _atom_offset_settle_pre_port1_settle_pre_port1  -3
+#define _atom_offset_settle_post_port1_settle_post_port1  -3
+#define _atom_offset_wait_ack0_port1_ack0_received_port1  12
+#define _atom_offset_continue_wait_ack0_port1_wait_ack0_port1  -6
+#define _atom_offset_skip_port1_from_ack0_end_atom    160
+#define _atom_offset_wait_ackrel0_port1_ack_released_port1  12
+#define _atom_offset_continue_wait_ackrel0_port1_wait_ackrel0_port1  -6
+#define _atom_offset_skip_port1_from_ackrel0_end_atom  142
+#define _atom_offset_wait_ack1_port1_ack1_received_port1  12
+#define _atom_offset_continue_wait_ack1_port1_wait_ack1_port1  -6
+#define _atom_offset_skip_port1_from_ack1_end_atom    123
+#define _atom_offset_wait_ackrel1_port1_ack_released1_port1  12
+#define _atom_offset_continue_wait_ackrel1_port1_wait_ackrel1_port1  -6
+#define _atom_offset_skip_port1_from_ackrel1_end_atom  105
+#define _atom_offset_wait_ack2_port1_ack2_received_port1  12
+#define _atom_offset_continue_wait_ack2_port1_wait_ack2_port1  -6
+#define _atom_offset_skip_port1_from_ack2_end_atom    86
+#define _atom_offset_wait_ackrel2_port1_ack_released2_port1  12
+#define _atom_offset_continue_wait_ackrel2_port1_wait_ackrel2_port1  -6
+#define _atom_offset_skip_port1_from_ackrel2_end_atom  68
+#define _atom_offset_wait_ack3_port1_ack3_received_port1  12
+#define _atom_offset_continue_wait_ack3_port1_wait_ack3_port1  -6
+#define _atom_offset_skip_port1_from_ack3_end_atom    49
+#define _atom_offset_wait_ackrel3_port1_ack_released3_port1  12
+#define _atom_offset_continue_wait_ackrel3_port1_wait_ackrel3_port1  -6
+#define _atom_offset_skip_port1_from_ackrel3_end_atom  31
+#define _atom_offset_wait_rx4_port1_rx4_received_port1  12
+#define _atom_offset_continue_wait_rx4_port1_wait_rx4_port1  -6
+#define _atom_offset_skip_port1_from_rx4_end_atom     12
+
+enum {
+    atom_offset_settle_pre_port0_settle_pre_port0 = _atom_offset_settle_pre_port0_settle_pre_port0,
+    atom_offset_settle_post_port0_settle_post_port0 = _atom_offset_settle_post_port0_settle_post_port0,
+    atom_offset_wait_ack0_port0_ack0_received_port0 = _atom_offset_wait_ack0_port0_ack0_received_port0,
+    atom_offset_continue_wait_ack0_port0_wait_ack0_port0 = _atom_offset_continue_wait_ack0_port0_wait_ack0_port0,
+    atom_offset_skip_port0_from_ack0_port1_start = _atom_offset_skip_port0_from_ack0_port1_start,
+    atom_offset_wait_ackrel0_port0_ack_released_port0 = _atom_offset_wait_ackrel0_port0_ack_released_port0,
+    atom_offset_continue_wait_ackrel0_port0_wait_ackrel0_port0 = _atom_offset_continue_wait_ackrel0_port0_wait_ackrel0_port0,
+    atom_offset_skip_port0_from_ackrel0_port1_start = _atom_offset_skip_port0_from_ackrel0_port1_start,
+    atom_offset_wait_ack1_port0_ack1_received_port0 = _atom_offset_wait_ack1_port0_ack1_received_port0,
+    atom_offset_continue_wait_ack1_port0_wait_ack1_port0 = _atom_offset_continue_wait_ack1_port0_wait_ack1_port0,
+    atom_offset_skip_port0_from_ack1_port1_start = _atom_offset_skip_port0_from_ack1_port1_start,
+    atom_offset_wait_ackrel1_port0_ack_released1_port0 = _atom_offset_wait_ackrel1_port0_ack_released1_port0,
+    atom_offset_continue_wait_ackrel1_port0_wait_ackrel1_port0 = _atom_offset_continue_wait_ackrel1_port0_wait_ackrel1_port0,
+    atom_offset_skip_port0_from_ackrel1_port1_start = _atom_offset_skip_port0_from_ackrel1_port1_start,
+    atom_offset_wait_ack2_port0_ack2_received_port0 = _atom_offset_wait_ack2_port0_ack2_received_port0,
+    atom_offset_continue_wait_ack2_port0_wait_ack2_port0 = _atom_offset_continue_wait_ack2_port0_wait_ack2_port0,
+    atom_offset_skip_port0_from_ack2_port1_start = _atom_offset_skip_port0_from_ack2_port1_start,
+    atom_offset_wait_ackrel2_port0_ack_released2_port0 = _atom_offset_wait_ackrel2_port0_ack_released2_port0,
+    atom_offset_continue_wait_ackrel2_port0_wait_ackrel2_port0 = _atom_offset_continue_wait_ackrel2_port0_wait_ackrel2_port0,
+    atom_offset_skip_port0_from_ackrel2_port1_start = _atom_offset_skip_port0_from_ackrel2_port1_start,
+    atom_offset_wait_ack3_port0_ack3_received_port0 = _atom_offset_wait_ack3_port0_ack3_received_port0,
+    atom_offset_continue_wait_ack3_port0_wait_ack3_port0 = _atom_offset_continue_wait_ack3_port0_wait_ack3_port0,
+    atom_offset_skip_port0_from_ack3_port1_start = _atom_offset_skip_port0_from_ack3_port1_start,
+    atom_offset_wait_ackrel3_port0_ack_released3_port0 = _atom_offset_wait_ackrel3_port0_ack_released3_port0,
+    atom_offset_continue_wait_ackrel3_port0_wait_ackrel3_port0 = _atom_offset_continue_wait_ackrel3_port0_wait_ackrel3_port0,
+    atom_offset_skip_port0_from_ackrel3_port1_start = _atom_offset_skip_port0_from_ackrel3_port1_start,
+    atom_offset_wait_rx4_port0_rx4_received_port0 = _atom_offset_wait_rx4_port0_rx4_received_port0,
+    atom_offset_continue_wait_rx4_port0_wait_rx4_port0 = _atom_offset_continue_wait_rx4_port0_wait_rx4_port0,
+    atom_offset_skip_port0_from_rx4_port1_start = _atom_offset_skip_port0_from_rx4_port1_start,
+    atom_offset_settle_pre_port1_settle_pre_port1 = _atom_offset_settle_pre_port1_settle_pre_port1,
+    atom_offset_settle_post_port1_settle_post_port1 = _atom_offset_settle_post_port1_settle_post_port1,
+    atom_offset_wait_ack0_port1_ack0_received_port1 = _atom_offset_wait_ack0_port1_ack0_received_port1,
+    atom_offset_continue_wait_ack0_port1_wait_ack0_port1 = _atom_offset_continue_wait_ack0_port1_wait_ack0_port1,
+    atom_offset_skip_port1_from_ack0_end_atom = _atom_offset_skip_port1_from_ack0_end_atom,
+    atom_offset_wait_ackrel0_port1_ack_released_port1 = _atom_offset_wait_ackrel0_port1_ack_released_port1,
+    atom_offset_continue_wait_ackrel0_port1_wait_ackrel0_port1 = _atom_offset_continue_wait_ackrel0_port1_wait_ackrel0_port1,
+    atom_offset_skip_port1_from_ackrel0_end_atom = _atom_offset_skip_port1_from_ackrel0_end_atom,
+    atom_offset_wait_ack1_port1_ack1_received_port1 = _atom_offset_wait_ack1_port1_ack1_received_port1,
+    atom_offset_continue_wait_ack1_port1_wait_ack1_port1 = _atom_offset_continue_wait_ack1_port1_wait_ack1_port1,
+    atom_offset_skip_port1_from_ack1_end_atom = _atom_offset_skip_port1_from_ack1_end_atom,
+    atom_offset_wait_ackrel1_port1_ack_released1_port1 = _atom_offset_wait_ackrel1_port1_ack_released1_port1,
+    atom_offset_continue_wait_ackrel1_port1_wait_ackrel1_port1 = _atom_offset_continue_wait_ackrel1_port1_wait_ackrel1_port1,
+    atom_offset_skip_port1_from_ackrel1_end_atom = _atom_offset_skip_port1_from_ackrel1_end_atom,
+    atom_offset_wait_ack2_port1_ack2_received_port1 = _atom_offset_wait_ack2_port1_ack2_received_port1,
+    atom_offset_continue_wait_ack2_port1_wait_ack2_port1 = _atom_offset_continue_wait_ack2_port1_wait_ack2_port1,
+    atom_offset_skip_port1_from_ack2_end_atom = _atom_offset_skip_port1_from_ack2_end_atom,
+    atom_offset_wait_ackrel2_port1_ack_released2_port1 = _atom_offset_wait_ackrel2_port1_ack_released2_port1,
+    atom_offset_continue_wait_ackrel2_port1_wait_ackrel2_port1 = _atom_offset_continue_wait_ackrel2_port1_wait_ackrel2_port1,
+    atom_offset_skip_port1_from_ackrel2_end_atom = _atom_offset_skip_port1_from_ackrel2_end_atom,
+    atom_offset_wait_ack3_port1_ack3_received_port1 = _atom_offset_wait_ack3_port1_ack3_received_port1,
+    atom_offset_continue_wait_ack3_port1_wait_ack3_port1 = _atom_offset_continue_wait_ack3_port1_wait_ack3_port1,
+    atom_offset_skip_port1_from_ack3_end_atom = _atom_offset_skip_port1_from_ack3_end_atom,
+    atom_offset_wait_ackrel3_port1_ack_released3_port1 = _atom_offset_wait_ackrel3_port1_ack_released3_port1,
+    atom_offset_continue_wait_ackrel3_port1_wait_ackrel3_port1 = _atom_offset_continue_wait_ackrel3_port1_wait_ackrel3_port1,
+    atom_offset_skip_port1_from_ackrel3_end_atom = _atom_offset_skip_port1_from_ackrel3_end_atom,
+    atom_offset_wait_rx4_port1_rx4_received_port1 = _atom_offset_wait_rx4_port1_rx4_received_port1,
+    atom_offset_continue_wait_rx4_port1_wait_rx4_port1 = _atom_offset_continue_wait_rx4_port1_wait_rx4_port1,
+    atom_offset_skip_port1_from_rx4_end_atom = _atom_offset_skip_port1_from_rx4_end_atom,
+};
+
+// --- atom: pad_apply_input (60 words) ---
+
+#define _atom_offset_dpad_left_exit_dpad_left         6
+#define _atom_offset_dpad_right_exit_dpad_right       6
+#define _atom_offset_dead_zone_low_check_dead_low_active  8
+#define _atom_offset_dead_zone_high_check_dead_high_active  15
+#define _atom_offset_dead_zone_skip_exit_stick        23
+#define _atom_offset_end_low_exit_stick               11
+
+enum {
+    atom_offset_dpad_left_exit_dpad_left = _atom_offset_dpad_left_exit_dpad_left,
+    atom_offset_dpad_right_exit_dpad_right = _atom_offset_dpad_right_exit_dpad_right,
+    atom_offset_dead_zone_low_check_dead_low_active = _atom_offset_dead_zone_low_check_dead_low_active,
+    atom_offset_dead_zone_high_check_dead_high_active = _atom_offset_dead_zone_high_check_dead_high_active,
+    atom_offset_dead_zone_skip_exit_stick = _atom_offset_dead_zone_skip_exit_stick,
+    atom_offset_end_low_exit_stick = _atom_offset_end_low_exit_stick,
+};
+
+// --- atom: pad_sio_diag_byte_exchange (53 words) ---
+
+#define _atom_offset_diag_wait_ack0_diag_ack0_done    5
+#define _atom_offset_diag_wait_ack0_diag_wait_ack0    -6
+#define _atom_offset_diag_timeout_ack0_diag_timeout   24
+#define _atom_offset_diag_wait_ack1_diag_ack1_done    5
+#define _atom_offset_diag_wait_ack1_diag_wait_ack1    -6
+#define _atom_offset_diag_timeout_ack1_diag_timeout   11
+#define _atom_offset_diag_success_diag_done           7
+
+enum {
+    atom_offset_diag_wait_ack0_diag_ack0_done = _atom_offset_diag_wait_ack0_diag_ack0_done,
+    atom_offset_diag_wait_ack0_diag_wait_ack0 = _atom_offset_diag_wait_ack0_diag_wait_ack0,
+    atom_offset_diag_timeout_ack0_diag_timeout = _atom_offset_diag_timeout_ack0_diag_timeout,
+    atom_offset_diag_wait_ack1_diag_ack1_done = _atom_offset_diag_wait_ack1_diag_ack1_done,
+    atom_offset_diag_wait_ack1_diag_wait_ack1 = _atom_offset_diag_wait_ack1_diag_wait_ack1,
+    atom_offset_diag_timeout_ack1_diag_timeout = _atom_offset_diag_timeout_ack1_diag_timeout,
+    atom_offset_diag_success_diag_done = _atom_offset_diag_success_diag_done,
+};
+
 #pragma endregion hello_joypad.tape
 
