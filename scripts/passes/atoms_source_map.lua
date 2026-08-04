@@ -1,8 +1,8 @@
 --- passes/atoms_source_map.lua — Per-.word source-line map emitter for tape atoms.
 ---
 --- Writer: this pass, given `atom.paths` (the per-atom mutable surface owned by `emission_model`). Readers:
---- `passes/dwarf_injection.lua` (synthesizes DW_TAG_inlined_subroutine + per-word line program rows) and the gdb-runtime
---- wrapper at `scripts/gdb/gdb_tape_atoms.gdb` (loads the source map via `source <path>`).
+--- `passes/dwarf_injection.lua` (synthesizes DW_TAG_inlined_subroutine + per-word line program rows) and 
+--- the gdb-runtime wrapper at `scripts/gdb/gdb_tape_atoms.gdb` (loads the source map via `source <path>`).
 ---
 --- Inputs from `atom.paths`: the ordered `items` stream, dense `word_events`, `invocations` views. Outputs: 
 ---  one `WORD N LINE L TEXT T` line per emitted `.word`, plus the per-word provenance form that DWARF synthesis consumes.
@@ -28,7 +28,6 @@
 ---   ...
 ---   ENDATOM
 ---   ```
----
 --- Marker records are zero-width in `atom.paths.items`, so they emit no WORD rows in the dense word view.
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -39,8 +38,8 @@
 -- (works both standalone + when require'd). `duffle_paths.lua` sets package.path then returns `require("duffle")` 
 -- at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle    = dofile(_bootstrap_dir .. "../duffle_paths.lua")
-local elf_dwarf = require("elf_dwarf")
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local elf_dwarf      = require("elf_dwarf")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -69,8 +68,8 @@ local FORMAT_VERSION = 1
 --- @param atom table
 --- @return table[], integer
 local function canonical_word_entries(atom)
-	local paths = atom.paths or {}
-	local events = paths.word_events or {}
+	local paths      = atom.paths or {}
+	local events     = paths.word_events or {}
 	local word_items = {}
 	for _, item in ipairs(paths.items or {}) do
 		if item.kind == "word" then word_items[#word_items + 1] = item end
@@ -95,41 +94,38 @@ end
 --- Render one atom's provenance stanza. Format 1 line shapes:
 ---   `WORD N  CALL <src-path>:<src-line>  MACRO <name> "<def-path>:<def-line>" BODY <line>` (component invocation)
 ---   `WORD N  CALL <src-path>:<src-line>  RAW` (raw `.word` outside any mac_* component)
---- Component identity comes from the outermost invocation record; the count-table lookup confirms the component was
---- declared in `corpus.word_counts` (populated by word_count_eval + components passes).
---- @param src table
+--- Component identity comes from the outermost invocation record; the count-table lookup confirms the component was declared in `corpus.word_counts` 
+--- (populated by word_count_eval + components passes).
+--- @param src  table
 --- @param atom table
---- @param wc table -- identity alias of corpus.word_counts
+--- @param wc   table -- identity alias of corpus.word_counts
 --- @return string[], integer
 local function emit_provenance_stanza(src, atom, wc)
-	local lines    = {}
-	local rel_path = src.path:gsub("\\\\", "/")
+	local lines          = {}
+	local rel_path       = src.path:gsub("\\\\", "/")
 	local entries, total = canonical_word_entries(atom)
-
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
 
 	for _, entry in ipairs(entries) do
-		local inv = entry.invocation
+		local inv         = entry.invocation
 		local macro_count = inv and wc["mac_" .. inv.component_name]
 		if inv and macro_count ~= nil then
-			lines[#lines + 1] = string.format(
-				'WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d',
-				entry.pos, rel_path, entry.line, inv.component_name,
-				inv.def_path or "", inv.def_line or 0, entry.body_line)
+			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d'
+				, entry.pos, rel_path, entry.line, inv.component_name
+				, inv.def_path or "", inv.def_line or 0, entry.body_line)
 		else
-			lines[#lines + 1] = string.format(
-				"WORD %d  CALL %s:%d  RAW", entry.pos, rel_path, entry.line)
+			lines[#lines + 1] = string.format("WORD %d  CALL %s:%d  RAW", entry.pos, rel_path, entry.line)
 		end
 	end
 
-	lines[1] = lines[1]:gsub(" 0$", " " .. tostring(total))
+	lines[1]          = lines[1]:gsub(" 0$", " " .. tostring(total))
 	lines[#lines + 1] = "ENDATOM"
 	return lines, total
 end
 
 --- Render the full provenance file content for one source.
 --- @param src table
---- @param wc table
+--- @param wc  table
 --- @return string
 local function render_provenance(src, wc)
 	local lines = {}
@@ -162,8 +158,8 @@ end
 --- @param wc     table
 --- @return string[], integer
 local function emit_atom_stanza(src, atom)
-	local lines    = {}
-	local rel_path = src.path:gsub("\\\\", "/")
+	local lines          = {}
+	local rel_path       = src.path:gsub("\\\\", "/")
 	local entries, total = canonical_word_entries(atom)
 
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
@@ -179,10 +175,10 @@ end
 --- Render the full source map file content for one source (one .atoms.sourcemap.txt per source). Mirrors offsets.lua's
 --- `project_atoms` shape: scan.atoms + scan.raw_atoms, no kind filter.
 --- @param src table
---- @param wc table
+--- @param wc  table
 --- @return string
 local function render_source_map(src)
-	local lines = {}
+	local lines       = {}
 	lines[#lines + 1] = "# FORMAT_VERSION " .. FORMAT_VERSION
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
 
@@ -216,16 +212,16 @@ end
 --- @param ctx PassCtx
 --- @return table[] -- list of {idx, name, src_path, file_base, addr, size_bytes, words, entries}
 local function build_atom_table(ctx)
-	local addrs = elf_dwarf.read_nm(ctx.flags.elf_path)
-	local corpus = ctx.shared and ctx.shared.corpus
+	local addrs   = elf_dwarf.read_nm(ctx.flags.elf_path)
+	local corpus  = ctx.shared and ctx.shared.corpus
 	local matched = {}
 
 	for _, src in ipairs(corpus.source_order or {}) do
 		local file_base = src.path:match("([^/\\\\]+)$") or src.path
 		local function append(atom)
 			if not atom.paths then return end
-			local name = atom.raw_name or atom.name
-			local info = addrs[name]
+			local  name = atom.raw_name or atom.name
+			local  info = addrs[name]
 			if not info then return end
 			local entries, total = canonical_word_entries(atom)
 			matched[#matched + 1] = {
@@ -248,9 +244,10 @@ local function build_atom_table(ctx)
 	return matched
 end
 
---- Append the 9 gdb command definitions to `lines`. Pure gdb scripting — addresses come from `nm`, the convenience
---- vars set in `emit_gdb_runtime` provide printf args, and each command is a static sequence of `printf` / `tbreak` /
---- `if ... end` blocks. The Lua pass emits N atoms' worth of lines; runtime iteration is gdb's job.
+--- Append the 9 gdb command definitions to `lines`. Pure gdb scripting — addresses come from `nm`,
+--- the convenience vars set in `emit_gdb_runtime` provide printf args, and 
+--- each command is a static sequence of `printf` / `tbreak` / `if ... end` blocks.
+--- The Lua pass emits N atoms' worth of lines; runtime iteration is gdb's job.
 ---
 --- Why hardcoded per-atom: gdb's `$` substitution doesn't concat inside var names — `$__atom_name_$__i` in a `while`
 --- loop resolves to one literal identifier, not `name_i`. Compile-time emission is the only path.
@@ -395,8 +392,7 @@ local function append_gdb_commands(lines, matched)
 end
 
 --- Emit the gdb-runtime file (post-link). Pure gdb scripting — addresses come from `mipsel-none-elf-nm -S`, get embedded
---- in `<ctx.out_root>/gdb_tape_atoms_runtime.gdb`, and load via `set $var = ...` + `define ... end` blocks at gdb
---- source-time.
+--- in `<ctx.out_root>/gdb_tape_atoms_runtime.gdb`, and load via `set $var = ...` + `define ... end` blocks at gdb source-time.
 --- @param ctx PassCtx
 local function emit_gdb_runtime(ctx)
 	if not (ctx.flags and ctx.flags.gdb_runtime) then return end

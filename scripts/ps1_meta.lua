@@ -16,7 +16,7 @@
 
 -- Bootstrap: load `duffle_paths.lua` via this script's own path.
 -- Use `arg[0]` when this file is the entry script (`arg[0]` ends in "ps1_meta.lua");
--- fall back to `debug.getinfo(1, "S").source` when this file is being dofile()'d or require()'d (in which case `arg[0]` is the *caller's* path, not ours).
+-- fall back to `debug.getinfo(1, "S").source` when this file is being dofile()'d or require()'d (in which case `arg[0]` is the *caller's* path).
 -- That single statement: (a) sets `package.path` + `package.cpath`, (b) at the bottom returns `require("duffle")`.
 -- So the dofile's return value is the duffle module.
 local _is_entry_script = arg and arg[0] and arg[0]:match("ps1_meta%.lua$") ~= nil
@@ -54,45 +54,44 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class PassDescriptor
---- @field module string       -- module name passed to require()
+--- @field module string       -- Module name passed to require()
 --- @field kind   string       -- "shared" | "header-output" | "validation" | "diagnostic" | "report"
 ---                            -- Report severity is independent from process exit policy (see PASS_KIND_STOP_ON_ERROR).
---- @field deps   string[]     -- names of upstream passes
---- @field groups string[]?    -- OPTIONAL build-phase groups this pass is a root of
----                            -- (e.g. { "pre-link" }, { "post-link" }); absent ⇒ dependency-only
+--- @field deps   string[]     -- Names of upstream passes
+--- @field groups string[]?    -- OPTIONAL build-phase groups this pass is a root of (e.g. { "pre-link" }, { "post-link" }); absent ⇒ dependency-only
 
 --- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
+--- @field path     string  -- Absolute path to the source file
+--- @field text     string  -- Full source text
+--- @field dir      string  -- Directory containing the source
+--- @field basename string  -- Filename without extension
 
 --- @class PassCtx
---- @field metadata_path      string                 -- path to word_count.metadata.h
---- @field shared             table                  -- cross-pass shared state
---- @field shared.corpus      table                  -- canonical authored-source/project projection
---- @field out_root           string                 -- output root (e.g. "build/gen")
+--- @field metadata_path      string                 -- Path to word_count.metadata.h
+--- @field shared             table                  -- Cross-pass shared state
+--- @field shared.corpus      table                  -- Authored-source/project projection
+--- @field out_root           string                 -- Output root (e.g. "build/gen")
 --- @field project_root       string                 -- PS1 repository root
 --- @field flags              table                  -- CLI flags + per-pass stash
---- @field verbose            boolean                -- if true, log diagnostic info
+--- @field verbose            boolean                -- If true, log diagnostic info
 
 --- @class Finding
---- @field line integer  -- source line (or 0 for pass-level)
---- @field msg  string   -- finding message
+--- @field line integer  -- Source line (or 0 for pass-level)
+--- @field msg  string   -- Finding message
 
 --- @class PassResult
---- @field outputs  PassOutputEntry[] -- emitted file paths
---- @field errors   Finding[]         -- build-stops (per-pass kind policy)
---- @field warnings Finding[]         -- informational
+--- @field outputs  PassOutputEntry[] -- Emitted file paths
+--- @field errors   Finding[]         -- Build-stops (per-pass kind policy)
+--- @field warnings Finding[]         -- Informational
 
 --- @class ParsedArgs
---- @field requested_set string[]   -- pass names to run (explicit --all expanded)
---- @field sources       string[]   -- exact --source values, retained in CLI order
+--- @field requested_set string[]   -- Pass names to run (explicit --all expanded)
+--- @field sources       string[]   -- Exact --source values, retained in CLI order
 --- @field unity_root    string|nil -- --unity-root value; mutually exclusive with sources
 --- @field metadata      string     -- --metadata value
 --- @field out_root      string     -- --out-root value (default "build/gen")
 --- @field project_root  string     -- PS1 repository root (derived from metadata by default)
---- @field verbose       boolean    -- if true, log diagnostic info
+--- @field verbose       boolean    -- If true, log diagnostic info
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PASSES Table
@@ -138,7 +137,7 @@ local PASSES = {
 	["static-analysis"] = {
 		module = "passes.static_analysis",
 		-- "diagnostic" — every `error`/`warning` finding is written to the report file;
-		-- the orchestrator does NOT exit non-zero on these findings (see PASS_KIND_STOP_ON_ERROR).
+		-- The orchestrator does NOT exit non-zero on these findings (see PASS_KIND_STOP_ON_ERROR).
 		-- Report severity is independent from process exit policy.
 		kind   = "diagnostic",
 		deps   = {"scan-source", "word-counts", "components", "emission-model"},
@@ -163,12 +162,12 @@ local PASSES = {
 }
 
 -- ────────────────────────────────────────────────────────────────────────────
--- Phase-root selection: derive the sorted set of roots belonging to a named build-phase group, then append them to `args.requested_set`.
+-- Phase-root selection: Derive the sorted set of roots belonging to a named build-phase group, then append them to `args.requested_set`.
 -- topo_sort closes the transitive deps from there; dispatch_passes runs every resolved pass without phase-filtering.
 -- ────────────────────────────────────────────────────────────────────────────
 
---- @param group_name string  -- the build-phase group ("pre-link" | "post-link")
---- @return string[]          -- sorted root pass names belonging to that group
+--- @param group_name string  -- Build-phase group ("pre-link" | "post-link")
+--- @return string[]          -- Sorted root pass names belonging to that group
 local function roots_for_group(group_name)
 	local names = {}
 	for name, pass in pairs(PASSES) do
@@ -206,7 +205,7 @@ end
 -- Report severity is independent from process exit policy.
 -- A "diagnostic" pass still writes every `error`/`warning` finding into its report file,
 -- but `report_validation_errors` returns early for non-stopping kinds, so nothing is printed to stderr and the orchestrator does not exit non-zero.
--- Adding a new pass kind requires listing it here explicitly; an unknown kind must not silently fall back to "true".
+-- Adding a new pass kind requires listing it here explicitly; An unknown kind must not silently fall back to "true".
 local PASS_KIND_STOP_ON_ERROR = {
 	["shared"]        = false,
 	["header-output"] = true,
@@ -216,8 +215,7 @@ local PASS_KIND_STOP_ON_ERROR = {
 }
 
 -- Closed set of CLI flags -> pass names.
--- Per-pass flags (e.g. --word-counts) live here; phase flags (--pre-link, --post-link, --all)
--- live in FLAG_HANDLERS because they own side effects or invoke group-derivation logic.
+-- Per-pass flags (e.g. --word-counts); phase flags (--pre-link, --post-link, --all) are within FLAG_HANDLERS because they own side effects or invoke group-derivation logic.
 -- dwarf-injection is *also* a per-pass opt-in flag, but its selection + opt-in state are both owned by the explicit FLAG_HANDLERS entry below
 -- (it sets args.flags.dwarf_injection and appends "dwarf-injection" to requested_set), so it is intentionally absent from this table.
 local PASS_FLAG_TO_NAME = {
@@ -246,7 +244,6 @@ end
 
 -- Per-flag handlers. Each handler takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it). 
 -- Returning nil + os.exit() handles termination flags (--help). 
-
 local FLAG_HANDLERS = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -317,8 +314,7 @@ local function require_flag_value(argv, arg_idx, flag)
 	local next_known = type(value) == "string"
 		and (FLAG_HANDLERS[value] ~= nil or PASS_FLAG_TO_NAME[value] ~= nil)
 	if value == nil or next_known then
-		io.stderr:write("ps1_meta: " .. flag .. " requires "
-			.. FLAG_VALUE_NAMES[flag] .. "\n")
+		io.stderr:write("ps1_meta: " .. flag .. " requires " .. FLAG_VALUE_NAMES[flag] .. "\n")
 		os.exit(EXIT_INTERNAL_ERROR)
 	end
 	return value, arg_idx + 1
@@ -328,12 +324,10 @@ end
 -- Termination flags like --help call os.exit() instead.
 -- Populated AFTER print_help so the --help handler can reference it as an upvalue (Lua resolves locals at closure-call time, 
 -- but if the closure is defined before the local, it falls back to _G). 
-FLAG_HANDLERS["--help"] = function(args)
-	print_help()
-	os.exit(0)
-end
 
-FLAG_HANDLERS["--verbose"] = function(args) args.verbose = true end
+FLAG_HANDLERS["--help"]    = function(args) print_help(); os.exit(0) end
+FLAG_HANDLERS["--verbose"] = function(args) args.verbose = true      end
+
 FLAG_HANDLERS["--source"] = function(args, argv, arg_idx)
 	local value, value_idx = require_flag_value(argv, arg_idx, "--source")
 	args.sources[#args.sources + 1] = value
@@ -490,14 +484,13 @@ end
 --- @param args ParsedArgs
 --- @return PassCtx
 local function build_ctx(args)
-	local normalized_project_root = duffle.normalize_path(args.project_root)
-	local project_root            = normalized_project_root
+	local normalized_project_root  = duffle.normalize_path(args.project_root)
+	local project_root             = normalized_project_root
 	local project_root_is_absolute = normalized_project_root:match("^%a:/")
 		or normalized_project_root:sub(1, 2) == "//"
 		or normalized_project_root:sub(1, 1) == "/"
 	if not project_root_is_absolute then
-		-- canonical_path_key validates ordinary relative paths and rejects
-		-- drive-relative paths before the absolute-path rewrite is performed.
+		-- canonical_path_key validates ordinary relative paths and rejects drive-relative paths before the absolute-path rewrite is performed.
 		duffle.canonical_path_key(normalized_project_root)
 		project_root = duffle.normalize_path(duffle.to_absolute_path(normalized_project_root))
 	else
@@ -511,8 +504,7 @@ local function build_ctx(args)
 			project_root = project_root,
 		})
 		if not ok_resolve then
-			io.stderr:write("ps1_meta: cannot resolve --unity-root "
-				.. tostring(args.unity_root) .. ": " .. tostring(resolved) .. "\n")
+			io.stderr:write("ps1_meta: cannot resolve --unity-root " .. tostring(args.unity_root) .. ": " .. tostring(resolved) .. "\n")
 			os.exit(EXIT_INTERNAL_ERROR)
 		end
 		resolution = resolved
@@ -528,8 +520,7 @@ local function build_ctx(args)
 			local path = duffle.normalize_path(input_path)
 			local key_ok, key_or_error = pcall(duffle.canonical_path_key, path)
 			if not key_ok then
-				error("ps1_meta: invalid --source " .. input_path .. ": "
-					.. tostring(key_or_error), 0)
+				error("ps1_meta: invalid --source " .. input_path .. ": " .. tostring(key_or_error), 0)
 			end
 			local file = io.open(path, "r")
 			if not file then
@@ -627,9 +618,7 @@ local function topo_sort(passes, requested_set)
 		changed = false
 		for name, _ in pairs(needed) do
 			local pass = passes[name]
-			if not pass then
-				error("unknown pass '" .. name .. "' requested")
-			end
+			if not pass then error("unknown pass '" .. name .. "' requested") end
 			for _, dep in ipairs(pass.deps) do
 				if not needed[dep] then
 					needed[dep] = true

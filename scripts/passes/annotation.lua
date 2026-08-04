@@ -22,11 +22,11 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
---- @field scan     table   -- pre-scanned SourceScan payload (from duffle.scan_source)
+--- @field path     string  -- Absolute path to the source file
+--- @field text     string  -- Full source text
+--- @field dir      string  -- Directory containing the source
+--- @field basename string  -- Filename without extension
+--- @field scan     table   -- Pre-scanned SourceScan payload (from duffle.scan_source)
 
 --- @class PassCtx
 --- @field sources            SourceFile[]
@@ -45,28 +45,28 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- @field warnings table[]
 
 --- @class AtomAnnotation
---- @field line    integer       -- source line of the atom_info call
---- @field macro   string        -- the macro name (always "atom_info" in the new shape)
---- @field name    string        -- the atom name
---- @field kind    string        -- always "info"
+--- @field line    integer       -- Source line of the atom_info call
+--- @field macro   string        -- Macro name (always "atom_info" in the new shape)
+--- @field name    string        -- Atom name
+--- @field kind    string        -- Always "info"
 --- @field binds   string|nil    -- Binds_X name if any
 --- @field reads   string[]      -- R_* names (read targets)
 --- @field writes  string[]      -- R_* names (write targets)
---- @field errors  string[]|nil  -- parse-time errors from scan_source (atom_info body malformed)
+--- @field errors  string[]|nil  -- Parse-time errors from scan_source (atom_info body malformed)
 
---- @class DebugSkipMarker  -- sub-shape of scan_source.lua's @class DebugSkipMarker
---- @field marker_kind    string                 -- exact marker ident read from source. Only "atom_dbg_skip" (bare) is positive.
+--- @class DebugSkipMarker  -- Sub-shape of scan_source.lua's @class DebugSkipMarker
+--- @field marker_kind    string                 -- Exact marker ident read from source. Only "atom_dbg_skip" (bare) is positive.
 --- @field marker_line    integer
---- @field args           string|nil             -- trimmed text inside the parens (nil when has_parens is false)
+--- @field args           string|nil             -- Trimmed text inside the parens (nil when has_parens is false)
 --- @field has_parens     boolean
 --- @field is_bare        boolean                -- true iff marker_kind == "atom_dbg_skip" AND has_parens == false (the only positive form)
 --- @field pending        boolean                -- true while awaiting the following declaration
---- @field superseded_by_marker_line integer|nil -- set on a marker that was bumped out of the pending slot
+--- @field superseded_by_marker_line integer|nil -- Set on a marker that was bumped out of the pending slot
 --- @field target_kind    string|nil             -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
 
 --- @class Finding
---- @field line integer -- source line (or 0 for pass-level)
---- @field msg  string  -- finding message
+--- @field line integer -- Source line (or 0 for pass-level)
+--- @field msg  string  -- Finding message
 
 --- @class Findings
 --- @field errors   Finding[]
@@ -74,14 +74,14 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- @field info     Finding[]
 
 --- @class PipeCtx
---- @field atom_index     table<string, AtomAnnotation> -- name -> AtomAnnotation (only kind=="atom")
---- @field binds_index    table<string, BindsStruct>    -- name -> BindsStruct
---- @field annot_counts   table<string, integer>        -- name -> annotation count (for unique_annotation check)
---- @field types          table<string, RegTypeDefault> -- from scan_source
---- @field atom_views     table<string, AtomViewEntry>  -- from scan_source
---- @field seen_defaults  table<string, integer>        -- duplicate atom_dbg_reg_default detection
+--- @field atom_index     table<string, AtomAnnotation> -- Name -> AtomAnnotation (only kind=="atom")
+--- @field binds_index    table<string, BindsStruct>    -- Name -> BindsStruct
+--- @field annot_counts   table<string, integer>        -- Name -> annotation count (for unique_annotation check)
+--- @field types          table<string, RegTypeDefault> -- From scan_source
+--- @field atom_views     table<string, AtomViewEntry>  -- From scan_source
+--- @field seen_defaults  table<string, integer>        -- Duplicate atom_dbg_reg_default detection
 --- @field seen_field     table<string, integer>        -- Binds_* -> count of fields (set/checked by check_binds_no_duplicate_fields)
---- @field _scan          SourceScan                    -- full scan payload (typed-view sub-calls live here) 
+--- @field _scan          SourceScan                    -- Full scan payload (typed-view sub-calls live here) 
 
 --- @class AnnotatedResult
 --- @field atoms    AtomEntry[]
@@ -95,11 +95,10 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- ════════════════════════════════════════════════════════════════════════════
 -- Per-check functions (the CHECK_RULES table's payload)
 -- ════════════════════════════════════════════════════════════════════════════
---
 --- The dispatcher in `validate()` routes each result by convention: existence checks write errors[] and shape checks write warnings[].
 --- `macro_word_drift` writes errors[] for missing or mismatched metadata and info[] for a match.
 
---- Check: every annotated atom must have a matching MipsAtom_(name) declaration.
+--- Check: Every annotated atom must have a matching MipsAtom_(name) declaration.
 --- @param a        AtomAnnotation
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
@@ -112,8 +111,8 @@ local function check_atom_decl_exists(a, pipe_ctx, findings)
 	end
 end
 
---- Check: every atom may have AT MOST ONE annotation.
---- Post-loop: needs full-corpus `annot_counts` from pipe_ctx.
+--- Check:     Every atom may have AT MOST ONE annotation.
+--- Post-loop: Needs full-corpus `annot_counts` from pipe_ctx.
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
 local function check_unique_annotation(pipe_ctx, findings)
@@ -146,7 +145,7 @@ end
 --- Check: TAPE_WORDS(mac_X, N) ↔ WORD_COUNT(mac_X, N) drift.
 --- Three outcomes: missing (error), mismatch (error), match (info).
 --- @param m  MacroEntry
---- @param wc table<string, integer> -- the shared word-count table (from ctx.shared.word_counts)
+--- @param wc table<string, integer> -- Shared word-count table (from ctx.shared.word_counts)
 --- @param findings Findings
 local function check_macro_word_drift(m, wc, findings)
 	local  declared = wc[m.name]
@@ -304,7 +303,7 @@ local function check_binds_no_duplicate_fields(_src, pipe_ctx, findings)
 	end
 end
 
--- Check: debug-skip markers must satisfy shape + placement constraints.
+-- Check: Debug-skip markers must satisfy shape + placement constraints.
 --- Walks the priority list once; each marker produces at most one error, so one source defect yields one finding.
 --- Priority order (first defect wins):
 ---   1. marker_kind ~= "atom_dbg_skip" -> legacy/renamed spelling (use `atom_dbg_skip`)
@@ -315,12 +314,11 @@ end
 ---   6. unsupported target_kind     -> marker precedes an unrelated declaration
 --- Valid markers stamp `debug_skip` on whole-atom, bare-component, and proc-component declaration records in scan_source.lua.
 --- @param marker DebugSkipMarker
---- @param _pipe_ctx PipeCtx     -- unused today; kept for plex-shape consistency with per_annot
+--- @param _pipe_ctx PipeCtx     -- Unused; kept for consistency with per_annot // TODO(Ed): Remove?
 --- @param findings Findings
 local function check_skip_marker(marker, _pipe_ctx, findings)
 	local kind = marker.marker_kind
 	local line = marker.marker_line
-
 	-- Left `scan.debug_skip_markers` with production records for `atom_dbg_skip` only; other identifiers take the walker's unrelated branch.
 
 	if marker.has_parens then
@@ -371,8 +369,6 @@ local function check_skip_marker(marker, _pipe_ctx, findings)
 end
 
 --- Warn when a source references an unregistered alias.
----
---- R_TapePtr, R_AtomJmp, R_PrimCursor, R_FaceCursor, R_VertBase, and R_OtBase opt in through `#define atom_reg` in lottes_tape.h.
 --- When a source uses an unregistered R_X, this check emits one pass-level info entry for that source and directs C-ABI register names to explicit alias registration.
 --- @param _src     SourceFile
 --- @param pipe_ctx PipeCtx
@@ -426,8 +422,7 @@ local CHECK_RULES = {
 -- ════════════════════════════════════════════════════════════════════════════
 -- Validation
 -- ════════════════════════════════════════════════════════════════════════════
---
--- Pure check: read from src.scan, run validations, emit findings. The scan was done once upstream.
+-- Pure check: Read from src.scan, run validations, emit findings. The scan was done once upstream.
 
 --- Builds one pass-wide pipe_ctx from the merged `corpus.*` registries and source-ordered `corpus.atom_infos`; per-source declarations and bodies remain in `src.scan`.
 --- The module ownership contract above requires callers to construct `ctx.shared.corpus` through `build_ctx`; the error message below enforces that gate.
@@ -473,7 +468,7 @@ end
 --- Validate one source against its pre-scanned SourceScan payload + the corpus-wide pipe_ctx.
 --- @param ctx             PassCtx
 --- @param src             SourceFile
---- @param corpus_pipe_ctx PipeCtx|nil  -- built once per pass from corpus registries; nil builds the same projection here.
+--- @param corpus_pipe_ctx PipeCtx|nil  -- Built once per pass from corpus registries; nil builds the same projection here.
 --- @return AnnotatedResult
 local function validate(ctx, src, corpus_pipe_ctx)
 	corpus_pipe_ctx = corpus_pipe_ctx or build_corpus_pipe_ctx(ctx)
@@ -503,14 +498,8 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	end
 
 	-- Build a per-source pipe_ctx: shared lookups come from `corpus_pipe_ctx`, while declarations, bodies, types, views, defaults, and occurrences come from `src.scan`.
-	local seen_defaults = {}
-	for reg, _ in pairs(scan.types or {}) do
-		seen_defaults[reg] = (seen_defaults[reg] or 0) + 1
-	end
-	local atom_infos_list = {}
-	for _, ai in ipairs(scan.atom_infos or {}) do
-		atom_infos_list[#atom_infos_list + 1] = ai
-	end
+	local seen_defaults   = {}; for reg, _ in pairs (scan.types      or {}) do seen_defaults[reg] = (seen_defaults[reg] or 0) + 1 end
+	local atom_infos_list = {}; for _, ai  in ipairs(scan.atom_infos or {}) do atom_infos_list[#atom_infos_list + 1] = ai         end
 
 	local pipe_ctx = {
 		atom_index               = {},

@@ -1,18 +1,12 @@
 --- duffle.lua — shared primitives + domain tables for the tape-atom metaprograms.
----
---- One ownership statement, then the rest is signal:
----   * **Character classification** (`is_space`, `is_alpha`, `is_alnum`, `is_digit`, plus the byte-fast `_byte` variants).
----   * **String / path primitives** (`trim`, `dirname`, `basename_no_ext`, `normalize_path`, `canonical_path_key`, `find_byte`).
----   * **I/O primitives** (`read_file`, `write_file`, `ensure_dir`).
----   * **Corpus resolution** (`parse_direct_quoted_includes`, `resolve_source_corpus`).
----   * **C-language scanner** (`skip_ws_and_cmt`, `skip_str_or_cmt`, `read_ident`, `read_parens`, `read_braces`, `read_brackets`,
----     `read_balanced`, `scan_to_char`, `split_top_level_commas`).
----   * **Word-count loader** (`load_word_counts` for `WORD_COUNT(...)` metadata files).
----   * **Line lookup** (`LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping).
----   * **Domain tables** (`TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`,
----     `INSTRUCTION_LATENCY`).
----
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex.
+---   * Character classification: `is_space`, `is_alpha`, `is_alnum`, `is_digit`, plus the byte-fast `_byte` variants.
+---   * String / path primitives: `trim`, `dirname`, `basename_no_ext`, `normalize_path`, `canonical_path_key`, `find_byte`.
+---   * I/O primitives:           `read_file`, `write_file`, `ensure_dir`.
+---   * Corpus resolution:        `parse_direct_quoted_includes`, `resolve_source_corpus`.
+---   * C-language scanner:       `skip_ws_and_cmt`, `skip_str_or_cmt`, `read_ident`, `read_parens`, `read_braces`, `read_brackets`, `read_balanced`, `scan_to_char`, `split_top_level_commas`.
+---   * Word-count loader:        `load_word_counts` for `WORD_COUNT(...)` metadata files.
+---   * Line lookup:              `LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping.
+---   * Domain tables:            `TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`, `INSTRUCTION_LATENCY`.
 
 local M = {}
 
@@ -24,7 +18,7 @@ local lfs = require("lfs")
 -- Cross-file type aliases
 -- ════════════════════════════════════════════════════════════════════════════
 
---- @alias Path        string   -- absolute or CWD-relative file path
+--- @alias Path        string   -- Absolute or CWD-relative file path
 --- @alias LineNum     integer  -- 1-indexed source line number
 --- @alias ByteOff     integer  -- 0-indexed byte offset within a source string
 --- @alias MacroName   string   -- lower_snake_case macro identifier (e.g. "mac_yield")
@@ -32,10 +26,10 @@ local lfs = require("lfs")
 --- @alias Severity    string   -- "error" | "warning" | "info"
 
 --- @class SourceFile
---- @field path     Path      -- absolute path to the source file
---- @field text     string    -- the full source text
---- @field dir      string    -- the directory containing the source
---- @field basename string    -- filename without extension
+--- @field path     Path      -- Absolute path to the source file
+--- @field text     string    -- Full source text
+--- @field dir      string    -- Directory containing the source
+--- @field basename string    -- Filename without extension
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ASCII byte constants
@@ -73,20 +67,12 @@ local BYTE_DIGIT_9 = 0x39       -- '9'
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section -1: Bootstrap (path-setup at module load)
 -- ════════════════════════════════════════════════════════════════════════════
---
--- Path setup runs through `scripts/duffle_paths.lua`, which derives the repo root from `debug.getinfo(1, "S").source`
--- (no subprocess, ~0ms) and then calls `require("duffle")`.
--- Entry and pass scripts load `duffle_paths.lua` first; a `find_repo_root` / `setup_package_path` defined here was dead code in practice.
--- `git rev-parse` costs ~100-180ms per subprocess spawn on Windows; `debug.getinfo` is <1ms, so we keep only the fast path.
---
--- To load `duffle.lua` outside `duffle_paths.lua`, set `package.path` manually before `require`.
--- See `docs/guide_metaprogram_ssdl.md` §"I/O primitives" for the pattern.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 0: LPeg patterns (compiled once at module load)
 -- ════════════════════════════════════════════════════════════════════════════
 --
--- LPeg is a required dependency (PEG library, no regex). It's loaded via `package.cpath` — `duffle_paths.lua` wires the path to `toolchain/lpeg/lpeg.dll`.
+-- LPeg is a required dependency (PEG library). It's loaded via `package.cpath` — `duffle_paths.lua` wires the path to `toolchain/lpeg/lpeg.dll`.
 -- LPeg handles the high-level scanner; the byte-by-byte helpers in Section 1 handle classification primitives that LPeg's CPython-level cost would dominate.
 --
 -- If the require fails, fail loud with an actionable message. The build script (`update_deps.ps1`) builds lpeg.dll into `toolchain/lpeg/`; run it when the dll is missing.
@@ -100,32 +86,26 @@ end
 local P, S, R = lpeg.P, lpeg.S, lpeg.R
 
 -- Character class patterns
-local alpha_pat  = R("AZ", "az") + P("_")
-local digit_pat  = R("09")
-local lpeg_alnum_pat  = alpha_pat + digit_pat
+local alpha_pat      = R("AZ", "az") + P("_")
+local digit_pat      = R("09")
+local lpeg_alnum_pat = alpha_pat + digit_pat
 
 -- Identifier: alpha followed by zero+ alnum. Capture as a string.
 local lpeg_alpha_pat = alpha_pat
 local lpeg_ident_pat = lpeg.C(alpha_pat * lpeg_alnum_pat^0)
 
--- String literal: "..." with backslash escapes.
-local lpeg_str_pat = P('"') * (P(1) - S('"\\') + P('\\') * P(1))^0 * P('"')
--- Char literal: '...' with backslash escapes.
-local lpeg_chr_pat = P("'") * (P(1) - S("'\\") + P('\\') * P(1))^0 * P("'")
--- Line comment: // ... to end-of-line.
-local lpeg_line_cmt_pat = P("//") * (P(1) - S("\n"))^0
--- Block comment: /* ... */ (no nesting per C standard).
-local lpeg_block_cmt_pat = P("/*") * (P(1) - P("*/"))^0 * P("*/")
--- String or comment (any of the four forms).
-local lpeg_str_or_cmt_pat = lpeg_str_pat + lpeg_chr_pat + lpeg_line_cmt_pat + lpeg_block_cmt_pat
+local lpeg_str_pat        = P('"') * (P(1) - S('"\\') + P('\\') * P(1))^0 * P('"') -- String literal: "..." with backslash escapes.
+local lpeg_chr_pat        = P("'") * (P(1) - S("'\\") + P('\\') * P(1))^0 * P("'") -- Char literal: '...' with backslash escapes.
+local lpeg_line_cmt_pat   = P("//") * (P(1) - S("\n"))^0                           -- Line comment: // ... to end-of-line.
+local lpeg_block_cmt_pat  = P("/*") * (P(1) - P("*/"))^0 * P("*/")                 -- Block comment: /* ... */ (no nesting per C standard).
+local lpeg_str_or_cmt_pat = lpeg_str_pat + lpeg_chr_pat + lpeg_line_cmt_pat + lpeg_block_cmt_pat -- String or comment (any of the four forms).
 
 -- Whitespace + comment skipper: zero+ (whitespace run | string | comment).
 local ws_pat              = S(" \t\n\r\v\f")
 local lpeg_ws_and_cmt_pat = (ws_pat + lpeg_str_or_cmt_pat)^0
 
 -- Generic "skip until target, but step over balanced groups" matcher.
--- Used by scan_to_char for non-ident / non-bracket chars.
--- We accept any single char except the target.
+-- Used by scan_to_char for non-ident / non-bracket chars. We accept any single char except the target.
 -- The balanced-group stepping is handled by the caller (via read_balanced).
 local lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  end
 
@@ -148,12 +128,10 @@ end
 
 -- Single digit.
 function M.is_digit_byte(b) return b and b >= BYTE_DIGIT_0 and b <= BYTE_DIGIT_9 end
-
 -- Letter OR digit OR underscore.
 function M.is_alnum_byte(b) return M.is_alpha_byte(b) or M.is_digit_byte(b) end
 
--- String-based wrappers (kept for callers that already have a single-char string;
--- the byte versions are what the hot loops should call).
+-- String-based wrappers (kept for callers that already have a single-char string; the byte versions are what the hot loops should call).
 function M.is_space(c)
 	if type(c) == "number" then return M.is_space_byte(c) end
 	return c == " "  or c == "\t" or c == "\n" or c == "\r" or c == "\v" or c == "\f"
@@ -184,8 +162,8 @@ end
 
 --- Linear-search for a single-byte target in a string.
 --- @param haystack string
---- @param target integer  -- byte value
---- @param start integer   -- optional 1-indexed start (default 1)
+--- @param target   integer  -- byte value
+--- @param start    integer  -- optional 1-indexed start (default 1)
 --- @return integer|nil
 function M.find_byte(haystack, target, start)
 	for pos = start or 1, #haystack do
@@ -309,7 +287,7 @@ local function absolute_normalized_path(path)
 end
 
 --- Return the normalized absolute, Windows-case-folded comparison key for a path.
---- -Ordinary relative paths resolve against the process cwd. Drive-relative paths are rejected because LuaFileSystem does not expose Windows per-drive current directories.
+--- Ordinary relative paths resolve against the process cwd. Drive-relative paths are rejected because LuaFileSystem does not expose Windows per-drive current directories.
 --- @param path Path
 --- @return string
 function M.canonical_path_key(path)
@@ -603,7 +581,7 @@ function M.parse_direct_quoted_includes(source_text)
 				pos = after
 			end
 		elseif byte == BYTE_DQUOTE or byte == BYTE_SQUOTE then
-			-- enter+leave the string literal in one skip; literal bodies cannot contain a directive regardless of what they look like.
+			-- enter + leave the string literal in one skip; literal bodies cannot contain a directive regardless of what they look like.
 			line_leading = false
 			local after  = M.skip_str_or_cmt(logical_text, pos)
 			pos          = (after > pos) and after or (pos + 1)
@@ -799,18 +777,17 @@ function M.resolve_source_corpus(options)
 	end
 
 	return {
-		unity_root     = root.path,
-		project_root   = project_root,
-		code_root      = code_root,
-		source_order   = source_order,
+		unity_root      = root.path,
+		project_root    = project_root,
+		code_root       = code_root,
+		source_order    = source_order,
 		sources_by_path = sources_by_path,
-		sources_by_dir = M.group_sources_by_dir(source_order),
-		resolver       = resolver,
+		sources_by_dir  = M.group_sources_by_dir(source_order),
+		resolver        = resolver,
 	}
 end
 
 -- Split a brace-body into top-level comma-separated tokens. Honors nested parens/braces/brackets and skips strings/comments.
---
 -- Splits at top-level NEWLINES and SEMICOLONS too, AND emits a token break after a top-level comment/string.
 -- Pure-comment / pure-string chunks contribute 0 words.
 function M.split_top_level_commas(body)
@@ -846,7 +823,7 @@ function M.split_top_level_commas(body)
 				if has_real_content(chunk) then
 					tokens[#tokens + 1] = chunk
 				elseif #tokens > 0 then
-					-- Pure comment/string chunk at top level.
+					-- comment/string chunk at top level.
 					-- Append it to the LAST token so emit-context callers (components.lua build_component_lines) can convert
 					-- `// trailing comment` to `/* */` and emit it with the macro body.
 					-- count_token_words only inspects the leading ident, so a trailing comment does not affect the count.
@@ -920,8 +897,7 @@ function M.tokenize_body(body)
 		while scan <= len do
 			local c = body:byte(scan)
 			-- Terminator bytes (delimit a token at the top level): ',' = 0x2C, '\n' = 0x0A, ';' = 0x3B.
-			-- These also appear as separators between argument lists inside the parens/braces/brackets,
-			-- so we stop the scan when we hit any of them.
+			-- These also appear as separators between argument lists inside the parens/braces/brackets, so we stop the scan when we hit any of them.
 			if     c == BYTE_COMMA   then break end
 			if     c == BYTE_NEWLINE then break end
 			if     c == BYTE_SEMI    then break end
@@ -966,7 +942,7 @@ function M.build_body_line_index(body)
 	local index = {}
 	local len   = #body
 	local newline_count = 0
-	for pos = 1, len do
+	for  pos = 1, len do
 		if pos > 1 then
 			index[pos] = newline_count + 1
 		end
@@ -1088,18 +1064,18 @@ M.GTE_COMMAND_ALIASES = {
 --   * "Store delays are counted in numbers of clock cycles (not in numbers of opcodes).
 --    For 3 cycle delay, one must usually insert 3 cached opcodes (or one uncached opcode)."
 --
--- Per PSX-SPX `docs/psx-spx/docs/gtepipelinetimings.md` (the per-instruction input-latch measurement, which is the same
--- phenomenon modeled from the command side), the values are:
---   rtps:  every data register, every control register (RT/TR/OFX/OFY/H/DQA/DQB)
---   rtpt:  same superset (rtpt reads V0..V2, the RT matrix, the TR vector, OFX/OFY, H, DQA, DQB)
---   nclip: SXY0, SXY1, SXY2 (no RT/TR/OFX inputs)
+-- Per PSX-SPX `docs/psx-spx/docs/gtepipelinetimings.md` (the per-instruction input-latch measurement, which is the same phenomenon modeled from the command side), 
+-- the values are:
+--   rtps:  every data register, every control register (RT / TR / OFX / OFY / H / DQA / DQB)
+--   rtpt:  same superset (rtpt reads V0..V2, the RT matrix, the TR vector, OFX / OFY, H, DQA, DQB)
+--   nclip: SXY0, SXY1, SXY2 (no RT / TR / OFX inputs)
 --   mvmva: variable (depends on the chosen mx / v / cv selector); treated conservatively as the union of all RT + TR + BK + IR columns
 --          (the data inputs the command can read).
 --   op:    IR1, IR2, IR3 (cross-product output, atomic; consumers treat as fan-out only)
---   avsz3/avsz4: SZ0..SZ3 + ZSF3/ZSF4
+--   avsz3 / avsz4: SZ0..SZ3 + ZSF3/ZSF4
 --
 -- We model the data-register + control-register superset. Every relevant input is in this set per PSX-SPX `gtepipelinetimings.md`;
--- the per-input latching values there describe the same number's command-side view
+-- The per-input latching values there describe the same number's command-side view
 -- (a recent mtc2/ctc2 to that register must retire the same number of cycles before the command issues).
 -- Anything outside this set is safe to clobber immediately after a prior command.
 M.GTE_COMMAND_INPUTS = {
@@ -1133,7 +1109,7 @@ M.GTE_COMMAND_INPUTS = {
 		"gte_cr_OFX",   "gte_cr_OFY",   "gte_cr_H",
 		"gte_cr_DQA",   "gte_cr_DQB",
 	},
-	-- NCLIP: reads SXY0/SXY1/SXY2 only (per PSX-SPX gtepipelinetimings.md §12.6).
+	-- NCLIP: reads SXY0 / SXY1 / SXY2 only (per PSX-SPX gtepipelinetimings.md §12.6).
 	["gte_cmdw_nclip"] = {
 		"C2_SXY0", "C2_SXY1", "C2_SXY2",
 	},
@@ -1163,7 +1139,6 @@ M.GTE_COMMAND_INPUTS = {
 }
 
 -- GTE command output-set + semantic role table.
---
 -- For each command, the set of C2 data registers the command writes as outputs, paired with the SEMANTIC ROLE of each output.
 -- The semantic role is the basis for the `_post_<cmd>` contract validation.
 -- The contract says "after <cmd>, the latest screen-XY is C2_SXY2" (C2_SXY0 is wrong; the FIFO side effects leave SXY0 as an older FIFO entry, never the newest).
@@ -1220,14 +1195,14 @@ M.GTE_COMMAND_OUTPUTS = {
 	["gte_cmdw_avsz4"] = {
 		{ register = "C2_OTZ", role = "otz" },
 	},
-	-- OP (outer product): writes IR1/IR2/IR3 (color-conversion fan-out).
+	-- OP (outer product): writes IR1 / IR2 / IR3 (color-conversion fan-out).
 	["gte_cmdw_op"] = {
 		{ register = "C2_IR1", role = "latest_color" },
 		{ register = "C2_IR2", role = "latest_color" },
 		{ register = "C2_IR3", role = "latest_color" },
 	},
 	-- MVMVA: same shape as OP from the role perspective; the single
-	-- MAC result is written to C2_IR1/IR2/IR3.
+	-- MAC result is written to C2_IR1 / IR2 / IR3.
 	["gte_cmdw_mvmva"] = {
 		{ register = "C2_IR1", role = "latest_color" },
 		{ register = "C2_IR2", role = "latest_color" },
@@ -1241,17 +1216,16 @@ M.GTE_COMMAND_OUTPUTS = {
 -- A subsequent MTC2/CTC2 overwrite of one of those outputs before the latch window expires is a hazard:
 -- the latched value in the pipeline gets overwritten by the CPU before the pipeline consumes it.
 --
--- This relation is the command -> register direction (the command is the producer; MTC2/CTC2 is the consumer).
--- It is the inverse of the MTC2 -> command input propagation (register -> command direction), which is staged by the
--- producer step of `analyze_hardware_relations`.
+-- This relation is the command -> register direction (the command is the producer; MTC2 / CTC2 is the consumer).
+-- It is the inverse of the MTC2 -> command input propagation (register -> command direction), which is staged by the producer step of `analyze_hardware_relations`.
 --
--- The schema mirrors the producer-side relations (`direction`, `evidence`, `violation_kind`); `required` counts the
--- emitted words strictly between the command's last output word and the overwrite.
+-- The schema mirrors the producer-side relations (`direction`, `evidence`, `violation_kind`); 
+-- `required` counts the emitted words strictly between the command's last output word and the overwrite.
 -- `required = 0` permits the immediately following overwrite; `required = 4` requires four intervening words.
 --
 -- Per PSX-SPX `gtepipelinetimings.md` the per-command input latching measurements are the same numbers inverted.
--- They describe when a recent MTC2/CTC2 must retire before the command issues; this table describes when a recent
--- command's outputs latch into the pipeline before a later MTC2/CTC2 overwrites them.
+-- They describe when a recent MTC2 / CTC2 must retire before the command issues. 
+-- This table describes when a recent command's outputs latch into the pipeline before a later MTC2/CTC2 overwrites them.
 --
 -- Consumers:
 --   * passes/static_analysis.lua::analyze_hardware_relations (stages post-command latch relations in `pending` after a GTE command).
@@ -1266,9 +1240,7 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 		{ register = "C2_OTZ",  required = 4 },
 		{ register = "C2_IR0",  required = 4 },
 	},
-	-- RTPT: same latching as RTPS (the LAST projection in SXY2 is the
-	-- newest one; the earlier SXY0 / SXY1 entries are part of the
-	-- batched triple).
+	-- RTPT: same latching as RTPS (the LAST projection in SXY2 is the newest one; the earlier SXY0 / SXY1 entries are part of the batched triple).
 	["gte_cmdw_rtpt"] = {
 		{ register = "C2_SXY0", required = 4 },
 		{ register = "C2_SXY1", required = 4 },
@@ -1287,7 +1259,7 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 	["gte_cmdw_avsz4"] = {
 		{ register = "C2_OTZ", required = 4 },
 	},
-	-- OP / MVMVA: IR1/IR2/IR3 latch for 4 emitted words.
+	-- OP / MVMVA: IR1 / IR2 / IR3 latch for 4 emitted words.
 	["gte_cmdw_op"] = {
 		{ register = "C2_IR1", required = 4 },
 		{ register = "C2_IR2", required = 4 },
@@ -1300,18 +1272,14 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 	},
 }
 
--- GTE component result contracts were removed: the `_post_<cmd>` naming convention was a soft convention
--- (the user did not want it formalized via static-analysis enforcement). A proper `atom_info` directive for ordering semantics is a future TODO.
-
 -- Operand-class table for the COP2->GPR load-delay check.
---
 -- Maps each emitting-token ident to the set of GPR operand positions it reads.
 -- Covers the current encoder vocabulary (`code/duffle/mips.h` + `code/duffle/gte.h`); add rows here as new encoders land.
 --
 -- Semantics:
 --   * A "GPR operand position" is the textual slot in the macro's argument list, 1-based; e.g. `load_word(rt, base, off)` has
 --     positional operands 1 (rt), 2 (base), 3 (off). The table reads operands 1 + 2 + 3 to find what GPRs the macro touches.
---   * The check tracks one entry per destination GPR per MFC2/CFC2 event.
+--   * The check tracks one entry per destination GPR per MFC2 / CFC2 event.
 --     A subsequent event counts as a "use" iff any of its read operand positions reference that destination GPR's ident (e.g. `R_T0`).
 --   * Branch delay slots are out of scope (MIPS control-flow; tracked separately).
 M.OPERAND_READ_POSITIONS = {
@@ -1324,13 +1292,13 @@ M.OPERAND_READ_POSITIONS = {
 	["sub_s"]                  = {1, 2, 3},
 	["sub_u"]                  = {1, 2, 3},
 	["and_i"]                  = {1, 2},
-	["and"]                  = {1, 2, 3},
+	["and"]                    = {1, 2, 3},
 	["or_i"]                   = {1, 2},
 	["or_i_self"]              = {1},
-	["or"]                   = {1, 2, 3},
-	["or_self"]              = {1, 2},
+	["or"]                     = {1, 2, 3},
+	["or_self"]                = {1, 2},
 	["xor_i"]                  = {1, 2},
-	["xor"]                  = {1, 2, 3},
+	["xor"]                    = {1, 2, 3},
 	["slt_s"]                  = {1, 2, 3},
 	["slt_u"]                  = {1, 2, 3},
 	["slt_si"]                 = {1, 2},
@@ -1431,7 +1399,6 @@ M.GP0_CMD_BY_SHAPE = {
 }
 
 -- Per-instruction cycle cost (best-case, no stalls). Used by the static-analysis pass to emit per-atom cycle budgets.
---
 -- GTE command values are the GTE instruction's intrinsic cycles — the latency after any pre-cmd `nop2` has retired.
 -- When the source emits `nop2, gte_cmdw_X`, the nops' cycles are added separately (1+1) plus the gte_cmdw_X value here:
 --   rtpt  = 23 + 2 nops = 25 total cycles  (PSX-SPX says 23 cycles for the cmd itself; the nops are pre-fill)
@@ -1445,8 +1412,8 @@ M.GP0_CMD_BY_SHAPE = {
 -- PSX-SPX reports the GTE intrinsic cycles as the total execution time of the command itself (rtpt=23, rtps=15, nclip=8, etc.).
 -- The pre-fill nops are a codebase convention for retiring preceding C2 writes.
 -- See `docs/psx-spx/docs/geometrytransformationenginegte.md` for per-command cycle counts and
--- `docs/psx-spx/docs/gtepipelinetimings.md` for the hardware-verified input-latch boundaries (most inputs become
--- safe to clobber after 0-4 cycles).
+-- `docs/psx-spx/docs/gtepipelinetimings.md` for the hardware-verified input-latch boundaries
+-- (most inputs become safe to clobber after 0-4 cycles).
 --
 -- Per-macro cycle costs (`mac_yield`, `mac_pack_color_word`, ...) and per-macro prim-buffer contributions
 -- (`mac_format_*_color`, `mac_gte_store_*`, `mac_insert_ot_tag_*`) are NOT hardcoded here.
@@ -1488,18 +1455,17 @@ M.INSTRUCTION_LATENCY = {
 	["load_byte_u"]         = 1,  ["load_byte"]   = 1,
 	["load_upper_i"]        = 1,
 	-- 2-word loads (lui + ori) used for >16-bit immediates
-	["load_imm"]            = 2,
-	["load_imm_1w"]         = 1,
-	["load_imm_1w_s0"]      = 1,
-	["load_imm_2w"]         = 2,
+	["load_imm"]                = 2,
+	["load_imm_1w"]             = 1,
+	["load_imm_1w_s0"]          = 1,
+	["load_imm_2w"]             = 2,
 	["load_imm_2w_addi_forced"] = 2,
 	["load_imm_2w_ori_forced"]  = 2,
 	-- Stores (1 cycle each)
 	["store_word"]          = 1,
 	["store_half"]          = 1,
 	["store_byte"]          = 1,
-	-- Branches (branch + BD slot nop = 2 cycles; the BD slot's nop is
-	-- counted as part of the branch's cost)
+	-- Branches (branch + BD slot nop = 2 cycles; the BD slot's nop is counted as part of the branch's cost)
 	["branch_equal"]        = 2,  ["branch_ne"]          = 2,
 	["branch_le_zero"]      = 2,  ["branch_lt_zero"]     = 2,
 	["branch_ge_zero"]      = 2,  ["branch_gt_zero"]     = 2,
@@ -1510,8 +1476,8 @@ M.INSTRUCTION_LATENCY = {
 	["jump"]                = 2,  ["jump_reg"]           = 2,
 	["jump_link"]           = 2,  ["call_reg"]           = 2,
 	["call_addr"]           = 2,
-	-- COP2 transfers (mtc2/mfc2/ctc2/cfc2 = 1 cycle + COP2 latency; the
-	-- COP2 latency is usually absorbed by subsequent nops or by the next
+	-- COP2 transfers (mtc2/mfc2/ctc2/cfc2 = 1 cycle + COP2 latency; 
+	-- The COP2 latency is usually absorbed by subsequent nops or by the next
 	-- GTE command's pre-fill nops, so we count 1)
 	["gte_mv_to_data_r"]    = 1,
 	["gte_mv_from_data_r"]  = 1,
@@ -1568,8 +1534,7 @@ M.UNKNOWN_INSTRUCTION_CYCLES = 1
 
 -- Hardware-relation policy table.
 --
--- The forward walker in `passes/static_analysis.lua::analyze_hardware_relations` reads every emitted word_event,
--- matches its `encoder` against `row.token`, and:
+-- The forward walker in `passes/static_analysis.lua::analyze_hardware_relations` reads every emitted word_event, matches its `encoder` against `row.token`, and:
 --   * stages the event as a producer in `atom.paths.forward_state`; or
 --   * matches it as a consumer against pending producers and records a hazard on `atom.paths.hazards` when the gap is below `visibility.required`.
 --
@@ -1589,8 +1554,8 @@ M.UNKNOWN_INSTRUCTION_CYCLES = 1
 --     and is reserved for future "self-retires" relations.
 --
 -- Evidence:
---   * `evidence.confidence` is one of `"exact"`, `"conservative"`, `"unknown"`. The severity comes from `violation_kind`; a hardware
---     measurement that the vendor caveats may still classify as `"conservative"` even when the underlying timing is numerically known.
+--   * `evidence.confidence` is one of `"exact"`, `"conservative"`, `"unknown"`. The severity comes from `violation_kind`;
+--     A hardware measurement that the vendor caveats may still classify as `"conservative"` even when the underlying timing is numerically known.
 --   * `evidence.source` is the upstream reference (file + line range) the row is sourced from. New rows must carry this citation.
 --
 -- Consumers:
@@ -1702,13 +1667,10 @@ M.HARDWARE_RELATIONS = {
 	-- The memory-side timing is not measured by the vendored GTE latch experiment, so this relation has no numeric retirement threshold.
 	-- The LWC2 destination has TWO retirement regimes (per PSX-SPX):
 	--   * GTE-command consumer (`gte_cmdw_*`): the GTE pipeline LATCHES the LWC2 result, so a `gte_cmdw_*`
-	--     in the very next slot uses the latched value. Gap = 0 is allowed.
-	--     (Per `docs/psx-spx/docs/gtepipelinetimings.md:271-274`.)
-	--   * Any other consumer: standard MIPS load delay applies. Gap = 1 required.
-	--     (Per `docs/psx-spx/docs/cpuspecifications.md:407-419`.)
-	-- Two separate relations so the walker can dispatch by consumer type and emit
-	-- different severities (the GTE-command path is `info` because the latch is intentional;
-	-- the non-GTE-consumer path is `error` because the missing nop is a real bug).
+	--     in the very next slot uses the latched value. Gap = 0 is allowed. (Per `docs/psx-spx/docs/gtepipelinetimings.md:271-274`.)
+	--   * Any other consumer: standard MIPS load delay applies. Gap = 1 required. (Per `docs/psx-spx/docs/cpuspecifications.md:407-419`.)
+	-- Two separate relations so the walker can dispatch by consumer type and emit different severities
+	-- (the GTE-command path is `info` because the latch is intentional; the non-GTE-consumer path is `error` because the missing nop is a real bug).
 	{
 		id             = "lwc2_to_gte_command",
 		semantic       = "LWC2_to_GTE",
@@ -2070,14 +2032,14 @@ local E_MAC_PREFIX_LEN = 4
 --- Expand a body entry into the flat sequence of emitted machine-word events.
 ---
 --- Semantics (one event per emitted machine word):
----   * **Direct one-word encoders** (`load_word`, `add_ui`, `nop`, `gte_lw`, ...): one event with `ident` = leading ident, `args` = parsed top-level args.
----   * **`nop2`** (2-word pseudo-instruction): two events, both with `ident = "nop"` so the recognized "this slot is a no-op" semantic is visible to downstream analyses.
----   * **Any other N-word token** in `word_counts`: N events sharing the same `ident` + `args` so useful CPU words retire slots in the cycle budget.
----   * **Known `mac_X(...)` calls**: recursively expand the indexed component body, including nested components. Every event from the expansion carries:
+---   * Direct one-word encoders `load_word`, `add_ui`, `nop`, `gte_lw`, ...: One event with `ident` = leading ident, `args` = parsed top-level args.
+---   * `nop2` (2-word pseudo-instruction): Two events, both with `ident = "nop"` so the recognized "this slot is a no-op" semantic is visible to downstream analyses.
+---   * Any other N-word token in `word_counts`: N events sharing the same `ident` + `args` so useful CPU words retire slots in the cycle budget.
+---   * Known `mac_X(...)` calls: Recursively expand the indexed component body, including nested components. Every event from the expansion carries:
 ---     - `source` / `line` = the COMPONENT'S source path + the line of the token within the component body (i.e. "definition site").
 ---     - `call_source` / `call_line` = the ROOT atom's source path + call-site line, PRESERVED across recursion so nested events still point at the original root.
----   * **Unknown `mac_X`** (not in `component_index`): fall back to `word_counts[ident]` if present; otherwise emit one opaque event so the cycle budget accounts for the word.
----   * **Marker tokens** (`atom_label(...)` / `atom_offset(...)`): zero events (they are pure metaprogram hints, not emitted machine words).
+---   * Unknown `mac_X` (not in `component_index`): fall back to `word_counts[ident]` if present; otherwise emit one opaque event so the cycle budget accounts for the word.
+---   * Marker Tokens (`atom_label(...)` / `atom_offset(...)`): Zero events (they are pure metaprogram hints).
 ---
 --- Cycle protection: a per-expansion `visiting` set tracks components currently on the expansion stack; a re-entry produces a deterministic `{kind = "cycle", ...}` error and aborts that branch (does NOT hang, does NOT recurse).
 ---
@@ -2101,12 +2063,12 @@ local E_MAC_PREFIX_LEN = 4
 -- word_counts table is authored-metadata + current-component count table.
 
 --- @class EmissionProjection
---- @field items       table[] -- ordered stream of word|label|offset|invoke_begin|invoke_end
---- @field word_events table[] -- dense view of items where kind == "word"
---- @field markers     table[] -- dense view of items where kind == "label"|"offset"
+--- @field items       table[] -- Ordered stream of word|label|offset|invoke_begin|invoke_end
+--- @field word_events table[] -- Dense view of items where kind == "word"
+--- @field markers     table[] -- Dense view of items where kind == "label"|"offset"
 --- @field invocations InvocationRecord[] -- dense view of items where kind == "invoke_begin"|"invoke_end"
---- @field errors      table[] -- token-resolution failures surfaced without fail-loud
---- @field warnings    table[] -- opaque warnings (e.g. unknown uncounted macro)
+--- @field errors      table[] -- Token-resolution failures surfaced without fail-loud
+--- @field warnings    table[] -- Opaque warnings (e.g. unknown uncounted macro)
 
 --- @class InvocationRecord
 --- Lives at `atom.paths.invocations[*]`. Constructed once at the single invocation-construction site
@@ -2114,20 +2076,20 @@ local E_MAC_PREFIX_LEN = 4
 --- @field id              integer  -- 1-based, monotonic per-atom invocation id (0 is reserved for "no open invocation")
 --- @field parent_id       integer  -- 0 for the outermost (root) call; otherwise the id of the immediately enclosing invocation
 --- @field kind            string   -- "comp_bare" | "comp_proc" (component form that triggered the expansion)
---- @field component_name  string   -- the bare component name without the `mac_` prefix
---- @field call_text       string   -- the immediate `mac_X(...)` token text (or root call text for the outermost entry)
---- @field root_call_text  string   -- the IMMUTABLE outermost `mac_X(...)` token text for every word emitted in this call's expansion
---- @field call_path       string   -- source path of the call site (root atom source for direct calls, component source for nested expansions)
---- @field call_line       integer  -- source line of the call site
---- @field def_path        string   -- source path of the component definition
---- @field def_line        integer  -- source line of the component declaration
+--- @field component_name  string   -- Bare component name without the `mac_` prefix
+--- @field call_text       string   -- Immediate `mac_X(...)` token text (or root call text for the outermost entry)
+--- @field root_call_text  string   -- IMMUTABLE outermost `mac_X(...)` token text for every word emitted in this call's expansion
+--- @field call_path       string   -- Source path of the call site (root atom source for direct calls, component source for nested expansions)
+--- @field call_line       integer  -- Source line of the call site
+--- @field def_path        string   -- Source path of the component definition
+--- @field def_line        integer  -- Source line of the component declaration
 --- @field start_pos       integer  -- 0-based emitted-word position of the FIRST word inside this invocation (the value of `word_idx` AT `emit_invoke_begin` time, BEFORE the first word is emitted). Words emitted inside this invocation occupy `start_pos..start_pos+#body_lines-1` (inclusive, 0-based). Downstream DWARF/provenance consumers MUST read this; do NOT reconstruct it from `start_word` (which is the 1-based items index including `invoke_begin`/`invoke_end` markers).
 --- @field end_pos         integer  -- 0-based position of the LAST word inside this invocation (set by `emit_invoke_end` to `word_idx - 1` AFTER all body words are emitted).
 --- @field start_word      integer  -- 1-based items index of the `invoke_begin` item
 --- @field end_word        integer  -- 1-based items index of the `invoke_end` item (set by `emit_invoke_end`)
---- @field word_count      integer  -- number of `word` items emitted between `start_word` and `end_word` (inclusive)
+--- @field word_count      integer  -- Number of `word` items emitted between `start_word` and `end_word` (inclusive)
 --- @field debug_skip      boolean  -- `debug_skip` stamp; true iff `corpus.components[name].debug_skip` is true at construction. Always boolean (never `nil`).
---- @field errors          table[]  -- per-invocation construction errors (cycle / count_mismatch); does not include pass-level errors
+--- @field errors          table[]  -- Per-invocation construction errors (cycle / count_mismatch); does not include pass-level errors
 
 -- Internal recursive walker. The items stream holds every emitted event in order; `word_events`, `markers`,
 -- `invocations`, `errors`, `warnings` are dense views / side outputs appended alongside.
@@ -2271,15 +2233,13 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		return count
 	end
 
-	-- Find the position of the consuming instruction's open paren (the `(` that
-	-- starts the consuming instruction's argument list). Returns nil if the token's
-	-- leading text isn't an ident followed by `(` (e.g. the ident is at the start of a
-	-- non-instruction token).
+	-- Find the position of the consuming instruction's open paren (the `(` that starts the consuming instruction's argument list).
+	-- Returns nil if the token's leading text isn't an ident followed by `(` (e.g. the ident is at the start of a non-instruction token).
 	local function find_consuming_paren(tok)
 		local i = 1
 		while i <= #tok do
 			local c = tok:sub(i, i)
-			if c == "(" then return i end
+			if    c == "(" then return i end
 			if not c:match("[%w_]") and c ~= " " then return nil end
 			i = i + 1
 		end
@@ -2287,33 +2247,32 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	end
 
 	local function emit_embedded_markers(tok, tok_line, consuming_encoder)
-		-- When called with a non-nil `consuming_encoder`, the marker is nested inside that
-		-- instruction's argument list. We compute each marker's arg position by counting
-		-- top-level commas between the consuming instruction's `(` and the marker's start.
+		-- When called with a non-nil `consuming_encoder`, the marker is nested inside that instruction's argument list.
+		-- We compute each marker's arg position by counting top-level commas between the consuming instruction's `(` and the marker's start.
 		local consuming_paren = nil
 		if consuming_encoder then consuming_paren = find_consuming_paren(tok) end
 		local pos = 1
 		while pos <= #tok do
-			-- trim leading whitespace and comments before each scan.
+			-- Trim leading whitespace and comments before each scan.
 			pos = M.skip_ws_and_cmt(tok, pos)
 			if pos > #tok then break end
 			local  ident, after = M.read_ident(tok, pos)
 			if not ident then
-				-- not an ident: token is a string or comment; skip or one-step.
+				-- Not an ident: token is a string or comment; skip or one-step.
 				local next_pos = M.skip_str_or_cmt(tok, pos)
 				pos = (next_pos > pos) and next_pos or (pos + 1)
 				goto continue_loop
 			end
 			if ident ~= "atom_label" and ident ~= "atom_offset" then
-				-- ordinary ident; nothing to emit, step past the ident only.
+				-- Ordinary ident; nothing to emit, step past the ident only.
 				pos = after
 				goto continue_loop
 			end
-			-- marker ident: parse the (...) arguments.
+			-- Marker ident: parse the (...) arguments.
 			local open               = M.skip_ws_and_cmt(tok, after)
 			local inner, after_paren = M.read_parens(tok, open)
 			if not inner then
-				-- (...) unreadable: fall back to non-marker behavior.
+				-- (...) Unreadable: fall back to non-marker behavior.
 				pos = after
 				goto continue_loop
 			end
@@ -2327,10 +2286,8 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				arg_pos = count_top_level_commas(tok, consuming_paren + 1, pos) + 1
 			end
 			local args = split_top_level_args(inner)
-			if ident == "atom_label" then
-				emit_marker("label", args[1] or "", nil,           tok_line, nil, nil, consuming_encoder, arg_pos)
-			else
-				emit_marker("offset", args[1] or "", args[2] or "", tok_line, nil, nil, consuming_encoder, arg_pos)
+			if ident == "atom_label" then emit_marker("label",  args[1] or "", nil,           tok_line, nil, nil, consuming_encoder, arg_pos)
+			else                          emit_marker("offset", args[1] or "", args[2] or "", tok_line, nil, nil, consuming_encoder, arg_pos)
 			end
 			pos = after_paren
 			::continue_loop::
@@ -2342,14 +2299,13 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		next_inv_id = next_inv_id + 1
 		-- Invocation-level debug_skip stamp: Emission pass owns `atom.paths.invocations[*].debug_skip`.
 		-- The stamp is resolved from the `corpus.components[name]` registry (passed in via `ctx_table.components` by `emission_model.run`), 
-		-- NOT from a parallel skip map, source-text re-parse, or second pass over `invocations`.
 		-- Unmarked components stamp `false` (not `nil`) so consumers can dispatch on the boolean without nil checks.
 		--
 		-- The walker has already found the component body in `ctx_table.component_index[component_name]`, so the matching entry MUST exist in `ctx_table.components[component_name]`
 		-- (both registries are populated from the same source by the components pass).
 		-- A missing entry is a corpus-plumbing bug; we fail loudly here rather than silently stamp `false` and mask the regression.
-		local components      = ctx_table.components
-		local component_def   = components and components[component_name] or nil
+		local  components    = ctx_table.components
+		local  component_def = components and components[component_name] or nil
 		if not component_def then
 			error("duffle.emit_invoke_begin: component " .. string.format("%q", component_name)
 				.. " is present in `component_index` (the walker matched a `mac_" .. component_name .. "()` call) but absent from `components` (the canonical corpus.components registry). "
@@ -2413,7 +2369,6 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	end
 
 	-- Resolve the per-token word count. If unresolved, surface ONE warning
-	-- (NOT an error; the build does not fail-loud on an uncounted opaque word)
 	-- and fall back to 1 opaque word so the cycle budget still accounts for the slot.
 	local function resolve_count(ident, tok_line)
 		local wc = ctx_table.word_counts
@@ -2437,10 +2392,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	end
 
 	-- Recursive walker: walk one body entry, possibly descending into components.
-	-- `walk_parent_inv_id` is the invocation ID of the enclosing call (0 for the root call).
-	-- `walk_root_call_text` is the outermost `mac_X(...)` token text (preserved across recursion).
-	-- `walk_immediate_call_text` is the IMMEDIATE outer `mac_X(...)` token text for words emitted in this body — nil for the root atom body.
-	-- The two trackers are propagated as separate parameters so words deep inside nested expansions correctly identify both their immediate call site and the outermost call site.
+	-- walk_parent_inv_id:       Invocation ID of the enclosing call (0 for the root call).
+	-- walk_root_call_text:      Outermost `mac_X(...)` token text (preserved across recursion).
+	-- walk_immediate_call_text: IMMEDIATE outer `mac_X(...)` token text for words emitted in this body — nil for the root atom body.
+	-- Two trackers are propagated as separate parameters so words deep inside nested expansions correctly identify both their immediate call site and the outermost call site.
 	local function walk_body_entry(body_entry, walk_parent_inv_id,
 		walk_root_call_text, walk_immediate_call_text)
 		local tokens     = body_entry.body_tokens or {}
@@ -2457,20 +2412,18 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			local _, args  = token_ident_and_args(tok)
 			local tok_line = line_of(body_off + bt.rel) or 0
 			-- embedded markers live only in non-marker tokens.
-			-- Pass `ident` as the consuming instruction so `emit_embedded_markers` can compute
-			-- each marker's arg position + record the consuming_encoder for the offsets pass.
-			-- Canonicalize `jump_rel` to `branch_equal` (its preprocessor-expanded form) so the
-			-- `consuming_encoder` metadata in marker records is canonical. `jump_rel` is the within-atom-safe
-			-- unconditional jump alias from `code/duffle/mips.h`; the C preprocessor expands it BEFORE
-			-- the metaprogram sees the source, but the raw token ident is still `jump_rel` here.
+			-- Pass `ident` as the consuming instruction so `emit_embedded_markers` can compute each marker's arg position + record the consuming_encoder for the offsets pass.
+			-- Canonicalize `jump_rel` to `branch_equal` (its preprocessor-expanded form) so the `consuming_encoder` metadata in marker records is canonical. 
+			-- `jump_rel`: unconditional jump alias from `code/duffle/mips.h`.
 			local consuming_encoder_for_markers = (ident == "jump_rel") and "branch_equal" or ident
 			if ident ~= "atom_label" and ident ~= "atom_offset" then
 				emit_embedded_markers(tok, tok_line, consuming_encoder_for_markers)
 			end
 			-- atom_label / atom_offset: terminal markers, no further descent.
 			-- Top-level markers (the marker IS the entire token) have no consuming instruction;
-			-- nil for both `consuming_encoder` and `consuming_arg_pos`. The offsets pass treats
-			-- these as branch-equivalent for backward compatibility.
+			-- nil for both `consuming_encoder` and `consuming_arg_pos`.
+			-- The offsets pass treats these as branch-equivalent for backward compatibility.
+			-- TODO(Ed): Review this don't want legacy cruft here..
 			if     ident == "atom_label"  then emit_marker("label",  args[1] or "", nil,           tok_line); return
 			elseif ident == "atom_offset" then emit_marker("offset", args[1] or "", args[2] or "", tok_line); return
 			end
@@ -2480,7 +2433,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				if comp then
 					local invocation_root_call_text = walk_root_call_text or tok
 					if ctx_table.visiting[bare] then
-						-- cycle: still allocate inv_id, emit zero-width begin/end, record the cycle error; do NOT recurse.
+						-- Cycle: still allocate inv_id, emit zero-width begin/end, record the cycle error; do NOT recurse.
 						local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
 						inv.parent_id = walk_parent_inv_id
 						inv.call_text = tok
@@ -2495,16 +2448,16 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 						emit_invoke_end(inv)
 						return
 					end
-					-- first visit: descend + count + count_mismatch-check below.
+					-- First visit: descend + count + count_mismatch-check below.
 					ctx_table.visiting[bare] = true
 					local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
 					inv.parent_id = walk_parent_inv_id
 					inv.call_text = tok
 					inv.def_path  = comp.source
 					inv.def_line  = comp.declaration
-					-- propagate trackers into the recursive walk:
+					-- Propagate trackers into the recursive walk:
 					--   immediate_call_text = this call's tok (the IMMEDIATE outer call for words emitted in this body)
-					--   root_call_text       = the OUTERMOST call (immutable across the recursion)
+					--   root_call_text      = the OUTERMOST call (immutable across the recursion)
 					walk_body_entry({
 							body_tokens = comp.body_tokens or {},
 							body_off    = comp.body_off or 0,
@@ -2517,7 +2470,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 						tok)
 					ctx_table.visiting[bare] = nil
 					emit_invoke_end(inv)
-					-- count `word` items inside [start_word, end_word].
+					-- Count `word` items inside [start_word, end_word].
 					local wc_inside = 0
 					for i = inv.start_word, inv.end_word do
 						local it = items[i]
@@ -2543,9 +2496,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				end
 				-- mac_X NOT in component_index: fall through to opaque emit.
 			end
-			-- direct encoder, or mac_X-without-component: resolve count + emit n words.
-			-- resolve_count may emit a warning if the count is unresolved.
-			local n = resolve_count(ident, tok_line)
+			-- Direct encoder, or mac_X-without-component: resolve count + emit n words.
+			-- Resolve_count may emit a warning if the count is unresolved.
+			local n         = resolve_count(ident, tok_line)
 			local out_ident = (ident == "nop2") and "nop" or ident
 			for _ = 1, n do
 				emit_word(out_ident, args, tok_line, tok, def_source, def_line, walk_immediate_call_text, walk_root_call_text)
@@ -2560,9 +2513,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	-- Initialize the per-walk mutable context.
 	-- `visiting` is the active DFS component stack; `root_call_path` / `root_call_line` are preserved across recursion so nested words always point at the
 	-- ORIGINAL root atom call site.
-	ctx_table.visiting        = ctx_table.visiting        or {}
-	ctx_table.root_call_path  = ctx_table.root_call_path  or ""
-	ctx_table.root_call_line  = ctx_table.root_call_line  or 0
+	ctx_table.visiting       = ctx_table.visiting        or {}
+	ctx_table.root_call_path = ctx_table.root_call_path  or ""
+	ctx_table.root_call_line = ctx_table.root_call_line  or 0
 
 	-- Walk first; the pass caller stamps the root call site for direct words after the projection returns.
 	-- For nested words the def_path / def_line already point at the component source and MUST be preserved (the stamping helper checks for that).

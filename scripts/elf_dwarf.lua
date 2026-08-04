@@ -1,13 +1,8 @@
 --- elf_dwarf.lua — ELF32 + DWARF + atoms source-map utilities.
---- All ELF32 + DWARF-specific code lives here.
----
 --- **What this module contains:**
 ---   - **Format-constant tables** (the byte-offset / opcode / size encyclopedias for ELF32, DWARF4 aranges, DWARF5 rnglists, DWARF line-program, MIPS).
 ---     Every constant carries a spec:` comment naming the spec section that defines it.
 ---   - **I/O helpers**: little-endian byte read/write, ELF32 section walker, nm symbol reader, source-map parser, native directory glob.
----
---- **Conventions:** tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Native dependencies
@@ -60,19 +55,19 @@ M.DW_AT = {
 }
 
 M.DW_FORM = {
-	addr        = 0x01,
-	data1       = 0x0B,
-	data2       = 0x05,
-	data4       = 0x06,
-	string      = 0x08,
-	strp        = 0x0E,
-	exprloc     = 0x18,
-	ref4        = 0x13,
-	udata       = 0x0F,
-	ref_sig8    = 0x20,
+	addr           = 0x01,
+	data1          = 0x0B,
+	data2          = 0x05,
+	data4          = 0x06,
+	string         = 0x08,
+	strp           = 0x0E,
+	exprloc        = 0x18,
+	ref4           = 0x13,
+	udata          = 0x0F,
+	ref_sig8       = 0x20,
 	implicit_const = 0x21,
-	flag_present = 0x19,
-	sec_offset  = 0x17,
+	flag_present   = 0x19,
+	sec_offset     = 0x17,
 }
 
 M.DW_ATE = {
@@ -104,13 +99,9 @@ M.MIPS_BYTES_PER_WORD = 0x04
 -- ----------------------------------------------------------------------------
 -- ELF32 (System V ABI gABI v1.2)
 -- ----------------------------------------------------------------------------
---- **Wire-offset contract:** format offsets, fixed-width reader offsets, LEB/parser cursors,
---- and section-relative values are zero-based wire offsets. Only Lua string APIs receive
---- a `+ 1` conversion at their boundary (`byte`, `sub`, and `find`).
----
---- ELF/DWARF field offsets are expressed in hex so they map directly to the
---- zero-based byte positions in the binary file.
-
+--- **Wire-offset contract:** format offsets, fixed-width reader offsets, LEB/parser cursors, and section-relative values are zero-based wire offsets. 
+--- Only Lua string APIs receive a `+ 1` conversion at their boundary (`byte`, `sub`, and `find`).
+--- ELF/DWARF field offsets are expressed in hex so they map directly to the zero-based byte positions in the binary file.
 
 --- spec: System V ABI gABI v1.2 §"ELF Header" (Table 1) + §"Section Header Table"
 M.ELF32 = {
@@ -192,8 +183,7 @@ M.DWARF_LINE_OPS = {
 	DW_LNE_end_sequence = 1,    -- spec: §6.2.5.3
 	DW_LNE_set_address  = 2,    -- spec: §6.2.5.3
 	-- Standard opcode header (§6.2.5.1)
-	-- opcode_base + line_range are 1-byte header fields; hex so they map
-	-- directly to the line-program header byte sequence.
+	-- opcode_base + line_range are 1-byte header fields; hex so they map directly to the line-program header byte sequence.
 	-- line_base stays signed decimal (=-5) since 0xFB obscures the spec semantics.
 	opcode_base              = 0x0D,
 	line_base                = -5,
@@ -249,12 +239,10 @@ M.DWARF5_DEBUG_LINE = {
 --- Read a 4-byte little-endian unsigned integer from `buf` at zero-based wire offset `off`.
 --- Equivalent to `string.unpack("<I4", buf, off + 1)` but avoids the table-return shape + works under LuaJIT 2.1
 --- (which has partial `string.unpack` coverage).
----
 --- **Convention:** `off` is a zero-based wire offset; `+ 1` is applied only at the `string.byte` boundary.
 ---
 --- **Byte weights** are written as `0x100`, `0x10000`, `0x1000000` (i.e. 2^8, 2^16, 2^24) so the LE byte positions are visually explicit:
---- byte 0 contributes its value directly; byte 1 is shifted left by 8
---- (= 0x100); byte 2 by 16 (= 0x10000); byte 3 by 24 (= 0x1000000).
+--- byte 0 contributes its value directly; byte 1 is shifted left by 8 (= 0x100); byte 2 by 16 (= 0x10000); byte 3 by 24 (= 0x1000000).
 --- @param buf string
 --- @param off integer  -- zero-based wire offset
 --- @return integer
@@ -278,12 +266,11 @@ end
 
 -- Pure-Lua 5.3 LEB128 readers (no `bit` library). `2^shift` arithmetic matches the existing parser.
 -- Offsets are 0-based; returns (value, next_pos).
--- Promoted from `local function` to M.* exports so passes/dwarf_injection.lua
--- can import them as file-scope locals per the 2nd-caller lift precedent
+-- Promoted from `local function` to M.* exports so passes/dwarf_injection.lua can import them as file-scope locals per the 2nd-caller lift precedent
 -- (the uleb128 + sleb128 encoders were promoted the same way).
 function M.read_uleb128_at(buf, pos)
 	local value, shift = 0, 0
-	local len = #buf
+	local len          = #buf
 	while pos < len do
 		local b = buf:byte(pos + 1)
 		value = value + (b % 0x80) * (2 ^ shift)
@@ -427,13 +414,13 @@ local function read_form_value(buf, str_buf, pos, form)
 		-- The constant is declared in the abbrev; no value bytes in the DIE.
 		return nil, pos
 	elseif form == M.DW_FORM.ref_sig8 then
-		-- DW_FORM_ref_sig8 (DWARF5 §7.4.2): an 8-byte value identifying a type
-		-- by signature. The low 4 bytes (LE) are the type signature (content hash);
-		-- the high 4 bytes (LE) are a CU-relative offset into the matching type unit.
-		-- Consumers use the low 4 to look up the type unit (see M.find_type_unit_by_signature)
-		-- then the high 4 to resolve the specific type within it.
-		-- Return the low 4 as the primary value to preserve the (value, next_pos) shape;
-		-- the high 4 is exposed via M.read_ref_sig8 (which returns both halves).
+		-- DW_FORM_ref_sig8 (DWARF5 §7.4.2): An 8-byte value identifying a type by signature.
+		-- The low  4 bytes (LE) are the type signature (content hash);
+		-- The high 4 bytes (LE) are a CU-relative offset into the matching type unit.
+		-- Consumers use the low  4 to look up the type unit (see M.find_type_unit_by_signature)
+		--          then the high 4 to resolve the specific type within it.
+		-- Return the low  4 as the primary value to preserve the (value, next_pos) shape;
+		--        the high 4 is exposed via M.read_ref_sig8 (which returns both halves).
 		local _, _, next_pos = M.read_ref_sig8(buf, pos)
 		return M.read_u32_le(buf, pos), next_pos
 	else
@@ -470,11 +457,11 @@ end
 -- @param target_sig_hi integer  -- high 4 bytes (LE) of the desired signature
 -- @return integer|nil, integer|nil  -- unit offset, type_offset within the unit
 function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
-	local pos = 0
+	local pos         = 0
 	local section_len = #info
 	while pos + 4 < section_len do
 		local unit_length = M.read_u32_le(info, pos)
-		if unit_length == 0xFFFFFFFF then
+		if    unit_length == 0xFFFFFFFF then
 			return nil, nil  -- DWARF64 not supported
 		end
 		-- unit_length is the body size, NOT including the 4-byte unit_length field itself.
@@ -503,9 +490,9 @@ function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
 			--   byte 8-15: type_signature (8)
 			--   byte 16-19: type_offset (4)
 			local unit_type = info:byte(body_start + 2 + 1)  -- 0-based +2 = unit_type in 1-indexed
-			if unit_type == 0x02 then  -- DW_UT_type
+			if    unit_type == 0x02 then  -- DW_UT_type
 				local sig_lo, sig_hi, _ = M.read_ref_sig8(info, body_start + 8)  -- 0-based +8 = type_signature in 1-indexed
-				if sig_lo == target_sig_lo and sig_hi == target_sig_hi then
+				if    sig_lo == target_sig_lo and sig_hi == target_sig_hi then
 					local type_offset = M.read_u32_le(info, body_start + 16)  -- 0-based +16 = type_offset in 1-indexed
 					return pos, type_offset
 				end
@@ -571,14 +558,14 @@ function M.read_elf_sections(elf_path, section_names)
 		return result
 	end
 
-	local f = io.open(elf_path, "rb")
+	local  f = io.open(elf_path, "rb")
 	if not f then
 		io.stderr:write(string.format("[elf_dwarf.read_elf_sections] io.open failed: %s\n", elf_path))
 		return result
 	end
 
 	-- Read the ELF32 header.
-	local header = f:read(M.ELF32.header_bytes)
+	local  header = f:read(M.ELF32.header_bytes)
 	if not header or #header < M.ELF32.header_bytes then
 		io.stderr:write("[elf_dwarf.read_elf_sections] ELF too small for ELF32 header\n")
 		f:close()
@@ -610,7 +597,7 @@ function M.read_elf_sections(elf_path, section_names)
 
 	-- Read the section-header string table (.shstrtab) so we can resolve section names from their `sh_name` offsets.
 	f:seek("set", e_shoff + e_shstrndx * e_shentsize)
-	local strtab_hdr = f:read(e_shentsize)
+	local  strtab_hdr = f:read(e_shentsize)
 	if not strtab_hdr or #strtab_hdr < e_shentsize then
 		io.stderr:write("[elf_dwarf.read_elf_sections] could not read .shstrtab header\n")
 		f:close()
@@ -629,7 +616,7 @@ function M.read_elf_sections(elf_path, section_names)
 
 	for sh_idx = 0, e_shnum - 1 do
 		f:seek("set", e_shoff + sh_idx * e_shentsize)
-		local sh = f:read(e_shentsize)
+		local  sh = f:read(e_shentsize)
 		if not sh or #sh < e_shentsize then break end
 		local sh_name   = M.read_u32_le(sh, M.ELF32.sh_name_offset)
 		local sh_offset = M.read_u32_le(sh, M.ELF32.sh_offset_offset)
@@ -679,15 +666,14 @@ function M.read_nm(elf_path)
 	local SYM_ST_INFO     = 0x0C
 	local n_syms = #symtab / SYM_ENTRY_BYTES
 	for i = 0, n_syms - 1 do
-		local entry_off  = i * SYM_ENTRY_BYTES
-		local st_info    = symtab:byte(entry_off + SYM_ST_INFO + 1)
+		local entry_off = i * SYM_ENTRY_BYTES
+		local st_info   = symtab:byte(entry_off + SYM_ST_INFO + 1)
 		-- High nibble = binding (STB_LOCAL=0, STB_GLOBAL=1, STB_WEAK=2).
-		-- Use math.floor(/16) instead of bit.rshift for LuaJIT 2.1 compat
-		-- (LuaJIT's `>>` is 5.3+, but math.floor(x/16) works on all versions).
-		local binding    = math.floor(st_info / 16)
-		if binding == 0 or binding == 1 then            -- STB_LOCAL or STB_GLOBAL
-			local st_size   = M.read_u32_le(symtab, entry_off + SYM_ST_SIZE)
-			if st_size > 0 then
+		-- Use math.floor(/16) instead of bit.rshift for LuaJIT 2.1 compat (LuaJIT's `>>` is 5.3+, but math.floor(x/16) works on all versions).
+		local binding = math.floor(st_info / 16)
+		if    binding == 0 or binding == 1 then -- STB_LOCAL or STB_GLOBAL
+			local st_size = M.read_u32_le(symtab, entry_off + SYM_ST_SIZE)
+			if    st_size > 0 then
 				local st_name_off = M.read_u32_le(symtab, entry_off + SYM_ST_NAME)
 				-- Extract the name from .strtab (null-terminated C string).
 				local name_end = strtab:find("\0", st_name_off + 1, true) or (st_name_off + 1)
@@ -779,8 +765,8 @@ function M.sleb128(n)
 		local b = n % (LEB_DATA_MASK + 1) -- extract low 7 bits
 		n = (n - b) / (LEB_DATA_MASK + 1) -- arithmetic shift right by 7
 		-- Termination: remaining value bits fit in the sign bit of the last byte.
-		if     n == 0  and b <  SLEB_SIGN_BIT then more = false end  -- positive terminator
-		if     n == -1 and b >= SLEB_SIGN_BIT then more = false end  -- negative terminator
+		if n == 0  and b <  SLEB_SIGN_BIT then more = false end  -- positive terminator
+		if n == -1 and b >= SLEB_SIGN_BIT then more = false end  -- negative terminator
 		if more then b = b + LEB_CONT_BIT end
 		bytes[#bytes + 1] = string.char(b)
 	end
@@ -811,14 +797,14 @@ end
 --- @param n integer  -- any integer (negative allowed)
 --- @return integer
 function M.sleb128_size(n)
-	local more = true
+	local more  = true
 	local bytes = 0
-	local v = n
+	local v     = n
 	while more do
 		local b = v % (LEB_DATA_MASK + 1) -- extract low 7 bits
 		v = (v - b) / (LEB_DATA_MASK + 1) -- arithmetic shift right by 7
-		if     v == 0  and b <  SLEB_SIGN_BIT then more = false end  -- positive terminator
-		if     v == -1 and b >= SLEB_SIGN_BIT then more = false end  -- negative terminator
+		if v == 0  and b <  SLEB_SIGN_BIT then more = false end  -- positive terminator
+		if v == -1 and b >= SLEB_SIGN_BIT then more = false end  -- negative terminator
 		if more then b = b + LEB_CONT_BIT end
 		bytes = bytes + 1
 	end
@@ -855,47 +841,45 @@ end
 --- (which replaced the former hardcoded `ATOM_SOURCE_FILE_INDEX` + `PROVENANCE_BASENAME_TO_FILE_INDEX` table per `conductor/tracks/dwarf_file_index_lookup_20260731/`)
 --- consult the map directly.
 ---
---- @param elf_path string  -- absolute path to the post-link ELF (typically the gcc-emitted `.elf` BEFORE dwarf_injector's splice;
----                            both shapes work since the splice preserves `.debug_line`)
+--- @param elf_path string  -- absolute path to the post-link ELF (typically the gcc-emitted `.elf` BEFORE dwarf_injector's splice; both shapes work since the splice preserves `.debug_line`)
 --- @return table|nil, table|nil, table|nil
----        basename_to_index: { [basename] = 1-based-per-unit-file-index, ... }
----        basenames:         { [1-based-per-unit-file-index] = basename, ... }
----        paths:             { [1-based-per-unit-file-index] = full path (mixed slashes), ... }
+---   basename_to_index: { [basename] = 1-based-per-unit-file-index, ... }
+---   basenames:         { [1-based-per-unit-file-index] = basename, ... }
+---   paths:             { [1-based-per-unit-file-index] = full path (mixed slashes), ... }
 function M.read_line_unit_file_table(elf_path)
 	local sections = M.read_elf_sections(elf_path, { ".debug_line", ".debug_line_str" })
-	local line      = sections[".debug_line"]
-	local lstr      = sections[".debug_line_str"] or ""
+	local line     = sections[".debug_line"]
+	local lstr     = sections[".debug_line_str"] or ""
 	if not line or line == "" then
 		io.stderr:write("[elf_dwarf.read_line_unit_file_table] no .debug_line section in: " .. tostring(elf_path) .. "\n")
 		return nil
 	end
 
-	local basenames        = {}
+	local basenames         = {}
 	local basename_to_index = {}
-	local paths            = {}
+	local paths             = {}
 
 	--- Read one form-code's bytes from `buf` at position `p` according to `form`.
 	--- Returns (value, after) where `value` is:
 	---   * the resolved string (DW_FORM_line_strp / DW_FORM_string)
-	---   * the ULEB128 number (DW_FORM_udata)
-	---   * nil + skip-bytes (DW_FORM_data16; we don't surface the MD5)
+	---   * the ULEB128 number  (DW_FORM_udata)
+	---   * nil + skip-bytes    (DW_FORM_data16; we don't surface the MD5)
 	local function read_form(buf, lstr_buf, p, form)
 		if form == M.DWARF5_DEBUG_LINE.form_line_strp then
-			local strp = M.read_u32_le(buf, p)
+			local strp    = M.read_u32_le(buf, p)
 			local end_pos = lstr_buf:find("\0", strp + 1, true) or (#lstr_buf + 1)
 			return lstr_buf:sub(strp + 1, end_pos - 1), p + M.DWARF5_DEBUG_LINE.form_strp_bytes
 		elseif form == M.DWARF5_DEBUG_LINE.form_string then
 			local nul = buf:find("\0", p + 1, true) or (#buf + 1)
 			return buf:sub(p + 1, nul - 1), nul
 		elseif form == M.DWARF5_DEBUG_LINE.form_udata then
-			local v, after = M.read_uleb128_at(buf, p)
+			local  v, after = M.read_uleb128_at(buf, p)
 			return v, after
 		elseif form == M.DWARF5_DEBUG_LINE.form_data16 then
 			return nil, p + M.DWARF5_DEBUG_LINE.form_data16_bytes
 		else
 			-- Unsupported form in a directory/file-table entry: best-effort skip.
-			-- We do NOT stderr-write because the crt0.s DWARF5 line unit (gcc-as emitted) uses DW_FORM_addr (0x01) for what is effectively a path entry, 
-			-- which is non-standard.
+			-- We do NOT stderr-write because the crt0.s DWARF5 line unit (gcc-as emitted) uses DW_FORM_addr (0x01) for what is effectively a path entry, which is non-standard.
 			-- The C-unit's DWARF3 paths are read via the parallel DWARF3 path and never see this error.
 			-- Callers should consult `basename_to_index` for the paths they care about and ignore this unit if it produced none.
 			return nil, p
@@ -916,9 +900,9 @@ function M.read_line_unit_file_table(elf_path)
 		local dirs = {}
 		while up < body_end do
 			local nul = buf:find("\0", up + 1, true) or (body_end + 1)
-			if nul > body_end then break end
+			if    nul > body_end then break end
 			local len = nul - up - 1
-			if len == 0 then up = nul break end
+			if    len == 0 then up = nul break end
 			dirs[#dirs + 1] = buf:sub(up + 1, nul - 1)
 			up = nul
 		end
@@ -926,14 +910,14 @@ function M.read_line_unit_file_table(elf_path)
 		local unit_paths = {}
 		while up < body_end do
 			local nul = buf:find("\0", up + 1, true) or (body_end + 1)
-			if nul > body_end or nul == up + 1 then up = nul break end
+			if    nul > body_end or nul == up + 1 then up = nul break end
 			local path = buf:sub(up + 1, nul - 1)
 			up = nul
-			local didx,    up_next  = M.read_uleb128_at(buf, up); up = up_next
-			local _time,   up_next2 = M.read_uleb128_at(buf, up); up = up_next2
-			local _size,   up_next3 = M.read_uleb128_at(buf, up); up = up_next3
+			local didx,  up_next  = M.read_uleb128_at(buf, up); up = up_next
+			local _time, up_next2 = M.read_uleb128_at(buf, up); up = up_next2
+			local _size, up_next3 = M.read_uleb128_at(buf, up); up = up_next3
 			local idx = #unit_basenames + 1
-			local bs   = path:match("[^/\\]+$") or path
+			local bs  = path:match("[^/\\]+$") or path
 			unit_paths[idx]     = path
 			unit_basenames[idx] = bs
 			dirs[1] = dirs[1] or ""  -- safety: gcc emits "" sentinel dir at 0
@@ -1006,7 +990,7 @@ function M.read_line_unit_file_table(elf_path)
 	local section_end = #line
 	while p + 4 <= section_end do
 		local unit_length = M.read_u32_le(line, p)
-		if unit_length == 0xFFFFFFFF then
+		if    unit_length == 0xFFFFFFFF then
 			io.stderr:write("[elf_dwarf.read_line_unit_file_table] 64-bit DWARF (initial-length 0xFFFFFFFF); not supported\n")
 			return nil
 		end
