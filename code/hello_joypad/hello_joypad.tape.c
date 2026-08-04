@@ -114,68 +114,6 @@ MipsAtomComp_Proc_(ac_put_draw_env, {
 
 #pragma region Baked Atoms
 
-/* DIAGNOSTIC 1: Pure tape loop test */
-internal MipsAtom_(diag_yield) { mac_yield() };
-
-/* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
-internal MipsAtom_(diag_color) {
-	store_word(  R_0, R_T7, 0), 
-	load_upper_i(R_AT, gp0_cmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
-	or_i_self(   R_AT, 0xFF00),                      /* Low:  Color G:FF, R:00 (Cyan) */
-	store_word(  R_AT, R_T7, 4),
-	
-	/* Fake coordinates - Swapped winding order to prevent GPU culling! */
-	load_upper_i(R_AT, 0x0010), or_i_self(R_AT, 0x0010), store_word(R_AT, R_T7, 8),  /* (16, 16) */
-	load_upper_i(R_AT, 0x0050), or_i_self(R_AT, 0x0010), store_word(R_AT, R_T7, 12), /* (80, 16) */
-	load_upper_i(R_AT, 0x0010), or_i_self(R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
-
-	add_ui(          R_T1, R_0,  10),
-	shift_lleft_self(R_T1,       S_(U4)/2), 
-	add_u_self(      R_T1,       R_T6),         
-	
-	load_word(   R_AT, R_T1, 0),        
-	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits),
-	store_word(  R_AT, R_T7, 0),       
-	shift_lleft(R_AT, R_T7, S_(PolyTag_len_bits)), shift_lright(R_AT, R_AT, S_(PolyTag_len_bits)),         
-	or_u_self(  R_AT, R_V0),          
-	store_word( R_AT, R_T1, 0),       
-
-	add_ui(R_T7, R_T7, 20),          
-
-	mac_yield()
-};
-
-/* DIAGNOSTIC 3: Pure GTE test (No Memory Writes) */
-internal MipsAtom_(diag_gte) {
-	/* Load 3 indices */
-	load_half_u(R_T0, R_T4, 0),
-	load_half_u(R_T1, R_T4, 2),
-	load_half_u(R_T2, R_T4, 4),
-
-	/* Load Vertices into GTE */
-	shift_lleft( R_AT, R_T0, 3), add_u(    R_AT, R_AT, R_T5),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
-
-	shift_lleft( R_AT, R_T1, 3), add_u(R_AT, R_AT, R_T5),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
-
-	shift_lleft(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_T5),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
-
-	/* Run Math */
-	nop2, gte_cmdw_rtpt,
-	nop2, gte_cmdw_nclip,
-	nop2,
-
-	/* Advance Face Cursor and Yield */
-	add_ui(R_T4, R_T4, 8),
-
-	mac_yield()
-};
-
 enum {
 	R_ScreenX   = R_T5 atom_reg atom_type(U2),
 	R_ScreenY   = R_T6 atom_reg atom_type(U2),
@@ -299,7 +237,10 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	gte_cmdw_nclip,
 
 	gte_mv_from_data_r(R_T0, C2_MAC0), nop,
-	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)), nop,
+	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
+		/* BD-slot: write the prim tag (R_0=0; overwrites the legacy tag word in the prim_buffer).
+		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded — harmless
+		 * because the OT entry that points to this prim is created later, only on the body path. */
 		store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
 		shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
 		load_word(R_V0, R_AT, O_(V3_S2, x)),   load_word(R_V1, R_AT, O_(V3_S2, z)),

@@ -5,9 +5,9 @@
 #pragma region hello_joypad.tape
 
 
-// --- atom: cube_g4_face (77 words) ---
+// --- atom: cube_g4_face (76 words) ---
 
-#define _atom_offset_cull_cube_g4_face_exit           42
+#define _atom_offset_cull_cube_g4_face_exit           41
 #define _atom_offset_bounds_chk_cube_g4_face_exit     24
 
 enum {

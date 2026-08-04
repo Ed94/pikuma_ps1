@@ -7,8 +7,10 @@
 #endif
 
 enum {
-	PrimitiveBuff_Len = 4096,
-	OrderingTbl_Len   = 2048
+	// PrimitiveBuff_Len = 4096,
+	// OrderingTbl_Len   = 2048,
+	PrimitiveBuff_Len = 131072,
+	OrderingTbl_Len   = 8192,
 };
 
 enum {

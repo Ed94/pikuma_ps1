@@ -125,9 +125,9 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 
 		gte_cmdw_avg_sort_z4,
 		gte_mv_from_data_r(R_T1, C2_OTZ),
-		add_ui(      R_AT, R_0,  OrderingTbl_Len),
-		set_lt_u(    R_AT, R_T1, R_AT),
 
+		add_ui(      R_AT, R_0, OrderingTbl_Len),
+		set_lt_u(    R_AT, R_T1, R_AT), 
 		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
 			mac_insert_ot_tag_g4(),
 			mac_format_g4_color(
@@ -184,7 +184,7 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 		/* Calculate Depth */
 		gte_avg_sort_z3,
 		gte_mv_from_data_r(R_T1, C2_OTZ),
-		/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
+		/* Bounds Check OTZ < OrderingTbl_Len (Branch forward to skip insertion) */
 		add_ui(      R_AT, R_0,  OrderingTbl_Len),
 		set_lt_u(    R_AT, R_T1, R_AT),
 		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,

@@ -1503,6 +1503,9 @@ M.INSTRUCTION_LATENCY = {
 	["branch_equal"]        = 2,  ["branch_ne"]          = 2,
 	["branch_le_zero"]      = 2,  ["branch_lt_zero"]     = 2,
 	["branch_ge_zero"]      = 2,  ["branch_gt_zero"]     = 2,
+	-- `jump_rel(off)` is the within-atom-safe unconditional-jump alias for `branch_equal(R_0, R_0, off)` (see `code/duffle/mips.h`).
+	-- Same cost as the underlying branch (1 instruction + 1 mandatory BD-slot nop = 2 cycles).
+	["jump_rel"]            = 2,
 	-- Jumps (jump + BD slot nop = 2 cycles)
 	["jump"]                = 2,  ["jump_reg"]           = 2,
 	["jump_link"]           = 2,  ["call_reg"]           = 2,

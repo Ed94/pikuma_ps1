@@ -111,12 +111,12 @@ enum {
 	MemTape_Len    = 512,
 };
 typedef Struct_(SMemory) {
-	U4 MemTape[MemTape_Len];
-
-	DoubleBuffer            screen_buf;
-	A2_OrderingTable_Buffer ordering_tbl;
 	PrimitiveArena          primitives;
+	A2_OrderingTable_Buffer ordering_tbl;
+	DoubleBuffer            screen_buf;
 	S4                      active_buf_id;
+
+	U4 MemTape[MemTape_Len];
 
 	M3_S2 tform_world;
 
