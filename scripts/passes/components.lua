@@ -4,7 +4,7 @@
 --- Scanner owns `declaration_comment` and `debug_skip` on each declaration record; this pass projects both forward.
 ---
 --- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations,
---- then resolves the function-args string from the preceding `FI_ MipsAtom ac_X(...)` declaration via a backward walk.
+--- then resolves the function-args string from the preceding `FI_ Slice_MipsCode ac_X(...)` declaration via a backward walk.
 ---
 --- Emits one `<dir_basename>.macs.h` per source with `#define mac_X(sig) \` macros plus `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
 ---
@@ -29,7 +29,7 @@ local duffle          = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- Atom component declaration identifiers.
 local ATOM_COMP_PROC  = "MipsAtomComp_Proc_"
-local MIPS_ATOM       = "MipsAtom"  -- prefix on the function declaration that wraps an AtomComp_Proc_
+local MIPS_ATOM       = "Slice_MipsCode"  -- prefix on the function declaration that wraps an AtomComp_Proc_
 
 -- Component-name prefixes.
 local AC_PREFIX       = "ac_"  -- arg to MipsAtomComp_(ac_X); the X is the atom name
@@ -97,9 +97,9 @@ local M = {}
 --- Returns the args string (e.g., `"U4 off, U4 code, U1 r, U1 g, U1 b"`) or nil if no function declaration is found.
 ---
 --- Convention: function form is
----   `FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })`
+---   `FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })`
 --- We find the LAST occurrence of `"ac_X("` before `before_pos` and extract the args from inside the parens.
---- We then verify the preceding context ends with `MipsAtom`
+--- We then verify the preceding context ends with `Slice_MipsCode`
 --- (the function-decl keyword with possible qualifiers between).
 ---
 --- @param source     string

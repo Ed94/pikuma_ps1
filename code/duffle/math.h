@@ -11,6 +11,7 @@ enum {
 	v3s2_byteoff = 3, // log2(8), used with shift_left_logical op for index via byte offset.
 };
 
+typedef Array_(U1, 2);
 typedef Array_(U4, 2);
 typedef Array_(S2, 2);
 typedef Array_(S2, 3);
@@ -22,6 +23,7 @@ typedef S2 A3x3_S2[3][3];
 typedef Struct_(Extent2_S2) { S2 width; S2 height; };
 typedef Struct_(Extent2_S4) { S4 width; S4 height; };
 
+typedef Struct_(V2_U1)      { U1 x; U1 y; };
 typedef Struct_(V2_S2)      { S2 x; S2 y; };
 typedef Struct_(V2_S4)      { S4 x; S4 y; };
 typedef Struct_(V3_S2)      { S2 x; S2 y; S2 z; S2 pad; };

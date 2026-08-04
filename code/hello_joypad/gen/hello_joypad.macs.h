@@ -10,6 +10,12 @@
 #endif
 
 /* atom_dbg_skip */
+#define mac_load_v2s2(rs_x, rs_y, r_base, offset) \
+	load_half( rs_x, r_base, O_(V3_S2,x)) \
+,	load_half( rs_y, r_base, O_(V3_S2,y))
+WORD_COUNT(mac_load_v2s2, 2)
+
+/* atom_dbg_skip */
 #define mac_store_v2s2(rt_x, rt_y, base, offset) \
 	store_half(rt_x, base, offset + O_(V2_S2,x)) \
 ,	store_half(rt_y, base, offset + O_(V2_S2,y))
@@ -62,18 +68,4 @@ WORD_COUNT(mac_put_disp_env, 15)
 ,	mac_gcmd_push(gp0_word_nop(), reg_transfer, reg_base, port) \
 ,	mac_gcmd_push(gp0_word_nop(), reg_transfer, reg_base, port)
 WORD_COUNT(mac_put_draw_env, 48)
-
-#define mac_pad_sio_write_pad_state(status_val, state_ptr_reg, scratch_reg) \
-	add_ui(scratch_reg, R_0, status_val) \
-,	store_word(scratch_reg, state_ptr_reg, O_(PadState,status))	/* FIX 2026-08-02: buttons = 0x0000FFFF = "no buttons pressed" in
-	 * libetc convention. Build it with LUI + ORI so addiu does not
-	 * sign-extend 0xFFFF to 0xFFFFFFFF. */ \
-,	load_upper_i(scratch_reg, 0x0000) \
-,	or_i(scratch_reg, scratch_reg, 0xFFFF) \
-,	store_word(scratch_reg, state_ptr_reg, O_(PadState,buttons)) \
-,	add_ui(scratch_reg, R_0, 0x80808080) \
-,	store_word(scratch_reg, state_ptr_reg, O_(PadState,left_x)) \
-,	add_ui(scratch_reg, R_0, 0) \
-,	store_word(scratch_reg, state_ptr_reg, O_(PadState,attempt))
-WORD_COUNT(mac_pad_sio_write_pad_state, 9)
 

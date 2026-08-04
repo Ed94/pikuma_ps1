@@ -336,10 +336,10 @@ enum { _BitOffsets = 0
 
 /* Logic Opcodes */
 
-#define and(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_and)
-#define or(rd, rs, rt)           enc_r(op_special, (rs), (rt), (rd), 0, fc_or)
-#define xor(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_xor)
-#define nor(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_nor)
+#define and_u(rd, rs, rt)        enc_r(op_special, (rs), (rt), (rd), 0, fc_and)
+#define or_u(rd, rs, rt)         enc_r(op_special, (rs), (rt), (rd), 0, fc_or)
+#define xor_u(rd, rs, rt)        enc_r(op_special, (rs), (rt), (rd), 0, fc_xor)
+#define nor_u(rd, rs, rt)        enc_r(op_special, (rs), (rt), (rd), 0, fc_nor)
 
 #define or_u_self(rd_rs, rt)       enc_r(op_special, (rd_rs), (rt), (rd_rs), 0, fc_or)
 

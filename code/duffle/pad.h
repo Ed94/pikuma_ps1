@@ -3,24 +3,26 @@
 #	include "dsl.h"
 #endif
 
-
+/* PSX button bit positions — 1:1 with PSX-SPX docs at docs/psx-spx/docs/controllersandmemorycards.md:405-421.
+ * Wire is active-low (0 = pressed).
+ * The decoder atom computes buttons = (~raw_buttons) & 0xFFFF; the active-low-to-active-high inversion is applied bit-by-bit. */
 enum {
-	Bit_(Pad_L2,       0),
-	Bit_(Pad_R2,       1),
-	Bit_(Pad_L1,       2),
-	Bit_(Pad_R1,       3),
-	Bit_(Pad_Triangle, 4),
-	Bit_(Pad_Circle,   5),
-	Bit_(Pad_Cross,    6),
-	Bit_(Pad_Square,   7),
-	Bit_(Pad_Select,   8),
-	Bit_(Unused_PadI,  9),
-	Bit_(Unused_PadJ, 10),
-	Bit_(Pad_Start,   11),
-	Bit_(Pad_Up,      12),
-	Bit_(Pad_Right,   13),
-	Bit_(Pad_Down,    14),
-	Bit_(Pad_Left,    15),
+	Bit_(Pad_Select,  0),
+	Bit_(Pad_L3,      1),
+	Bit_(Pad_R3,      2),
+	Bit_(Pad_Start,   3),
+	Bit_(Pad_Up,      4),
+	Bit_(Pad_Right,   5),
+	Bit_(Pad_Down,    6),
+	Bit_(Pad_Left,    7),
+	Bit_(Pad_L2,      8),
+	Bit_(Pad_R2,      9),
+	Bit_(Pad_L1,     10),
+	Bit_(Pad_R1,     11),
+	Bit_(Pad_Triangle, 12),
+	Bit_(Pad_Circle,  13),
+	Bit_(Pad_Cross,   14),
+	Bit_(Pad_Square,  15),
 };
 
 enum {
@@ -33,111 +35,39 @@ enum {
 #define pad0_(btn_id) (btn_id << Pad0)
 #define pad1_(btn_id) (btn_id << Pad1)
 
-
 /* ============================================================
- * SIO0 raw controller polling surface (Phase 1 scaffolding)
- * Source of truth: docs/psx-spx/docs/serialinterfacessio.md
- *                  docs/psx-spx/docs/controllersandmemorycards.md
- *                  https://github.com/Lameguy64/PSn00bSDK (spi.c)
+ * BIOS pad-buffer subsystem: docs/psx-spx/docs/kernelbios.md (B(12h) + B(13h))
  * ============================================================ */
 
 enum {
-	/* SIO0 register offsets relative to IOBASE 0xBF800000 */
-	pad_SIO_DATA_OFFSET       = 0x1040,  /* 8-bit data (TX write / RX read) */
-	pad_SIO_STAT_OFFSET       = 0x1044,  /* 16-bit status */
-	pad_SIO_MODE_OFFSET       = 0x1048,  /* 16-bit mode */
-	pad_SIO_CTRL_OFFSET       = 0x104A,  /* 16-bit control */
-	pad_SIO_BAUD_OFFSET       = 0x104E,  /* 16-bit baud */
-
-	/* SIO_CTRL bit flags */
-	pad_SIO_CTRL_RESET        = 0x0040,  /* reset most SIO registers */
-	pad_SIO_CTRL_TX_ENABLE    = 0x0001,  /* TX enable */
-	pad_SIO_CTRL_DTR_CS       = 0x0002,  /* DTR drives /CS on controller */
-	pad_SIO_CTRL_ACK          = 0x0010,  /* acknowledge / clear status */
-	pad_SIO_CTRL_DSR_IRQ      = 0x1000,  /* enable /ACK IRQ (unused; polling) */
-
-	/* SIO_STAT bit flags */
-	pad_SIO_STAT_TX_READY     = 0x0001,
-	pad_SIO_STAT_RX_NOT_EMPTY = 0x0002,
-	pad_SIO_STAT_TX_IDLE      = 0x0004,
-	pad_SIO_STAT_DSR_ACK      = 0x0080,
-
-	/* SIO init values (per docs/psx-spx/docs/serialinterfacessio.md) */
-	pad_SIO_MODE_INIT         = 0x000D,  /* MUL1, 8-bit, no parity, idle-high */
-	pad_SIO_BAUD_INIT         = 0x0088,  /* ~250 kHz standard rate */
-	pad_SIO_CTRL_CLEANUP      = 0x0010,  /* raise /CS + clear stale status */
-
-	/* Controller protocol bytes (per docs/psx-spx/docs/controllersandmemorycards.md) */
-	pad_PROTO_ADDR            = 0x01,
-	pad_PROTO_CMD_READ        = 0x42,
-	pad_PROTO_CMD_ENTERCFG    = 0x43,
-	pad_PROTO_CMD_SETLED      = 0x44,
-	pad_PROTO_PREFIX          = 0x5A,
-	pad_PROTO_PREFIX_QUIRK    = 0x00,  /* DualShock: Analog-button swap after cfg */
-
-	/* Controller response ID nibble (low 4 bits of ID byte) */
-	pad_PROTO_ID_DIGITAL      = 0x41,
-	pad_PROTO_ID_ANALOG_STK   = 0x53,
-	pad_PROTO_ID_ANALOG       = 0x73,
-	pad_PROTO_ID_CONFIG       = 0xF3,
-
-	/* Per-state constants */
-	pad_SIO_SETTLE_BEFORE_TX  = 1000,   /* iterations after CTRL=0x0010 */
-	pad_SIO_SETTLE_AFTER_TX   = 2000,   /* iterations after CTRL=port_select */
-	pad_SIO_WAIT_BUDGET       = 4096,   /* max iterations per /ACK or RX wait */
-	pad_SIO_CFG_MAX_ATTEMPTS  = 3,      /* DualShock config retries before reject */
+	PAD_BIOS_RAW_SIZE = 0x22,
+};
+typedef Struct_(PadBiosRaw) {
+	U1 bytes[PAD_BIOS_RAW_SIZE];
 };
 
-/* Pad status enum (per-port outcome) */
-typedef Enum_(U4, PadSioStatus) {
-	PadSioStatus_Disconnected,
-	PadSioStatus_Digital,
-	PadSioStatus_AnalogStick,
-	PadSioStatus_Analog,
-	PadSioStatus_ConfigRejected,
-	PadSioStatus_Invalid,
-	PadSioStatus_TxTimeout,
-	PadSioStatus_RxTimeout,
-	PadSioStatus_AckTimeout,
+typedef Enum_(U4, PadStatus) {
+	PadStatus_Disconnected,
+	PadStatus_Digital,
+	PadStatus_AnalogStick,
+	PadStatus_AnalogPad,
+	PadStatus_Unsupported,
+	PadStatus_Pending,
+	PadStatus_Invalid,
 };
 
-/* PadState — per-port runtime state */
+/* PadState — per-port normalized runtime state.
+ * Field order is chosen so that the 4 axes (left_x, left_y, right_x, right_y)
+ * form a contiguous 4-byte block at offset 8, allowing a single `store_word` to clear-or-write all 4 axes in one MIPS instruction.
+ * The struct size stays 12 bytes (unchanged from the prior order,
+ * which left the C compiler to insert 1 byte of trailing pad to reach the 4-byte struct alignment). */
 typedef Struct_(PadState) {
-	PadSioStatus status;
-	U4           buttons;
-	U1           left_x;
-	U1           left_y;
-	U1           right_x;
-	U1           right_y;
-	U4           attempt;
+	PadStatus status;  /* offset 0,  size 4 (U4) */
+	U2        buttons; /* offset 4,  size 2 */
+	U1        id;      /* offset 6,  size 1 */
+	U1        pad;     /* offset 7,  size 1 — explicit pad to align the axes block */
+	U1        left_x;  /* offset 8,  size 1 — store_word target (4-byte aligned) */
+	U1        left_y;  /* offset 9,  size 1 */
+	U1        right_x; /* offset 10, size 1 */
+	U1        right_y; /* offset 11, size 1 */
 };
-
-/* PadSioInit — boot-time C-side pointer table passed into the tape */
-typedef Struct_(PadSioInit) {
-	U4        sio_base_addr[2];
-	PadState* pad_state_ptr[2];
-};
-
-/* Register aliases for the new atoms (post-2026-07-10 ABI) */
-#ifndef atom_reg
-#define atom_reg /* atom_reg: opt the preceding enum entry into the DWARF registry */
-#endif
-
-enum {
-	R_PadSioBase   = R_T6 atom_reg,  /* caller-pinned IO_BASE_ADDR */
-	R_PadState     = R_T7 atom_reg,  /* caller-pinned PadState* */
-	R_PadStatus    = R_T4 atom_reg,  /* scratch for status reads */
-	R_PadCountdown = R_T5 atom_reg,  /* scratch for countdown budget */
-	R_DiagPinScratch = R_T3 atom_reg, /* raw_sio_pad_poll_20260802 — diag scratch address */
-#define R_PadSioBase_Code       R_T6_Code
-#define R_PadState_Code         R_T7_Code
-#define R_PadStatus_Code        R_T4_Code
-#define R_PadCountdown_Code     R_T5_Code
-#define R_DiagPinScratch_Code  R_T3_Code
-};
-
-/* Address of SIO0 block in KSEG1 (the PS1-side uncached mirror) */
-enum {
-	pad_IO_KSEG1_BASE = 0xBF800000,
-};
-

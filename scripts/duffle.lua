@@ -920,18 +920,26 @@ function M.tokenize_body(body)
 		while scan <= len do
 			local c = body:byte(scan)
 			-- Terminator bytes (delimit a token at the top level): ',' = 0x2C, '\n' = 0x0A, ';' = 0x3B.
-			-- These also appear as separators between argument lists inside the parens/braces/brackets, 
+			-- These also appear as separators between argument lists inside the parens/braces/brackets,
 			-- so we stop the scan when we hit any of them.
 			if     c == BYTE_COMMA   then break end
 			if     c == BYTE_NEWLINE then break end
 			if     c == BYTE_SEMI    then break end
+			-- Line-comment '// ... \n' (0x2F 0x2F): skip to (and past) the next newline, or to end-of-body.
+			if     c == BYTE_SLASH and body:byte(scan + 1) == BYTE_SLASH then
+				local nl = M.find_byte(body, BYTE_NEWLINE, scan)
+				scan = nl and (nl + 1) or (len + 1)
+			-- Block-comment '/* ... */' (0x2F 0x2A): skip to (and past) the matching '*/', or to end-of-body.
+			elseif c == BYTE_SLASH and body:byte(scan + 1) == BYTE_STAR then
+				local close = body:find("*/", scan + 2, true)
+				scan = close and (close + 2) or (len + 1)
 			-- Group opener bytes (consume the balanced group via the matching reader): '(' = 0x28, '{' = 0x7B, '[' = 0x5B.
-			if     c == BYTE_OPEN_PAREN then local _, a = M.read_parens   (body, scan); scan = a
+			elseif c == BYTE_OPEN_PAREN then local _, a = M.read_parens   (body, scan); scan = a
 			elseif c == BYTE_OPEN_BRACE then local _, a = M.read_braces   (body, scan); scan = a
 			elseif c == BYTE_OPEN_BRACK then local _, a = M.read_brackets (body, scan); scan = a
 			-- String-literal byte ('"' = 0x22 or '\'' = 0x27): skip past the quoted region in one shot.
 			elseif c == BYTE_DQUOTE or c == BYTE_SQUOTE then
-				scan = M.skip_str_or_cmt(body, scan) + 1
+				scan = (M.skip_str_or_cmt(body, scan) or scan) + 1
 			else
 				scan = scan + 1
 			end
@@ -1316,13 +1324,13 @@ M.OPERAND_READ_POSITIONS = {
 	["sub_s"]                  = {1, 2, 3},
 	["sub_u"]                  = {1, 2, 3},
 	["and_i"]                  = {1, 2},
-	["and_u"]                  = {1, 2, 3},
+	["and"]                  = {1, 2, 3},
 	["or_i"]                   = {1, 2},
 	["or_i_self"]              = {1},
-	["or_u"]                   = {1, 2, 3},
-	["or_u_self"]              = {1, 2},
+	["or"]                   = {1, 2, 3},
+	["or_self"]              = {1, 2},
 	["xor_i"]                  = {1, 2},
-	["xor_u"]                  = {1, 2, 3},
+	["xor"]                  = {1, 2, 3},
 	["slt_s"]                  = {1, 2, 3},
 	["slt_u"]                  = {1, 2, 3},
 	["slt_si"]                 = {1, 2},
@@ -1469,14 +1477,14 @@ M.INSTRUCTION_LATENCY = {
 	-- CPU ALU (single-cycle R3000A ops)
 	["nop"]                 = 1,
 	["nop2"]                = 2,
-	["add_ui"]              = 1,  ["add_ui_self"]       = 1,
-	["add_s"]               = 1,  ["add_si"]            = 1,
-	["add_u"]               = 1,  ["add_u_self"]        = 1,
-	["sub_u"]               = 1,  ["sub_s"]             = 1,
-	["and_i"]               = 1,  ["and_u"]             = 1,
-	["or_i"]                = 1,  ["or_i_self"]         = 1,
-	["or_u"]                = 1,  ["or_u_self"]         = 1,
-	["xor_i"]               = 1,  ["xor_u"]             = 1,
+	["add_ui"]              = 1,  ["add_ui_self"]     = 1,
+	["add_s"]               = 1,  ["add_si"]          = 1,
+	["add_u"]               = 1,  ["add_u_self"]      = 1,
+	["sub_u"]               = 1,  ["sub_s"]           = 1,
+	["and_i"]               = 1,  ["and"]             = 1,
+	["or_i"]                = 1,  ["or_i_self"]       = 1,
+	["or_u"]                = 1,  ["or_u_self"]       = 1,
+	["xor_i"]               = 1,  ["xor_u"]           = 1,
 	["nor_u"]               = 1,
 	["shift_lleft"]         = 1,  ["shift_lleft_self"]  = 1,
 	["shift_lright"]        = 1,
@@ -1952,7 +1960,7 @@ M.GPR_VALUE_RULES = {
 	-- Present register-form self variants. They are included here so a
 	-- known value is not needlessly lost when these encoders are used.
 	add_u_self       = { op = "add_u",       dest = 1, sources = {1, 2}, },
-	or_u_self        = { op = "or_u",        dest = 1, sources = {1, 2}, },
+	or_u_self        = { op = "or",          dest = 1, sources = {1, 2}, },
 	shift_lleft_self = { op = "shift_lleft", dest = 1, source = 1, immediate = 2, },
 }
 

@@ -10,10 +10,10 @@
 #	include "gen/duffle.offsets.h"
 #endif
 
-typedef U4 const MipsCode;
+typedef U4 const MipsCode; // Underlying type to mips asm words.
 typedef Slice_(MipsCode);
-typedef Slice_MipsCode MipsAtom;
 
+typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that must terminate with an ac_yield.
 #define MipsAtom_(sym) MipsCode sym [] align_(4) =
 
 // Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
@@ -23,9 +23,9 @@ typedef Slice_MipsCode MipsAtom;
 #define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
 
 // Used for components with value-args (e.g., ac_format_f3_color).
-//   FI_ MipsAtom ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
+//   FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
 // expands to:
-//   FI_ MipsAtom ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
+//   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
 #define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
 
 // Auto-generated component macros (<module>/gen/<dir>/<dir>.macs.h) are included manually by the unity build.
@@ -59,12 +59,12 @@ enum {
 	R_TScratch6  = R_T6,
 	R_TScratch7  = R_T7,
 	R_TScratch8 =  R_T8,
+	R_TScratch10 = R_V0,
+	R_TScratch11 = R_V1,
 	// Note(Ed): We can technically clobber these, but don't unless we hit a bottleneck.
-	// R_TScratch10 = R_V0,
-	// R_TScratch10 = R_V1,
-	// R_TScratch11 = R_A0,
-	// R_TScratch12 = R_A1,
-	// R_TScratch13 = R_A3,
+	// R_TScratch12 = R_A0,
+	// R_TScratch13 = R_A1,
+	// R_TScratch14 = R_A3,
 	// TODO(Ed): Review S0-S7, they are technically avaialble, we just have to snapshot them at the ABI boundary.
 	// TODO(Ed): This is technically a waste of cycles for most work? so maybe only do this for expensive atoms on-demand or atom phases.
 // TODO(Ed): Sort out the other available registers... (Not sure how much is left avail)
@@ -74,25 +74,27 @@ enum {
 /* ---------------------------------------------------------------------------
  *  TAPE DRIVE ABI & REGISTER ALIASES (the enum moved earlier; see below)
  * ---------------------------------------------------------------------------*/
+typedef Slice_(MipsAtom); typedef Slice_MipsAtom Tape;
 
 /* The 'Exit' Atom */
 atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 
 //TODO(Ed): Do we backup R_S0-7 here? Have it in a heavier tape run as a opt-in? Same with V0-1 and A0-3?
 /* Generalized Tape Engine Runner */
-FI_ void tape_run(Slice_MipsCode tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
+FI_ void tape_run(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
 	asm_words(
 		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
-		, add_ui_self(R_TapePtr, S_(MipsCode)) /* Advance tape */
+		, add_ui_self(R_TapePtr, S_(MipsAtom)) /* Advance tape */
 		, call_reg(   R_AtomJmp)               /* jalr $t9 */
 		, nop                                  /* Branch delay slot */
 	)
 	asm_rpins, r_use(tape_ptr)
 	asm_clobber: 
-			rlit(R_AT)
-		, rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4)
-		, rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8)
-		, clb_mem_drain 
+		rlit(R_AT),
+		rlit(R_V0), rlit(R_V1),
+		rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
+		rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8),
+		clb_mem_drain 
 ); }
 
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
@@ -100,12 +102,13 @@ FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start
 FI_ TapeBuilder tb_make_old(             FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
 FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ mem.ptr, mem.len, 0 }; }
 
-#define tb_emit_(tb, atom) tb_emit(tb, atom)
 FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
 FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
+#define tb_emit_(atom)        tb_emit(& tb, atom)
+#define tb_data_(field, data) tb_data(& tb, u4_(data))
 
-FI_ Slice_MipsCode tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Slice_MipsCode){ C_(U4*,tb->ptr), tb->used }; }
-FI_ Slice_MipsCode tb_slice(TapeBuilder  tb) {                        return (Slice_MipsCode){ C_(U4*,tb.ptr),  tb.used }; }
+FI_ Tape tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Tape){ C_(U4*,tb->ptr), tb->used }; }
+FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4*,tb.ptr),  tb.used }; }
 #define tb_scope(tb)     for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,tape_exit))
 
 FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_slice(tb[0])); }
@@ -159,7 +162,7 @@ MipsAtomComp_(ac_insert_ot_tag_f3) {
 	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
 	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (5 - 1) << 24 = 4 << 24
 	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
-	or(          R_AT, R_AT, R_V0),                            // Merge length
+	or_u(        R_AT, R_AT, R_V0),                            // Merge length
 	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
 	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
 	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
@@ -174,7 +177,7 @@ MipsAtomComp_(ac_insert_ot_tag_g4) {
 	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
 	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (9 - 1) << 24 = 8 << 24
 	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
-	or(          R_AT, R_AT, R_V0),                            // Merge length
+	or_u(        R_AT, R_AT, R_V0),                            // Merge length
 	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
 	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
 	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
@@ -183,7 +186,7 @@ MipsAtomComp_(ac_insert_ot_tag_g4) {
 
 /* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given
  * byte offset. Internal helper used by the *_format_*_color macros. */
-FI_ MipsAtom ac_pack_color_word(U4 off, U4 cmd, U1 r, U1 g, U1 b)
+FI_ Slice_MipsCode ac_pack_color_word(U4 off, U4 cmd, U1 r, U1 g, U1 b)
 atom_dbg_skip MipsAtomComp_Proc_(ac_pack_color_word, {
 	load_upper_i(R_AT, (cmd) << 8  | (b)),
 	or_i_self(   R_AT, ((g)  << 8) | (r)),
@@ -192,7 +195,7 @@ atom_dbg_skip MipsAtomComp_Proc_(ac_pack_color_word, {
 
 /* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
  * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields). */
-FI_ MipsAtom ac_format_f3_color(U1 r, U1 g, U1 b)
+FI_ Slice_MipsCode ac_format_f3_color(U1 r, U1 g, U1 b)
 atom_dbg_skip MipsAtomComp_Proc_(ac_format_f3_color, { mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b) })
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
@@ -205,7 +208,7 @@ atom_dbg_skip MipsAtomComp_(ac_gte_store_f3) {
 
 /* Words: 12; Emits the four (code|color) words of a Poly_G4.
  * Args: rN,gN,bN are 8-bit RGB byte values for each of the 4 vertices. */
-FI_ MipsAtom ac_format_g4_color(
+FI_ Slice_MipsCode ac_format_g4_color(
 	U1 r0, U1 g0, U1 b0,
   U1 r1, U1 g1, U1 b1,
   U1 r2, U1 g2, U1 b2,
@@ -259,7 +262,7 @@ FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
 	mem_bump(ab->start, ab->capacity, & ab->used, S_(ac_yield));
 }
 
-#define mipsatom_from_builder(ab) (MipsAtom){ab.start, ab.used}
+#define mipsatom_from_builder(ab) (Slice_MipsCode){ab.start, ab.used}
 
 #pragma endregion Mips Atom Builder
 
@@ -310,68 +313,6 @@ internal MipsAtom_(set_gte_world) atom_info(
 	gte_mv_to_ctrl_r(R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(R_T2, gte_cr_RT22),
 	load_word(R_T0, R_T3, 20), load_word(R_T1, R_T3, 24), load_word(R_T2, R_T3, 28),
 	gte_mv_to_ctrl_r(R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(R_T2, gte_cr_TRZ),
-	mac_yield()
-};
-
-/* DIAGNOSTIC 1: Pure tape loop test */
-internal MipsAtom_(diag_yield) { mac_yield() };
-
-/* DIAGNOSTIC 2: Pure memory test (No GTE). Draws a fixed cyan triangle. */
-internal MipsAtom_(diag_color) {
-	store_word(  R_0, R_T7, 0), 
-	load_upper_i(R_AT, gp0_cmd_poly_f3 << 8 | 0xFF), /* High: MipsCode Poly_F3(0x20) + Color B:FF */
-	or_i_self(   R_AT, 0xFF00),                      /* Low:  Color G:FF, R:00 (Cyan) */
-	store_word(  R_AT, R_T7, 4),
-	
-	/* Fake coordinates - Swapped winding order to prevent GPU culling! */
-	load_upper_i(R_AT, 0x0010), or_i_self(R_AT, 0x0010), store_word(R_AT, R_T7, 8),  /* (16, 16) */
-	load_upper_i(R_AT, 0x0050), or_i_self(R_AT, 0x0010), store_word(R_AT, R_T7, 12), /* (80, 16) */
-	load_upper_i(R_AT, 0x0010), or_i_self(R_AT, 0x0050), store_word(R_AT, R_T7, 16), /* (16, 80) */
-
-	add_ui(          R_T1, R_0,  10),
-	shift_lleft_self(R_T1,       S_(U4)/2), 
-	add_u_self(      R_T1,       R_T6),         
-	
-	load_word(   R_AT, R_T1, 0),        
-	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits),
-	store_word(  R_AT, R_T7, 0),       
-	shift_lleft(R_AT, R_T7, S_(PolyTag_len_bits)), shift_lright(R_AT, R_AT, S_(PolyTag_len_bits)),         
-	or_u_self(  R_AT, R_V0),          
-	store_word( R_AT, R_T1, 0),       
-
-	add_ui(R_T7, R_T7, 20),          
-
-	mac_yield()
-};
-
-/* DIAGNOSTIC 3: Pure GTE test (No Memory Writes) */
-internal MipsAtom_(diag_gte) {
-	/* Load 3 indices */
-	load_half_u(R_T0, R_T4, 0),
-	load_half_u(R_T1, R_T4, 2),
-	load_half_u(R_T2, R_T4, 4),
-
-	/* Load Vertices into GTE */
-	shift_lleft( R_AT, R_T0, 3), add_u(    R_AT, R_AT, R_T5),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
-
-	shift_lleft( R_AT, R_T1, 3), add_u(R_AT, R_AT, R_T5),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
-
-	shift_lleft(R_AT, R_T2, 3), add_u(R_AT, R_AT, R_T5),
-	load_word(R_V0, R_AT, 0), load_word(R_V1, R_AT, 4),
-	gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
-
-	/* Run Math */
-	nop2, gte_cmdw_rtpt,
-	nop2, gte_cmdw_nclip,
-	nop2,
-
-	/* Advance Face Cursor and Yield */
-	add_ui(R_T4, R_T4, 8),
-
 	mac_yield()
 };
 

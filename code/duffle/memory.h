@@ -67,8 +67,8 @@ typedef Slice_(B1);
 #define slice_end(slice)   ((slice).ptr + (slice).len)
 #define S_slice(s)         ((s).len * S_((s).ptr[0]))
 
-#define slice_ut(ptr,len)  slice_ut_(u4_(ptr), u4_(len))
-#define slice_ut_arr(a)    slice_ut_(u4_(a),   S_(a))
+#define slice_ut(ptr,len)  slice_ut_(u4_(ptr),     u4_(len))
+#define slice_ut_arr(a)    slice_ut_(u4_(a),       S_(a))
 #define slice_to_ut(s)     slice_ut_(u4_((s).ptr), S_slice(s))
 
 #define slice_iter(container, iter)     (T_((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter)

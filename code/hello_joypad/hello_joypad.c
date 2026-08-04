@@ -123,25 +123,13 @@ typedef Struct_(SMemory) {
 	Ent_Cube  cube;
 	Ent_Floor floor;
 
-	U4 pad_state;
-
-	PadState     pad[2];             /* raw_sio_pad_poll_20260802 — per-port */
-	PadSioInit    pad_sio_init;       /* raw_sio_pad_poll_20260802 — boot init */
+	PadBiosRaw pad_raw[2];
+	PadState   pad[2];
 
 	U4_V scratchpad; // d-cache
 };
 global SMemory smem;
 extern SMemory smem;
-U4 scratch_for_atom_diag_pin;   /* raw_sio_pad_poll_20260802 — diag atom scratch */
-
-#define pad0_signal_(btn_id) smem.pad_state & pad0_(btn_id)
-#define pad1_signal_(btn_id) smem.pad_state & pad1_(btn_id)
-
-
-// TODO(Ed):
-FI_ U4* spad_warm(MipsAtom atom) {
-	return nullptr;
-}
 
 I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 	gknown PrimitiveArena* pa  = & smem.primitives;
@@ -152,6 +140,80 @@ I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 	return next;
 }
 #define prim_alloc(type) (type*)prim__alloc(S_(type), slit( stringify(type)))
+
+/* Uses ONE 8-byte frame allocated via the compiler's standard prologue.
+ * The 4 wasted-arg words for B(12h) InitPAD2 live at [SP+0..15] but are not explicitly allocated.
+ * The compiler handles the MIPS O32 "wasted stack" convention for us by treating the B-call as a 4-arg call.
+ *
+ * The buffer pointers are passed as arguments so the compiler keeps them in callee-saved registers;
+ * The B(12h) asm volatile block does NOT clobber those registers (it clobbers only the volatile GPRs + the B-table arg registers explicitly).
+ * The C-level writes after the call re-load the pointers from their callee-saved homes.
+ *
+ * The clobber list for both B-calls names the full BIOS destroy set documented in kernelbios.md:167-174 (R1..R15, R24..R25, R31, HI/LO).
+ * The kernel-ABI "volatile GPRs" subset is clb_system; the rest of the destroy set is enumerated explicitly here. */
+NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
+{
+	/* Pin raw0 + raw1 to $a0 + $a1 via rgcc; the B(12h) call uses these directly.
+	 * The `(void)` casts mark them as unread after the call so the compiler doesn't need to move them back. */
+	register PadBiosRaw* p0 rgcc(R_A0) = raw0;
+	register PadBiosRaw* p1 rgcc(R_A1) = raw1;
+	(void)p0; (void)p1;
+
+	// TODO(Ed): Properly annotate the raw values in the inline asm instructions.
+	// Use enums.
+
+	/* B(12h) InitPAD2(raw0, 0x22, raw1, 0x22)
+	 *   $a0 = raw0 (rgcc-bound; survives the sequence below)
+	 *   $a1 = raw1 (preserved into $a2 before $a1 is overwritten)
+	 *   $a2 = raw1 (moved from $a1; survives $a1's overwrite)
+	 *   $a3 = 0x22 (immediate)
+	 *   $t1 = 0x12 (function number)
+	 *   $t2 = 0xB0 (BIOS B-table address) */
+	asm volatile(
+		asm_words(
+			or_u(    rarg_2, rarg_1, rdiscard), /* $a2 = $a1 = raw1 */
+			add_ui(  rarg_1, rdiscard, 0x22),   /* $a1 = 0x22 */
+			add_ui(  rarg_3, rdiscard, 0x22),   /* $a3 = 0x22 */
+			add_ui(  rtmp_1, rdiscard, 0x12),   /* $t1 = 0x12 */
+			add_ui(  rtmp_2, rdiscard, 0xB0),   /* $t2 = 0xB0 */
+			call_reg(rtmp_2),                   /* jalr $t2, $ra */
+			nop                                 /* BD slot */
+		)
+		asm_rpins, r_use(p0), r_use(p1)
+		asm_clobber: 
+			rlit(R_AT), 
+			rlit(R_V0), rlit(R_V1),
+			rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
+			rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8), rlit(R_T9),
+			rlit(R_RA),
+			clb_mem_drain
+	);
+
+	/* BIOS clobbered $a0..$a3, $ra, and the volatile GPRs above.
+	 * The compiler keeps raw0 + raw1 in callee-saved registers (or the outer frame's saved slots)
+	 * because the asm volatile blocks only clobber the volatile GPRs above.
+	 * The C-level writes re-load the pointers via the parameter names and write 0xFF to each 
+	 * buffer's status byte to mark the initial-state hazard documented in kernelbios.md:1621-1624. */
+	u1_v(raw0)[0] = 0xFF;
+	u1_v(raw1)[0] = 0xFF;
+
+	/* B(13h) StartPAD2() — no args. The BIOS preserves $sp. */
+	asm volatile(
+		asm_words(
+			add_ui(  rtmp_1, rdiscard, 0x13), /* $t1 = 0x13 */
+			add_ui(  rtmp_2, rdiscard, 0xB0), /* $t2 = 0xB0 (re-load) */
+			call_reg(rtmp_2),                 /* jalr $t2, $ra */
+			nop                               /* BD slot */
+		)
+		asm_clobber:
+			rlit(R_AT),
+			rlit(R_V0), rlit(R_V1),
+			rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
+			rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8), rlit(R_T9),
+			rlit(R_RA),
+			clb_mem_drain
+	);
+}
 
 void gp_screen_init_c11(DoubleBuffer* screen_buf, S4* active_buf_id)
 {
@@ -197,21 +259,19 @@ void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_
 	active_buf_id[0] = ! active_buf_id[0]; // Swap current buffer
 }
 
-void render(void) {
-}
-
 GCC_OPTIMIZATION_DISABLE
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
 
-	if (0) // Pad Input
+	if (0) // Pad Input (dead — kept for the source-as-written record; references the deleted `pad_state` field)
 	{
-		if (pad0_signal_(Pad_Left)) {
+		(void)Pad_Left; (void)Pad_Right; /* suppress unused-token warnings */
+		if (false) {
 			smem.cube.rot.y  += 30;
 			smem.floor.rot.y += 5;
 		}
-		if (pad0_signal_(Pad_Right)) {
+		if (false) {
 			smem.cube.rot.y  -= 30;
 			smem.floor.rot.y -= 5;
 		}
@@ -219,18 +279,18 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	if (1) // Pad Input (Tape version)
 	{
 		tb.used = 0; tb_scope_run(& tb) {
-			/* Per-frame SIO0 poll: pad_sio_step polls both ports; pad_apply_input applies rotation */
-			tb_emit(& tb, pad_sio_init);
-			tb_emit(& tb, pad_sio_step);
-				tb_data(& tb, u4_(& smem.pad[0]));
-				tb_data(& tb, u4_(& smem.pad[1]));
-				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[0]));
-				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[1]));
+			/* BIOS-owned polling: per-frame snapshot of both ports. */
+			tb_emit_(pad_bios_snapshot);
+				tb_data_(Binds_PadBiosSnapshot.raw,   & smem.pad_raw[0]);
+				tb_data_(Binds_PadBiosSnapshot.state, & smem.pad[0]);
+			tb_emit_(pad_bios_snapshot);
+				tb_data_(Binds_PadBiosSnapshot.raw,   & smem.pad_raw[1]);
+				tb_data_(Binds_PadBiosSnapshot.state, & smem.pad[1]);
 			/* Per-frame rotation apply: consume pad[0].buttons + pad[0].left_x */
-			tb_emit(& tb, pad_apply_input);
-				tb_data(& tb, u4_(& smem.pad[0]));
-				tb_data(& tb, u4_(& smem.cube.rot));
-				tb_data(& tb, u4_(& smem.floor.rot));
+			tb_emit_(pad_apply_input);
+				tb_data_(Binds_PadApplyInput.state,     & smem.pad[0]);
+				tb_data_(Binds_PadApplyInput.cube_rot,  & smem.cube.rot);
+				tb_data_(Binds_PadApplyInput.floor_rot, & smem.floor.rot);
 		}
 	}
 
@@ -440,6 +500,9 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 }
 GCC_OPTIMIZATION_ENABLE
 
+void render(void) {
+}
+
 int main(void)
 {
 	smem = (SMemory){0};
@@ -450,7 +513,6 @@ int main(void)
 		ent_cube128_init(& smem.cube.verts, & smem.cube.faces); {
 			Ent_Cube* cube = & smem.cube;
 			cube->rot    = v3s2(0, 0, 0);
-			// cube->pos    = v3s4(0, 0, 900);
 			cube->scale  = v3s4_fp_one();
 			cube->accel  = v3s4(0, 1, 0);
 			cube->pos    = v3s4(0, -400, 1800);
@@ -464,25 +526,14 @@ int main(void)
 	}
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape)); {
 		reset_graph(0);
-		pad_sio_init_setup(& smem.pad_sio_init, & smem.pad[0], & smem.pad[1]);
-		/* raw_sio_pad_poll_20260802 — pin the SIO base for the boot atom.
-		 * Use the KSEG1 constant directly (not via pad_sio_init.sio_base_addr[0])
-		 * because rgcc binds the register to the variable's storage, not the
-		 * value-at-call-site. Reading the field at tape-emit time would require
-		 * an extra load, which the atom body can't do implicitly. */
-		register U4 pad_io_base rgcc(R_PadSioBase) = pad_IO_KSEG1_BASE;
-		register U4* io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
-		register U4* r_diag_scratch rgcc(R_DiagPinScratch) = & scratch_for_atom_diag_pin;
-		register DoubleBuffer* screen_buf rgcc(R_ScreenBuf) = & smem.screen_buf;
+		/* Direct BIOS: poll both ports during VBlank. */
+		pad_bios_init_start(& smem.pad_raw[0], & smem.pad_raw[1]);
+		/* Pinned registers for the GPU init atom. */
+		register U4*           io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
+		register DoubleBuffer* screen_buf   rgcc(R_ScreenBuf)   = & smem.screen_buf;
 		tb.used = 0; tb_scope_run(& tb) {
 			tb_emit(& tb, screen_env_init);
 			tb_emit(& tb, gp_screen_init);
-			tb_emit(& tb, pad_sio_init);
-			tb_emit(& tb, pad_sio_step);  /* initial baseline */
-				tb_data(& tb, u4_(& smem.pad[0]));
-				tb_data(& tb, u4_(& smem.pad[1]));
-				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[0]));
-				tb_data(& tb, u4_(smem.pad_sio_init.sio_base_addr[1]));
 		}
 	}
 	while (1) {
@@ -494,14 +545,4 @@ int main(void)
 		gp_display_frame(& smem.screen_buf, active_buf_id, ordering_buf, pa);
 	};
 	return 0;
-}
-
-/* raw_sio_pad_poll_20260802 — populate the boot-time pad SIO context.
- * Populates the two PadState pointers + the KSEG1 SIO base address. */
-void pad_sio_init_setup(PadSioInit* init, PadState* s0, PadState* s1)
-{
-	init->sio_base_addr[0] = pad_IO_KSEG1_BASE;
-	init->sio_base_addr[1] = pad_IO_KSEG1_BASE;
-	init->pad_state_ptr[0]  = s0;
-	init->pad_state_ptr[1]  = s1;
 }

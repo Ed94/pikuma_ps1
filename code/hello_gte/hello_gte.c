@@ -122,7 +122,7 @@ global SMemory smem;
 extern SMemory smem;
 
 // TODO(Ed):
-FI_ U4* spad_warm(MipsAtom atom) {
+FI_ U4* spad_warm(Slice_MipsCode atom) {
 	return nullptr;
 }
 
