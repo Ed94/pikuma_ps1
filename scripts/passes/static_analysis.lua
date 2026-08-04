@@ -401,6 +401,18 @@ end
 -- therefore counts ONLY words strictly between the producer and the consumer.
 -- ─────────────────────────────────────────────────────────────────────────
 
+-- True iff `consumer_event` is a GTE command (gte_cmdw_* or one of the human-readable aliases
+-- mapped in `duffle.GTE_COMMAND_ALIASES`). Used by the LWC2 retirement-regime dispatch in the
+-- forward walker: a GTE-command consumer can read the LWC2 result in the very next slot (the GTE
+-- pipeline latches the LWC2 data); any other consumer must observe the standard MIPS load delay
+-- (gap >= 1).
+local function is_gte_command(consumer_event)
+	local tok = consumer_event.encoder or consumer_event.ident or ""
+	if tok:sub(1, 9) == "gte_cmdw_" then return true end
+	local aliases = duffle.GTE_COMMAND_ALIASES or {}
+	return aliases[tok] ~= nil
+end
+
 -- True iff `consumer_word` falls inside the COP2 command's input set OR inside the producer's `fanout_to` set (for IRGB writes).
 -- Used by the consumer-match step of the forward walker.
 local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
@@ -817,9 +829,17 @@ local function analyze_hardware_relations(atom)
 			local relation = prod.relation
 			local semantic = relation.semantic
 			local is_match = false
-			if semantic == "MTC2" or semantic == "CTC2" or semantic == "LWC2" then
+			if semantic == "MTC2" or semantic == "CTC2" or semantic == "LWC2_to_GTE" or semantic == "LWC2_to_other" then
 				-- Consumer is a GTE command whose input set contains the producer's COP2 destination (or a fan-out target).
-				is_match = is_cop2_consumer_of(ev, prod.destination, relation)
+				-- LWC2_to_GTE  — GTE-command consumer: gap = 0 OK (the pipeline latches the LWC2 result).
+				-- LWC2_to_other — non-GTE consumer: standard load delay applies.
+				if relation.id == "lwc2_to_gte_command" then
+					is_match = is_gte_command(ev) and is_cop2_consumer_of(ev, prod.destination, relation)
+				elseif relation.id == "lwc2_to_other_consumer" then
+					is_match = (not is_gte_command(ev)) and is_cop2_consumer_of(ev, prod.destination, relation)
+				else
+					is_match = is_cop2_consumer_of(ev, prod.destination, relation)
+				end
 			elseif semantic == "MFC2" or semantic == "CFC2" or semantic == "MFC0" then
 				-- Consumer is any encoder that reads the producer's GPR destination as an operand.
 				is_match = is_gpr_consumer_of(ev, prod.destination)
@@ -1163,6 +1183,8 @@ end
 local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 	local forward = atom.paths and atom.paths.forward_state
 	local events  = atom.paths.word_events or {}
+	-- GPR effects table used to resolve load destinations when classifying load-delay-slot nops.
+	local gpr_effects = duffle.INSTRUCTION_GPR_EFFECTS or {}
 	if not events or #events == 0 then return end
 	-- Runtime-helper atoms / components (e.g. tape_exit, ac_yield) carry `debug_skip = true` from the bare
 	-- `atom_dbg_skip` marker; their structural nops are part of the fixed handshake and not author choices.
@@ -1180,9 +1202,10 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 
 		-- Classify the nop BEFORE its event is applied to the pending state.
 		if ev_ident == "nop" and prev_ev ~= nil then
-			-- Skip BD-slot nops: they are exclusively owned by control_transfer_delay_slot_use.
+			-- Skip BD-slot nops that are exclusively owned by control_transfer_delay_slot_use
+			-- (the nop after a branch/jump — covered by that check separately).
 			-- Every BD-slot nop is structural; this check never reports on it.
-			-- (The earlier `if not suppressed then is_bd_slot = true end` form inverted the suppression — the `mac_yield()` handshake's `jump_reg(R_AtomJmp)` was incorrectly flagged.)
+			-- (The earlier `if not suppressed then is_bd_slot = true end` form inverted the suppression - the `mac_yield()` handshake's `jump_reg(R_AtomJmp)` was incorrectly flagged.)
 			local prev_ident   = prev_ev.encoder or ""
 			local bd_policies  = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
 			local is_bd_slot   = bd_policies[prev_ident] ~= nil
@@ -1243,20 +1266,52 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 				else
 					-- Track the slot_kind so the BD-separation case can assert the mac_yield handshake is still suppressed.
 					local slot_kind = "plain"
-					findings[#findings + 1] = {
-						check              = "hazard_nop_use",
-						kind               = "info",
-						atom               = atom.name,
-						line               = ev_line,
-						source             = ev.def_path or ev.source or "",
-						nop_classification = "modeled-redundant",
-						nop_word_index     = ev_word,
-						retired_relation   = nil,
-						slot_kind          = slot_kind,
-						msg = string.format("%s at line %d: nop at word %d is modeled-redundant (no pending modeled relation)"
-							, atom.name, ev_line, ev_word
-						),
-					}
+					-- MIPS load-delay slot: a `load_*` wrote a register in the previous slot, and the result
+					-- is unavailable for 1 cycle. This `nop` is structurally required; classifying it as
+					-- `modeled-required` is the correct signal (removing it would make the following
+					-- instruction read the OLD value of the loaded register, a load-use hazard). The
+					-- `load_delay_violations` check (Concern 3) catches the actual read-side error; here
+					-- we suppress the `modeled-redundant` misclassification.
+					-- The set of load instructions mirrors the LOAD_INSTRUCTION_IDENTS in `check_load_delay_slots`.
+					local load_idents    = { load_word = true, load_half = true, load_half_u = true,
+					                         load_byte = true, load_byte_u = true, gte_lw = true, gte_lwc2 = true }
+					local is_load_delay = load_idents[prev_ident] == true
+					if is_load_delay then
+						-- Determine the destination register from the load's `writes` field.
+						local prev_writes   = gpr_effects[prev_ident] and gpr_effects[prev_ident].writes or {}
+						local prev_args     = prev_ev.args or {}
+						local load_dest     = prev_writes[1] and prev_args[prev_writes[1]] or "<load-destination>"
+						findings[#findings + 1] = {
+							check                = "hazard_nop_use",
+							kind                 = "info",
+							atom                 = atom.name,
+							line                 = ev_line,
+							source               = ev.def_path or ev.source or "",
+							nop_classification   = "modeled-required",
+							nop_word_index       = ev_word,
+							retired_relation     = "load_delay_slot",
+							producer_destination = load_dest,
+							consumer_token       = "<would-be-consumer>",
+							msg = string.format("%s at line %d: nop at word %d is modeled-required (load-delay slot for %s)"
+								, atom.name, ev_line, ev_word, load_dest
+							),
+						}
+					else
+						findings[#findings + 1] = {
+							check              = "hazard_nop_use",
+							kind               = "info",
+							atom               = atom.name,
+							line               = ev_line,
+							source             = ev.def_path or ev.source or "",
+							nop_classification = "modeled-redundant",
+							nop_word_index     = ev_word,
+							retired_relation   = nil,
+							slot_kind          = slot_kind,
+							msg = string.format("%s at line %d: nop at word %d is modeled-redundant (no pending modeled relation)"
+								, atom.name, ev_line, ev_word
+							),
+						}
+					end
 				end
 			end
 		end

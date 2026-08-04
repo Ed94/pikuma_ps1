@@ -1700,20 +1700,43 @@ M.HARDWARE_RELATIONS = {
 	},
 	-- Memory -> COP2 data register (LWC2).
 	-- The memory-side timing is not measured by the vendored GTE latch experiment, so this relation has no numeric retirement threshold.
-	-- The forward walker emits one info edge at the first command-input consumer and then clears the pending relation.
+	-- The LWC2 destination has TWO retirement regimes (per PSX-SPX):
+	--   * GTE-command consumer (`gte_cmdw_*`): the GTE pipeline LATCHES the LWC2 result, so a `gte_cmdw_*`
+	--     in the very next slot uses the latched value. Gap = 0 is allowed.
+	--     (Per `docs/psx-spx/docs/gtepipelinetimings.md:271-274`.)
+	--   * Any other consumer: standard MIPS load delay applies. Gap = 1 required.
+	--     (Per `docs/psx-spx/docs/cpuspecifications.md:407-419`.)
+	-- Two separate relations so the walker can dispatch by consumer type and emit
+	-- different severities (the GTE-command path is `info` because the latch is intentional;
+	-- the non-GTE-consumer path is `error` because the missing nop is a real bug).
 	{
-		id             = "lwc2_unknown_visibility",
-		semantic       = "LWC2",
+		id             = "lwc2_to_gte_command",
+		semantic       = "LWC2_to_GTE",
 		token          = "gte_lw",
 		direction      = "memory_to_cop2_data",
 		reads          = { domain = "memory",    arg = 2 },
 		writes         = { domain = "cop2.data", arg = 1 },
-		visibility     = { kind = "unknown_consumer", required = nil },
+		required       = 0,  -- GTE-command consumer: gap = 0 OK (latched).
 		evidence       = {
-			confidence = "unknown",
+			confidence = "measured",
 			source     = "gtepipelinetimings.md:271-274",
 		},
 		violation_kind = "info",
+		clear_on_consumer = true,
+	},
+	{
+		id             = "lwc2_to_other_consumer",
+		semantic       = "LWC2_to_other",
+		token          = "gte_lw",
+		direction      = "memory_to_cop2_data",
+		reads          = { domain = "memory",    arg = 2 },
+		writes         = { domain = "cop2.data", arg = 1 },
+		required       = 1,  -- Non-GTE-consumer: standard MIPS load delay.
+		evidence       = {
+			confidence = "inferred",
+			source     = "cpuspecifications.md:407-419",
+		},
+		violation_kind = "error",
 		clear_on_consumer = true,
 	},
 	-- COP2 data register -> memory (SWC2). A read of C2 state, not a CPU-to-COP2 write.
