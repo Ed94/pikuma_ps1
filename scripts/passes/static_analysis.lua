@@ -124,7 +124,7 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field info     table[]   -- finding-level info (kind == "info"); distinct from per-source scanned/cycles summary rows
 
 --- @alias AtomName    string  -- lower_snake_case atom nameMacroName   string  -- lower_snake_case macro identifier
---- @alias CheckName   string  -- "transfer_hazards" | "control_transfer_delay_slot_use" | "mac_yield_uniformity" | "abi_handoff" | "gpu_portstore_shape" | "per_atom_cycle_budget" | "enum_alias_membership" | "atom_type_consistency" | "binds_no_substruct_deref"
+--- @alias CheckName   string  -- "transfer_hazards" | "control_transfer_delay_slot_use" | "mac_yield_uniformity" | "yield_load_tail_pairing" | "abi_handoff" | "gpu_portstore_shape" | "per_atom_cycle_budget" | "enum_alias_membership" | "atom_type_consistency" | "binds_no_substruct_deref"
 
 --- @class AtomBody
 --- @field line     integer  -- source line of the atom declaration
@@ -277,7 +277,10 @@ local function classify_tokens(tokens)
 		if     ident == "nop"  then nop_words = 1
 		elseif ident == "nop2" then nop_words = 2 end
 
-		local is_yield      = ident == "mac_yield"
+		-- `mac_yield_tail` is the canonical end-of-atom terminator when paired with `mac_yield_load`
+		-- in a preceding branch's BD-slot. It runs `addiu_self R_TapePtr; jr R_AtomJmp; nop` — the
+		-- "tail" half of the lego split. Treat it as a yield for the `mac_yield_uniformity` check.
+		local is_yield      = ident == "mac_yield" or ident == "mac_yield_tail"
 		local is_atom_label = false
 		local label_name    = nil
 		local is_branch     = false
@@ -1574,7 +1577,127 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- Check #3: Binding handoff discipline
+-- Check #3: mac_yield_load / mac_yield_tail pairing (the lego split)
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- The lego split — `mac_yield_load()` in a branch BD-slot + `mac_yield_tail()` at the branch's target
+--- label — must be used as a pair. Otherwise `R_AtomJmp` is not loaded for the tail's `jr R_AtomJmp`,
+--- and the tape runtime would jump to garbage.
+---
+--- Rules:
+---   1. Every `mac_yield_load()` must be in a branch BD-slot (the immediately preceding token must be a branch).
+---   2. Every `mac_yield_tail()` must be the first instruction after an `atom_label()`, AND
+---      at least one branch targeting that label must have `mac_yield_load()` in its BD-slot.
+---   3. `mac_yield_tail()` as the atom-end terminator (last token) is a WARNING, not an error
+---      (the safe default for atom-endings is `mac_yield()` which re-loads `R_AtomJmp`).
+---
+--- Per-atom. Runtime-helper atoms (`debug_skip`) are exempt.
+--- Takes `(atom, pipe_ctx, findings)`; `pipe_ctx` is unused.
+local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
+	if atom.kind ~= "atom" then return end
+	if is_runtime_helper(atom) then return end
+
+	local tokens       = atom.paths.tokens
+	local line_in_body = atom.paths.line_in_body
+	local tc           = atom.paths.tok_class
+	local n            = #tokens
+
+	local function line_for(idx)
+		return atom.line + line_in_body[tokens[idx].rel]
+	end
+
+	-- ── Rule 1: every `mac_yield_load()` must be in a branch BD-slot.
+	for tok_idx = 1, n do
+		local c = tc[tok_idx]
+		if c.ident == "mac_yield_load" then
+			if tok_idx < 2 or not tc[tok_idx - 1].is_branch then
+				local prev_ident = (tok_idx >= 2) and (tc[tok_idx - 1].ident or "?") or "<none>"
+				findings[#findings + 1] = {
+					atom  = atom.name,
+					line  = tok_idx >= 2 and line_for(tok_idx) or atom.line,
+					check = "yield_load_tail_pairing",
+					kind  = "error",
+					msg   = string.format(
+						"%s at line %d has `mac_yield_load()` at word %d but the previous token is `%s`, not a branch — `mac_yield_load()` must fill a branch BD-slot."
+						, atom.name, tok_idx >= 2 and line_for(tok_idx) or atom.line, tok_idx, prev_ident),
+				}
+			end
+		end
+	end
+
+	-- ── Rule 2: every `mac_yield_tail()` must be at a labeled target whose branch BD-slot is `mac_yield_load()`.
+	for tok_idx = 1, n do
+		local c = tc[tok_idx]
+		if c.ident ~= "mac_yield_tail" then goto continue end
+
+		-- The immediately preceding token must be an `atom_label()` (no instructions between them).
+		local prev_idx = tok_idx - 1
+		if prev_idx < 1 or not tc[prev_idx].is_atom_label then
+			if tok_idx == n then
+				-- Atom-ending case: last token is `mac_yield_tail()` without a preceding label. WARNING.
+				findings[#findings + 1] = {
+					atom  = atom.name,
+					line  = line_for(tok_idx),
+					check = "yield_load_tail_pairing",
+					kind  = "warning",
+					msg   = string.format(
+						"%s at line %d has `mac_yield_tail()` as the atom-end terminator. The safe default for atom-endings is `mac_yield()` (which re-loads R_AtomJmp). The split is for BD-slot fill, not atom-endings."
+						, atom.name, line_for(tok_idx)),
+				}
+			else
+				findings[#findings + 1] = {
+					atom  = atom.name,
+					line  = line_for(tok_idx),
+					check = "yield_load_tail_pairing",
+					kind  = "error",
+					msg   = string.format(
+						"%s at line %d has `mac_yield_tail()` at word %d but it's not the first instruction after an `atom_label()` — `mac_yield_tail()` must be the first token of its target label's body."
+						, atom.name, line_for(tok_idx), tok_idx),
+				}
+			end
+			goto continue
+		end
+
+		local label_name = tc[prev_idx].label_name
+		-- Find at least one branch targeting `label_name` whose BD-slot is `mac_yield_load()`.
+		local found_pairing = false
+		for branch_idx = 1, n do
+			local bt = tc[branch_idx]
+			if bt.is_branch and bt.branch_label == label_name then
+				local bd_idx   = branch_idx + 1
+				local bd_tc   = bd_idx <= n and tc[bd_idx] or nil
+				if bd_tc and bd_tc.ident == "mac_yield_load" then
+					found_pairing = true
+				else
+					findings[#findings + 1] = {
+						atom  = atom.name,
+						line  = line_for(branch_idx),
+						check = "yield_load_tail_pairing",
+						kind  = "error",
+						msg   = string.format(
+							"%s at line %d has `mac_yield_tail()` at label `%s` (word %d) but the branch targeting it (at word %d) has BD-slot `%s` instead of `mac_yield_load()`."
+							, atom.name, line_for(branch_idx), label_name, tok_idx, branch_idx, bd_tc and bd_tc.ident or "?"),
+					}
+				end
+			end
+		end
+		if not found_pairing then
+			findings[#findings + 1] = {
+				atom  = atom.name,
+				line  = line_for(tok_idx),
+				check = "yield_load_tail_pairing",
+				kind  = "error",
+				msg   = string.format(
+					"%s at line %d has `mac_yield_tail()` at label `%s` but no branch in the body targets this label with `mac_yield_load()` in its BD-slot — R_AtomJmp would not be loaded."
+					, atom.name, line_for(tok_idx), label_name),
+			}
+		end
+		::continue::
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Check #4: Binding handoff discipline
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- For every atom with `atom_bind(Binds_X)`, verify the atom body reads every field of `Binds_X` from R_TapePtr (in any order) 
@@ -2178,6 +2301,7 @@ local CHECK_RULES = {
 	{ name = "control_transfer_delay_slot_use",per_atom   = check_control_transfer_delay_slot_use},
 	{ name = "load_delay_violation",          per_atom   = check_load_delay_slots             },
 	{ name = "mac_yield_uniformity",           per_atom   = check_mac_yield_uniformity           },
+	{ name = "yield_load_tail_pairing",       per_atom   = check_yield_load_tail_pairing       },
 	{ name = "abi_handoff",                    per_atom   = check_abi_handoff                    },
 	{ name = "gpu_portstore_shape",            per_atom   = check_gpu_portstore_shape            },
 	{ name = "per_atom_cycle_budget",          per_atom   = check_per_atom_cycle_budget          },

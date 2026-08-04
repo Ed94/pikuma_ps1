@@ -122,11 +122,25 @@ FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_
  *  These do NOT yield. They are expanded inline inside Tape Atoms.
  * ---------------------------------------------------------------------------*/
 
-// The 'Yield' sequence for Tape Atoms (mac_yield). 
+// The 'Yield' sequence for Tape Atoms (mac_yield).
+//   - mac_yield() is the safe default for atom-endings: 4 words, BD-slot of jr is mandatory nop.
+//   - mac_yield_load() + mac_yield_tail():
+//     - unconditional branch: mac_yield_load fills the branch's BD-slot (replaces a nop);
+//     - mac_yield_tail runs at the branch target (does NOT re-load R_AtomJmp).
+
 atom_dbg_skip MipsAtomComp_(ac_yield) {
 	load_word(R_AtomJmp, R_TapePtr, 0),
 	add_ui_self(         R_TapePtr, S_(MipsCode)),
 	jump_reg( R_AtomJmp), nop,
+};
+
+atom_dbg_skip MipsAtomComp_(ac_yield_load) {
+	load_word(R_AtomJmp, R_TapePtr, 0),
+};
+
+atom_dbg_skip MipsAtomComp_(ac_yield_tail) {
+	add_ui_self(R_TapePtr, S_(MipsCode)),
+	jump_reg(  R_AtomJmp), nop,
 };
 
 enum {

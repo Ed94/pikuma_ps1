@@ -400,7 +400,11 @@ atom_label(disconnected) /* === Disconnected body. */
 	load_upper_i(R_T4, 0x8080), or_i_self(R_T4, 0x8080),
 	store_word(  R_T4,    R_PadState, O_(PadState,left_x)),
 	store_byte(  R_RawId, R_PadState, O_(PadState,id)),
-	jump_rel(atom_offset(disconnected, snap_end)), nop,
+	jump_rel(atom_offset(disconnected, snap_end)),
+		/* BD-slot: load next atom's entry point (replaces the nop).
+		 * The unconditional branch always jumps to snap_end, where mac_yield_tail()
+		 * transfers control to R_AtomJmp without re-loading it. */
+		mac_yield_load(),
 atom_label(skip_disconnected)
 
 	/* === Case 2: Pending (status == 0 && id == 0)
@@ -418,7 +422,8 @@ atom_label(pending) /* === Pending body */
 	load_upper_i(R_T4, 0x8080), or_i_self(R_T4, 0x8080),
 	store_word(  R_T4,    R_PadState, O_(PadState,left_x)),
 	store_byte(  R_RawId, R_PadState, O_(PadState,id)),
-	jump_rel(atom_offset(pending, snap_end)), nop,
+	jump_rel(atom_offset(pending, snap_end)),
+		mac_yield_load(),
 
 atom_label(id_dispatch) /* === Case 3-6: ID dispatch */
 	add_ui(R_T4, R_0, 0x41), branch_ne(R_RawId, R_T4, atom_offset(id_dispatch, try_analog_stick)),
@@ -440,7 +445,8 @@ atom_label(id_dispatch) /* === Case 3-6: ID dispatch */
 	add_ui(      R_T4, R_0, 0x41),
 	store_byte(  R_T4, R_PadState, O_(PadState,id)),
 
-	jump_rel(atom_offset(id_dispatch, snap_end)), nop,
+	jump_rel(atom_offset(id_dispatch, snap_end)),
+		mac_yield_load(),
 
 atom_label(try_analog_stick) /* === Case 4: AnalogStick (id == 0x53)*/
 	add_ui(R_T4, R_0, 0x53), branch_ne(R_RawId, R_T4, atom_offset(try_analog_stick, try_analog_pad)),
@@ -461,7 +467,8 @@ atom_label(analog_stick) /* === AnalogStick body
 	store_half(  R_T4, R_PadState, O_(PadState,right_x)),
 	add_ui(      R_T5, R_0, 0x53),                        /* R_T5 = id value (clobbers left_xy, already stored) */
 	store_byte(  R_T5, R_PadState, O_(PadState,id)),
-	jump_rel(atom_offset(analog_stick, snap_end)), nop,
+	jump_rel(atom_offset(analog_stick, snap_end)),
+		mac_yield_load(),
 
 atom_label(try_analog_pad) /* === Case 5-6: AnalogPad (id & 0xF0 == 0x70) */
 	and_i(    R_T4, R_RawId, 0xF0),
@@ -483,7 +490,8 @@ atom_label(analog_pad) /* === AnalogPad body
 	store_half( R_T4, R_PadState, O_(PadState,right_x)),
 	store_byte( R_RawId, R_PadState, O_(PadState,id)),
 
-	jump_rel(atom_offset(analog_pad, snap_end)), nop,
+	jump_rel(atom_offset(analog_pad, snap_end)),
+		mac_yield_load(),
 
 atom_label(try_unsupported) /* === Case 7: Unsupported — fall through from the AnalogPad range-check miss. */
 	add_ui(    R_T4, R_0, PadStatus_Unsupported),
@@ -497,7 +505,8 @@ atom_label(try_unsupported) /* === Case 7: Unsupported — fall through from the
 	/* Fall through to snap_end. */
 
 atom_label(snap_end)
-	mac_yield(),
+	/* NOT mac_yield() — R_AtomJmp was already loaded in the BD-slot of the case-exit branch. */
+	mac_yield_tail(),
 };
 
 /* ----- pad_apply_input -----
@@ -581,7 +590,8 @@ atom_label(dead_check_upper)
 	/* R_T4 = (0x90 < left_x) ? 1 : 0 → (left_x > 0x90) ? 1 : 0 */
 	set_lt_u(R_T4, R_T4, R_T3), branch_ne(R_T4, R_0, atom_offset(dead_zone_high_check, dead_high_active)),
 	add_ui(  R_T4, R_0, 0x80), /* BD-slot: pre-load 0x80 for dead_high_active */
-	jump_rel(atom_offset(dead_zone_skip, exit_stick)), nop,
+	jump_rel(atom_offset(dead_zone_skip, exit_stick)),
+		mac_yield_load(),
 
 atom_label(dead_low_active)
 	/* R_T3 = left_x (from line 632 lbu; not clobbered between dead_zone_low_check branch + its BD-slot `add_ui R_T4, 0x80`).
@@ -603,7 +613,8 @@ atom_label(dead_low_active)
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_FloorRot, O_(V3_S2,y)),
 
-	jump_rel(atom_offset(end_low, exit_stick)), nop,
+	jump_rel(atom_offset(end_low, exit_stick)),
+		mac_yield_load(),
 
 atom_label(dead_high_active)
 	/* R_T3 = left_x (from line 641 lbu in dead_check_upper; not clobbered between dead_zone_high_check branch + its BD-slot `add_ui R_T4, 0x80`).
@@ -625,7 +636,8 @@ atom_label(dead_high_active)
 	store_half(  R_T0, R_FloorRot, O_(V3_S2,y)),
 
 atom_label(exit_stick)
-	mac_yield(),
+	/* NOT mac_yield() — R_AtomJmp was already loaded in the BD-slot of the dead-zone/exit branch. */
+	mac_yield_tail(),
 };
 
 #pragma endregion Baked Atoms
