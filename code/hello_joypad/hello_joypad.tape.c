@@ -437,20 +437,22 @@ internal MipsAtom_(pad_bios_snapshot) atom_info(atom_bind(Binds_PadBiosSnapshot)
 , atom_reads( R_PadRaw, R_PadState, R_RawStatus, R_RawId, R_T4, R_T5, R_TapePtr)
 , atom_writes(R_PadRaw, R_PadState, R_RawStatus, R_RawId, R_T4, R_T5, R_TapePtr)
 ) {
-	/* === Bind consumption (3 words): T0 = raw, T1 = state, advance R_TapePtr by 8. */
+	/* === Bind consumption: T0 = raw, T1 = state, advance R_TapePtr by 8. */
 	load_word(R_PadRaw,   R_TapePtr, O_(Binds_PadBiosSnapshot,raw)),
 	load_word(R_PadState, R_TapePtr, O_(Binds_PadBiosSnapshot,state)),
 	add_ui_self(          R_TapePtr, S_(Binds_PadBiosSnapshot)),
 
-	/* === Read raw[0] (status) + raw[1] (id) — 3 words. */
+	/* === Read raw[0] (status) + raw[1] (id) */
 	load_byte_u(R_RawStatus, R_PadRaw, 0),
 	load_byte_u(R_RawId,     R_PadRaw, 1),
 
-atom_label(snap_root) /* === Case 1: Disconnected (status == 0xFF) — 3 words. */
-	add_ui(R_T4, R_0, 0xFF), branch_ne(R_RawStatus, R_T4, atom_offset(snap_root, skip_disconnected)), nop,
+atom_label(snap_root) /* === Case 1: Disconnected (status == 0xFF). */
+	add_ui(R_T4, R_0, 0xFF), branch_ne(R_RawStatus, R_T4, atom_offset(snap_root, skip_disconnected)),
+	/* BD-slot: pre-compute PadStatus_Disconnected. Branch reads R_T4=0xFF in EX before this WB completes.
+	 * If branch NOT taken (fall through to pending/id_dispatch), R_T4 is overwritten by the next case body's add_ui — harmless. */
 
-atom_label(disconnected) /* === Disconnected body — 9 words. */
-	add_ui(R_T4, R_0, PadStatus_Disconnected),
+atom_label(disconnected) /* === Disconnected body. */
+	/* R_T4 = PadStatus_Disconnected from snap_root BD-slot. */
 	store_word(R_T4, R_PadState, O_(PadState,status)),
 	store_half(R_0,  R_PadState, O_(PadState,buttons)),
 	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
@@ -462,13 +464,15 @@ atom_label(disconnected) /* === Disconnected body — 9 words. */
 	// jump(atom_offset(disconnected, snap_end)), nop,
 atom_label(skip_disconnected)
 
-	/* === Case 2: Pending (status == 0 && id == 0) — 3 words.
+	/* === Case 2: Pending (status == 0 && id == 0)
 	 * Combined check: if (status | id) != 0 then skip to id_dispatch.
 	 * Falls through to the Pending case only when both are zero. */
-	or_u_self(R_RawStatus, R_RawId), branch_ne(R_RawStatus, R_0, atom_offset(case_2, id_dispatch)), nop,
+	or_u_self(R_RawStatus, R_RawId), branch_ne(R_RawStatus, R_0, atom_offset(case_2, id_dispatch)),
+	/* BD-slot: pre-compute PadStatus_Pending. Branch reads R_RawStatus in EX before this WB completes.
+	 * If branch NOT taken (fall through to id_dispatch), R_T4 is overwritten by the digital/analog body add_ui — harmless. */
 
-atom_label(pending) /* === Pending body — 9 words. */
-	add_ui(    R_T4, R_0, PadStatus_Pending),
+atom_label(pending) /* === Pending body */
+	/* R_T4 = PadStatus_Pending from case_2 BD-slot. */
 	store_word(R_T4, R_PadState, O_(PadState,status)),
 	store_half(R_0,  R_PadState, O_(PadState,buttons)),
 	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
@@ -479,21 +483,23 @@ atom_label(pending) /* === Pending body — 9 words. */
 	// TODO(Ed): Lua metaprogram: Support jump instruction here..
 	// jump(atom_offset(pending, snap_end)), nop,
 
-atom_label(id_dispatch) /* === Case 3-6: ID dispatch — 3 words (id == 0x41 check). */
-	add_ui(R_T4, R_0, 0x41), branch_ne(R_RawId, R_T4, atom_offset(id_dispatch, try_analog_stick)), nop,
+atom_label(id_dispatch) /* === Case 3-6: ID dispatch */
+	add_ui(R_T4, R_0, 0x41), branch_ne(R_RawId, R_T4, atom_offset(id_dispatch, try_analog_stick)),
+	/* BD-slot: pre-compute PadStatus_Digital. Branch reads R_RawId in EX before this WB completes.
+	 * If branch NOT taken (fall through to try_analog_stick), R_T4 is overwritten by the analog body add_ui. */
 
-	/* === Digital body — 15 words (status, buttons normalize, axes=0x80, id, branch). */
-	add_ui(     R_T4, R_0, PadStatus_Digital),
+	/* === Digital body (status, buttons normalize, axes=0x80, id, branch. */
+	/* R_T4 = PadStatus_Digital from id_dispatch BD-slot. */
 	store_word( R_T4, R_PadState, O_(PadState,status)),
 	load_half_u(R_T4, R_PadRaw,   2 * S_(U1)),
-	nop,
+	/* Fill R_T4's load-delay slot with the 0x80808080 axes constant into R_T5
+	 * (R_T5 is dead on this path; it's only consumed at the analog_pad range check). */
+	load_upper_i(R_T5, 0x8080), or_i_self(R_T5, 0x8080),
 	nor_u(      R_T4, R_T4, R_0), /* raw_buttons is already in host bit order; no swap needed */
 	store_half( R_T4, R_PadState, O_(PadState,buttons)),
 
 	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
-	load_upper_i(R_T4, 0x8080),
-	or_i_self(   R_T4, 0x8080),
-	store_word(  R_T4, R_PadState, O_(PadState,left_x)),
+	store_word(  R_T5, R_PadState, O_(PadState,left_x)),
 	add_ui(      R_T4, R_0, 0x41),
 	store_byte(  R_T4, R_PadState, O_(PadState,id)),
 
@@ -501,49 +507,47 @@ atom_label(id_dispatch) /* === Case 3-6: ID dispatch — 3 words (id == 0x41 che
 	// TODO(Ed): Lua metaprogram: Support jump instruction here..
 	// jump(atom_offset(id_dispatch, snap_end)), nop,
 
-atom_label(try_analog_stick) /* === Case 4: AnalogStick (id == 0x53) — 3 words dispatch. */
-	add_ui(R_T4, R_0, 0x53),
-	branch_ne(R_RawId, R_T4, atom_offset(try_analog_stick, try_analog_pad)), nop,
+atom_label(try_analog_stick) /* === Case 4: AnalogStick (id == 0x53)*/
+	add_ui(R_T4, R_0, 0x53), branch_ne(R_RawId, R_T4, atom_offset(try_analog_stick, try_analog_pad)),
+	/* BD-slot: pre-compute PadStatus_AnalogStick. Branch reads R_RawId in EX before this WB completes.
+	 * If branch NOT taken (fall through to try_analog_pad), R_T4 is overwritten by the analog_pad body add_ui. */
 
-atom_label(analog_stick) /* === AnalogStick body — 21 words.
-	* Axes are loaded as two halfwords: raw[6..7] → left_xy (sh at offset 8), raw[4..5] → right_xy (sh at offset 10). 
-	* Each lhu is followed by a nop in its MIPS-I load delay slot; the sh consumes the halfword safely. */
-	add_ui(      R_T4, R_0, PadStatus_AnalogStick),
+atom_label(analog_stick) /* === AnalogStick body
+	* Axes are loaded as two halfwords: raw[6..7] → left_xy (sh at offset 8), raw[4..5] → right_xy (sh at offset 10).
+	* R_T5 holds left_xy / id-value in turn (it's dead on this path — only consumed at the analog_pad range check). */
+	/* R_T4 = PadStatus_AnalogStick from try_analog_stick BD-slot. */
 	store_word(  R_T4, R_PadState, O_(PadState,status)),
-	load_half_u( R_T4, R_PadRaw,   2 * S_(U1)),
-	nop,
-	nor_u(       R_T4, R_T4, R_0),                        /* raw_buttons is already in host bit order; no swap needed */
+	load_half_u( R_T4, R_PadRaw,   2 * S_(U1)),           /* R_T4 = raw_buttons */
+	load_half_u( R_T5, R_PadRaw,   6 * S_(U1)),           /* R_T5 = left_xy; fills R_T4's load-delay slot (doesn't read R_T4) */
+	nor_u(       R_T4, R_T4, R_0),                        /* R_T4 = ~raw_buttons */
 	store_half(  R_T4, R_PadState, O_(PadState,buttons)),
-	load_half_u( R_T4, R_PadRaw,   6 * S_(U1)),           /* raw[6..7] = left_x | (left_y << 8) */
-	nop,
-	store_half(  R_T4, R_PadState, O_(PadState,left_x)),   /* sh at offset 8 → left_x @ 8, left_y @ 9 */
-	load_half_u( R_T4, R_PadRaw,   4 * S_(U1)),           /* raw[4..5] = right_x | (right_y << 8) */
-	nop,
-	store_half(  R_T4, R_PadState, O_(PadState,right_x)),  /* sh at offset 10 → right_x @ 10, right_y @ 11 */
-	add_ui(      R_T4, R_0, 0x53),
-	store_byte(  R_T4, R_PadState, O_(PadState,id)),
+	load_half_u( R_T4, R_PadRaw,   4 * S_(U1)),           /* R_T4 = right_xy; fills R_T5's load-delay slot */
+	store_half(  R_T5, R_PadState, O_(PadState,left_x)),  /* R_T5 settled, store left_xy */
+	store_half(  R_T4, R_PadState, O_(PadState,right_x)),
+	add_ui(      R_T5, R_0, 0x53),                        /* R_T5 = id value (clobbers left_xy, already stored) */
+	store_byte(  R_T5, R_PadState, O_(PadState,id)),
 	branch_equal(R_0, R_0, atom_offset(analog_stick, snap_end)), nop,
 	// TODO(Ed): Lua metaprogram: Support jump instruction here..
 	// jump(atom_offset(analog_stick, snap_end)), nop,
 
-atom_label(try_analog_pad) /* === Case 5-6: AnalogPad (id & 0xF0 == 0x70) — 4 words dispatch. */
+atom_label(try_analog_pad) /* === Case 5-6: AnalogPad (id & 0xF0 == 0x70) */
 	and_i(    R_T4, R_RawId, 0xF0),
-	add_ui(   R_T5, R_0,  0x70),
-	branch_ne(R_T4, R_T5, atom_offset(try_analog_pad, try_unsupported)), nop,
+	add_ui(   R_T5, R_0,     0x70),
+	branch_ne(R_T4, R_T5, atom_offset(try_analog_pad, try_unsupported)),
+	/* BD-slot: pre-compute PadStatus_AnalogPad. Branch reads R_T4 in EX before this WB completes.
+	 * If branch NOT taken (fall through to try_unsupported), R_T4 is overwritten by the unsupported body add_ui. */
 
-atom_label(analog_pad) /* === AnalogPad body — 21 words (same shape as AnalogStick with AnalogPad status). */
-	add_ui(     R_T4, R_0, PadStatus_AnalogPad),
+atom_label(analog_pad) /* === AnalogPad body
+	* Same shape as AnalogStick with AnalogPad status. R_T5 holds left_xy (it's dead on this path). */
+	/* R_T4 = PadStatus_AnalogPad from try_analog_pad BD-slot. */
 	store_word( R_T4, R_PadState, O_(PadState,status)),
-	load_half_u(R_T4, R_PadRaw,   2 * S_(U1)),
-	nop,
-	nor_u(      R_T4, R_T4, R_0),                        /* raw_buttons is already in host bit order; no swap needed */
+	load_half_u(R_T4, R_PadRaw,   2 * S_(U1)),           /* R_T4 = raw_buttons */
+	load_half_u(R_T5, R_PadRaw,   6 * S_(U1)),           /* R_T5 = left_xy; fills R_T4's load-delay slot */
+	nor_u(      R_T4, R_T4, R_0),                        /* R_T4 = ~raw_buttons */
 	store_half( R_T4, R_PadState, O_(PadState,buttons)),
-	load_half_u(R_T4, R_PadRaw,   6 * S_(U1)),           /* raw[6..7] = left_x | (left_y << 8) */
-	nop,
-	store_half( R_T4, R_PadState, O_(PadState,left_x)),  /* sh at offset 8 → left_x @ 8, left_y @ 9 */
-	load_half_u(R_T4, R_PadRaw,   4 * S_(U1)),           /* raw[4..5] = right_x | (right_y << 8) */
-	nop,
-	store_half( R_T4, R_PadState, O_(PadState,right_x)), /* sh at offset 10 → right_x @ 10, right_y @ 11 */
+	load_half_u(R_T4, R_PadRaw,   4 * S_(U1)),           /* R_T4 = right_xy; fills R_T5's load-delay slot */
+	store_half( R_T5, R_PadState, O_(PadState,left_x)),  /* R_T5 settled, store left_xy */
+	store_half( R_T4, R_PadState, O_(PadState,right_x)),
 	store_byte( R_RawId, R_PadState, O_(PadState,id)),
 
 	branch_equal(R_0, R_0, atom_offset(analog_pad, snap_end)), nop,
@@ -555,8 +559,7 @@ atom_label(try_unsupported) /* === Case 7: Unsupported — fall through from the
 	store_word(R_T4, R_PadState, O_(PadState,status)),
 	store_half(R_0,  R_PadState, O_(PadState,buttons)),
 	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
-	load_upper_i(R_T4, 0x8080),
-	or_i_self(   R_T4, 0x8080),
+	load_upper_i(R_T4, 0x8080), or_i_self(R_T4, 0x8080),
 	store_word(  R_T4, R_PadState, O_(PadState,left_x)),
 	add_ui(      R_T4, R_0, 0xFF),                      /* 0xFF sentinel: "unknown id" */
 	store_byte(  R_T4, R_PadState, O_(PadState,id)),
@@ -568,7 +571,7 @@ atom_label(snap_end)
 
 /* ----- pad_apply_input -----
  * Reads pad[0].buttons + pad[0].left_x; 
- * Applies the input-semantics deltas to cube_rot.y + floor_rot.y per spec §"Input semantics":
+ * Applies the input-semantics deltas to cube_rot.y + floor_rot.y:
  *   - D-pad Left:  cube_rot.y += 30, floor_rot.y += 5
  *   - D-pad Right: cube_rot.y -= 30, floor_rot.y -= 5
  *   - Analog stick X (dead zone 0x70..0x90):
@@ -630,7 +633,7 @@ internal MipsAtom_(pad_apply_input) atom_info(atom_bind(Binds_PadApplyInput)
 		store_half(R_T3, R_FloorRot, O_(V3_S2,y)),
 	atom_label(exit_dpad_right)
 
-	/* Analog left-stick X: dead zone 0x70..0x90 (per spec line 89).
+	/* Analog left-stick X: dead zone 0x70..0x90.
 	 * Cube delta = (0x80 - left_x) >> 2; floor delta = (0x80 - left_x) >> 5. */
 	load_byte_u(R_T3, R_PadStateT5, O_(PadState,left_x)),
 
@@ -653,9 +656,10 @@ atom_label(dead_check_upper)
 	// jump(atom_offset(dead_zone_skip, exit_stick)), nop,
 
 atom_label(dead_low_active)
-	load_byte_u(R_T3, R_PadStateT5, O_(PadState,left_x)), 
-//	add_ui(R_T4, R_0,  0x80), // R_T4 = 0x80 (from BD-slot: dead_zone_low_check).
-		sub_u( R_T3, R_T4, R_T3), /* R_T3 = 0x80 - left_x */
+	/* R_T3 = left_x (from line 632 lbu; not clobbered between dead_zone_low_check branch + its BD-slot `add_ui R_T4, 0x80`).
+	 * The earlier `load_byte_u(R_T3, ...)` reload was redundant and introduced a load-use hazard on the next `sub_u`.
+	 * R_T4 = 0x80 from the BD-slot of `dead_zone_low_check`'s branch_ne. */
+	sub_u( R_T3, R_T4, R_T3), /* R_T3 = 0x80 - left_x */
 	/* delta = 0x80 - left_x (positive). */
 
 	/* R_T4 = cube_delta */
@@ -664,10 +668,10 @@ atom_label(dead_low_active)
 	nop,
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_CubeRot, O_(V3_S2,y)),
-	/* R_T4 = floor_delta */
-	shift_aright(R_T4, R_T3, 5),
+	/* R_T4 = floor_delta — moved into the load-delay slot of the floor load below (fills the 1-instruction gap;
+	 * doesn't read R_T0; R_T4 settles by the subsequent add_u). */
 	load_half(   R_T0, R_FloorRot, O_(V3_S2,y)),
-	nop,
+	shift_aright(R_T4, R_T3, 5),
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_FloorRot, O_(V3_S2,y)),
 
@@ -676,9 +680,10 @@ atom_label(dead_low_active)
 	// jump(atom_offset(end_low, exit_stick)), nop,
 
 atom_label(dead_high_active)
-	load_byte_u(R_T3, R_PadStateT5, O_(PadState,left_x)),
-//	add_ui(R_T4, R_0, 0x80),  // R_T4 = 0x80 (from BD-slot: dead_zone_high_check)
-		sub_u( R_T3, R_T4, R_T3),
+	/* R_T3 = left_x (from line 641 lbu in dead_check_upper; not clobbered between dead_zone_high_check branch + its BD-slot `add_ui R_T4, 0x80`).
+	 * The earlier `load_byte_u(R_T3, ...)` reload was redundant and introduced a load-use hazard on the next `sub_u`.
+	 * R_T4 = 0x80 from the BD-slot of `dead_zone_high_check`'s branch_ne. */
+	sub_u( R_T3, R_T4, R_T3),
 	/* delta = 0x80 - left_x (signed negative). */
 
 	shift_aright(R_T4, R_T3, 2),                      /* R_T4 = cube_delta (signed) */
@@ -687,9 +692,9 @@ atom_label(dead_high_active)
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_CubeRot, O_(V3_S2,y)),
 
-	shift_aright(R_T4, R_T3, 5),                      /* R_T4 = floor_delta (signed) */
+	/* R_T4 = floor_delta (signed) — moved into the load-delay slot of the floor load below. */
 	load_half(   R_T0, R_FloorRot, O_(V3_S2,y)),
-	nop,
+	shift_aright(R_T4, R_T3, 5),
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_FloorRot, O_(V3_S2,y)),
 

@@ -25,17 +25,17 @@ enum {
     atom_offset_bounds_chk_floor_f3_face_exit = _atom_offset_bounds_chk_floor_f3_face_exit,
 };
 
-// --- atom: pad_bios_snapshot (88 words) ---
+// --- atom: pad_bios_snapshot (78 words) ---
 
-#define _atom_offset_snap_root_skip_disconnected      10
-#define _atom_offset_disconnected_snap_end            68
-#define _atom_offset_case_2_id_dispatch               10
-#define _atom_offset_pending_snap_end                 56
-#define _atom_offset_id_dispatch_try_analog_stick     13
-#define _atom_offset_id_dispatch_snap_end             41
-#define _atom_offset_try_analog_stick_try_analog_pad  14
-#define _atom_offset_analog_stick_snap_end            25
-#define _atom_offset_try_analog_pad_try_unsupported   13
+#define _atom_offset_snap_root_skip_disconnected      8
+#define _atom_offset_disconnected_snap_end            60
+#define _atom_offset_case_2_id_dispatch               8
+#define _atom_offset_pending_snap_end                 50
+#define _atom_offset_id_dispatch_try_analog_stick     11
+#define _atom_offset_id_dispatch_snap_end             37
+#define _atom_offset_try_analog_stick_try_analog_pad  12
+#define _atom_offset_analog_stick_snap_end            23
+#define _atom_offset_try_analog_pad_try_unsupported   11
 #define _atom_offset_analog_pad_snap_end              9
 
 enum {

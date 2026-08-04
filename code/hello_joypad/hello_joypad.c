@@ -278,16 +278,16 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		tb.used = 0; tb_scope_run(& tb) {
 			/* BIOS-owned polling: per-frame snapshot of both ports. */
 			tb_emit_(pad_bios_snapshot);
-				tb_data_(Binds_PadBiosSnapshot.raw,   & smem.pad_raw[0]);
-				tb_data_(Binds_PadBiosSnapshot.state, & smem.pad[0]);
+				tb_data_(raw, & smem.pad_raw[0]);
+				tb_data_(state, & smem.pad[0]);
 			tb_emit_(pad_bios_snapshot);
-				tb_data_(Binds_PadBiosSnapshot.raw,   & smem.pad_raw[1]);
-				tb_data_(Binds_PadBiosSnapshot.state, & smem.pad[1]);
+				tb_data_(raw,   & smem.pad_raw[1]);
+				tb_data_(state, & smem.pad[1]);
 			/* Per-frame rotation apply: consume pad[0].buttons + pad[0].left_x */
 			tb_emit_(pad_apply_input);
-				tb_data_(Binds_PadApplyInput.state,     & smem.pad[0]);
-				tb_data_(Binds_PadApplyInput.cube_rot,  & smem.cube.rot);
-				tb_data_(Binds_PadApplyInput.floor_rot, & smem.floor.rot);
+				tb_data_(state,     & smem.pad[0]);
+				tb_data_(cube_rot,  & smem.cube.rot);
+				tb_data_(floor_rot, & smem.floor.rot);
 		}
 	}
 
