@@ -182,17 +182,14 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 		asm_rpins, r_use(p0), r_use(p1)
 		asm_clobber: 
 			rlit(R_AT), 
-			rlit(R_V0), rlit(R_V1),
+			rlit(R_V0), rlit(R_V1), 
 			rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
 			rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8), rlit(R_T9),
 			rlit(R_RA),
 			clb_mem_drain
 	);
 
-	/* BIOS clobbered $a0..$a3, $ra, and the volatile GPRs above.
-	 * The compiler keeps raw0 + raw1 in callee-saved registers (or the outer frame's saved slots)
-	 * because the asm volatile blocks only clobber the volatile GPRs above.
-	 * The C-level writes re-load the pointers via the parameter names and write 0xFF to each 
+	/* The C-level writes re-load the pointers via the parameter names and write 0xFF to each 
 	 * buffer's status byte to mark the initial-state hazard documented in kernelbios.md:1621-1624. */
 	u1_v(raw0)[0] = 0xFF;
 	u1_v(raw1)[0] = 0xFF;

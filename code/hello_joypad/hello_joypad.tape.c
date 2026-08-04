@@ -486,6 +486,7 @@ atom_label(id_dispatch) /* === Case 3-6: ID dispatch — 3 words (id == 0x41 che
 	add_ui(     R_T4, R_0, PadStatus_Digital),
 	store_word( R_T4, R_PadState, O_(PadState,status)),
 	load_half_u(R_T4, R_PadRaw,   2 * S_(U1)),
+	nop,
 	nor_u(      R_T4, R_T4, R_0), /* raw_buttons is already in host bit order; no swap needed */
 	store_half( R_T4, R_PadState, O_(PadState,buttons)),
 
@@ -510,11 +511,14 @@ atom_label(analog_stick) /* === AnalogStick body — 21 words.
 	add_ui(      R_T4, R_0, PadStatus_AnalogStick),
 	store_word(  R_T4, R_PadState, O_(PadState,status)),
 	load_half_u( R_T4, R_PadRaw,   2 * S_(U1)),
+	nop,
 	nor_u(       R_T4, R_T4, R_0),                        /* raw_buttons is already in host bit order; no swap needed */
 	store_half(  R_T4, R_PadState, O_(PadState,buttons)),
 	load_half_u( R_T4, R_PadRaw,   6 * S_(U1)),           /* raw[6..7] = left_x | (left_y << 8) */
+	nop,
 	store_half(  R_T4, R_PadState, O_(PadState,left_x)),   /* sh at offset 8 → left_x @ 8, left_y @ 9 */
 	load_half_u( R_T4, R_PadRaw,   4 * S_(U1)),           /* raw[4..5] = right_x | (right_y << 8) */
+	nop,
 	store_half(  R_T4, R_PadState, O_(PadState,right_x)),  /* sh at offset 10 → right_x @ 10, right_y @ 11 */
 	add_ui(      R_T4, R_0, 0x53),
 	store_byte(  R_T4, R_PadState, O_(PadState,id)),
@@ -524,19 +528,22 @@ atom_label(analog_stick) /* === AnalogStick body — 21 words.
 
 atom_label(try_analog_pad) /* === Case 5-6: AnalogPad (id & 0xF0 == 0x70) — 4 words dispatch. */
 	and_i(    R_T4, R_RawId, 0xF0),
-	add_ui(   R_T5, R_0,     0x70),
+	add_ui(   R_T5, R_0,  0x70),
 	branch_ne(R_T4, R_T5, atom_offset(try_analog_pad, try_unsupported)), nop,
 
 atom_label(analog_pad) /* === AnalogPad body — 21 words (same shape as AnalogStick with AnalogPad status). */
-	add_ui(     R_T4,    R_0, PadStatus_AnalogPad),
-	store_word( R_T4,    R_PadState, O_(PadState,status)),
-	load_half_u(R_T4,    R_PadRaw,   2 * S_(U1)),
-	nor_u(      R_T4,    R_T4, R_0),                        /* raw_buttons is already in host bit order; no swap needed */
-	store_half( R_T4,    R_PadState, O_(PadState,buttons)),
-	load_half_u(R_T4,    R_PadRaw,   6 * S_(U1)),           /* raw[6..7] = left_x | (left_y << 8) */
-	store_half( R_T4,    R_PadState, O_(PadState,left_x)),  /* sh at offset 8 → left_x @ 8, left_y @ 9 */
-	load_half_u(R_T4,    R_PadRaw,   4 * S_(U1)),           /* raw[4..5] = right_x | (right_y << 8) */
-	store_half( R_T4,    R_PadState, O_(PadState,right_x)), /* sh at offset 10 → right_x @ 10, right_y @ 11 */
+	add_ui(     R_T4, R_0, PadStatus_AnalogPad),
+	store_word( R_T4, R_PadState, O_(PadState,status)),
+	load_half_u(R_T4, R_PadRaw,   2 * S_(U1)),
+	nop,
+	nor_u(      R_T4, R_T4, R_0),                        /* raw_buttons is already in host bit order; no swap needed */
+	store_half( R_T4, R_PadState, O_(PadState,buttons)),
+	load_half_u(R_T4, R_PadRaw,   6 * S_(U1)),           /* raw[6..7] = left_x | (left_y << 8) */
+	nop,
+	store_half( R_T4, R_PadState, O_(PadState,left_x)),  /* sh at offset 8 → left_x @ 8, left_y @ 9 */
+	load_half_u(R_T4, R_PadRaw,   4 * S_(U1)),           /* raw[4..5] = right_x | (right_y << 8) */
+	nop,
+	store_half( R_T4, R_PadState, O_(PadState,right_x)), /* sh at offset 10 → right_x @ 10, right_y @ 11 */
 	store_byte( R_RawId, R_PadState, O_(PadState,id)),
 
 	branch_equal(R_0, R_0, atom_offset(analog_pad, snap_end)), nop,
@@ -569,7 +576,7 @@ atom_label(snap_end)
  *       floor delta = (0x80 - left_x) >> 5  (range approx -4..+4)
  *   - D-pad + analog deltas add when used together.
  *
- * Convention (per spec line 137 + Task 3.1b buttons-fix):
+ * Convention:
  *   pad_state = 0 means no buttons active. 
  *   The fail-safe zero-button value flows through unchanged, so a disconnected/fresh pad produces no rotation.
  *   The branch_le_zero pattern below matches the existing pad_input_demo convention (atom body lines 248/257).
@@ -654,11 +661,13 @@ atom_label(dead_low_active)
 	/* R_T4 = cube_delta */
 	shift_aright(R_T4, R_T3, 2),
 	load_half(   R_T0, R_CubeRot, O_(V3_S2,y)),
+	nop,
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_CubeRot, O_(V3_S2,y)),
 	/* R_T4 = floor_delta */
 	shift_aright(R_T4, R_T3, 5),
 	load_half(   R_T0, R_FloorRot, O_(V3_S2,y)),
+	nop,
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_FloorRot, O_(V3_S2,y)),
 
@@ -674,11 +683,13 @@ atom_label(dead_high_active)
 
 	shift_aright(R_T4, R_T3, 2),                      /* R_T4 = cube_delta (signed) */
 	load_half(   R_T0, R_CubeRot, O_(V3_S2,y)),
+	nop,
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_CubeRot, O_(V3_S2,y)),
 
 	shift_aright(R_T4, R_T3, 5),                      /* R_T4 = floor_delta (signed) */
 	load_half(   R_T0, R_FloorRot, O_(V3_S2,y)),
+	nop,
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_FloorRot, O_(V3_S2,y)),
 
