@@ -362,10 +362,28 @@ enum { _BitOffsets = 0
 /* call_reg rs — jump-and-link to register-held address; link in $ra. */
 #define call_reg(rs)               jump_link((rs), R_RA)
 
-/* j target — absolute jump within the current 256MB region. */
+/* j target — absolute jump within the current 256MB region.
+ * WARNING: `jump(off)` CANNOT BE USED for within-atom jumps in the current pipeline.
+ * The MIPS j opcode encodes `(target_addr >> 2)` in its 26-bit immediate field; an  ABSOLUTE byte address, not a relative word offset.
+ * The metaprogram computes `off` as a relative word offset (`target_word_idx - branch_word_idx - 1`), which the assembler/linker does NOT resolve.
+ *
+ * `jump(off)` is only safe when the BUILD PIPELINE owns the absolute position of the emitted code — i.e. when: s
+ *   - the build emits a symbol-relative `.word` expression that the linker resolvess via `R_MIPS_26`, OR
+ *   - the code is hand-assembled with explicit absolute targets, OR a custom post-build patcher resolves the 26-bit field.
+ */
 #define jump(off)                  enc_i(op_j,     R_0, R_0, (off))
 
-/* call_addr off — jump-and-link to immediate address. */
+/* jump_rel off — unconditional relative jump (the within-atom-safe `jump`).
+ * MIPS I R3000A has no "branch always" opcode. The idiom for an unconditional relative jump is `beq $0, $0, off`.
+ */
+#define jump_rel(off)              branch_equal(R_0, R_0, (off))
+
+/* call_addr off — jump-and-link to immediate address.
+ *
+ * Same WARNING as `jump(off)` above: the jal opcode also encodes an absolute 26-bit target.
+ * For within-atom calls, the current pipeline has no equivalent always-taken call-and-link idiom.
+ * Workaround: `branch_link` (always-taken branch + explicit `la $ra, next_word_addr; jr $ra`), or just use `call_reg($tmp)` after loading the target into a register.
+ */
 #define call_addr(off)             enc_i(op_jal,   R_0, R_0, (off))
 
 /* --- Store family (mirrors the load family) --- */

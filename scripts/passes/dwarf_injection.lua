@@ -73,10 +73,6 @@ local DW_RLE_start_length  = DWARF5_RNGLISTS.start_length
 
 -- File-index lookup for the existing main line unit (Unit 2).
 -- Populated at pass start by `init_file_index_lookup(elf_path)` from the runtime ELF (see `elf_dwarf.read_line_unit_file_table`).
--- The hardcoded indices and the `PROVENANCE_BASENAME_TO_FILE_INDEX` table that previously lived here were retired in `conductor/tracks/dwarf_file_index_lookup_20260731/`
--- (red of the
--- `TODO(Ed): Remove this HARDCODE` from line 156); the runtime lookup reads the
--- actual gcc-emitted `.debug_line` file table instead.
 local _file_index_by_basename = nil  -- [basename] = 1-based line-table file index
 local _file_path_by_index    = nil  -- [1-based index] = full source path (diagnostics / future consumers)
 local _default_atom_source_index = nil  -- any valid index used in opaque-row fallbacks
@@ -840,12 +836,15 @@ end
 ---   load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)),
 ---   ...
 ---
+--- Also matches `load_half` / `load_half_u` / `load_byte` / `load_byte_u` (any MIPS load instruction with `(R_<reg>, R_<base>, O_(<Binds_X>, FieldName))` shape).
+--- Every field's `byte_size` + `offset` determine which load to emit; this function only records the (reg, field) pair.
+---
 --- The GPR for each `R_<reg>` is looked up in the merged register_alias_registry; aliases absent from the registry
 --- (no `atom_reg` opt-in) are silently skipped — the resulting rbind record will be incomplete and the atom will fail to bind a usable piece chain.
 --- This is intentional: silently falling back to a hardcoded GPR would mask the missing opt-in.
 ---
 --- Pre-tokenized: `body_tokens` is the scan-source pass's pre-split list of top-level
---- statements (each entry is a single `load_word(...)` call or other statement).
+--- statements (each entry is a single `load_*` call or other statement).
 --- @param body_tokens table[]  -- the atom's pre-tokenized body statements (from atom.body_tokens)
 --- @param binds_name  string   -- expected Binds_X name (skip pairs with mismatching binds)
 --- @param registries  table    -- merged registries from collect_per_source_registries
@@ -853,14 +852,18 @@ end
 local function parse_body_load_pairs(body_tokens, binds_name, registries)
 	local pairs = {}
 	local reg_index_by_name = (registries and registries.register_alias_registry) or {}
+	-- One regex that matches any of: load_word, load_half, load_half_u, load_byte, load_byte_u, gte_lw, gte_lwc2.
+	-- The captured ident is `kind`; `inner` holds the parens body for arg parsing.
+	local load_pattern = "^(load_word|load_half|load_half_u|load_byte|load_byte_u|gte_lw|gte_lwc2)%s*%((.*)%)$"
 	for _, t in ipairs(body_tokens or {}) do
 		local tok = duffle.trim(t.tok or "")
-		-- Match "load_word(...)" — the entire call is one body_tokens entry.
-		local inner = tok:match("^load_word%s*%((.*)%)$")
-		if inner then
+		local kind, inner = tok:match(load_pattern)
+		if kind then
 			local args = duffle.split_top_level_commas(inner)
-			-- Expected shape: (R_<reg>, R_TapePtr, O_(Binds_<X>, FieldName))
-			if #args >= 3 then
+			-- Expected shape for an rbind piece-chain load: (R_<reg>, R_TapePtr, O_(Binds_<X>, FieldName))
+			-- The second arg MUST be R_TapePtr — loads from other bases (e.g. `load_byte_u(R_RawStatus, R_PadRaw, 0)`)
+			-- are field-derivative loads that read already-bound tape values; they're NOT a new piece-chain.
+			if #args >= 3 and duffle.trim(args[2]) == "R_TapePtr" then
 				local reg_name  = duffle.trim(args[1])
 				local third_arg = duffle.trim(args[3])
 				-- Match O_(Binds_<X>, FieldName)

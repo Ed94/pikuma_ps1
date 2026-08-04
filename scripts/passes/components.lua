@@ -339,6 +339,118 @@ local function count_all_components(components, wc)
 	return counts
 end
 
+-- ═══════════════════════════════════════════
+-- Per-component metadata derivation (replaces the hardcoded `M.GP0_MACRO_CONTRIB` + `M.INSTRUCTION_LATENCY[mac_*]` tables that previously lived in `duffle.lua`).
+--
+-- Each `MipsAtomComp_(ac_X) { body }` definition in `code/duffle/lottes_tape.h` is the canonical source.
+-- The `mac_X(...)` macros are GENERATED from these definitions by `emit_component_macros_h` for tape-side composition;
+-- the metaprogram must NEVER walk the generated variants to derive metadata.
+-- Always walk the original `MipsAtomComp_` body via `cc.body_tokens`.
+-- ═══════════════════════════════════════════
+
+--- (internal) Recursive cycle-cost derivation. Sum `latency[ident]` per emitted instruction in the component body,
+--- recursing through nested `mac_*` calls (so `mac_format_g4_color`'s cost = 4 × `mac_pack_color_word`'s cost).
+---
+--- Special rule: `mac_yield`'s cost = 0 (per `lottes_tape.h:125-130` "the runtime cost lands in the next atom's prologue").
+--- @param name         string  -- component bare name (e.g. "yield", "pack_color_word")
+--- @param comp_by_name table<string, Component>
+--- @param latency      table<string, integer>
+--- @param cache        table<string, integer>  -- shared memoization; `-1` sentinel detects cycles
+--- @return integer
+local function cycle_cost_rec(name, comp_by_name, latency, cache)
+	if cache[name] ~= nil then return cache[name] end
+	cache[name] = -1
+	local cc = comp_by_name[name]
+	local n
+	if cc then
+		if name == "yield" then
+			-- mac_yield's cost is 0 by convention (the runtime cost lands in the next atom's prologue).
+			n = 0
+		else
+			n = 0
+			local tokens = cc.body_tokens
+			for _, t in ipairs(tokens) do
+				local trimmed = t.tok
+				if trimmed ~= "" then
+					local ident = duffle.read_ident(trimmed, 1)
+					if ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
+						-- Nested `mac_X(...)` call: recurse.
+						local nested = ident:sub(MAC_PREFIX_LEN + 1)
+						n = n + cycle_cost_rec(nested, comp_by_name, latency, cache)
+					else
+						-- Leaf instruction or pseudo-macro. Look up in INSTRUCTION_LATENCY; default 1.
+						n = n + (latency[ident] or 1)
+					end
+				end
+			end
+		end
+	else
+		n = 1
+	end
+	cache[name] = n
+	return n
+end
+
+--- (internal) Recursive GP0 prim-buffer contribution. Count `store_word` / `store_half` / `store_byte` 
+--- calls in the component body that target `R_PrimCursor` (these are the
+--- RAM-side prim-buffer words the macro contributes), recursing through nested `mac_*` calls.
+---
+--- Only `R_PrimCursor`-targeting stores count. Stores targeting other registers (e.g. `R_OtBase`, heap pointers) are not prim-buffer contributions.
+--- @param name         string
+--- @param comp_by_name table<string, Component>
+--- @param cache        table<string, integer>
+--- @return integer
+local function gp0_contrib_rec(name, comp_by_name, cache)
+	if cache[name] ~= nil then return cache[name] end
+	cache[name] = -1
+	local cc = comp_by_name[name]
+	local n
+	if cc then
+		n = 0
+		local tokens = cc.body_tokens
+		for _, t in ipairs(tokens) do
+			local trimmed = t.tok
+			if trimmed ~= "" then
+				local ident = duffle.read_ident(trimmed, 1)
+				if ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
+					-- Nested `mac_X(...)` call: recurse.
+					local nested = ident:sub(MAC_PREFIX_LEN + 1)
+					n = n + gp0_contrib_rec(nested, comp_by_name, cache)
+				elseif ident == "store_word" or ident == "store_half" or ident == "store_byte" then
+					if trimmed:find("R_PrimCursor", 1, true) then
+						n = n + 1
+					end
+				end
+			end
+		end
+	else
+		n = 0
+	end
+	cache[name] = n
+	return n
+end
+
+--- Compute `cycle_cost` + `gp0_contrib` for every component in `components` in a single pass.
+--- Memoization cache is built ONCE (per source) and shared across both helpers so that
+--- a nested `mac_Y` reference inside a `mac_X` body computes its values once.
+--- @param components Component[]
+--- @param latency    table<string, integer>
+--- @return table<string, {cycle_cost=integer, gp0_contrib=integer}>
+local function compute_components_metadata(components, latency)
+	local comp_by_name = {}
+	for _, cc in ipairs(components) do comp_by_name[cc.name] = cc end
+	local cc_cache  = {}
+	local gc_cache  = {}
+	local out       = {}
+	for _, c in ipairs(components) do
+		out[c.name] = {
+			cycle_cost = cycle_cost_rec(c.name, comp_by_name, latency, cc_cache),
+			gp0_contrib = gp0_contrib_rec(c.name, comp_by_name, gc_cache),
+		}
+	end
+	return out
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Per-component emit logic
 -- ════════════════════════════════════════════════════════════════════════════
@@ -534,25 +646,29 @@ end
 
 --- (internal) Populate `corpus.components` with this source's components-by-name map.
 --- First declaration wins; later declarations of the same bare name are dropped and recorded as a collision via `corpus.collisions` (kind = "component").
---- The pass does NOT write to `ctx.shared.components` (ownership follows the canonical contract).
---- The `debug_skip` field mirrors the scanner-owned declaration record (`c.debug_skip`).
+--- The pass does NOT write to `ctx.shared.components`.
 --- No parallel skip map is built here; consumers that need the per-component skip state read `corpus.components[name].debug_skip` directly.
---- @param corpus     table  -- the corpus
+--- The `cycle_cost` + `gp0_contrib` fields are populated from `metadata[c.name]` (computed by `compute_components_metadata` against the original `MipsAtomComp_` body).
+--- @param corpus     table   -- the corpus
 --- @param src        SourceFile
 --- @param components Component[]
-local function update_canonical_components(corpus, src, components)
+--- @param metadata    table<string, {cycle_cost=integer, gp0_contrib=integer}>
+local function update_canonical_components(corpus, src, components, metadata)
 	local rel_path = src.path:gsub("\\", "/")
 	for _, c in ipairs(components) do
 		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`).
 		-- The atoms_source_map pass looks up components by bare name from the corpus;
 		-- `mac_` prefix lives at the call-site identifier and is stripped before lookup.
+		local m = metadata and metadata[c.name] or nil
 		if corpus.components[c.name] == nil then
 			corpus.components[c.name] = {
-				name       = c.name,
-				line       = c.line,
-				path       = rel_path,
-				kind       = c.kind or "comp_bare",
-				debug_skip = c.debug_skip == true,
+				name        = c.name,
+				line        = c.line,
+				path        = rel_path,
+				kind        = c.kind or "comp_bare",
+				debug_skip  = c.debug_skip == true,
+				cycle_cost  = m and m.cycle_cost  or nil,
+				gp0_contrib = m and m.gp0_contrib or nil,
 			}
 		else
 			-- A second declaration of the same bare name: record a typed collision so static-analysis + the report can surface it.
@@ -632,12 +748,15 @@ function M.run(ctx)
 			-- Use `corpus.word_counts` so the recursive lookup sees both authored-metadata entries
 			-- (loaded by word_count_eval.run) AND same-source component entries (populated earlier in this loop by `update_canonical_word_counts`).
 			local counts = count_all_components(components, corpus.word_counts)
+			-- Derive cycle_cost + gp0_contrib from the original `MipsAtomComp_` body tokens
+			-- (NOT from the generated `mac_*` variants — those are written to disk above).
+			local metadata = compute_components_metadata(components, duffle.INSTRUCTION_LATENCY)
 			local macs_path = emit_component_macros_h(ctx, src, components, counts)
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }
 				-- Populate the projections AFTER disk emission (so the byte-identical `.macs.h` contract is preserved before any current-count mutation).
 				update_canonical_word_counts(corpus, components, counts)
-				update_canonical_components(corpus, src, components)
+				update_canonical_components(corpus, src, components, metadata)
 				update_canonical_component_body_index(corpus, src, components, src.scan)
 			end
 		end

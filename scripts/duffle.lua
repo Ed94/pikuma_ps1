@@ -10,7 +10,7 @@
 ---   * **Word-count loader** (`load_word_counts` for `WORD_COUNT(...)` metadata files).
 ---   * **Line lookup** (`LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping).
 ---   * **Domain tables** (`TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`,
----     `GP0_MACRO_CONTRIB`, `INSTRUCTION_LATENCY`).
+---     `INSTRUCTION_LATENCY`).
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex.
 
@@ -1430,33 +1430,7 @@ M.GP0_CMD_BY_SHAPE = {
 	["g4"]  = 0x38, ["gt4"] = 0x3C,
 }
 
--- TODO(Ed): REMOVE THIS HARDCODE, THIS SHOULD BE RESOLVED AUTOMATICALLY
--- Per-macro prim-buffer contribution: how many 32-bit words each macro writes to the primitive being built in main RAM.
--- (This counts RAM-side prim-buffer words, not .text instruction words.)
--- The sum across `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X` calls in an atom body must equal
--- `GP0_CMD_SIZE[GP0_CMD_BY_SHAPE[shape]]`.
-M.GP0_MACRO_CONTRIB = {
-	["mac_format_f3_color"]      = 1,
-	["mac_format_g3_color"]      = 3,
-	["mac_format_g4_color"]      = 4,
-	["mac_gte_store_f3"]         = 3,
-	["mac_gte_store_g3"]         = 3,
-	["mac_gte_store_g4_p012"]    = 3,
-	["mac_gte_store_g4_p3"]      = 1,
-	["mac_insert_ot_tag_f3"]     = 1,
-	["mac_insert_ot_tag_g4"]     = 1,
-}
-
--- Per-macro cycle cost (best-case, no stalls). Used by the static-analysis pass to emit per-atom cycle budgets.
--- The counts cover the expanded instruction sequence the macro emits (not just the surface token in source).
--- Worked example — `mac_pack_color_word(off, cmd, r, g, b)` expands to:
---     load_upper_i(R_AT, (cmd << 8) | b)        -- 1 cycle
---     or_i_self(R_AT, (g << 8) | r)             -- 1 cycle
---     store_word(R_AT, R_PrimCursor, off)       -- 1 cycle
---                                                = 3 cycles total
---
--- `mac_yield` emits a control-transfer sequence (load_word, add_ui_self, jump_reg, nop). The atom body's cycle budget excludes
--- the yield's cost (we model it as 0); the runtime cost lands in the next atom's prologue.
+-- Per-instruction cycle cost (best-case, no stalls). Used by the static-analysis pass to emit per-atom cycle budgets.
 --
 -- GTE command values are the GTE instruction's intrinsic cycles — the latency after any pre-cmd `nop2` has retired.
 -- When the source emits `nop2, gte_cmdw_X`, the nops' cycles are added separately (1+1) plus the gte_cmdw_X value here:
@@ -1473,6 +1447,13 @@ M.GP0_MACRO_CONTRIB = {
 -- See `docs/psx-spx/docs/geometrytransformationenginegte.md` for per-command cycle counts and
 -- `docs/psx-spx/docs/gtepipelinetimings.md` for the hardware-verified input-latch boundaries (most inputs become
 -- safe to clobber after 0-4 cycles).
+--
+-- Per-macro cycle costs (`mac_yield`, `mac_pack_color_word`, ...) and per-macro prim-buffer contributions
+-- (`mac_format_*_color`, `mac_gte_store_*`, `mac_insert_ot_tag_*`) are NOT hardcoded here.
+-- `passes/components.lua::compute_components_metadata` derives both from each `MipsAtomComp_(ac_X)` body in
+-- `code/duffle/lottes_tape.h`, stores the values on `corpus.components[name].cycle_cost` and
+-- `corpus.components[name].gp0_contrib`, and `passes/static_analysis.lua` reads those fields directly.
+-- The `mac_yield` cost is 0 by convention (the runtime cost lands in the next atom's prologue).
 M.INSTRUCTION_LATENCY = {
 	-- CPU ALU (single-cycle R3000A ops)
 	["nop"]                 = 1,
@@ -1567,22 +1548,6 @@ M.INSTRUCTION_LATENCY = {
 	["gte_load_v1"]         = 2,
 	["gte_load_v2"]         = 2,
 	["gte_load_v0v1v2"]     = 6,
-
-	-- TODO(Ed): REMOVE THIS HARDCODE, THIS SHOULD BE RESOLVED AUTOMATICALLY
-	-- mac_* helpers (cycle cost = sum of the expanded instructions)
-	-- mac_yield transfers control; cycle budget is 0 (the next atom absorbs the cost).
-	["mac_yield"]              = 0,
-	["mac_pack_color_word"]    = 3,  -- lui + ori + sw
-	["mac_format_f3_color"]    = 3,  -- = mac_pack_color_word
-	["mac_format_g4_color"]    = 12, -- 4 x mac_pack_color_word
-	["mac_load_tri_indices"]   = 3,  -- 3 x lhu
-	["mac_gte_load_tri_verts"] = 18, -- 3 x {sll, addu, lw, lw, mtc2, mtc2}
-	["mac_gte_store_f3"]       = 3,
-	["mac_gte_store_g3"]       = 3,
-	["mac_gte_store_g4_p012"]  = 3,
-	["mac_gte_store_g4_p3"]    = 1,
-	["mac_insert_ot_tag_f3"]   = 11,  -- 11 .word slots in the macro body
-	["mac_insert_ot_tag_g4"]   = 11,
 
 	-- Annotation markers (emit no code; pure metaprogram hints)
 	["atom_label"]          = 0,
@@ -2212,10 +2177,15 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	end
 
 	local function emit_marker(kind, name, target, line,
-		immediate_call_text, root_call_text_w)
+		immediate_call_text, root_call_text_w,
+		consuming_encoder, consuming_arg_pos)
 		local inv_ids   = open_invocation_ids_snapshot()
 		local outermost = inv_ids[1] or 0
 		-- Markers carry the open invocation stack snapshot. `call_text` / `root_call_text` belong to words, not markers — markers are zero-width and skip per-word call-site attribution.
+		-- `consuming_encoder` + `consuming_arg_pos` carry the surrounding control-transfer instruction context
+		-- (e.g. `branch_le_zero` consuming its 3rd argument, or `jump` / `call_addr` consuming their only argument).
+		-- `passes/offsets.lua` reads these to dispatch per-consuming-instruction offset encoding.
+		-- nil for top-level markers (where the marker is the entire token — no surrounding consuming instruction).
 		local it = {
 			kind                     = kind,
 			name                     = name,
@@ -2225,17 +2195,77 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			outermost_invocation_id  = outermost,
 		}
 		if target ~= nil then it.target = target end
+		if consuming_encoder then it.consuming_encoder = consuming_encoder end
+		if consuming_arg_pos  then it.consuming_arg_pos  = consuming_arg_pos  end
 		items[#items + 1] = it
 		markers[#markers + 1] = {
-			kind       = kind,
-			name       = name,
-			line       = line,
-			word_index = word_idx,
-			target     = target,
+			kind              = kind,
+			name              = name,
+			line              = line,
+			word_index        = word_idx,
+			target            = target,
+			consuming_encoder = consuming_encoder,
+			consuming_arg_pos = consuming_arg_pos,
 		}
 	end
 
-	local function emit_embedded_markers(tok, tok_line)
+	-- Count top-level commas in `tok` between position `from_pos` (inclusive) and `to_pos` (exclusive).
+	-- Tracks paren depth so commas inside nested () don't count. Skips string literals + comments.
+	-- Used by `emit_embedded_markers` to compute `consuming_arg_pos` for each embedded marker.
+	local function count_top_level_commas(tok, from_pos, to_pos)
+		local depth  = 0
+		local count  = 0
+		local i      = from_pos
+		while i < to_pos do
+			local c = tok:sub(i, i)
+			if c == "'" or c == '"' then
+				local next_pos = M.skip_str_or_cmt(tok, i)
+				i = (next_pos > i) and next_pos or (i + 1)
+			elseif c == "/" and tok:sub(i + 1, i + 1) == "/" then
+				-- line comment: skip to end of line
+				local nl = tok:find("\n", i, true)
+				i = (nl and nl + 1) or (#tok + 1)
+			elseif c == "/" and tok:sub(i + 1, i + 1) == "*" then
+				-- block comment: skip to matching */
+				local close = tok:find("*/", i + 2, true)
+				i = (close and close + 2) or (#tok + 1)
+			elseif c == "(" then
+				depth = depth + 1
+				i = i + 1
+			elseif c == ")" then
+				depth = depth - 1
+				i = i + 1
+			elseif c == "," and depth == 0 then
+				count = count + 1
+				i = i + 1
+			else
+				i = i + 1
+			end
+		end
+		return count
+	end
+
+	-- Find the position of the consuming instruction's open paren (the `(` that
+	-- starts the consuming instruction's argument list). Returns nil if the token's
+	-- leading text isn't an ident followed by `(` (e.g. the ident is at the start of a
+	-- non-instruction token).
+	local function find_consuming_paren(tok)
+		local i = 1
+		while i <= #tok do
+			local c = tok:sub(i, i)
+			if c == "(" then return i end
+			if not c:match("[%w_]") and c ~= " " then return nil end
+			i = i + 1
+		end
+		return nil
+	end
+
+	local function emit_embedded_markers(tok, tok_line, consuming_encoder)
+		-- When called with a non-nil `consuming_encoder`, the marker is nested inside that
+		-- instruction's argument list. We compute each marker's arg position by counting
+		-- top-level commas between the consuming instruction's `(` and the marker's start.
+		local consuming_paren = nil
+		if consuming_encoder then consuming_paren = find_consuming_paren(tok) end
 		local pos = 1
 		while pos <= #tok do
 			-- trim leading whitespace and comments before each scan.
@@ -2261,10 +2291,20 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				pos = after
 				goto continue_loop
 			end
-			-- commit: label takes 1 arg, offset takes 2.
+			-- Commit: label takes 1 arg, offset takes 2.
+			-- For embedded markers, propagate the consuming_encoder + the marker's arg position
+			-- (1-based) so `passes/offsets.lua` can dispatch per-consuming-instruction offset encoding.
+			-- Top-level markers (no consuming_encoder) get nil for both — the offsets pass treats
+			-- them as branch-equivalent for backward compatibility.
+			local arg_pos = nil
+			if consuming_encoder and consuming_paren then
+				arg_pos = count_top_level_commas(tok, consuming_paren + 1, pos) + 1
+			end
 			local args = split_top_level_args(inner)
-			if ident == "atom_label" then emit_marker("label",  args[1] or "", nil,           tok_line) 
-			else                          emit_marker("offset", args[1] or "", args[2] or "", tok_line)
+			if ident == "atom_label" then
+				emit_marker("label", args[1] or "", nil,           tok_line, nil, nil, consuming_encoder, arg_pos)
+			else
+				emit_marker("offset", args[1] or "", args[2] or "", tok_line, nil, nil, consuming_encoder, arg_pos)
 			end
 			pos = after_paren
 			::continue_loop::
@@ -2391,9 +2431,21 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			local _, args  = token_ident_and_args(tok)
 			local tok_line = line_of(body_off + bt.rel) or 0
 			-- embedded markers live only in non-marker tokens.
-			if ident ~= "atom_label" and ident ~= "atom_offset" then emit_embedded_markers(tok, tok_line) end
+			-- Pass `ident` as the consuming instruction so `emit_embedded_markers` can compute
+			-- each marker's arg position + record the consuming_encoder for the offsets pass.
+			-- Canonicalize `jump_rel` to `branch_equal` (its preprocessor-expanded form) so the
+			-- `consuming_encoder` metadata in marker records is canonical. `jump_rel` is the within-atom-safe
+			-- unconditional jump alias from `code/duffle/mips.h`; the C preprocessor expands it BEFORE
+			-- the metaprogram sees the source, but the raw token ident is still `jump_rel` here.
+			local consuming_encoder_for_markers = (ident == "jump_rel") and "branch_equal" or ident
+			if ident ~= "atom_label" and ident ~= "atom_offset" then
+				emit_embedded_markers(tok, tok_line, consuming_encoder_for_markers)
+			end
 			-- atom_label / atom_offset: terminal markers, no further descent.
-			if     ident == "atom_label"  then emit_marker("label",  args[1] or "", nil,          tok_line); return
+			-- Top-level markers (the marker IS the entire token) have no consuming instruction;
+			-- nil for both `consuming_encoder` and `consuming_arg_pos`. The offsets pass treats
+			-- these as branch-equivalent for backward compatibility.
+			if     ident == "atom_label"  then emit_marker("label",  args[1] or "", nil,           tok_line); return
 			elseif ident == "atom_offset" then emit_marker("offset", args[1] or "", args[2] or "", tok_line); return
 			end
 			if ident:sub(1, 4) == "mac_" then

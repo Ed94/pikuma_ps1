@@ -57,10 +57,12 @@ local OFFSET_MACRO_COL = 44
 --- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
 
 --- @class BranchOffset
---- @field tag         string   -- the marker tag (e.g. "F" in `atom_offset(F, T)`)
---- @field target      string   -- the target label name (e.g. "T" in `atom_offset(F, T)`)
---- @field branch_word integer  -- branch word position within the atom body
---- @field offset      integer  -- computed `target_word - branch_word - 1`
+--- @field tag              string      -- the marker tag (e.g. "F" in `atom_offset(F, T)`)
+--- @field target           string      -- the target label name (e.g. "T" in `atom_offset(F, T)`)
+--- @field branch_word      integer     -- branch word position within the atom body
+--- @field offset           integer     -- computed per consuming instruction (see `compute_offsets`)
+--- @field consuming_encoder string|nil -- the instruction consuming the offset (e.g. "branch_le_zero", "jump", "call_addr")
+--- @field consuming_arg_pos integer|nil -- 1-based arg position within the consuming instruction's arg list
 
 --- @class AtomData
 --- @field name        string         -- atom name
@@ -72,7 +74,7 @@ local OFFSET_MACRO_COL = 44
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- MARKER_PROJECTORS is the marker-kind data table.
--- The emission-model pass already records marker word positions;
+-- The emission-model pass already records marker word positions + consuming-instruction context;
 -- this pass only projects those records into the label/branch lookup shape needed by offset computation.
 local MARKER_PROJECTORS = {
 	label = function(state, marker)
@@ -80,9 +82,11 @@ local MARKER_PROJECTORS = {
 	end,
 	offset = function(state, marker)
 		state.branches[#state.branches + 1] = {
-			tag         = marker.name,
-			target      = marker.target,
-			branch_word = marker.word_index,
+			tag                = marker.name,
+			target             = marker.target,
+			branch_word        = marker.word_index,
+			consuming_encoder  = marker.consuming_encoder,
+			consuming_arg_pos  = marker.consuming_arg_pos,
 		}
 	end,
 }
@@ -104,7 +108,19 @@ end
 -- Offset computation + header generation
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Compute branch offsets as `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding).
+--- Compute branch offsets per consuming instruction.
+---
+--- Disposition table:
+---   `branch_*`           -> relative offset: `target_word - branch_word - 1` (MIPS branch-immediate encoding).
+---   `jump` / `call_addr` -> same value as `branch_*` (a relative word offset). 
+---     The duffle headers' `enc_i` macro truncates the value to the immediate-field width (16 bits for branches, 26 bits for jumps).
+---     For tape-atom bodies within a single module, this works for `j`/`jal` because the linker's symbol resolution produces the correct 26-bit absolute target via standard `j` relocations.
+---     For cross-module `j`/`jal` (atom body in one module, target in another), the linker emits a `R_MIPS_26` relocation against the lower 26 bits; the upper 4 bits come from the PC of the delay slot following the `j`.
+---     The metaprogram doesn't know either at compile time, so the emitted value is the relative word offset that the duffle `enc_i` macro places in the immediate field; the toolchain handles the rest.
+---   `jump_reg` / `call_reg` / `jump_link` -> ERROR. Register-form jumps have no offset field; `atom_offset` is invalid.
+---
+--- Top-level `atom_offset(F, T)` markers (where the marker is the entire token — `consuming_encoder` == nil) default to `branch_*` behavior (relative offset).
+--- This preserves backward compatibility for any top-level marker that may exist outside a control-transfer instruction.
 --- @param labels table<string, integer>
 --- @param branches table[]
 --- @return BranchOffset[]
@@ -115,11 +131,23 @@ local function compute_offsets(labels, branches)
 		if not target then
 			error("Branch target '" .. br.target .. "' has no atom_label (at word " .. br.branch_word .. ")")
 		end
+		local consuming = br.consuming_encoder
+		local offset
+		if consuming == "jump_reg" or consuming == "call_reg" or consuming == "jump_link" then
+			-- Register-form jumps have no offset field. `atom_offset` cannot be used here.
+			error("atom_offset cannot be used with " .. consuming
+				.. " (register-form jumps have no offset field); at word " .. br.branch_word)
+		end
+		-- All other consuming instructions (including `branch_*`, `jump`, `call_addr`, and nil for top-level markers) use the same relative offset value.
+		-- The MIPS encoding differs per opcode but the duffle `enc_i` macro handles the truncation to the immediate-field width.
+		offset = target - br.branch_word - 1
 		results[#results + 1] = {
-			target      = br.target,
-			tag         = br.tag,
-			branch_word = br.branch_word,
-			offset      = target - br.branch_word - 1,
+			target             = br.target,
+			tag                = br.tag,
+			branch_word        = br.branch_word,
+			offset             = offset,
+			consuming_encoder  = br.consuming_encoder,
+			consuming_arg_pos  = br.consuming_arg_pos,
 		}
 	end
 	return results

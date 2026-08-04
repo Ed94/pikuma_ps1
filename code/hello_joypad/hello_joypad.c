@@ -478,22 +478,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// C-side state (pa->used) has already been updated by the tape!
 		// smem.floor.rot.y += 5;
 	}
-	// --- TAPE DIAGNOSTICS ---
-	if (0)
-	{
-		LP_ U4 mem_temp_tape[512]; FArena tape_arena; farena_init(& tape_arena, slice_ut_arr(mem_temp_tape));
-		TapeBuilder tb = tb_make_old(& tape_arena); tb_scope(& tb) {
-			// Skip set_gte_world atom for diagnostics to isolate the triangle loop
-			for (U4 i = 0; i < Floor_num_faces; i++) {
-				// tb_emit(& tb, code_diag_yield);
-				// tb_emit(& tb, code_diag_color);
-				// tb_emit(& tb, code_diag_gte); 
-			}
-		}
-		B1* prim_cursor = (B1*)r_(pa->buf)[smem.active_buf_id] + pa->used;
-		tape_run(tb_slice(tb));
-		pa->used = (U4)prim_cursor - (U4)r_(pa->buf)[smem.active_buf_id];
-	}
 }
 GCC_OPTIMIZATION_ENABLE
 

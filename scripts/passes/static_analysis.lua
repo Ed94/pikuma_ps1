@@ -23,7 +23,9 @@
 ---   4. Binding handoff: Every `atom_bind(Binds_X)` must reference a `typedef Struct_(Binds_X) { ... }` declaration.
 ---   5. GPU Port-Store Shape: Per-shape (`f3`/`f4`/`g4`/etc.) the sum of `mac_format_X_color` + `mac_gte_store_X_*` + `mac_insert_ot_tag_X` words
 ---      must equal the GP0 cmd's expected packet size.
----   6. Per-Atom Cycle Budget: Sum each atom body's instruction latencies (per `duffle.INSTRUCTION_LATENCY`); report total.
+---   6. Per-Atom Cycle Budget: Sum each atom body's instruction latencies — non-`mac_*` tokens look up `duffle.INSTRUCTION_LATENCY[ident]`; 
+---      `mac_*` tokens look up `pipe_ctx.components_by_name[bare_name].cycle_cost` (auto-derived from the original `MipsAtomComp_` body by `passes/components.lua::compute_components_metadata`).
+---      Report total.
 ---
 --- Per-source rules (registry-driven):
 ---   8. enum_alias_membership: Every `R_X` referenced from `atom_dbg_reg_default`, `atom_reg_types`, `atom_type(...)`, `atom_reads`, or `atom_writes`
@@ -191,15 +193,21 @@ end
 --
 -- The classification is stored on `atom.paths.tok_class` as an array indexed by token index (1..#tokens). 
 -- Each entry has:
---   ident         — the leading identifier (e.g. "load_word", "gte_cmdw_rtpt", "nop", "mac_yield")
---   nop_words     — 0 / 1 / 2 (for "nop" / "nop2" / anything else)
---   nop_prefix    — consecutive nop words ending just BEFORE this token (forward-pass pre-compute;
---                   makes preceding-nop lookup O(N))
---   is_yield      — true if this token is `mac_yield` or `mac_yield(...)`
---   is_atom_label — true if this token is `atom_label(name)`; label_name has the name
---   is_branch     — true if this token is `branch_*(...)`; branch_label has the label or false
---   is_load_word  — true if this token starts with `load_word(`
---   is_store_word — true if this token starts with `store_word(`
+--   ident              — the leading identifier (e.g. "load_word", "gte_cmdw_rtpt", "nop", "mac_yield")
+--   nop_words          — 0 / 1 / 2 (for "nop" / "nop2" / anything else)
+--   nop_prefix         — consecutive nop words ending just BEFORE this token (forward-pass pre-compute;
+--                        makes preceding-nop lookup O(N))
+--   is_yield           — true if this token is `mac_yield` or `mac_yield(...)`
+--   is_atom_label      — true if this token is `atom_label(name)`; label_name has the name
+--   is_branch          — true if this token is `branch_*(...)` OR an unconditional-jump-with-offset (`jump(off)` / `call_addr(off)`); branch_label has the target label or false
+--   is_unconditional_jump — true if this token is `jump` or `call_addr` (BD slot + single successor — taken only; no fall-through).
+--                           Mutually exclusive with the conditional-branch semantics; combined with `is_branch` above.
+--   is_terminal_jump   — true if this token is `jump_reg` / `call_reg` / `jump_link` (transfers control OUT of the current atom; the `mac_yield()` handshake ends in `jump_reg(R_AtomJmp), nop`). 
+--                        No offset field — `atom_offset` is invalid here. Terminates the current path in the CFG.
+--   is_load            — true if this token starts with any of: load_word, load_half, load_half_u, load_byte,
+--                        load_byte_u, gte_lw, gte_lwc2. These all have MIPS load-delay semantics (the
+--                        destination register is volatile for 1 word after the load).
+--   is_store_word      — true if this token starts with `store_word(`
 --
 -- Checks that need the leading ident use `tok_class.ident` instead of re-matching the token string.
 -- Checks that need "how many nops before token i" use `tok_class.nop_prefix` instead of walking backwards.
@@ -211,9 +219,11 @@ end
 --- @field is_yield           boolean
 --- @field is_atom_label      boolean
 --- @field label_name         string|nil      -- for atom_label(name)
---- @field is_branch          boolean
---- @field branch_label       string|false|nil -- for branch_*(..., atom_offset(F, label))
---- @field is_load_word       boolean
+--- @field is_branch          boolean         -- conditional branch OR unconditional-jump-with-offset
+--- @field is_unconditional_jump boolean      -- `jump` / `call_addr` only
+--- @field is_terminal_jump   boolean         -- `jump_reg` / `call_reg` / `jump_link` only
+--- @field branch_label       string|false|nil -- for branch_*(..., atom_offset(F, label)) OR jump/call_addr
+--- @field is_load            boolean         -- load_word | load_half | load_half_u | load_byte | load_byte_u | gte_lw | gte_lwc2
 --- @field is_store_word      boolean
 --- @field mac_format_shape   string|nil      -- "f3" / "g4" etc. for mac_format_X_color; nil otherwise
 --- @field is_gte_store       boolean         -- ident matches `mac_gte_store_<shape>`
@@ -224,11 +234,37 @@ end
 --- @field o_arg2             string|nil      -- second arg of O_(<a>, <b>) captures
 --- @field s_arg1             string|nil      -- arg of S_(<a>) captures; nil for non-S_ tokens
 
+-- The set of MIPS instruction idents that have a load-delay slot.
+-- Per MIPS I R3000A: `lw`, `lh`, `lhu`, `lb`, `lbu`, `lwc2` (gte_lw).
+-- Note: `lui` (load_upper_i) does NOT have a load delay on MIPS I — it's an ALU op, not a load.
+-- The `load_imm_*` macros are lui + ori sequences with no per-component load delay either.
+local LOAD_INSTRUCTION_IDENTS = {
+	load_word   = true,
+	load_half   = true,
+	load_half_u = true,
+	load_byte   = true,
+	load_byte_u = true,
+	gte_lw      = true,
+	gte_lwc2    = true,
+}
+
 -- Patterns for O_(<arg1>, <arg2>) and S_(<arg>) captures.
 -- UNANCHORED, the substring can appea anywhere in the token (e.g., `load_word(R_T0, R_TapePtr, O_(Binds_X, field))` matches at position ~24).
 -- The binds_name match is deferred to check_abi_handoff (which compares tc.o_arg1 == atom.info.binds).
 local O_PATTERN = "O_%(([%w_]+),%s*([%w_]+)%s*%)"
 local S_PATTERN = "S_%(([%w_]+)%s*%)"
+
+-- Ident patterns for control-transfer instruction kinds:
+--   * `branch_*` (conditional): `branch_equal`, `branch_ne`, `branch_lt_zero`, `branch_ge_zero`, `branch_le_zero`, `branch_gt_zero`.
+--   * `jump` / `call_addr` (unconditional absolute): one immediate offset field; can carry `atom_offset(F, T)`.
+--   * `jump_reg` / `call_reg` / `jump_link` (register-form): no offset field; `atom_offset` is invalid; transfers OUT of the current atom.
+local BRANCH_PATTERN          = "^branch_[%w_]+%s*%("
+-- `jump_rel(off)` is an ergonomic alias for `branch_equal(R_0, R_0, off)` (the within-atom-safe unconditional jump — see `code/duffle/mips.h`).
+-- The C preprocessor expands it BEFORE the metaprogram sees the source, but for source-level metadata consistency we still match it here and classify it as a branch_equal.
+-- This keeps `consuming_encoder` canonical for any downstream tooling that consults the metadata field.
+local JUMP_REL_PATTERN      = "^jump_rel%s*%("
+local UNCOND_JUMP_PATTERN   = "^%f[%w](jump|call_addr)%f[%W]"
+local TERMINAL_JUMP_PATTERN = "^%f[%w](jump_reg|call_reg|jump_link)%f[%W]"
 
 local function classify_tokens(tokens)
 	local n       = #tokens
@@ -245,8 +281,10 @@ local function classify_tokens(tokens)
 		local is_atom_label = false
 		local label_name    = nil
 		local is_branch     = false
+		local is_unconditional_jump = false
+		local is_terminal_jump   = false
 		local branch_label  = nil
-		local is_load_word  = ident == "load_word"
+		local is_load       = LOAD_INSTRUCTION_IDENTS[ident] == true
 		local is_store_word = ident == "store_word"
 
 		-- Per-check pre-computes (R3 lift).
@@ -262,9 +300,21 @@ local function classify_tokens(tokens)
 		if ident == "atom_label" then
 			is_atom_label = true
 			label_name    = tok:match("^atom_label%s*%(%s*([%w_]+)%s*%)")
-		elseif tok:match("^branch_[%w_]+%s*%(") then
+		elseif tok:match(BRANCH_PATTERN) or tok:match(JUMP_REL_PATTERN) then
+			-- Conditional branch OR `jump_rel` (the within-atom-safe unconditional jump alias).
+			-- Both encode a 16-bit signed relative word offset.
 			is_branch    = true
 			branch_label = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
+		elseif tok:match(UNCOND_JUMP_PATTERN) then
+			-- Unconditional absolute jump / call: `jump(off)` / `call_addr(off)`.
+			-- One immediate offset field; can carry an `atom_offset(F, T)` marker (the offsets pass dispatches on `consuming_encoder` — see `passes/offsets.lua::compute_offsets`).
+			is_branch              = true
+			is_unconditional_jump = true
+			branch_label           = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
+		elseif tok:match(TERMINAL_JUMP_PATTERN) then
+			-- Register-form jump / call: no offset field; `atom_offset` is invalid here (the offsets pass will error if one is supplied).
+			-- Transfers control OUT of the current atom — the CFG treats this as a path terminator.
+			is_terminal_jump = true
 		end
 
 		-- mac_format_X_color / mac_gte_store_<shape> / mac_insert_ot_tag_<shape> (used by check_gpu_portstore_shape).
@@ -283,24 +333,26 @@ local function classify_tokens(tokens)
 		if is_store_word and tok:find("R_PrimCursor", 1, true) then writes_r_prim_cursor = true end
 
 		tc[tok_idx] = {
-			ident                = ident,
-			nop_words            = nop_words,
-			nop_prefix           = nop_run,
-			is_yield             = is_yield,
-			is_atom_label        = is_atom_label,
-			label_name           = label_name,
-			is_branch            = is_branch,
-			branch_label         = branch_label,
-			is_load_word         = is_load_word,
-			is_store_word        = is_store_word,
-			mac_format_shape     = mac_format_shape,
-			is_gte_store         = is_gte_store,
-			is_ot_tag            = is_ot_tag,
-			writes_r_prim_cursor = writes_r_prim_cursor,
-			reads_r_tape_ptr     = reads_r_tape_ptr,
-			o_arg1               = o_arg1,
-			o_arg2               = o_arg2,
-			s_arg1               = s_arg1,
+			ident                  = ident,
+			nop_words              = nop_words,
+			nop_prefix             = nop_run,
+			is_yield               = is_yield,
+			is_atom_label          = is_atom_label,
+			label_name             = label_name,
+			is_branch              = is_branch,
+			is_unconditional_jump = is_unconditional_jump,
+			is_terminal_jump       = is_terminal_jump,
+			branch_label           = branch_label,
+			is_load                = is_load,
+			is_store_word          = is_store_word,
+			mac_format_shape       = mac_format_shape,
+			is_gte_store           = is_gte_store,
+			is_ot_tag              = is_ot_tag,
+			writes_r_prim_cursor   = writes_r_prim_cursor,
+			reads_r_tape_ptr       = reads_r_tape_ptr,
+			o_arg1                 = o_arg1,
+			o_arg2                 = o_arg2,
+			s_arg1                 = s_arg1,
 		}
 		-- Advance the nop run for the NEXT token.
 		if nop_words > 0 then nop_run = nop_run + nop_words
@@ -381,8 +433,7 @@ local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
 end
 
 -- True iff `consumer_event` reads the GPR operand at any position the destination register occupies.
--- The read-position lookup consults `duffle.OPERAND_READ_POSITIONS` 
--- for the consumer's encoder and walks each `args[pos]` to find an operand-equal match.
+-- The read-position lookup consults `duffle.OPERAND_READ_POSITIONS` for the consumer's encoder and walks each `args[pos]` to find an operand-equal match.
 local function is_gpr_consumer_of(consumer_event, destination)
 	local consumer_token = consumer_event.encoder or consumer_event.ident
 	local read_pos       = duffle.OPERAND_READ_POSITIONS or {}
@@ -449,8 +500,8 @@ local function shift_left_u4(value, amount)
 	return wrap_u4(value * (2 ^ amount))
 end
 
--- Resolve only a standalone integer literal. Compound C expressions remain
--- unknown by design; the analyzer must not pretend to be a C evaluator.
+-- Resolve only a standalone integer literal.
+-- Compound C expressions remain unknown by design; the analyzer must not pretend to be a C evaluator.
 local function parse_integer_literal(raw)
 	if type(raw) ~= "string" then return nil end
 	raw = duffle.trim(raw)
@@ -1024,7 +1075,9 @@ end
 -- A subsequent MFC2 (or any encoder that reads a C2 register) that picks the WRONG register for the active role emits a `result_role_mismatch` warning.
 -- For example, reading `C2_SXY0` after RTPS is wrong: the `latest_screen_xy` role is `C2_SXY2`.
 --
--- Note: the OLD `gte_result_position` check also emitted table-gap info findings for `_post_<cmd>` components missing a row in `duffle.GTE_COMPONENT_RESULT_CONTRACTS`. That table-gap check was based on the `_post_<cmd>` NAMING convention rather than hardware truth, and was removed (the user did not want naming to encode ordering semantics; a proper `atom_info` directive for ordering semantics is a future TODO).
+-- Note: the OLD `gte_result_position` check also emitted table-gap info findings for `_post_<cmd>` components missing a row in `duffle.GTE_COMPONENT_RESULT_CONTRACTS`.
+-- That table-gap check was based on the `_post_<cmd>` NAMING convention rather than hardware truth, and was removed
+-- (the user did not want naming to encode ordering semantics; A proper `atom_info` directive for ordering semantics is a future TODO).
 --
 -- The first `transfer_hazards` reader comment above records the projection contract.
 -- ─────────────────────────────────────────────────────────────────────────
@@ -1316,6 +1369,107 @@ local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- Check #1d: load-delay slot violations (per-atom)
+-- �═══════════════════════════════════════════════════════════════════════════
+
+--- Walk every emitted word event of one atom. For each `is_load` event (lw / lh / lhu / lb / lbu / lwc2),
+--- mark the destination register as "volatile through" the NEXT emitted slot — MIPS I R3000A load-delay
+--- semantics. If any subsequent event in that 1-slot window reads the volatile register, emit a `load_delay_violation`
+--- finding (severity: error — the load result is unavailable in the delay slot).
+---
+--- The register becomes non-volatile again at word N+2 (the load has retired), OR sooner if a non-load instruction overwrites the register
+--- (the overwriter's write is the fresh producer; the load's value is shadowed and never observed by any reader).
+---
+--- Runtime-helper atoms / components (`debug_skip == true`) are exempt: their internal load-then-use sequences
+--- are part of the fixed handshake (e.g. `ac_load_tri_indices` loads into R_T0..R_T2, but those are caller-supplied).
+---
+--- The walker reads `duffle.OPERAND_READ_POSITIONS[event.encoder]` to determine which args are read-source
+--- (the destination of a load is in `writes`, not `reads` — see `duffle.INSTRUCTION_GPR_EFFECTS`).
+--- The check is purely structural; it does not consult the GPR-value lattice (no constant propagation needed for load-delay detection — the volatility window is unconditional).
+local function check_load_delay_slots(atom, pipe_ctx, findings)
+	if atom.kind ~= "atom" then return end
+	local events = atom.paths.word_events or {}
+	if #events == 0 then return end
+	if is_runtime_helper(atom) then return end
+
+	local gpr_effects = duffle.INSTRUCTION_GPR_EFFECTS or {}
+	local read_positions = duffle.OPERAND_READ_POSITIONS or {}
+	-- volatile_until[reg] = 1-based word_events index; the slot AFTER which the register is safe.
+	-- `nil` means "not currently volatile".
+	local volatile_until = {}
+
+	-- Compute the "net reads" of an event: read-positions MINUS write-positions.
+	-- A position that is BOTH read and written (e.g. `add_ui rt, rs, imm` where the duffle table lists position 1 as both.
+	-- See `duffle.OPERAND_READ_POSITIONS["add_ui"] = {1, 2}` and `INSTRUCTION_GPR_EFFECTS["add_ui"].writes = {1}` — 
+	-- and for genuine RMW ops like `add rt, rs, rt` where position 1 IS both read+written) is not a "read" for load-delay purposes:
+	-- The write shadows whatever value the register previously held. Only positions that are reads WITHOUT a co-occurring write to the same register count as net reads.
+	local function net_reads(event_ident, args)
+		local effect = gpr_effects[event_ident]
+		local positions = read_positions[event_ident]
+		if not positions then return {} end
+		local writes_set = {}
+		if effect and effect.writes then
+			for _, pos in ipairs(effect.writes) do writes_set[pos] = true end
+		end
+		local net = {}
+		for _, pos in ipairs(positions) do
+			if not writes_set[pos] then net[#net + 1] = pos end
+		end
+		return net
+	end
+
+	for event_idx, event in ipairs(events) do
+		local event_ident = event.encoder or event.ident
+		local args        = event.args or {}
+		local is_load     = LOAD_INSTRUCTION_IDENTS[event_ident] == true
+
+		-- (1) Is this event reading a register that's still volatile from a previous load?
+		-- Skip the load instruction itself (the load's own argument list may "read" its destination via `OPERAND_READ_POSITIONS`:
+		-- e.g. `addiu rt, rs, imm` lists position 1 (rt) as a "read", but rt is the destination; the within-load argument list is not a separate consumer).
+		-- Use `net_reads` to ignore RMW positions (write shadows read within the same instruction).
+		if not is_load then
+			for _, pos in ipairs(net_reads(event_ident, args)) do
+				local reg = args[pos]
+				if type(reg) == "string" and reg:sub(1, 2) == "R_" then
+					local until_idx = volatile_until[reg]
+					if until_idx and event_idx <= until_idx then
+						local ev_line = line_for_word_event(event)
+						findings[#findings + 1] = {
+							atom  = atom.name,
+							line  = ev_line,
+							check = "load_delay_violation",
+							kind  = "error",
+							msg   = string.format("%s at line %d reads %s at word %d, but a prior load's "
+								.. "delay slot is not over until word %d; insert a `nop` between the "
+								.. "load and this instruction.",
+								atom.name, ev_line, reg, event_idx, until_idx),
+						}
+					end
+				end
+			end
+		end
+
+		-- (2) Update the volatile set based on what this event writes.
+		local effect = gpr_effects[event_ident]
+		if effect and effect.writes then
+			for _, pos in ipairs(effect.writes) do
+				local reg = args[pos]
+				if type(reg) == "string" and reg:sub(1, 2) == "R_" then
+					if is_load then
+						-- Load: destination volatile for exactly 1 slot (the delay slot).
+						volatile_until[reg] = event_idx + 1
+					else
+						-- Non-load write to this register: overwrites shadow the load; the volatile state ends.
+						-- If another reader comes later, it sees the overwriter's value (or unknown), not the stale load value.
+						volatile_until[reg] = nil
+					end
+				end
+			end
+		end
+	end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Check #2: mac_yield uniformity
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -1463,7 +1617,7 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 	for tok_idx = 1, #tokens do
 		local tc_entry = tc[tok_idx]
 		-- scan: load_word(R_*, R_TapePtr, O_(<Binds_X>, <field>))
-		if tc_entry.is_load_word and tc_entry.reads_r_tape_ptr and tc_entry.o_arg1 == binds_name then
+		if tc_entry.is_load and tc_entry.reads_r_tape_ptr and tc_entry.o_arg1 == binds_name then
 			local field = tc_entry.o_arg2
 			if field then
 				found_field_set[field] = true
@@ -1508,14 +1662,15 @@ end
 -- Check #4: GPU port-store shape
 -- ════════════════════════════════════════════════════════════════════════════
 
---- For every baked atom body, detect which GP0 primitive it's emitting 
---- (first `mac_format_<shape>_color` call). Sum contributions from `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`. 
+--- For every baked atom body, detect which GP0 primitive it's emitting
+--- (first `mac_format_<shape>_color` call). Sum contributions from `mac_format_X_color` + `mac_gte_store_X_post_*` + `mac_insert_ot_tag_X`.
 --- Compare to duffle.GP0_CMD_SIZE[cmd_byte]. Mismatch = error.
 ---
 --- Soft behavior (warnings):
----   - Atoms emitting a primitive via raw `store_word(R_PrimCursor, ...)` (no `mac_format_X_color` call) emit a "manual packet assembly" advisory. 
+---   - Atoms emitting a primitive via raw `store_word(R_PrimCursor, ...)` (no `mac_format_X_color` call) emit a "manual packet assembly" advisory.
 ---     Cannot auto-validate.
----   - Atoms containing a `mac_<name>(...)` call whose name is not in duffle.GP0_MACRO_CONTRIB emit a "new macro; update duffle.GP0_MACRO_CONTRIB" advisory.
+---   - Atoms containing a `mac_<name>(...)` call whose `name` is not registered in `pipe_ctx.components_by_name` emit a "new macro;
+---     Not in corpus.components" advisory — the auto-derivation returned nil for that name.
 ---
 --- Applies only to `kind = "atom"` (baked atoms). Components don't emit full primitives.
 local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
@@ -1540,15 +1695,23 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 				cmd_line = atom.line + line_in_body[tokens[tok_idx].rel]
 			end
 			saw_format = true
-			local n = duffle.GP0_MACRO_CONTRIB["mac_format_" .. shape .. "_color"]
+			-- gp0_contrib is auto-derived from the original `MipsAtomComp_(ac_format_<shape>_color) { body }` body
+			-- in `passes/components.lua::compute_components_metadata` and stored on `corpus.components`.
+			local comp = pipe_ctx.components_by_name["format_" .. shape .. "_color"]
+			local n    = comp and comp.gp0_contrib
 			if    n then contrib = contrib + n end
 		end
 		if tc_entry.is_gte_store then
-			local n = duffle.GP0_MACRO_CONTRIB[tc_entry.ident]
+			-- `tc_entry.ident` is the macro-variant form (`mac_gte_store_f3`); strip the `mac_` prefix for the bare-name corpus lookup.
+			local bare    = tc_entry.ident:sub(#"mac_" + 1)
+			local comp    = pipe_ctx.components_by_name[bare]
+			local n       = comp and comp.gp0_contrib
 			if    n then contrib = contrib + n end
 		end
 		if tc_entry.is_ot_tag then
-			local n = duffle.GP0_MACRO_CONTRIB[tc_entry.ident]
+			local bare    = tc_entry.ident:sub(#"mac_" + 1)
+			local comp    = pipe_ctx.components_by_name[bare]
+			local n       = comp and comp.gp0_contrib
 			if    n then contrib = contrib + n end
 		end
 		if tc_entry.writes_r_prim_cursor then
@@ -1585,23 +1748,30 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Walk all paths through an atom body and return per-path cycle sums.
---- Builds a tiny CFG: each token has a "next" pointer; branches have two (fall-through + taken).
---- The BD-slot nop after a branch is absorbed into the branch's cost (MIPS-accurate: BD slot always runs), 
---- and is SKIPPED when continuing down the fall-through path (otherwise we'd double-count it).
+--- Builds a tiny CFG: each token has a "next" pointer. Three control-transfer kinds are recognized (set by `classify_tokens`):
+---   * `branch_*` (conditional): 2 successors — fall-through (BD slot absorbed) + taken (if `atom_offset` target known).
+---   * `jump` / `call_addr` (unconditional absolute): 1 successor — taken only (BD slot absorbed into the cost).
+---   * `jump_reg` / `call_reg` / `jump_link` (register-form): terminator — transfers control OUT of the current atom (e.g. `mac_yield()` ends in `jump_reg(R_AtomJmp), nop`).
+---
+--- The BD-slot nop after ANY of these (conditional branch, unconditional jump, terminal jump) is absorbed into the control-transfer's cost
+--- (MIPS-accurate: the BD slot always runs) and is SKIPPED in the successor list (otherwise we'd double-count it).
 ---
 --- Returns:
 ---   cycles_min     - shortest path through the body (sum of token costs)
 ---   cycles_max     - longest path through the body
----   branches       - number of branches in the body
----   paths          - number of distinct paths reached (terminated at mac_yield or end-of-body)
+---   branches       - number of branches in the body (conditional + unconditional-with-offset)
+---   paths          - number of distinct paths reached (terminated at mac_yield / terminal_jump / end-of-body)
 ---   has_loops      - true iff a path re-entered a token it had visited (warning; loop bodies aren't supported)
----   unknown_macros - list of unique macro names not in duffle.INSTRUCTION_LATENCY
-local function analyze_atom_paths(atom)
+---   unknown_macros - list of unique ident names with no cost lookup: non-`mac_*` idents not in `duffle.INSTRUCTION_LATENCY`,
+---                    plus `mac_*` idents whose bare name is missing from `pipe_ctx.components_by_name` (i.e. no `MipsAtomComp_` for it).
+local function analyze_atom_paths(atom, pipe_ctx)
 	local tokens = atom.paths.tokens or duffle.tokenize_body(atom.body)
 	local tc     = atom.paths.tok_class or classify_tokens(tokens)
 	local n      = #tokens
 
 	-- Build label + branch maps from the pre-computed classification (no re-scan).
+	-- `branches` keys both `branch_*` (conditional) and `jump`/`call_addr` (unconditional absolute);
+	-- The latter resolve via `tc[tok_idx].branch_label` the same way (the offsets pass produces a valid relative offset for both).
 	local labels   = {}
 	local branches = {}
 	for tok_idx = 1, n do
@@ -1615,23 +1785,46 @@ local function analyze_atom_paths(atom)
 	end
 
 	-- Pre-compute per-token cycle costs from the pre-computed ident (no re-match).
+	-- For non-`mac_*` tokens: lookup `duffle.INSTRUCTION_LATENCY[c.ident]` directly.
+	-- For `mac_*` tokens: lookup `pipe_ctx.components_by_name[bare_name].cycle_cost`, which `passes/components.lua::compute_components_metadata` derived from the originals
+	-- `MipsAtomComp_(ac_X) { body }` definition (sum of `INSTRUCTION_LATENCY` per emitted instruction,
+	-- recursing through nested `mac_*` calls). `mac_yield` is special-cased to 0 by `compute_components_metadata` (the runtime cost lands in the next atom's prologue).
 	local costs       = {}
 	local unknown_set = {}
 	for tok_idx = 1, n do
 		local c      = tc[tok_idx]
-		local cost   = duffle.INSTRUCTION_LATENCY[c.ident]
-		if cost == nil then
-			cost = duffle.UNKNOWN_INSTRUCTION_CYCLES
-			unknown_set[c.ident] = true
+		local ident  = c.ident
+		local cost
+		if ident:sub(1, #"mac_") == "mac_" then
+			-- `mac_*` token: lookup corpus.components[bare_name].cycle_cost.
+			local bare = ident:sub(#"mac_" + 1)
+			local comp = pipe_ctx.components_by_name and pipe_ctx.components_by_name[bare]
+			if comp and comp.cycle_cost ~= nil then
+				cost = comp.cycle_cost
+			else
+				cost = duffle.UNKNOWN_INSTRUCTION_CYCLES
+				unknown_set[ident] = true
+			end
+		else
+			cost = duffle.INSTRUCTION_LATENCY[ident]
+			if cost == nil then
+				cost = duffle.UNKNOWN_INSTRUCTION_CYCLES
+				unknown_set[ident] = true
+			end
 		end
 		costs[tok_idx] = cost
 	end
 
-	-- A token is a terminator if it's `mac_yield`.
-	local function is_terminator(tok_idx) return tc[tok_idx].is_yield end
-
-	-- A token is a "branch" if the classification says so.
+	-- Three control-transfer predicates (set by `classify_tokens`):
+	--   is_terminator — path ends here (`mac_yield` or register-form jump); empty successors.
+	--   is_branch — has an immediate offset (`branch_*`, `jump`, `call_addr`); 1-2 successors depending on unconditional_jump.
+	--   is_unconditional_jump — when is_branch is also true: skip fall-through (target only).
+	local function is_terminator(tok_idx)
+		local c = tc[tok_idx]
+		return c.is_yield or c.is_terminal_jump
+	end
 	local function is_branch(tok_idx) return tc[tok_idx].is_branch end
+	local function is_unconditional_jump(tok_idx) return tc[tok_idx].is_unconditional_jump end
 	local function successors(tok_idx)
 		local tok = tokens[tok_idx].tok
 		if is_terminator(tok_idx) then
@@ -1640,11 +1833,22 @@ local function analyze_atom_paths(atom)
 		if is_branch(tok_idx) then
 			local label = branches[tok_idx]  -- may be false for literal-offset branches
 			local succ  = {}
-			-- Fall-through: skip the BD slot (tok_idx+1). Use tok_idx+2.
+			if is_unconditional_jump(tok_idx) then
+				-- Unconditional absolute jump / call: BD slot absorbed; single successor — the taken path.
+				-- The instruction word after the BD slot is unreachable in this atom's execution.
+				if label then
+					local label_pos = labels[label]
+					if label_pos and label_pos + 1 <= n then
+						succ[#succ + 1] = label_pos + 1
+					end
+				end
+				-- For literal-offset jumps (label == false), the target is a non-tracked address; conservatively omit.
+				return succ, nil
+			end
+			-- Conditional branch: BD slot absorbed; two successors — fall-through (tok_idx+2) + taken (if known).
 			if tok_idx + 2 <= n then
 				succ[#succ + 1] = tok_idx + 2
 			end
-			-- Taken: only if the branch has a known atom_offset target.
 			if label then
 				local label_pos = labels[label]
 				if label_pos and label_pos + 1 <= n then
@@ -1680,11 +1884,11 @@ local function analyze_atom_paths(atom)
 			return
 		end
 
-		-- Add this token's cost. For a branch, ADD the BD-slot cost too
-		-- (and skip the BD slot in the successor list — already done in `successors` above for fall-through; 
-		-- for taken path the BD slot was at tok_idx+1 which is now skipped entirely).
+		-- Add this token's cost. For ANY control-transfer (conditional branch, unconditional jump, terminal jump),
+		-- ADD the BD-slot cost too — MIPS-accurate: the BD slot always runs. Skip the BD slot in the successor list (already done in `successors` above;
+		-- for the taken path the BD slot was at tok_idx+1 which is now skipped entirely).
 		local cost = costs[tok_idx]
-		if is_branch(tok_idx) and tok_idx + 1 <= n then
+		if (is_branch(tok_idx) or is_terminator(tok_idx)) and tok_idx + 1 <= n then
 			cost = cost + costs[tok_idx + 1]
 		end
 		local new_acc = acc + cost
@@ -1715,7 +1919,7 @@ local function analyze_atom_paths(atom)
 	for macro_name in pairs(unknown_set) do unknown_list[#unknown_list + 1] = macro_name end
 	table.sort(unknown_list)
 
-	-- branch_count: number of `branch_*(...)` tokens.
+	-- branch_count: number of control-transfer tokens with an immediate offset (`branch_*` + `jump` + `call_addr`).
 	local branch_count = 0
 	for _ in pairs(branches) do branch_count = branch_count + 1 end
 
@@ -1733,9 +1937,9 @@ local function analyze_atom_paths(atom)
 end
 
 --- Per-source check that emits one finding per unknown macro seen
---- (deduplicated across atoms so the warning section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
---- Per-atom: emit one finding per unknown macro seen, deduplicated across atoms 
---- (so the warning section doesn't get spammed with N copies of "macro X not in duffle.INSTRUCTION_LATENCY").
+--- (deduplicated across atoms so the warning section doesn't get spammed with N copies of the same diagnostic).
+--- Per-atom: emit one finding per unknown macro seen, deduplicated across atoms
+--- (so the warning section doesn't get spammed with N copies of the same diagnostic).
 --- Reuses `analyze_atom_paths`'s per-atom unknown_macros discovery, which walks tokens and computes per-token cycle costs.
 local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 	local p = atom.paths or {}
@@ -1745,8 +1949,11 @@ local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
 			findings[#findings + 1] = {
 				atom  = atom.name, line = atom.line,
 				check = "per_atom_cycle_budget", kind = "warning",
-				msg   = string.format("%s at line %d uses macro `%s` which is not in duffle.INSTRUCTION_LATENCY; "
-					.. "cycle count will be +%d per call (best-case). Add an entry to duffle.INSTRUCTION_LATENCY."
+				msg   = string.format("%s at line %d uses macro `%s` with no cycle_cost lookup; "
+					.. "cycle count will be +%d per call (best-case). For `mac_*` idents, ensure the "
+					.. "corresponding `MipsAtomComp_(ac_X)` is in scope of the build so "
+					.. "`passes/components.lua::compute_components_metadata` can derive its cost; "
+					.. "for non-`mac_*` idents, add an entry to `duffle.INSTRUCTION_LATENCY`."
 					, atom.name, atom.line, name, duffle.UNKNOWN_INSTRUCTION_CYCLES),
 			}
 		end
@@ -1910,7 +2117,7 @@ local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 		local line_in_body = a.paths and a.paths.line_in_body or {}
 		for ti = 1, #tokens do
 			local tc_entry = tc[ti]
-			if (tc_entry.is_load_word or tc_entry.is_store_word)
+			if (tc_entry.is_load or tc_entry.is_store_word)
 				and tc_entry.o_arg1 and tc_entry.o_arg2 then
 				local type_name  = tc_entry.o_arg1
 				local field_name = tc_entry.o_arg2
@@ -1969,6 +2176,7 @@ local CHECK_RULES = {
 	{ name = "gte_role_mismatch",              per_atom   = check_gte_role_mismatch              },
 	{ name = "hazard_nop_use",                 per_atom   = check_hazard_nop_use                 },
 	{ name = "control_transfer_delay_slot_use",per_atom   = check_control_transfer_delay_slot_use},
+	{ name = "load_delay_violation",          per_atom   = check_load_delay_slots             },
 	{ name = "mac_yield_uniformity",           per_atom   = check_mac_yield_uniformity           },
 	{ name = "abi_handoff",                    per_atom   = check_abi_handoff                    },
 	{ name = "gpu_portstore_shape",            per_atom   = check_gpu_portstore_shape            },
@@ -1998,7 +2206,7 @@ local function build_corpus_pipe_ctx(ctx)
 			.. "no per-source fallback is supported)", 0)
 	end
 	-- The pipe_ctx views REFERENCE the corpus tables directly (no copies).
--- Every consumer observes mutations through the corpus tables directly.
+	-- Every consumer observes mutations through the corpus tables directly.
 	return {
 		-- Cross-source lookup tables.
 		register_alias_registry = corpus.register_alias_registry or {},
@@ -2008,6 +2216,10 @@ local function build_corpus_pipe_ctx(ctx)
 		atom_phases             = corpus.atom_phases             or {},
 		binds_by_name           = corpus.binds_by_name           or {},
 		atoms_by_name           = corpus.atoms_by_name           or {},
+		-- Per-component metadata (cycle_cost + gp0_contrib) auto-derived from the original
+		-- `MipsAtomComp_` body by `passes/components.lua::compute_components_metadata`.
+		-- Keyed by bare name (e.g. `format_f3_color`, `gte_store_f3`); the `mac_` prefix at call sites is stripped before lookup. 
+		components_by_name      = corpus.components              or {},
 		-- Corpus-wide ordered list of atom_info records (source-order + duplicates).
 		atom_infos_list         = corpus.atom_infos              or {},
 		-- Corpus-wide collisions (recorded by scan_source.merge_corpus_registries).
@@ -2059,15 +2271,16 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		atom_infos_list         = atom_infos or {},
 		register_alias_registry = corpus_pipe_ctx.register_alias_registry,
 		type_name_registry      = corpus_pipe_ctx.type_name_registry,
+		-- Per-component metadata (cycle_cost + gp0_contrib) auto-derived from the original `MipsAtomComp_` body by `passes/components.lua::compute_components_metadata`.
+		components_by_name      = corpus_pipe_ctx.components_by_name,
 	}
-	-- Shared cross-source component-body index is owned by the corpus
-	-- (`corpus.component_body_index`, populated by `passes/components.lua`).
+	-- Shared cross-source component-body index is owned by the corpus (`corpus.component_body_index`, populated by `passes/components.lua`).
 	-- Per-atom checks consume the corpus-owned index directly.
 	pipe_ctx.component_body_index = (corpus and corpus.component_body_index) or {}
 
 	--- Per-atom pipeline. ONE iteration of atoms; the 5 check_* functions + analyze_atom_paths all run here, sharing a single tokenize_body + build_body_line_index per body.
 	--- Every piece of state derived from an atom body lives on `atom.paths` (per-atom mega-struct);
-	--- readers (analyze_atom_paths, the 5 checks, the renderers) all consume `atom.paths`, not the raw `atoms` list.
+	--- readers (analyze_atom_paths, the 5 checks, the renderers) all consume `atom.paths`.
 	--- Each `check_*` function accepts one atom and its shared context.
 	--- Per-source rules run once after this loop completes (no parallel dispatch table).
 	---
@@ -2093,7 +2306,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		a.paths.tok_class = classify_tokens(a.paths.tokens)
 
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
-		analyze_atom_paths(a)
+		analyze_atom_paths(a, pipe_ctx)
 
 		-- Run the single forward walker for transfer-hazard policy.
 		-- Runs once per atom BEFORE the CHECK_RULES per-atom dispatch so the `transfer_hazards` reader (`check_transfer_hazards`) can
