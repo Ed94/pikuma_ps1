@@ -16,11 +16,38 @@
 //   source: C:\projects\Pikuma\ps1\code\duffle\mips.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\gp.atom.c
+//   source: C:\projects\Pikuma\ps1\code\duffle\pad.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\psyq.atom.c
 #pragma once
 
 #pragma region duffle
 
+
+// --- atom: pad_bios_snapshot (78 words) ---
+
+#define _atom_offset_snap_root_skip_disconnected      8
+#define _atom_offset_disconnected_snap_end            61
+#define _atom_offset_case_2_id_dispatch               8
+#define _atom_offset_pending_snap_end                 51
+#define _atom_offset_id_dispatch_try_analog_stick     11
+#define _atom_offset_id_dispatch_snap_end             38
+#define _atom_offset_try_analog_stick_try_analog_pad  12
+#define _atom_offset_analog_stick_snap_end            24
+#define _atom_offset_try_analog_pad_try_unsupported   11
+#define _atom_offset_analog_pad_snap_end              10
+
+enum {
+    atom_offset_snap_root_skip_disconnected = _atom_offset_snap_root_skip_disconnected,
+    atom_offset_disconnected_snap_end = _atom_offset_disconnected_snap_end,
+    atom_offset_case_2_id_dispatch = _atom_offset_case_2_id_dispatch,
+    atom_offset_pending_snap_end = _atom_offset_pending_snap_end,
+    atom_offset_id_dispatch_try_analog_stick = _atom_offset_id_dispatch_try_analog_stick,
+    atom_offset_id_dispatch_snap_end = _atom_offset_id_dispatch_snap_end,
+    atom_offset_try_analog_stick_try_analog_pad = _atom_offset_try_analog_stick_try_analog_pad,
+    atom_offset_analog_stick_snap_end = _atom_offset_analog_stick_snap_end,
+    atom_offset_try_analog_pad_try_unsupported = _atom_offset_try_analog_pad_try_unsupported,
+    atom_offset_analog_pad_snap_end = _atom_offset_analog_pad_snap_end,
+};
 
 #pragma endregion duffle
 

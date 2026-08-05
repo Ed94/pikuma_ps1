@@ -34,15 +34,16 @@
 #include "duffle/mips.atom.c"
 #include "duffle/gte.atom.c"
 #include "duffle/gp.atom.c"
+#include "duffle/pad.atom.c"
 #include "duffle/psyq.atom.c"
 #pragma endregion Duffle TUs
 
-#pragma region Joypade Headers
+#pragma region Hello Camera Headers
 #	include "gen/macs.h"
 #	include "gen/offsets.h"
 
 #include "hello_camera.h"
-#pragma region Joypad Headers
+#pragma endregion Hello Camera Headers
 
 #pragma region Hello Joypad TUs
 #include "hello_camera.atom.c"
@@ -159,19 +160,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 {
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
 
-	if (0) // Pad Input (dead — kept for the source-as-written record; references the deleted `pad_state` field)
-	{
-		(void)Pad_Left; (void)Pad_Right; /* suppress unused-token warnings */
-		if (false) {
-			smem.cube.rot.y  += 30;
-			smem.floor.rot.y += 5;
-		}
-		if (false) {
-			smem.cube.rot.y  -= 30;
-			smem.floor.rot.y -= 5;
-		}
-	}
-	if (1) // Pad Input (Tape version)
+	if (1) // Pad Input
 	{
 		tb.used = 0; tb_scope_run(& tb) {
 			/* BIOS-owned polling: per-frame snapshot of both ports. */
@@ -213,47 +202,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	S4 flag; //????
 
 
-	// Draw Cube
-	if (0)
-	{
-		m3s2_rotation   (& smem.cube.rot,    & smem.tform_world);
-		m3s2_translation(& smem.tform_world, & smem.cube.pos);
-		m3s2_scale      (& smem.tform_world, & smem.cube.scale);
-		// gte_matrix_set_rotation   (& smem.tform_world);
-		gte_matrix_set_translation(& smem.tform_world);
-		for (U4 face_id = 0; face_id < Cube_num_faces; face_id += 1)
-		{
-			Poly_G4* quad = prim_alloc(Poly_G4); set_poly_g4(quad);
-			quad->c0 = rgb8(255,   0, 255);
-			quad->c1 = rgb8(255, 255,   0);
-			quad->c2 = rgb8(  0, 255, 255);
-			quad->c3 = rgb8(  0, 255,   0);
-
-			V4_S2* face = & smem.cube.faces[face_id];
-			V3_S2* p0   = & smem.cube.verts[face->x];
-			V3_S2* p1   = & smem.cube.verts[face->y];
-			V3_S2* p2   = & smem.cube.verts[face->z];
-			V3_S2* p3   = & smem.cube.verts[face->w];
-
-			nclip = rtp_avg_nclip_a4_v3s2(
-				p0, p1, p2, p3,
-				& quad->p0, & quad->p1, & quad->p2, & quad->p3,
-				& p, & orderingtbl_z, & flag
-			);
-			if (nclip <= 0) {
-				continue;
-			}
-
-			if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
-				orderingtbl_add_primitive(ordering_buf[orderingtbl_z], quad);
-			}
-		}
-		// smem.cube.rot.x +=  6;
-		// smem.cube.rot.y +=  8;
-		// smem.cube.rot.z += 12;
-		smem.cube.rot.y += 30;
-	}
-	// Draw cube (tape method) - two triangles per face
+	// Draw cube
 	if (1)
 	{
 		m3s2_rotation   (& smem.cube.rot,    & smem.tform_world);
@@ -285,61 +234,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		// smem.cube.rot.y += 30;
 	}
-	// Draw Floor
-	if (0)
-	{
-		m3s2_rotation   (& smem.floor.rot,   & smem.tform_world);
-		m3s2_translation(& smem.tform_world, & smem.floor.pos);
-		m3s2_scale      (& smem.tform_world, & smem.floor.scale);
-		gte_matrix_set_rotation   (& smem.tform_world);
-		gte_matrix_set_translation(& smem.tform_world);
-		for (U4 face_id = 0; face_id < Floor_num_faces; face_id += 1)
-		{
-			Poly_F3* tri = prim_alloc(Poly_F3); set_poly_f3(tri);
-			tri->color   = rgb8(255, 255, 255);
-
-			V3_S2* face = & smem.floor.faces[face_id];
-			register V3_S2* p0 rgcc(R_T4) = & smem.floor.verts[face->x];
-			register V3_S2* p1 rgcc(R_T5) = & smem.floor.verts[face->y];
-			register V3_S2* p2 rgcc(R_T6) = & smem.floor.verts[face->z];
-
-			gte_load_v0(p0, R_T4);
-			/*
-			asm volatile( ".word " "%0" ", %1" : : 
-				"i"(((op_lwc2 & OPCODE_MASK) << OPCODE_SHIFT) | ((R_T4 & REG_MASK) << RS_SHIFT) | ((gte_in_v0_xy & REG_MASK) << RT_SHIFT) | (0            & IMM_MASK)),
-				"i"(((op_lwc2 & OPCODE_MASK) << OPCODE_SHIFT) | ((R_T4 & REG_MASK) << RS_SHIFT) | ((gte_in_v0_z  & REG_MASK) << RT_SHIFT) | (GTE_Z_Offset & IMM_MASK)), 
-				"r"(p0) : 
-				"$2", "$8", "$9", "$31", "memory" 
-			);
-			*/
-			gte_load_v1(p1, R_T5);
-			gte_load_v2(p2, R_T6);
-
-			gte_rtpt();
-			gte_nclip();
-			gte_stotz(& nclip);
-
-			// nclip = rtp_avg_nclip_a3_v3s2(p0, p1, p2
-			// 	, & tri->p0, & tri->p1, & tri->p2
-			// 	, & p, & orderingtbl_z, & flag
-			// );
-			// if (nclip <= 0) {
-			// 	continue;
-			// }
-
-			if (nclip > 0 ) {
-				gte_stsxy3(& tri->p0, & tri->p1, & tri->p2);
-				gte_avsz3();
-				gte_stotz(& orderingtbl_z);
-
-				if ((orderingtbl_z > 0) && (orderingtbl_z < OrderingTbl_Len)) {
-					orderingtbl_add_primitive(ordering_buf[orderingtbl_z], tri);
-				}
-			}
-		}
-		smem.floor.rot.y += 5;
-	}
-	// Draw floor tape method
+	// Draw floor
 	if (1)
 	{
 		m3s2_rotation   (& smem.floor.rot,   & smem.tform_world);

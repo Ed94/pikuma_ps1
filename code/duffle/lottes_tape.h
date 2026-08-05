@@ -11,39 +11,11 @@
 #	include "dsl.atom.h"
 #endif
 
-typedef U4 const MipsCode; // Underlying type to mips asm words.
-typedef Slice_(MipsCode);
-
-typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that must terminate with an ac_yield.
-#define MipsAtom_(sym) MipsCode sym [] align_(4) =
-
-// Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
-//   MipsAtomComp_(ac_X) { body }
-// expands to:
-//   MipsCode ac_X[] align_(4) = { body };
-#define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
-
-// Used for components with value-args (e.g., ac_format_f3_color).
-//   FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
-// expands to:
-//   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
-#define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
-
-/* Line-table anchor: gcc only adds a file to the .debug_line file table when the
-   file contains line-numbered content. Files containing only:
-     - `MipsAtomComp_` static-array declarations, or
-     - `MipsAtomComp_Proc_` (force-inline) function bodies whose line info gets
-       attributed to the call site at the include point are otherwise omitted from the file table,
-			 which breaks the DWARF injection when it tries to resolve atom-component provenance paths.
-
-   Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
-	 The macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
-	 The constant is in `.rodata` and unreferenced; the linker may eliminate it.
-	 The two-level concat + `__LINE__` suffix makes the identifier unique per call site
-	 (the identifier embeds the source line, so duplicates across `#include`d files don't collide). */
-#define ATOM_FILE_DEBUGGER_LINE_MARKER(file_name) internal U4 const tmpl(atom_file_debugger_line_marker,file_name) = 0
-
-/* Register aliases */
+#pragma region Tape Drive
+/* ---------------------------------------------------------------------------
+ *  TAPE DRIVE ABI
+ * ---------------------------------------------------------------------------*/
+/* Register Allocation Info */
 enum {
 	R_AtomJmp  = R_T8 atom_reg,  /* debug-visible; tape yield handshake scratch */
 	R_TapePtr  = R_T9 atom_reg,  /* The Instruction Stream Pointer */
@@ -79,16 +51,46 @@ enum {
 	// S 0-7
 };
 
-#pragma region Tape Drive
-/* ---------------------------------------------------------------------------
- *  TAPE DRIVE ABI & REGISTER ALIASES (the enum moved earlier; see below)
- * ---------------------------------------------------------------------------*/
-typedef Slice_(MipsAtom); typedef Slice_MipsAtom Tape;
+typedef U4 const MipsCode; // Underlying type to mips asm words.
+typedef Slice_(MipsCode);
+
+typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that must terminate with an ac_yield.
+#define MipsAtom_(sym) MipsCode sym [] align_(4) =
+
+// Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
+//   MipsAtomComp_(ac_X) { body }
+// expands to:
+//   MipsCode ac_X[] align_(4) = { body };
+#define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
+
+// Used for components with value-args (e.g., ac_format_f3_color).
+//   FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
+// expands to:
+//   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
+#define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
+
+/* Line-table anchor: gcc only adds a file to the .debug_line file table when the
+   file contains line-numbered content. Files containing only:
+     - `MipsAtomComp_` static-array declarations, or
+     - `MipsAtomComp_Proc_` (force-inline) function bodies whose line info gets
+       attributed to the call site at the include point are otherwise omitted from the file table,
+			 which breaks the DWARF injection when it tries to resolve atom-component provenance paths.
+
+   Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
+	 The macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
+	 The constant is in `.rodata` and unreferenced; the linker may eliminate it.
+	 The two-level concat + `__LINE__` suffix makes the identifier unique per call site
+	 (the identifier embeds the source line, so duplicates across `#include`d files don't collide). */
+#define ATOM_FILE_DEBUGGER_LINE_MARKER(file_name) internal U4 const tmpl(atom_file_debugger_line_marker,file_name) = 0
+
+ typedef Slice_(MipsAtom); typedef Slice_MipsAtom Tape;
 
 /* The 'Exit' Atom */
 atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 
-/* Generalized Tape Engine Runner */
+// TODO(Ed): When we have a substantial workload/throughput, profile each of these to see impact at ABI boundaries.
+
+/* Tape Runner (Default) */
 FI_ void tape_run(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
 	asm_words(
 		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
@@ -99,13 +101,13 @@ FI_ void tape_run(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape
 	asm_rpins, r_use(tape_ptr)
 	asm_clobber: 
 		rlit(R_AT),
-		rlit(R_V0), rlit(R_V1),
+		rlit(R_V0), rlit(R_V1), // We clobber these for GTE ACs (that don't expose register selection, might expose them in the future...)
 		rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
 		rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8),
 		clb_mem_drain 
 ); }
 
-/* Fully Clobbered Tape */
+/* Tape Runner (Static and Arg Clobbers) */
 FI_ void tape_run_a02_s07(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
 	asm_words(
 		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */

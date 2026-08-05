@@ -19,6 +19,7 @@
 //   source: C:\projects\Pikuma\ps1\code\duffle\mips.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\gp.atom.c
+//   source: C:\projects\Pikuma\ps1\code\duffle\pad.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\psyq.atom.c
 // Component atoms (MipsAtomComp_(ac_*)) -> macro variants (mac_*)
 
