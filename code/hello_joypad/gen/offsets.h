@@ -28,18 +28,18 @@ enum {
     atom_offset_bounds_chk_floor_f3_face_exit = _atom_offset_bounds_chk_floor_f3_face_exit,
 };
 
-// --- atom: pad_bios_snapshot (77 words) ---
+// --- atom: pad_bios_snapshot (78 words) ---
 
 #define _atom_offset_snap_root_skip_disconnected      8
-#define _atom_offset_disconnected_snap_end            60
+#define _atom_offset_disconnected_snap_end            61
 #define _atom_offset_case_2_id_dispatch               8
-#define _atom_offset_pending_snap_end                 50
+#define _atom_offset_pending_snap_end                 51
 #define _atom_offset_id_dispatch_try_analog_stick     11
-#define _atom_offset_id_dispatch_snap_end             37
+#define _atom_offset_id_dispatch_snap_end             38
 #define _atom_offset_try_analog_stick_try_analog_pad  12
-#define _atom_offset_analog_stick_snap_end            23
+#define _atom_offset_analog_stick_snap_end            24
 #define _atom_offset_try_analog_pad_try_unsupported   11
-#define _atom_offset_analog_pad_snap_end              9
+#define _atom_offset_analog_pad_snap_end              10
 
 enum {
     atom_offset_snap_root_skip_disconnected = _atom_offset_snap_root_skip_disconnected,
@@ -54,14 +54,14 @@ enum {
     atom_offset_analog_pad_snap_end = _atom_offset_analog_pad_snap_end,
 };
 
-// --- atom: pad_apply_input (59 words) ---
+// --- atom: pad_apply_input (60 words) ---
 
 #define _atom_offset_dpad_left_exit_dpad_left         6
 #define _atom_offset_dpad_right_exit_dpad_right       6
 #define _atom_offset_dead_zone_low_check_dead_low_active  8
 #define _atom_offset_dead_zone_high_check_dead_high_active  15
-#define _atom_offset_dead_zone_skip_exit_stick        23
-#define _atom_offset_end_low_exit_stick               11
+#define _atom_offset_dead_zone_skip_exit_stick        24
+#define _atom_offset_end_low_exit_stick               12
 
 enum {
     atom_offset_dpad_left_exit_dpad_left = _atom_offset_dpad_left_exit_dpad_left,

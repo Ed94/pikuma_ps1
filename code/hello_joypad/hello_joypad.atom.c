@@ -493,6 +493,9 @@ atom_label(try_unsupported) /* === Case 7: Unsupported — fall through from the
 	store_byte(  R_T4, R_PadState, O_(PadState,id)),
 	/* Fall through to snap_end. */
 
+atom_label(no_jump_fallthrough)
+	mac_yield_load(),
+
 atom_label(snap_end)
 	/* NOT mac_yield() — R_AtomJmp was already loaded in the BD-slot of the case-exit branch. */
 	mac_yield_tail(),
@@ -623,6 +626,9 @@ atom_label(dead_high_active)
 	shift_aright(R_T4, R_T3, 5),
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_FloorRot, O_(V3_S2,y)),
+
+atom_label(no_jump_fallthrough)
+	mac_yield_load(),
 
 atom_label(exit_stick)
 	/* NOT mac_yield() — R_AtomJmp was already loaded in the BD-slot of the dead-zone/exit branch. */
