@@ -265,6 +265,73 @@ function ps1-meta { param(
 	}
 }
 
+function inject-dwarf { param(
+	[string]$elf,
+	[string]$path_gen
+)
+	$base_name               = [System.IO.Path]::GetFileNameWithoutExtension($elf)
+	$path_dwarf_line_bin     = join-path $path_gen  "$base_name.dwarf_line.bin"
+	$path_dwarf_aranges_bin  = join-path $path_gen  "$base_name.dwarf_aranges.bin"
+	$path_dwarf_rnglists_bin = join-path $path_gen  "$base_name.dwarf_rnglists.bin"
+	$path_dwarf_info_bin     = join-path $path_gen  "$base_name.dwarf_info.bin"
+	$path_dwarf_abbrev_bin   = join-path $path_gen  "$base_name.dwarf_abbrev.bin"
+	$path_dwarf_str_bin      = join-path $path_gen  "$base_name.dwarf_str.bin"
+	$path_dwarf_loc_bin      = join-path $path_gen  "$base_name.dwarf_loc.bin"
+	$path_dwarf_loclists_bin = join-path $path_gen  "$base_name.dwarf_loclists.bin"
+	$path_inject_elf         = join-path $path_build "$base_name.dwarf-injected.elf"
+
+	if (-not (Test-Path $path_dwarf_line_bin))     { return }
+	if (-not (Test-Path $path_dwarf_aranges_bin))  { return }
+	if (-not (Test-Path $path_dwarf_rnglists_bin)) { return }
+
+	Write-Host "[build] DWARF-injecting $elf -> $path_inject_elf"
+	Copy-Item -LiteralPath $elf -Destination $path_inject_elf -Force
+
+	# Objcopy call 1: 3x --update-section for the PC-mapping tables (line, aranges, rnglists).
+	$objcopy_args_dwarf_pc = @(
+		"--update-section=.debug_line=$path_dwarf_line_bin",
+		"--update-section=.debug_aranges=$path_dwarf_aranges_bin",
+		"--update-section=.debug_rnglists=$path_dwarf_rnglists_bin"
+	)
+	& $Objcopy @objcopy_args_dwarf_pc $path_inject_elf 2>&1 | Out-Null
+	if ($LASTEXITCODE -ne 0) {
+		Write-Warning "[build] objcopy dwarf-pc splice failed (exit $LASTEXITCODE); removing $path_inject_elf"
+		Remove-Item -LiteralPath $path_inject_elf -ErrorAction SilentlyContinue
+		return
+	}
+
+	# Objcopy call 2: 3x --update-section + 2x --add-section for the debug-data tables (info, abbrev, str, loc, loclists).
+	$objcopy_args_dwarf_info = @(
+		"--update-section=.debug_info=$path_dwarf_info_bin",
+		"--update-section=.debug_abbrev=$path_dwarf_abbrev_bin",
+		"--update-section=.debug_str=$path_dwarf_str_bin",
+		"--add-section=.debug_loc=$path_dwarf_loc_bin",
+		"--add-section=.debug_loclists=$path_dwarf_loclists_bin"
+	)
+	& $Objcopy @objcopy_args_dwarf_info $path_inject_elf 2>&1 | Out-Null
+	if ($LASTEXITCODE -ne 0) {
+		Write-Warning "[build] objcopy dwarf-info splice failed (exit $LASTEXITCODE); removing $path_inject_elf"
+		Remove-Item -LiteralPath $path_inject_elf -ErrorAction SilentlyContinue
+		return
+	}
+
+	# Baked atoms execute from RAM but are emitted as C data arrays, so their ELF sections lack SHF_EXECINSTR.
+	# GDB discards line rows for non-code sections. Mark only the debug-copy sections executable.
+	# The original ELF and PS-EXE remain byte/flag unchanged.
+	& $Objcopy `
+		--set-section-flags ".rodata=alloc,load,readonly,code,contents" `
+		--set-section-flags ".data=alloc,load,data,code,contents" `
+		$path_inject_elf 2>&1 | Out-Null
+	if ($LASTEXITCODE -ne 0) {
+		Write-Warning "[build] atom-section flag update failed (exit $LASTEXITCODE); removing $path_inject_elf"
+		Remove-Item -LiteralPath $path_inject_elf -ErrorAction SilentlyContinue
+	}
+	else {
+		Write-Host "[build] DWARF-injected ELF: $path_inject_elf"
+	}
+}
+# inject-dwarf
+
 function build-hello_psyqo {
 	$includes += @()
 
@@ -391,61 +458,7 @@ function build-hello_gte {
 	# Post-link: gdb-runtime + dwarf-injection in a single Lua invocation (one luajit cold start).
 	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen -passes @('--post-link') ` -extra_args @('--elf', $elf)
 
-	$dwarfLineBin     = join-path $path_build_gen 'hello_gte.dwarf_line.bin'
-	$dwarfArangesBin  = join-path $path_build_gen 'hello_gte.dwarf_aranges.bin'
-	$dwarfRnglistsBin = join-path $path_build_gen 'hello_gte.dwarf_rnglists.bin'
-	$injectElf        = join-path $path_build 'hello_gte.dwarf-injected.elf'
-	if ((Test-Path $dwarfLineBin) -and (Test-Path $dwarfArangesBin) -and (Test-Path $dwarfRnglistsBin))
-	{
-		Write-Host "[build] DWARF-injecting $elf -> $injectElf"
-		Copy-Item -LiteralPath $elf -Destination $injectElf -Force
-		# Objcopy call: 3x --update-section for (line, aranges, rnglists).
-		$f_args = @(
-			"--update-section=.debug_line=$dwarfLineBin",
-			"--update-section=.debug_aranges=$dwarfArangesBin",
-			"--update-section=.debug_rnglists=$dwarfRnglistsBin"
-		)
-		& $Objcopy @f_args $injectElf 2>&1 | Out-Null
-		if ($LASTEXITCODE -ne 0) {
-			Write-Warning "[build] objcopy F' splice failed (exit $LASTEXITCODE); removing $injectElf"
-			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
-			return;
-		}
-
-		$dwarfInfoBin     = join-path $path_build_gen 'hello_gte.dwarf_info.bin'
-		$dwarfAbbrevBin   = join-path $path_build_gen 'hello_gte.dwarf_abbrev.bin'
-		$dwarfStrBin      = join-path $path_build_gen 'hello_gte.dwarf_str.bin'
-		$dwarfLocBin      = join-path $path_build_gen 'hello_gte.dwarf_loc.bin'
-		$dwarfLoclistsBin = join-path $path_build_gen 'hello_gte.dwarf_loclists.bin'
-		$g_args = @(
-			"--update-section=.debug_info=$dwarfInfoBin",
-			"--update-section=.debug_abbrev=$dwarfAbbrevBin",
-			"--update-section=.debug_str=$dwarfStrBin",
-			"--add-section=.debug_loc=$dwarfLocBin",
-			"--add-section=.debug_loclists=$dwarfLoclistsBin"
-		)
-		& $Objcopy @g_args $injectElf 2>&1 | Out-Null
-		if ($LASTEXITCODE -ne 0) {
-			Write-Warning "[build] objcopy G' splice failed (exit $LASTEXITCODE); removing $injectElf"
-			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
-			return;
-		}
-
-		# Baked atoms execute from RAM but are emitted as C data arrays, so their ELF sections lack SHF_EXECINSTR.
-		# GDB discards line rows for non-code sections. Mark only the debug-copy sections executable.
-		# The original ELF and PS-EXE remain byte/flag unchanged.
-		& $Objcopy `
-			--set-section-flags ".rodata=alloc,load,readonly,code,contents" `
-			--set-section-flags ".data=alloc,load,data,code,contents" `
-			$injectElf 2>&1 | Out-Null
-		if ($LASTEXITCODE -ne 0) {
-			Write-Warning "[build] atom-section flag update failed (exit $LASTEXITCODE); removing $injectElf"
-			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
-		} 
-		else {
-			Write-Host "[build] DWARF-injected ELF: $injectElf"
-		}
-	}
+	inject-dwarf $elf $path_build_gen
 }
 # build-hello_gte
 
@@ -496,63 +509,60 @@ function build-hello_joypad {
 	# Post-link: gdb-runtime + dwarf-injection in a single Lua invocation (one luajit cold start).
 	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen -passes @('--post-link') ` -extra_args @('--elf', $elf)
 
-	$dwarfLineBin     = join-path $path_build_gen 'hello_joypad.dwarf_line.bin'
-	$dwarfArangesBin  = join-path $path_build_gen 'hello_joypad.dwarf_aranges.bin'
-	$dwarfRnglistsBin = join-path $path_build_gen 'hello_joypad.dwarf_rnglists.bin'
-	$injectElf        = join-path $path_build 'hello_joypad.dwarf-injected.elf'
-	if ((Test-Path $dwarfLineBin) -and (Test-Path $dwarfArangesBin) -and (Test-Path $dwarfRnglistsBin))
-	{
-		Write-Host "[build] DWARF-injecting $elf -> $injectElf"
-		Copy-Item -LiteralPath $elf -Destination $injectElf -Force
-		# Objcopy call: 3x --update-section for (line, aranges, rnglists).
-		$f_args = @(
-			"--update-section=.debug_line=$dwarfLineBin",
-			"--update-section=.debug_aranges=$dwarfArangesBin",
-			"--update-section=.debug_rnglists=$dwarfRnglistsBin"
-		)
-		& $Objcopy @f_args $injectElf 2>&1 | Out-Null
-		if ($LASTEXITCODE -ne 0) {
-			Write-Warning "[build] objcopy F' splice failed (exit $LASTEXITCODE); removing $injectElf"
-			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
-			return;
-		}
-
-		$dwarfInfoBin     = join-path $path_build_gen 'hello_joypad.dwarf_info.bin'
-		$dwarfAbbrevBin   = join-path $path_build_gen 'hello_joypad.dwarf_abbrev.bin'
-		$dwarfStrBin      = join-path $path_build_gen 'hello_joypad.dwarf_str.bin'
-		$dwarfLocBin      = join-path $path_build_gen 'hello_joypad.dwarf_loc.bin'
-		$dwarfLoclistsBin = join-path $path_build_gen 'hello_joypad.dwarf_loclists.bin'
-		$g_args = @(
-			"--update-section=.debug_info=$dwarfInfoBin",
-			"--update-section=.debug_abbrev=$dwarfAbbrevBin",
-			"--update-section=.debug_str=$dwarfStrBin",
-			"--add-section=.debug_loc=$dwarfLocBin",
-			"--add-section=.debug_loclists=$dwarfLoclistsBin"
-		)
-		& $Objcopy @g_args $injectElf 2>&1 | Out-Null
-		if ($LASTEXITCODE -ne 0) {
-			Write-Warning "[build] objcopy G' splice failed (exit $LASTEXITCODE); removing $injectElf"
-			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
-			return;
-		}
-
-		# Baked atoms execute from RAM but are emitted as C data arrays, so their ELF sections lack SHF_EXECINSTR.
-		# GDB discards line rows for non-code sections. Mark only the debug-copy sections executable.
-		# The original ELF and PS-EXE remain byte/flag unchanged.
-		& $Objcopy `
-			--set-section-flags ".rodata=alloc,load,readonly,code,contents" `
-			--set-section-flags ".data=alloc,load,data,code,contents" `
-			$injectElf 2>&1 | Out-Null
-		if ($LASTEXITCODE -ne 0) {
-			Write-Warning "[build] atom-section flag update failed (exit $LASTEXITCODE); removing $injectElf"
-			Remove-Item -LiteralPath $injectElf -ErrorAction SilentlyContinue
-		} 
-		else {
-			Write-Host "[build] DWARF-injected ELF: $injectElf"
-		}
-	}
+	inject-dwarf $elf $path_build_gen
 }
-build-hello_joypad
+# build-hello_joypad
+
+function build-hello_camera {
+	$includes += @()
+
+	$path_module        = join-path $path_code   'hello_camera'
+	$path_duffle        = join-path $path_code   'duffle'
+	$path_atom_metadata = join-path $path_duffle 'word_count.metadata.h'
+	$path_build_gen     = join-path $path_build  'gen'
+
+	$src_c = join-path $path_module 'hello_camera.c'
+	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen
+
+	$assemble_args = @()
+	$assemble_args += $f_debug
+	$assemble_args += $f_optimize_none
+	$assemble_args += ($f_include + $path_code)
+
+	$src_asm_crt    = join-path $path_nugget_common 'crt0/crt0.s'
+	$module_asm_crt = join-path $path_build         'crt0.o'
+	assemble-unit $src_asm_crt $module_asm_crt $includes $assemble_args
+
+	$module_c = join-path $path_build  'hello_camera_c.o'
+
+	$compile_args = @()
+	$compile_args += $f_debug
+	$compile_args += $f_optimize_none
+	# $compile_args += $f_optimize_intrinsics
+	# $compile_args += $f_optimize_size
+	# $compile_args += $f_optimize_debug
+	$compile_args += ($f_include + $path_code)
+	compile-unit $src_c $module_c $includes $compile_args
+
+	$elf = join-path $path_build 'hello_camera.elf'
+	$exe = join-path $path_build 'hello_camera.ps-exe'
+
+	$link_args = @()
+	$link_args += $f_debug
+	# $link_args += $f_optimize_size
+	$link_modules = @(
+		$module_asm_crt,
+		$module_c
+	)
+	link-modules $link_modules $elf $link_args
+	make-binary $elf $exe
+
+	# Post-link: gdb-runtime + dwarf-injection in a single Lua invocation (one luajit cold start).
+	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen -passes @('--post-link') ` -extra_args @('--elf', $elf)
+
+	inject-dwarf $elf $path_build_gen
+}
+build-hello_camera
 
 # NO idea if this works yet...
 function Send-ToEmulator { param( [string]$exePath )

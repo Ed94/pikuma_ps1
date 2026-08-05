@@ -142,6 +142,41 @@
 				"tbreak main",
 				"continue"
 			]
+		},
+		{
+			"name": "Debug: Hello Camera!",
+			"type": "gdb",
+			"request": "attach",
+			"target": "localhost:3333",
+			"remote": true,
+			"cwd": "${workspaceRoot}",
+			"valuesFormatting": "parseText",
+			"registerLimit": "1-32",
+			"frameFilters": false,
+			"showDevDebugOutput": false,
+			"printCalls": false,
+			"stopAtConnect": true,
+			"gdbpath": "gdb-multiarch",
+			"windows": {
+				"gdbpath": "gdb-multiarch.exe"
+			},
+			"osx": {
+				"gdbpath": "gdb"
+			},
+			"executable": "${workspaceRoot}/build/hello_camera.dwarf-injected.elf",
+			"setupCommands": [
+				{ "text": "set mi-async off" },
+				{ "text": "set remotetimeout 0" },
+				{ "text": "set logging file build/gen/hello_camera.gdb.log" },
+				{ "text": "set logging redirect on" }
+			],
+			"autorun": [
+				"monitor reset shellhalt",
+				"load build/hello_camera.dwarf-injected.elf",
+				"source scripts/gdb/gdb_tape_atoms.gdb",
+				"tbreak main",
+				"continue"
+			]
 		}
 	]
 }
