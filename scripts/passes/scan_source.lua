@@ -2,7 +2,6 @@
 ---
 --- Single source-walk pass that produces the fat `SourceScan` payload consumed by all downstream passes. Walks each corpus source record once,
 --- extracting every construct type the metaprograms need:
----
 ---   MipsAtom_              (kind = "atom", with optional atom_info inner)
 ---   MipsAtomComp_          (kind = "comp_bare")
 ---   MipsAtomComp_Proc_     (kind = "comp_proc", body inside last {})
@@ -14,8 +13,6 @@
 --- The result is attached to each `src.scan` so downstream passes can read from `src.scan.atoms` / `src.scan.binds` / etc. without re-walking the source.
 --- This is the first pass in the dep graph (no deps).
 --- Every other pass that reads source structure depends on this one — see `ps1_meta.lua :: PASSES`.
----
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex, Lua 5.3 compatible
 
 -- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
@@ -23,7 +20,7 @@
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when required).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle        = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- Forward declarations for helpers used by earlier parsers (parse_enum_body_fields needs parse_enum_int_literal;
 -- parse_typedef_binds needs duffle.find_byte).
@@ -50,12 +47,12 @@ local parse_enum_int_literal
 --- @field line_of           fun(pos: integer): integer       -- shared LineIndex closure
 
 --- @class DebugSkipMarker
---- @field marker_kind    string      -- exact marker ident read from source. Only "atom_dbg_skip" (bare) is positive; any other ident reaches the unrelated fallback and is never associated with a declaration.
---- @field marker_line    integer     -- line of the marker ident start
---- @field marker_pos     integer     -- byte position of the marker ident start (the comment walker anchors here)
+--- @field marker_kind    string      -- Exact marker ident read from source. Only "atom_dbg_skip" (bare) is positive; any other ident reaches the unrelated fallback and is never associated with a declaration.
+--- @field marker_line    integer     -- Line of the marker ident start
+--- @field marker_pos     integer     -- Byte position of the marker ident start (the comment walker anchors here)
 --- @field is_bare        boolean     -- true iff marker_kind == "atom_dbg_skip" AND has_parens == false (the only positive form)
 --- @field has_parens     boolean     -- true iff a `(...)` follows the marker ident (diagnostic-only)
---- @field args           string|nil  -- trimmed args inside the `(...)` (nil when has_parens is false)
+--- @field args           string|nil  -- Trimmed args inside the `(...)` (nil when has_parens is false)
 --- @field pending        boolean     -- true while awaiting the following declaration
 --- @field superseded_by_marker_line integer|nil -- set when a newer marker bumped this one out of the pending slot
 --- @field target_kind    string|nil  -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed (nil if no declaration ever followed)
@@ -71,15 +68,15 @@ local parse_enum_int_literal
 --- @field reg           string  -- "R_T0"
 --- @field type_name     string
 --- @field pointer_depth integer
---- @field source_line   integer -- line of the call site (callsite or enum-site)
+--- @field source_line   integer -- Line of the call site (callsite or enum-site)
 
 --- @class AtomCtxEntry
---- @field rbind_atom string  -- the rbind atom ident that this consumer should propagate types from
+--- @field rbind_atom string  -- The rbind atom ident that this consumer should propagate types from
 --- @field info_line  integer
---- @field source     string  -- absolute path of the source file
+--- @field source     string  -- Absolute path of the source file
 
 --- @class AtomPhaseGroup
---- @field atoms string[]  -- atom names tagged with this phase label (source-order)
+--- @field atoms string[]  -- Atom names tagged with this phase label (source-order)
 
 --- @class AtomViewEntry
 --- @field atom_name        string                 -- e.g. "red_cube_g4_face"
@@ -88,11 +85,11 @@ local parse_enum_int_literal
 --- @field info_line        integer                -- line of the atom_info call
 
 --- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
---- @field scan     table   -- pre-scanned SourceScan payload (set by this pass)
+--- @field path     string  -- Absolute path to the source file
+--- @field text     string  -- Full source text
+--- @field dir      string  -- Directory containing the source
+--- @field basename string  -- Filename without extension
+--- @field scan     table   -- Pre-scanned SourceScan payload (set by this pass)
 
 --- @class PassCtx
 --- @field sources            SourceFile[]
@@ -111,15 +108,15 @@ local parse_enum_int_literal
 
 --- @class AtomEntry
 --- @field line              integer
---- @field name              string     -- atom name (for components: without ac_ prefix)
---- @field body              string     -- brace-delimited body (without the braces)
---- @field body_off          integer    -- char offset of body[1] in source
---- @field kind              string     -- "atom" | "comp_bare" | "comp_proc" | "raw_atom"
---- @field raw_name          string     -- un-stripped name (for components: with ac_ prefix)
---- @field ident_pos         integer    -- position of the MipsAtom_/MipsAtomComp_ ident start
---- @field after_paren       integer    -- position past the closing paren
---- @field debug_skip        boolean    -- true when an `atom_dbg_skip` bare marker immediately precedes this declaration (sole-owner stamp; see push_debug_skip_marker)
---- @field declaration_comment string|nil -- populated by the scanner (backward walk past the marker, captures contiguous `/* */` or `//` block)
+--- @field name              string       -- Atom name (for components: without ac_ prefix)
+--- @field body              string       -- Brace-delimited body (without the braces)
+--- @field body_off          integer      -- Char offset of body[1] in source
+--- @field kind              string       -- "atom" | "comp_bare" | "comp_proc" | "raw_atom"
+--- @field raw_name          string       -- Un-stripped name (for components: with ac_ prefix)
+--- @field ident_pos         integer      -- Position of the MipsAtom_/MipsAtomComp_ ident start
+--- @field after_paren       integer      -- Position past the closing paren
+--- @field debug_skip        boolean      -- true when an `atom_dbg_skip` bare marker immediately precedes this declaration (sole-owner stamp; see push_debug_skip_marker)
+--- @field declaration_comment string|nil -- Populated by the scanner (backward walk past the marker, captures contiguous `/* */` or `//` block)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Local helpers (shared by per-form parsers)
@@ -139,10 +136,10 @@ local QUALIFIER_KEYWORDS = {
 local AC_PREFIX     = "ac_"
 local AC_PREFIX_LEN = 3
 
--- Strip the "ac_" prefix from a component name.
--- Returns the input unchanged if it doesn't start with the prefix.
--- @param raw_name string
--- @return string
+--- Strip the "ac_" prefix from a component name.
+--- Returns the input unchanged if it doesn't start with the prefix.
+--- @param raw_name string
+--- @return string
 local function strip_ac_prefix(raw_name)
 	if #raw_name > AC_PREFIX_LEN and raw_name:sub(1, AC_PREFIX_LEN) == AC_PREFIX then
 		return raw_name:sub(AC_PREFIX_LEN + 1)
@@ -156,7 +153,7 @@ end
 local function push_debug_skip_marker(out, marker)
 	local markers = out.debug_skip_markers
 	local prior   = markers[#markers]
-	if prior and prior.pending then
+	if    prior and prior.pending then
 		prior.pending = false
 		prior.superseded_by_marker_line = marker.marker_line
 	end
@@ -178,25 +175,25 @@ end
 -- Returns (body, after_brace, body_off) on success, or (nil, fallback_pos) on no brace.
 -- `fallback_pos` defaults to `after_paren + 1` (the common "advance by 1" case).
 local function find_body_braces(source, after_paren, fallback)
-	local brace = duffle.scan_to_char(source, "{", after_paren)
+	local  brace = duffle.scan_to_char(source, "{", after_paren)
 	if not brace then return nil, fallback or (after_paren + 1) end
 	local body, after_brace = duffle.read_braces(source, brace)
 	return body, after_brace, brace + 1
 end
 
--- Walk backward from `start_pos` capturing contiguous `/* */` block(s) and
--- `//` line(s) that immediately precede it. The caller (preceding_declaration_comment)
--- supplies `start_pos` so the walker does not need to detect marker shape or prelude layout.
--- The scanner already knows the marker_pos + decl ident_pos and threads that knowledge forward.
---
--- The walker captures:
---   - Block comment close `*/` followed by walking back to `/*`.
---   - `//` line comments (the line containing the current non-ws position starts with `//`).
--- It stops at the first non-ws char that does not begin a comment block or line.
--- Empty string if no comment is adjacent.
--- @param source string
--- @param start_pos integer -- exclusive upper bound for the captured block
--- @return string
+--- Walk backward from `start_pos` capturing contiguous `/* */` block(s) and
+--- `//` line(s) that immediately precede it. The caller (preceding_declaration_comment)
+--- supplies `start_pos` so the walker does not need to detect marker shape or prelude layout.
+--- The scanner already knows the marker_pos + decl ident_pos and threads that knowledge forward.
+---
+--- The walker captures:
+---   - Block comment close `*/` followed by walking back to `/*`.
+---   - `//` line comments (the line containing the current non-ws position starts with `//`).
+--- It stops at the first non-ws char that does not begin a comment block or line.
+--- Empty string if no comment is adjacent.
+--- @param source    string
+--- @param start_pos integer -- exclusive upper bound for the captured block
+--- @return string
 local function preceding_comment_walk_backward(source, start_pos)
 	local pieces  = {}
 	local scan_pos = start_pos
@@ -249,13 +246,13 @@ local function preceding_comment_walk_backward(source, start_pos)
 	return table.concat(pieces, "\n")
 end
 
--- Resolve the start position for the declaration-comment walk.
--- When a debug-skip marker is pending, the walker must start from the position immediately before the marker ident
--- (so it walks backward past the marker text and any `FI_ MipsAtom ac_X(args)` proc-prelude layout — neither of which is visible if we start from the declaration ident_pos).
--- When no marker is pending, the walker starts from the declaration ident_pos directly.
--- @param pending_marker DebugSkipMarker|nil
--- @param ident_pos integer -- declaration ident position
--- @return integer
+--- Resolve the start position for the declaration-comment walk.
+--- When a debug-skip marker is pending, the walker must start from the position immediately before the marker ident
+--- (so it walks backward past the marker text and any `FI_ MipsAtom ac_X(args)` proc-prelude layout — neither of which is visible if we start from the declaration ident_pos).
+--- When no marker is pending, the walker starts from the declaration ident_pos directly.
+--- @param pending_marker DebugSkipMarker|nil
+--- @param ident_pos      integer -- declaration ident position
+--- @return integer
 local function comment_walk_start(pending_marker, ident_pos)
 	if pending_marker then
 		return pending_marker.marker_pos - 1
@@ -263,16 +260,16 @@ local function comment_walk_start(pending_marker, ident_pos)
 	return ident_pos - 1
 end
 
--- Attach the pending marker to the next declaration.
--- The declaration form disambiguates whole atoms from components; the resolved `debug_skip` is stamped directly on the declaration record
--- (sole-owner discipline; see push_debug_skip_marker).
---
--- A marker is POSITIVE (stamps `debug_skip = true` on the declaration) iff:
---   marker_kind == "atom_dbg_skip" AND is_bare == true
--- Any other spelling or shape (parenthesized form, legacy name) is recorded as a raw marker for annotation validation but never stamps `debug_skip`.
--- @param out SourceScan
--- @param target_kind string|nil -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
--- @return boolean|nil -- true iff the marker is the positive bare form
+--- Attach the pending marker to the next declaration.
+--- The declaration form disambiguates whole atoms from components; the resolved `debug_skip` is stamped directly on the declaration record
+--- (sole-owner discipline; see push_debug_skip_marker).
+---
+--- A marker is POSITIVE (stamps `debug_skip = true` on the declaration) iff:
+---   marker_kind == "atom_dbg_skip" AND is_bare == true
+--- Any other spelling or shape (parenthesized form, legacy name) is recorded as a raw marker for annotation validation but never stamps `debug_skip`.
+--- @param out         SourceScan
+--- @param target_kind string|nil -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
+--- @return boolean|nil -- true iff the marker is the positive bare form
 local function attach_debug_skip_marker(out, target_kind)
 	local markers = out.debug_skip_markers
 	local marker  = markers[#markers]
@@ -390,13 +387,13 @@ local function walk_body_fields(body, build_field)
 	while body_pos <= body_len do
 		body_pos = duffle.skip_ws_and_cmt(body, body_pos)
 		if body_pos > body_len then break end
-		local first, first_end = duffle.read_ident(body, body_pos)
+		local  first, first_end = duffle.read_ident(body, body_pos)
 		if not first then
 			body_pos = body_pos + 1
 		else
-			local after_first = duffle.skip_ws_and_cmt(body, first_end)
+			local after_first     = duffle.skip_ws_and_cmt(body, first_end)
 			local result, new_pos = build_field(first, first_end, after_first)
-			if result then fields[#fields + 1] = result end
+			if    result then fields[#fields + 1] = result end
 			body_pos = new_pos or first_end
 			-- Skip a single trailing `,` or `;`.
 			if body_pos <= body_len and (body:sub(body_pos, body_pos) == "," or body:sub(body_pos, body_pos) == ";") then
@@ -442,7 +439,7 @@ local function parse_enum_body_fields(body)
 		local value
 		local new_pos
 		if body:sub(after_name, after_name) == "=" then
-			local val_pos = duffle.skip_ws_and_cmt(body, after_name + 1)
+			local val_pos    = duffle.skip_ws_and_cmt(body, after_name + 1)
 			local v, end_pos = parse_enum_int_literal(body, val_pos)
 			if v ~= nil then
 				value   = v
@@ -461,16 +458,16 @@ end
 -- Returns a positive integer byte_size when the chain bottoms out at a builtin, or nil if the chain is broken, exceeds TYPE_CHAIN_MAX_DEPTH, or contains a cycle.
 local function resolve_typedef_byte_size(type_name, type_name_registry, visited, depth)
 	if depth > TYPE_CHAIN_MAX_DEPTH then return nil end
-	if visited[type_name] then return nil end
+	if visited[type_name]           then return nil end
 	visited[type_name] = true
 
 	-- Check the builtin primitive map FIRST.
 	-- This handles undeclared builtin idents (e.g. `__UINT32_TYPE__` appears as underlying_type in `typedef __UINT32_TYPE__ TSet_(V4_S2);` 
 	-- even though the fixture never declares `__UINT32_TYPE__` itself).
 	local builtin = BUILTIN_BYTE_SIZES[type_name]
-	if builtin ~= nil then return builtin end
+	if    builtin ~= nil then return builtin end
 
-	local entry = type_name_registry[type_name]
+	local  entry = type_name_registry[type_name]
 	if not entry then return nil end
 
 	-- Confident: this entry was already resolved by the propagation pass (e.g., a builtin or a struct whose fields are all resolved).
@@ -519,9 +516,9 @@ local function propagate_type_sizes(out)
 		for name, entry in pairs(reg) do
 			if entry.byte_size == nil then
 				local resolved = resolve_typedef_byte_size(name, reg, {}, 1)
-				if resolved ~= nil then
+				if    resolved ~= nil then
 					entry.byte_size = resolved
-					any_change = true
+					any_change      = true
 				end
 			end
 		end
@@ -828,7 +825,7 @@ end
 --- Parse a decimal/negative-decimal/hex integer literal starting at byte position `start`.
 --- Returns (value, end_pos) on success, or (nil, start) on failure / no match.
 --- Accepts: 12, -1, 0, 0x10, 0X1F, -0x10.
---- @param text string
+--- @param text  string
 --- @param start integer
 --- @return integer|nil, integer
 --- Implementation note: this is a plain assignment (not `local function`) 
@@ -952,9 +949,9 @@ end
 --- Always saves the raw RHS text into `code_macro_bodies` (for cross-source fallback during chain resolution),
 --- then (if resolvable) stores the resolved integer code into `code_macros` keyed by the macro name.
 --- `directive_start` points at the `#` byte. The function is silent on non-matching directives, the caller skips the line in any case.
---- @param source string
+--- @param source          string
 --- @param directive_start integer  -- byte position of `#`
---- @param code_macros table        -- out._code_macros / ctx.shared._code_macros
+--- @param code_macros     table    -- out._code_macros / ctx.shared._code_macros
 --- @param code_macro_bodies table  -- out._code_macro_bodies / ctx.shared._code_macro_bodies
 local function try_extract_code_macro(source, directive_start, code_macros, code_macro_bodies)
 	local rest = duffle.skip_ws_and_cmt(source, directive_start + 1)
@@ -985,8 +982,8 @@ end
 --- Populates `code_macros` with resolved integer codes AND `code_macro_bodies` with raw RHS text
 --- (used by the chain walker as cross-source fallback during pass 1b in `M.run`); ignores everything else.
 --- Used by `M.run` pass 1a to build the cross-source `_code_macros` + `_code_macro_bodies` registries before pass 1b resolves chains.
---- @param source      string
---- @param code_macros table
+--- @param source            string
+--- @param code_macros       table
 --- @param code_macro_bodies table
 local function scan_source_pre_pass(source, code_macros, code_macro_bodies)
 	local pos     = 1
@@ -1043,7 +1040,7 @@ local function parse_enum_atom_type_default(body, pos)
 	if pos > #body then return nil, 0, pos end
 	-- Bare `atom_type` word with word-bounding on both sides.
 	local ident, ident_end = duffle.read_ident(body, pos)
-	if ident ~= "atom_type" then return nil, 0, pos end
+	if    ident ~= "atom_type" then return nil, 0, pos end
 	if pos > 1 then
 		local prev = body:byte(pos - 1)
 		if duffle.is_alnum_byte(prev) then return nil, 0, pos end
@@ -1054,19 +1051,19 @@ local function parse_enum_atom_type_default(body, pos)
 	end
 	-- Expect `( ... )` immediately after.
 	local open_pos = duffle.skip_ws_and_cmt(body, ident_end)
-	if open_pos > #body or body:sub(open_pos, open_pos) ~= "(" then return nil, 0, pos end
+	if    open_pos > #body or body:sub(open_pos, open_pos) ~= "(" then return nil, 0, pos end
 	local inner, after_close = duffle.read_parens(body, open_pos)
 	-- Reject any trailing tokens past the close paren other than comma / close-brace (next enum entry / end of enum).
 	local residue = duffle.skip_ws_and_cmt(body, after_close)
-	if residue <= #body then
+	if    residue <= #body then
 		local rbyte = body:byte(residue)
 		if rbyte ~= BYTE_COMMA and rbyte ~= BYTE_CLOSE_BRACE then return nil, 0, pos end
 	end
 	-- Parse the type chain inside the parens (e.g. `V4_S2*` -> ("V4_S2", 1)).
-	local type_name, depth, after_chain = parse_type_chain(inner, 1)
+	local  type_name, depth, after_chain = parse_type_chain(inner, 1)
 	if not type_name then return nil, 0, pos end
 	local end_check = duffle.skip_ws_and_cmt(inner, after_chain)
-	if end_check <= #inner then return nil, 0, pos end
+	if    end_check <= #inner then return nil, 0, pos end
 	return type_name, depth, duffle.skip_ws_and_cmt(body, after_close)
 end
 
@@ -1098,11 +1095,11 @@ end
 ---
 --- Diagnostic-only path: a following `(...)` is recorded as an invalid parenthesized-form marker so the annotation rule can emit a precise "parenthesized form" diagnostic.
 --- The parenthesized form stays diagnostic; the bare form alone carries the runtime stamp.
---- @param source string
---- @param pos integer
+--- @param source    string
+--- @param pos       integer
 --- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
 --- @return integer -- source cursor position to resume from
 local function parse_dbg_skip_marker(source, pos, ident_end, line_of, out)
 	local marker_kind = source:sub(pos, ident_end - 1)
@@ -1134,15 +1131,15 @@ end
 -- Parse `atom_dbg_reg_default(R_X, <type>...)`;
 -- the second argument may be a `Type` or `Type*`/`Type**` chain. Records in `out.types[R_X]`.
 local function parse_atom_dbg_reg_default(source, pos, ident_end, line_of, out)
-	local inner, after_paren = read_parens_after(source, ident_end)
+	local  inner, after_paren = read_parens_after(source, ident_end)
 	if not inner then return after_paren end
 	local args = duffle.split_top_level_commas(inner)
-	if #args < 1 then
+	if   #args < 1 then
 		-- Annotation pass surfaces this; we still consume the marker.
 		return after_paren
 	end
-	local reg_name  = duffle.trim(args[1])
-	local type_part = args[2] or "void"
+	local reg_name         = duffle.trim(args[1])
+	local type_part        = args[2] or "void"
 	local type_name, depth = parse_type_chain(type_part, 1)
 	if not type_name then type_name, depth = duffle.trim(type_part), 0 end
 	out.types[reg_name] = {
@@ -1161,23 +1158,23 @@ local function parse_atom_dbg_reg_default(source, pos, ident_end, line_of, out)
 end
 
 --- Parse: `MipsAtom_(<name>) [atom_info(<binds>, <reads>, <writes>)] { <body> }`
---- @param source string
---- @param pos integer
+--- @param source    string
+--- @param pos       integer
 --- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
 --- @return integer
 local function parse_mips_atom(source, pos, ident_end, line_of, out)
-	local inner, after_paren, open_paren = read_parens_after(source, ident_end)
+	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
 	if not inner then return after_paren end
 
 	local raw_name = duffle.read_ident(inner, 1)
 
 	-- Lookahead for atom_info(...) between `)` and `{`. Captures sub-calls; updates brace search start.
-	local brace_search_pos = after_paren
-	local lookahead        = duffle.skip_ws_and_cmt(source, after_paren)
+	local brace_search_pos     = after_paren
+	local lookahead            = duffle.skip_ws_and_cmt(source, after_paren)
 	local look_ident, look_end = duffle.read_ident(source, lookahead)
-	if look_ident == "atom_info" then
+	if    look_ident == "atom_info" then
 		local info_open = duffle.skip_ws_and_cmt(source, look_end)
 		if source:sub(info_open, info_open) == "(" then
 			local info_inner, info_after = duffle.read_parens(source, info_open)
@@ -1221,7 +1218,7 @@ local function parse_mips_atom(source, pos, ident_end, line_of, out)
 		end
 	end
 
-	local body, after_brace, body_off = find_body_braces(source, brace_search_pos, open_paren + 1)
+	local  body, after_brace, body_off = find_body_braces(source, brace_search_pos, open_paren + 1)
 	if not body then return after_brace end
 	if raw_name and raw_name ~= "" then
 		register_atom(out, "atom", line_of(pos), raw_name, body, body_off, raw_name, pos, after_paren, source)
@@ -1231,20 +1228,20 @@ local function parse_mips_atom(source, pos, ident_end, line_of, out)
 end
 
 --- Parse: `MipsAtomComp_(<name>) { <body> }`
---- @param source string
---- @param pos integer
+--- @param source    string
+--- @param pos       integer
 --- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
 --- @return integer
 local function parse_mips_atom_comp(source, pos, ident_end, line_of, out)
-	local inner, after_paren, open_paren = read_parens_after(source, ident_end)
+	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
 	if not inner then return after_paren end
 
 	local  raw_name = duffle.read_ident(inner, 1)
 	if not raw_name then return open_paren + 1 end
 
-	local body, after_brace, body_off = find_body_braces(source, after_paren, open_paren + 1)
+	local  body, after_brace, body_off = find_body_braces(source, after_paren, open_paren + 1)
 	if not body then return after_brace end
 	local name = strip_ac_prefix(raw_name)
 	register_atom(out, "comp_bare", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
@@ -1253,14 +1250,14 @@ local function parse_mips_atom_comp(source, pos, ident_end, line_of, out)
 end
 
 --- Parse: `MipsAtomComp_Proc_(<name>, { <body> })` — body is inside the LAST `{` in args.
---- @param source string
---- @param pos integer
+--- @param source    string
+--- @param pos       integer
 --- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
 --- @return integer
 local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
-	local inner, after_paren, open_paren = read_parens_after(source, ident_end)
+	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
 	if not inner then return after_paren end
 
 	-- Find the LAST `{` in inner (the body brace, not any potential embedded braces in expressions).
@@ -1277,21 +1274,20 @@ local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
 	if close_pos > #inner + 1 then return after_paren end
 
 	local raw_name = inner:match("^%s*([%w_]+)") or "?"
-	local name = strip_ac_prefix(raw_name)
+	local name     = strip_ac_prefix(raw_name)
 	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
 	local body_off = open_paren + 2 + last_brace_pos
-
 	register_atom(out, "comp_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
 
 	return after_paren
 end
 
 --- Parse: `MipsCode code_<name> { <body> }` (raw atom form — offsets pass only).
---- @param source string
---- @param pos integer
+--- @param source    string
+--- @param pos       integer
 --- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
 --- @return integer
 local function parse_mips_code(source, pos, ident_end, line_of, out)
 	local  next_pos               = duffle.skip_ws_and_cmt(source, ident_end)
@@ -1300,8 +1296,8 @@ local function parse_mips_code(source, pos, ident_end, line_of, out)
 		return ident_end
 	end
 
-	local  atom_name = next_ident:sub(6)
-	local body, after_brace, body_off = find_body_braces(source, next_after, ident_end)
+	local  atom_name                   = next_ident:sub(6)
+	local  body, after_brace, body_off = find_body_braces(source, next_after, ident_end)
 	if not body then return after_brace end
 	register_raw_atom(out, line_of(pos), atom_name, body, body_off, atom_name, pos)
 
@@ -1320,13 +1316,13 @@ end
 ---     pointer_depth = 0 
 --- 	} -- byte_size + per-field offset/byte_size set by the propagation pass.
 --- Also populates `out.binds[]` IFF `name:sub(1, 6) == "Binds_"`.
---- @param body string
---- @param name string
---- @param pos integer
+--- @param body    string
+--- @param name    string
+--- @param pos     integer
 --- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param out     SourceScan
 local function register_struct_type(body, name, pos, line_of, out)
-	local fields = parse_struct_body_fields(body)
+	local fields     = parse_struct_body_fields(body)
 	local source_pos = line_of(pos)
 	out.type_name_registry[name] = {
 		name          = name,
@@ -1352,11 +1348,11 @@ end
 --- Register an Enum_ entry in type_name_registry.
 --- Local helper for parse_typedef_binds. Captures the underlying type (1st arg of `Enum_(<underlying>, <name>)`) and the body fields.
 --- @param underlying string
---- @param name string
---- @param body string
---- @param pos integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param name       string
+--- @param body       string
+--- @param pos        integer
+--- @param line_of    fun(pos: integer): integer
+--- @param out        SourceScan
 local function register_enum_type(underlying, name, body, pos, line_of, out)
 	local fields = parse_enum_body_fields(body)
 	out.type_name_registry[name] = {
@@ -1375,18 +1371,18 @@ end
 --- Captures the underlying type ident (LHS of `typedef <type> <alias>;`) and exposes it through the registry.
 --- The propagation pass follows the underlying_type chain to resolve byte_size.
 --- @param underlying string
---- @param name string
---- @param pos integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
+--- @param name       string
+--- @param pos        integer
+--- @param line_of    fun(pos: integer): integer
+--- @param out        SourceScan
 local function register_typedef_alias(underlying, name, pos, line_of, out)
 	out.type_name_registry[name] = {
-		name           = name,
-		kind           = "typedef",
+		name            = name,
+		kind            = "typedef",
 		underlying_type = underlying,
-		source_line    = line_of(pos),
-		source_file    = out._source_file,
-		pointer_depth  = 0,
+		source_line     = line_of(pos),
+		source_file     = out._source_file,
+		pointer_depth   = 0,
 	}
 end
 
@@ -1396,29 +1392,29 @@ end
 ---   1. `typedef Struct_(<name>) { <body> } <alias>;` adds to type_name_registry (kind="struct"). 
 ---       Binds_* aliases also land in out.binds[].
 ---   2. `typedef Enum_(<underlying>, <name>) { <body> } <alias>;` 
----       adds to type_name_registry (kind="enum"). 
+---       Adds to type_name_registry (kind="enum"). 
 ---   3. `typedef <type> <alias>;` simple typedef alias.
 ---       Adds to type_name_registry (kind="typedef").
 ---   4. `typedef <type> TSet_(<name>);` duffle TSet_ convention.
 ---       Strips TSet_ wrapper; adds to type_name_registry (kind="typedef") with underlying_type=<type>.
 ---
 --- All four shapes also attach an "unrelated" debug-skip marker (the existing behavior — typedef declarations don't carry atom_dbg_skip).
---- @param source string
---- @param pos integer
+--- @param source    string
+--- @param pos       integer
 --- @param ident_end integer
---- @param line_of fun(pos: integer): integer
---- @param out SourceScan
---- @return integer
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
+--- @return          integer
 local function parse_typedef_binds(source, pos, ident_end, line_of, out)
-	local after_typedef = duffle.skip_ws_and_cmt(source, ident_end)
-	local id2, id2_end  = duffle.read_ident(source, after_typedef)
+	local  after_typedef = duffle.skip_ws_and_cmt(source, ident_end)
+	local  id2, id2_end  = duffle.read_ident(source, after_typedef)
 	if not id2 then return ident_end end
 
 	-- ── Shape 1: `typedef Struct_(<name>) { <body> } <alias>;` ────────────
 	if id2 == "Struct_" then
-		local inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end)
+		local  inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end)
 		if not inner then return id2_end end
-		local name               = duffle.trim(inner)
+		local name = duffle.trim(inner)
 
 		local body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
 		if not body then return after_brace end
@@ -1428,7 +1424,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 
 	-- ── Shape 2: `typedef Enum_(<underlying>, <name>) { <body> } <alias>;`
 	elseif id2 == "Enum_" then
-		local inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end)
+		local  inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end)
 		if not inner then return id2_end end
 		-- Split `inner` on the first top-level comma into (<underlying>, <name>).
 		local args = duffle.split_top_level_commas(inner)
@@ -1436,7 +1432,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		local underlying = duffle.trim(args[1])
 		local name       = duffle.trim(args[2])
 
-		local body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
+		local  body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
 		if not body then return after_brace end
 		register_enum_type(underlying, name, body, pos, line_of, out)
 		attach_debug_skip_marker(out, "unrelated")
@@ -1469,11 +1465,10 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 
 	-- Shape 4 (TSet_ at id2 position): no preceding underlying span.
 	if id2 == "TSet_" then
-		local inner, after_paren = read_parens_after(source, id2_end, id2_end)
+		local  inner, after_paren = read_parens_after(source, id2_end, id2_end)
 		if not inner then return id2_end end
 		local tset_name = duffle.trim(inner)
-		-- Empty underlying span is acceptable; the TSet_ wrapper itself
-		-- encodes the alias identity (per the duffle TSet_ convention).
+		-- Empty underlying span is acceptable; the TSet_ wrapper itself encodes the alias identity (per the duffle TSet_ convention).
 		register_typedef_alias("", tset_name, pos, line_of, out)
 		attach_debug_skip_marker(out, "unrelated")
 		return after_paren
@@ -1491,13 +1486,13 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 	while scan < semi_pos do
 		scan = duffle.skip_ws_and_cmt(source, scan)
 		if scan >= semi_pos then break end
-		local id, id_end = duffle.read_ident(source, scan)
+		local  id, id_end = duffle.read_ident(source, scan)
 		if not id then
 			scan = scan + 1
 		elseif id == "TSet_" then
 			-- Shape 4 (TSet_ at non-id2 position): grab the parenthesized argument.
 			local inner, after_paren = read_parens_after(source, id_end, id_end)
-			if inner then
+			if    inner then
 				tset_arg     = duffle.trim(inner)
 				tset_arg_end = after_paren
 				tset_pos     = scan
@@ -1957,7 +1952,7 @@ local function merge_named_with_sites(registry, name, new_entry, site, collision
 		registry[name].sites = { site }
 		return
 	end
-	local existing = registry[name]
+	local existing  = registry[name]
 	local new_shape = shape_fn(new_entry)
 	local old_shape = shape_fn(existing)
 	if new_shape == old_shape and new_shape ~= "" then

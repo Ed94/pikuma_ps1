@@ -73,8 +73,8 @@ local DW_RLE_start_length  = DWARF5_RNGLISTS.start_length
 
 -- File-index lookup for the existing main line unit (Unit 2).
 -- Populated at pass start by `init_file_index_lookup(elf_path)` from the runtime ELF (see `elf_dwarf.read_line_unit_file_table`).
-local _file_index_by_basename = nil  -- [basename] = 1-based line-table file index
-local _file_path_by_index    = nil  -- [1-based index] = full source path (diagnostics / future consumers)
+local _file_index_by_basename    = nil  -- [basename] = 1-based line-table file index
+local _file_path_by_index        = nil  -- [1-based index] = full source path (diagnostics / future consumers)
 local _default_atom_source_index = nil  -- any valid index used in opaque-row fallbacks
 
 -- RR_<R_Name> debug-visible variables come from the merged register_alias_registry filtered to aliases whose code is a valid MIPS GPR 0..31
@@ -107,8 +107,8 @@ local ABBREV_TYPED_VIEW_POINTER = 0x6E   -- 110: DW_TAG_pointer_type no children
 -- DWARF5 §7.7.3 loclist opcodes.
 local DW_LLE_end_of_list    = 0x00
 local DW_LLE_start_length   = 0x08
-local DW_OP_reg0            = 0x50   -- base reg op; regN = 0x50 + N
-local DW_OP_breg0           = 0x70   -- base breg op; bregN = 0x70 + N (SLEB offset)
+local DW_OP_reg0            = 0x50 -- base reg op; regN = 0x50 + N
+local DW_OP_breg0           = 0x70 -- base breg op; bregN = 0x70 + N (SLEB offset)
 local DW_OP_piece           = 0x93
 local MIPS_LOAD_DELAY_BYTES = 0x08 -- 1 load word + 1 BD-slot word
 
@@ -184,15 +184,17 @@ end
 --- Resolve an absolute provenance path to the line-unit file index used by the emitting line program.
 --- Normalizes mixed `/` and `\` separators to a basename and looks it up against the runtime-computed file table populated by `init_file_index_lookup`.
 ---
---- Fails loudly on an unknown provenance basename: adding a new component source file will produce a clear error message naming the missing basename and listing the .debug_line file table contents, 
---- so the user can either confirm the gcc include order, the unity-root, or the `.debug_line` file table contents.
---- Silent fallback would mask the new-file case by misattributing component rows to an arbitrary source file.
+--- Returns 0 (the DWARF `set_file(0)` "no file change" sentinel) when the basename is not in the file table.
+--- This is a normal occurrence: the compiler only adds a file to the `.debug_line` file table when the file has line-numbered content (i.e., code).
+--- Files containing only static-array data (e.g. `MipsAtomComp_` declarations in `gp.atom.c`, `psyq.atom.c`, `pad.atom.c` — the OT-tag inserts, etc.) produce no line numbers,
+--- so gcc omits them from the file table.
+--- The DWARF emitter then keeps the previous line-program file state instead of pointing at a file that has no entries to walk.
+--- A stderr warning is emitted per-miss so the user can audit which files the compiler dropped.
 --- @param path string  -- absolute provenance path (mixed slashes accepted)
---- @return integer  -- 1-based line-unit file index
+--- @return integer  -- 1-based line-unit file index, or 0 on miss (DWARF no-change sentinel)
 local function resolve_provenance_file_index(path)
 	if _file_index_by_basename == nil then
-		error("[dwarf_injection] resolve_provenance_file_index called before init_file_index_lookup. "
-			.. "Is M.run being entered correctly (with --elf)?")
+		error("[dwarf_injection] resolve_provenance_file_index called before init_file_index_lookup. Is M.run being entered correctly (with --elf)?")
 	end
 	if path == nil or path == "" then
 		error("[dwarf_injection] resolve_provenance_file_index: empty path")
@@ -201,19 +203,17 @@ local function resolve_provenance_file_index(path)
 	local normalized = path:gsub("\\", "/")
 	-- Take the last path component (the basename).
 	local basename = normalized:match("([^/]+)$") or normalized
-	local idx = _file_index_by_basename[basename]
+	local idx      = _file_index_by_basename[basename]
 	if idx ~= nil then return idx end
 	-- Last-resort exact-path match (handles paths that don't reduce to a known basename).
 	for i, p in pairs(_file_path_by_index) do
 		if p and p:gsub("\\", "/") == normalized then return i end
 	end
-	-- Build an error message listing the known basenames for fast diagnostics.
-	local known = {}
-	for k in pairs(_file_index_by_basename) do known[#known + 1] = k end
-	table.sort(known)
-	error(string.format("[dwarf_injection] resolve_provenance_file_index: unknown provenance basename '%s' (from '%s'). "
-		.. "Known basenames in the .debug_line file table (%d): %s"
-		, basename, path, #known, table.concat(known, ", ")))
+	-- File is in the corpus but gcc omitted it from the .debug_line file table (data-only content).
+	-- Return 0 = DWARF `set_file(0)` no-change sentinel so the line program keeps its prior file state.
+	io.stderr:write(string.format("[dwarf_injection] line-table miss: '%s' (basename '%s') not in .debug_line file table; "
+		.. "falling back to set_file(0)\n", path, basename))
+	return 0
 end
 
 local DW_FORM_addr           = 0x01
@@ -227,7 +227,6 @@ local DW_FORM_implicit_const = 0x21   -- DWARF5 §7.5.6: abbrev declaration carr
 local DW_FORM_sec_offset     = 0x17   -- 4-byte section-relative offset (into .debug_loclists / .debug_rnglists)
 
 -- DW_OP_reg0 + DW_OP_piece are declared above (lines 114-116) alongside the other DWARF5 §7.7.3 loclist opcodes.
-
 
 local DW_ATE_unsigned        = 0x07   -- DWARF5 §7.8.1: DW_ATE_unsigned (used for U4 base type)
 
@@ -448,9 +447,9 @@ end
 --- Statement-state rules:
 ---   * A marked whole atom emits one opaque is_stmt=false range row and no nested component rows; its subprogram symbol/range remains available.
 ---   * Per-row policy at every other PC:
----       - Call-site row of any invocation's first word:  is_stmt = true   (unconditional; `want_call = true`).
+---       - Call-site row of any invocation's first word:     is_stmt = true   (unconditional; `want_call = true`).
 ---       - Body row of any invocation (first or subsequent): is_stmt = not inv.debug_skip  (`want_body = not inv.debug_skip`).
----       - RAW word (no containing invocation):            is_stmt = true   (unconditional).
+---       - RAW word (no containing invocation):              is_stmt = true   (unconditional).
 ---   * The previous per-word `marked_idx` ancestor walk and the GDB 12 zero-instruction-prologue duplicate row at atom entry are DELETED; the new
 ---     first-word emission IS the entry statement.
 ---   * Whole-atom suppression wins over component markers; no nested inversion.
@@ -612,10 +611,8 @@ local function build_atom_sequence(atom)
 		-- NOT anc.body_lines[1] (= the line of the first WORD, which is wrong when the outer's body starts with a nested call).
 		for ai, anc in ipairs(entry_1_ancestry) do
 			assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
-			assert(anc.body_lines[1] ~= nil
-				, "dwarf_injection: body_lines[1] missing on first-word entry for inv=" .. tostring(anc.component_name))
-			assert(anc.call_path and anc.call_path ~= ""
-				, "dwarf_injection: inv.call_path is missing on invocation " .. tostring(anc.component_name) .. "; emitter did not run emission-model.")
+			assert(anc.body_lines[1] ~= nil,              "dwarf_injection: body_lines[1] missing on first-word entry for inv=" .. tostring(anc.component_name))
+			assert(anc.call_path and anc.call_path ~= "", "dwarf_injection: inv.call_path is missing on invocation "            .. tostring(anc.component_name) .. "; emitter did not run emission-model.")
 			emit_row(resolve_provenance_file_index(anc.call_path), anc.call_line,    true)
 			local is_outermost = (ai == 1)
 			if not (is_outermost and anc.debug_skip) then
@@ -640,8 +637,7 @@ local function build_atom_sequence(atom)
 			-- all OTHER ancestors emit body_lines[1] with is_stmt = not debug_skip.
 			--
 			-- This re-emits the outer ancestor's call-site + body rows at the inner's first word PC
-			-- for debugger context: source-level stepping now shows the outer body line
-			-- (not the inner body line) when stepping into the inner. PROBLEM B fix.
+			-- for debugger context: source-level stepping now shows the outer body line (not the inner body line) when stepping into the inner. PROBLEM B fix.
 			-- The body_lines[1] row references body_first_line_of[anc.id] (= the body's first content line in the parent's source), 
 			-- NOT anc.body_lines[1] (= the line of the first WORD, which is wrong when the outer's body starts with a nested call: 
 			-- gdb 12.1 picks the displayed line as the LAST row at the same PC in byte-stream order,
@@ -649,12 +645,9 @@ local function build_atom_sequence(atom)
 			local ancestry = ancestry_idx[idx]
 			for ai, anc in ipairs(ancestry) do
 				assert(anc.body_lines, "missing body_lines: emitter did not run emission-model")
-				assert(anc.body_lines[1] ~= nil
-					, string.format("missing body_lines[1] for inv=%s start_pos=%d len=%d",
-						anc.component_name, anc.start_pos, #(anc.body_lines or {})))
-				assert(anc.call_path and anc.call_path ~= ""
-					, "dwarf_injection: inv.call_path is missing on invocation " .. tostring(anc.component_name) .. "; emitter did not run emission-model.")
-				emit_row(resolve_provenance_file_index(anc.call_path), anc.call_line,    true)
+				assert(anc.body_lines[1] ~= nil, string.format("missing body_lines[1] for inv=%s start_pos=%d len=%d", anc.component_name, anc.start_pos, #(anc.body_lines or {})))
+				assert(anc.call_path and anc.call_path ~= "", "dwarf_injection: inv.call_path is missing on invocation " .. tostring(anc.component_name) .. "; emitter did not run emission-model.")
+				emit_row(resolve_provenance_file_index(anc.call_path), anc.call_line, true)
 				local is_outermost = (ai == 1)
 				if not (is_outermost and anc.debug_skip) then
 					emit_row(resolve_provenance_file_index(anc.def_path),  body_first_line_of[anc.id] or anc.body_lines[1], not anc.debug_skip)
@@ -669,10 +662,8 @@ local function build_atom_sequence(atom)
 			-- Marked invocations emit non-statement body rows at every body word; unmarked invocations emit statement body rows.
 			assert(inv.body_lines, "missing body_lines: emitter did not run emission-model")
 			local words_into = idx - inv.start_pos
-			assert(inv.body_lines[words_into] ~= nil
-				, string.format("missing body_lines[%d] for inv=%s start_pos=%d len=%d idx=%d",
-					words_into, inv.component_name, inv.start_pos, #(inv.body_lines or {}), idx))
-			emit_row(resolve_provenance_file_index(inv.def_path),       inv.body_lines[words_into], not inv.debug_skip)
+			assert(inv.body_lines[words_into] ~= nil, string.format("missing body_lines[%d] for inv=%s start_pos=%d len=%d idx=%d", words_into, inv.component_name, inv.start_pos, #(inv.body_lines or {}), idx))
+			emit_row(resolve_provenance_file_index(inv.def_path), inv.body_lines[words_into], not inv.debug_skip)
 		else
 			-- RAW word: single call-site row, always a statement target (the word itself is unmarked).
 			emit_row(call_file_idx, entry.line, true)
@@ -712,8 +703,8 @@ end
 ---     `{comp_name, call_file, call_line, comp_file, comp_line, start_pos, end_pos, body_lines, debug_skip}`. `body_lines[k]`
 ---     is the k-th word's source line within the component body.
 ---
---- @param corpus    table -- the corpus from `ctx.shared.corpus`
---- @param addrs     table -- ELF symbols keyed by atom name from `elf_dwarf.read_nm`
+--- @param corpus table -- the corpus from `ctx.shared.corpus`
+--- @param addrs  table -- ELF symbols keyed by atom name from `elf_dwarf.read_nm`
 --- @return table[]  -- list of {name, addr, size_bytes, words, entries, invocations, debug_skip?}
 local function build_atom_table(corpus, addrs)
 	-- Cross-ref: keep only atoms present in BOTH the nm symbol table AND `corpus.atoms_by_name`. Output is sorted by ascending addr.
@@ -730,8 +721,8 @@ local function build_atom_table(corpus, addrs)
 		local word_events      = paths.word_events or {}
 		local invocations_proj = paths.invocations or {}
 		-- Build the dense entries list from `word_events`.
-		--   `word_events[i].i`     = the 0-based `.word` position
-		--   `call_line`            = the root atom's physical source line for that word (stamped by emission_model)
+		--   `word_events[i].i`  = the 0-based `.word` position
+		--   `call_line`         = the root atom's physical source line for that word (stamped by emission_model)
 		local entries = {}
 		for idx, ev in ipairs(word_events) do
 			entries[#entries + 1] = {
@@ -773,9 +764,8 @@ local function build_atom_table(corpus, addrs)
 
 	local out = {}
 	-- Walk every source's atom list (which preserves source order + per-source src_path).
-	-- Cross-ref with the nm symbol table; atoms absent from `addrs` are skipped (an atom
-	-- declared in source but not emitted as a symbol is a metaprogram or atom-info bug, not
-	-- a source-correlation bug — emit_no_emit would catch it upstream).
+	-- Cross-ref with the nm symbol table; atoms absent from `addrs` are skipped
+	-- (an atom declared in source but not emitted as a symbol is a metaprogram or atom-info bug, not a source-correlation bug — emit_no_emit would catch it upstream).
 	for _, src in ipairs((corpus and corpus.source_order) or {}) do
 		local src_path = src.path or ""
 		for _, atom_rec in ipairs(((src.scan or {}).atoms) or {}) do
@@ -843,8 +833,7 @@ end
 --- (no `atom_reg` opt-in) are silently skipped — the resulting rbind record will be incomplete and the atom will fail to bind a usable piece chain.
 --- This is intentional: silently falling back to a hardcoded GPR would mask the missing opt-in.
 ---
---- Pre-tokenized: `body_tokens` is the scan-source pass's pre-split list of top-level
---- statements (each entry is a single `load_*` call or other statement).
+--- Pre-tokenized: `body_tokens` is the scan-source pass's pre-split list of top-level statements (each entry is a single `load_*` call or other statement).
 --- @param body_tokens table[]  -- the atom's pre-tokenized body statements (from atom.body_tokens)
 --- @param binds_name  string   -- expected Binds_X name (skip pairs with mismatching binds)
 --- @param registries  table    -- merged registries from collect_per_source_registries
@@ -856,7 +845,7 @@ local function parse_body_load_pairs(body_tokens, binds_name, registries)
 	-- The captured ident is `kind`; `inner` holds the parens body for arg parsing.
 	local load_pattern = "^(load_word|load_half|load_half_u|load_byte|load_byte_u|gte_lw|gte_lwc2)%s*%((.*)%)$"
 	for _, t in ipairs(body_tokens or {}) do
-		local tok = duffle.trim(t.tok or "")
+		local tok         = duffle.trim(t.tok or "")
 		local kind, inner = tok:match(load_pattern)
 		if kind then
 			local args = duffle.split_top_level_commas(inner)
@@ -882,9 +871,7 @@ local function parse_body_load_pairs(body_tokens, binds_name, registries)
 end
 
 --- Collect every rbind atom + the matching Binds_X struct + (reg, field) pairs.
----
 --- Inputs come from the dep-closed `scan-source` pass (the per-source `src.scan` payload is preserved on each `corpus.source_order` entry).
----
 --- Returns:
 ---   rbind_atoms     = {[atom_name] = {binds, fields, regs, byte_size, info_line}}
 ---   rbind_structs   = {[binds_name] = {byte_size, fields, atom_names}}
@@ -929,7 +916,7 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 	local body_tokens_by_atom = {}
 	for _, src in ipairs((corpus and corpus.source_order) or {}) do
 		local scan = src.scan
-		if scan then
+		if    scan then
 			for _, atom in ipairs(scan.atoms or {}) do
 				body_tokens_by_atom[atom.name] = atom.body_tokens
 			end
@@ -948,8 +935,8 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 
 	for atom_name, ai in pairs(ai_by_atom) do
 		if ai.binds then
-			local struct     = rbind_structs[ai.binds]
-			local body_toks  = body_tokens_by_atom[atom_name]
+			local struct    = rbind_structs[ai.binds]
+			local body_toks = body_tokens_by_atom[atom_name]
 			if struct and body_toks then
 				local pairs = parse_body_load_pairs(body_toks, ai.binds, registries)
 				if #pairs > 0 then
@@ -984,7 +971,8 @@ end
 --- (the final unit, referenced by the main CU's DW_AT_stmt_list).
 ---
 --- This builder extends the main compilation unit.
---- A detached synthetic line unit has no DW_AT_stmt_list referencing it, so gdb ignored it (a previous experiment); byte 13 is the first special opcode, not the extended-opcode marker.
+--- A detached synthetic line unit has no DW_AT_stmt_list referencing it, so gdb ignored it (a previous experiment);
+--- byte 13 is the first special opcode, not the extended-opcode marker.
 --- The existing final unit already contains hello_gte_tape.c as file index 11 and ends with a valid end_sequence.
 --- We preserve its bytes, append independent atom sequences, and increase only that unit's DWARF32 unit_length.
 --- @param existing   string -- existing section bytes, byte-for-byte
@@ -995,9 +983,7 @@ local function build_dwarf_line_section(existing, atom_table)
 
 	-- Build the sequences.
 	local sequences = {}
-	for _, atom in ipairs(atom_table) do
-		sequences[#sequences + 1] = build_atom_sequence(atom)
-	end
+	for _, atom in ipairs(atom_table) do sequences[#sequences + 1] = build_atom_sequence(atom) end
 	local appended = table.concat(sequences)
 
 	-- Walk DWARF32 line units and retain the final unit's bounds.
@@ -1005,7 +991,7 @@ local function build_dwarf_line_section(existing, atom_table)
 	local unit_pos, last_pos, last_length, last_end = 0, nil, nil, nil
 	while unit_pos < #existing do
 		if unit_pos + 4 > #existing then return existing end
-		local unit_length = elf_dwarf.read_u32_le(existing, unit_pos)
+		local unit_length =  elf_dwarf.read_u32_le(existing, unit_pos)
 		if    unit_length == elf_dwarf.ELF32.dw_dwarf32_terminator then return existing end
 		local unit_end_excl = unit_pos + 4 + unit_length
 		if unit_end_excl > #existing then return existing end
@@ -1531,13 +1517,12 @@ end
 ---        DW_AT_location  = piece-chain (DW_FORM_exprloc)
 ---        DW_AT_type      = ref4 → structure_type DIE
 ---
---- This function does NOT emit the final 0 byte (root terminator). build_debug_info_section splices bytes ahead of the root terminator
---- and preserves existing DIE bytes exactly.
+--- This function does NOT emit the final 0 byte (root terminator).
+--- build_debug_info_section splices bytes ahead of the root terminator and preserves existing DIE bytes exactly.
 ---
 --- ref4 basis: DW_FORM_ref4 is CU-relative (offset from the first byte of the CU header).
 --- Our inserted DIEs live in the main CU, so every ref4 = (target section offset) - main_cu_offset.
 --- Per-die section offsets are tracked via the running `next_offset` cursor (= section offset of the NEXT byte to emit).
----
 --- @param main_cu_offset integer    -- 0-based section offset of the main CU's unit_length field
 --- @param main_cu_end_excl integer  -- 0-based section offset of the first byte AFTER the main CU
 --- @param atom_table table[]        -- atoms (with atom.rbind set if rbind; atom.invocations set if mac_X(...) calls)
@@ -1657,6 +1642,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	--
 	-- The table is small + explicit — the prototype principle treats the typed-view struct layout as data, not derived state.
 	local STRUCT_MEMBER_TABLE = {
+		-- TODO(Ed): This hardcoding is brittle...
+		-- TODO(Ed): Better to just have a table for the fundamental types in duffle/dsl.h, we can derive the rest via typedef parsing...
 		-- 2-element signed short vector (rare; placeholder for future use).
 		V2_S2 = { byte_size = 4, members = {
 			{ name = "x", offset = 0, byte_size = 2 },
@@ -1909,12 +1896,13 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		end
 		local atom_view = (registries.atom_views or {})[atom.name]
 		-- Build the atom-name lookup table once (cheap; O(atom_table)) so step (b) and step (d) can resolve rbind_atom names.
+		-- TODO(Ed): Bad assignment?
 		local atom_by_name = atom_by_name or (function() local m = {}; for _, a in ipairs(atom_table) do if a.name then m[a.name] = a end end; return m end)()
 		-- step (b) inputs: this atom's `atom_ctx(<rbind_atom>)` (resolved from the registries' atom_ctxs)
 		local this_ctx = registries.atom_ctxs and registries.atom_ctxs[atom.name]
 		if this_ctx and this_ctx.rbind_atom then
 			local rbind = atom_by_name_global[this_ctx.rbind_atom]
-			if rbind and rbind.rbind and rbind.rbind.fields then
+			if    rbind and rbind.rbind and rbind.rbind.fields then
 				atom_view_ctx_fields = {}
 				for _, f in ipairs(rbind.rbind.fields) do atom_view_ctx_fields[f.name] = f end
 				if rbind.rbind.regs then
@@ -1934,11 +1922,11 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		end
 		if my_phase_label then
 			local group = (registries.atom_phases or {})[my_phase_label]
-			if group and group.atoms then
+			if    group and group.atoms then
 				for _, group_atom_name in ipairs(group.atoms) do
 					if group_atom_name ~= atom.name then
 						local cand = atom_by_name_global[group_atom_name]
-						if cand and cand.rbind and cand.rbind.fields then
+						if    cand and cand.rbind and cand.rbind.fields then
 							atom_view_phase_fields = {}
 							for _, f in ipairs(cand.rbind.fields) do atom_view_phase_fields[f.name] = f end
 							if cand.rbind.regs then
@@ -1959,7 +1947,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			-- (a) per-atom callsite atom_type(R_X, <T>): most specific; user explicit override for THIS atom only.
 			function(r_name, alias_code)
 				local override = atom_view and atom_view.reg_type_overrides and atom_view.reg_type_overrides[r_name]
-				if override and override.pointer_depth and override.pointer_depth > 0 then
+				if    override and override.pointer_depth and override.pointer_depth > 0 then
 					return type_chain_offsets[override.type_name .. "|" .. override.pointer_depth]
 				end
 			end,
@@ -1967,7 +1955,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			function(r_name, alias_code)
 				local ctx_field_name = reg_to_field_ctx and reg_to_field_ctx[alias_code]
 				local ctx_f          = ctx_field_name and atom_view_ctx_fields and atom_view_ctx_fields[ctx_field_name]
-				if ctx_f and ctx_f.pointer_depth and ctx_f.pointer_depth > 0 then
+				if    ctx_f and ctx_f.pointer_depth and ctx_f.pointer_depth > 0 then
 					return type_chain_offsets[ctx_f.type_name .. "|" .. ctx_f.pointer_depth]
 				end
 			end,
@@ -1975,7 +1963,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			function(r_name, alias_code)
 				local field_name = reg_to_field[alias_code]
 				local f         = field_name and field_type_by_name[field_name]
-				if f and f.pointer_depth and f.pointer_depth > 0 then
+				if    f and f.pointer_depth and f.pointer_depth > 0 then
 					return type_chain_offsets[f.type_name .. "|" .. f.pointer_depth]
 				end
 			end,
@@ -1983,12 +1971,13 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			function(r_name, alias_code)
 				local phase_field_name = reg_to_field_phase and reg_to_field_phase[alias_code]
 				local phase_f          = phase_field_name and atom_view_phase_fields and atom_view_phase_fields[phase_field_name]
-				if phase_f and phase_f.pointer_depth and phase_f.pointer_depth > 0 then
+				if    phase_f and phase_f.pointer_depth and phase_f.pointer_depth > 0 then
 					return type_chain_offsets[phase_f.type_name .. "|" .. phase_f.pointer_depth]
 				end
 			end,
 			-- (e) enum-site atom_type(<T>) default on the registry entry.
 			function(r_name, alias_code)
+				-- TODO(Ed): Bad definition?
 				if alias and alias.default_type and alias.default_depth and alias.default_depth > 0 then
 					return type_chain_offsets[alias.default_type .. "|" .. alias.default_depth]
 				end
@@ -1997,8 +1986,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 
 		-- Iterate `by_alias` in sorted order; Lua's pairs() is non-deterministic, so sorting ensures byte-identical DWARF output across builds.
 		for _, r_name in ipairs(by_alias_order) do
-			local alias = by_alias[r_name]
-			local rr_name = "RR_" .. strip_r_prefix(r_name)
+			local alias      = by_alias[r_name]
+			local rr_name    = "RR_" .. strip_r_prefix(r_name)
 			local alias_code = alias.code
 			emit(uleb128(ABBREV_VARIABLE))
 			emit(rr_name .. "\0") -- DW_FORM_string (DW_AT_name)
@@ -2020,7 +2009,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		-- Two PC ranges cover every field: [atom.addr, last_load+8) describes each field as tape memory (DW_OP_bregN + offset) piece,
 		-- and [last_load+8, atom.end) describes each field as a GPR (DW_OP_regN) piece.
 		if atom.rbind then
-			local binds_name = atom.rbind.binds
+			local binds_name      = atom.rbind.binds
 			local loclists_offset = loclists_offsets[atom.name] or 0
 			emit(uleb128(ABBREV_BIND_VAR_LOCLIST))
 			emit("bind_args\0")                  -- DW_FORM_string (DW_AT_name)
@@ -2073,7 +2062,7 @@ end
 ---
 --- Fails safely by returning existing sections unchanged if the table walker can't find the table terminator (malformed input).
 ---
---- @param existing string  -- existing .debug_abbrev bytes, byte-for-byte
+--- @param existing           string   -- existing .debug_abbrev bytes, byte-for-byte
 --- @param main_abbrev_offset integer  -- 0-based offset into `existing` of the main CU's abbrev table
 --- @return string, integer  -- (new_abbrev_bytes, offset_where_duplicate_table_starts = #existing)
 local function build_debug_abbrev_section(existing, main_abbrev_offset)
@@ -2091,7 +2080,7 @@ local function build_debug_abbrev_section(existing, main_abbrev_offset)
 end
 
 --- Build the new .debug_str: existing strings + new strings appended.
---- @param existing string  -- existing .debug_str bytes, byte-for-byte
+--- @param existing   string  -- existing .debug_str bytes, byte-for-byte
 --- @param atom_table table[]
 --- @param registries table  -- merged registries from collect_per_source_registries
 --- @return string  -- existing bytes plus the deterministic appended strings
@@ -2101,7 +2090,6 @@ local function build_debug_str_section(existing, atom_table, registries)
 end
 
 --- Build the new .debug_info: SPLICE inserted DIEs into the MAIN CU as children.
----
 --- This implementation:
 ---   1. Builds the inserted-children bytes (base_type, struct_types, subprograms with their RR_* + bind_args children) via build_inserted_children.
 ---   2. Patches the main CU's `unit_length` field to account for the inserted bytes.
@@ -2111,14 +2099,14 @@ end
 ---
 --- The crt CU (everything before main_cu_start) is preserved.
 
---- @param existing string            -- existing .debug_info section bytes
---- @param main_cu_start integer      -- 0-based offset of the main CU's unit_length field
---- @param main_cu_end_excl integer   -- 0-based offset of the first byte AFTER the main CU
+--- @param existing          string   -- existing .debug_info section bytes
+--- @param main_cu_start     integer  -- 0-based offset of the main CU's unit_length field
+--- @param main_cu_end_excl  integer  -- 0-based offset of the first byte AFTER the main CU
 --- @param new_abbrev_offset integer  -- 0-based offset into the new .debug_abbrev of the duplicate main table
---- @param atom_table table[]
---- @param rbind_structs table     -- {[binds_name] = {bytes, fields, atom_names}}
---- @param loclists_offsets table  -- {[atom_name] = section-relative offset}
---- @param registries table        -- merged registries from collect_per_source_registries
+--- @param atom_table        table[]
+--- @param rbind_structs     table    -- {[binds_name] = {bytes, fields, atom_names}}
+--- @param loclists_offsets  table    -- {[atom_name] = section-relative offset}
+--- @param registries        table    -- merged registries from collect_per_source_registries
 --- @return string  -- the rebuilt .debug_info bytes
 local function build_debug_info_section(existing, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets, registries)
 	-- 1) Build the inserted children bytes (just before the main CU's root terminator).
@@ -2176,13 +2164,13 @@ local SECTION_WRITERS = {
 -- Write a list of `{name, data}` section records to disk via SECTION_WRITERS.
 -- @param results table[]  -- list of `{name=, data=}` records to write
 -- @param ctx PassCtx
--- @param basename string   -- output file basename (e.g. "hello_gte")
--- @return table             -- list of {name_bin = path} entries to append to M.run's outputs
+-- @param basename string  -- output file basename (e.g. "hello_gte")
+-- @return table           -- list of {name_bin = path} entries to append to M.run's outputs
 local function write_sections(results, ctx, basename)
 	local outputs = {}
 	for _, r in ipairs(results) do
 		local path = SECTION_WRITERS[r.name](ctx.out_root, basename)
-		local f = io.open(path, "wb")
+		local  f   = io.open(path, "wb")
 		if not f then
 			io.stderr:write(string.format("[dwarf_injection] failed to open %s for write\n", path))
 		else
@@ -2209,7 +2197,7 @@ function M.run(ctx)
 	end
 
 	-- Guard: --elf is required.
-	local elf_path = ctx.flags and ctx.flags.elf_path
+	local  elf_path = ctx.flags and ctx.flags.elf_path
 	if not elf_path or elf_path == "" then
 		io.stderr:write("[dwarf_injection] --elf flag missing\n")
 		return { outputs = {}, errors = {}, warnings = {} }
@@ -2220,7 +2208,8 @@ function M.run(ctx)
 
 	-- Read the existing DWARF sections directly (no subprocess; io.open + manual ELF32 section-header walk).
 	-- We need all 8 sections: .debug_line / .debug_aranges / .debug_rnglists get extended (additional rows appended to the existing unit),
-	-- and .debug_info / .debug_abbrev / .debug_str / .debug_loc / .debug_loclists get spliced (the main CU's unit_length is patched; no new compile unit is appended; .debug_loc/.debug_loclists may not exist in the source ELF so we add-section them on splice).
+	-- and .debug_info / .debug_abbrev / .debug_str / .debug_loc / .debug_loclists get spliced
+	-- (the main CU's unit_length is patched; no new compile unit is appended; .debug_loc/.debug_loclists may not exist in the source ELF so we add-section them on splice).
 	-- The per-section dispatch is inlined in the writers loop below.
 	local existing_sections = elf_dwarf.read_elf_sections(elf_path, {
 		".debug_line", ".debug_aranges", ".debug_rnglists",
@@ -2235,12 +2224,11 @@ function M.run(ctx)
 	init_file_index_lookup(elf_path)
 	-- Skip state lives in `corpus.atoms_by_name[*].debug_skip` (whole-atom) and `atom.paths.invocations[*].debug_skip` (per-invocation).
 	-- `corpus` is the sole canonical source projection.
-	local corpus = (ctx.shared and ctx.shared.corpus) or {}
+	local corpus     = (ctx.shared and ctx.shared.corpus) or {}
 	local registries = collect_per_source_registries(corpus)
-	-- Read nm symbols (the ONLY disk-side input to the atom table) and join
-	-- them against `corpus.atoms_by_name` + `atom.paths` for word rows + invocation ancestry.
+	-- Read nm symbols (the ONLY disk-side input to the atom table) and join them against `corpus.atoms_by_name` + `atom.paths` for word rows + invocation ancestry.
 	-- Disk source-map/provenance text is not consulted (those are diagnostic artifacts; semantic inputs are in memory).
-	local addrs = elf_dwarf.read_nm(ctx.flags.elf_path)
+	local addrs      = elf_dwarf.read_nm(ctx.flags.elf_path)
 	local atom_table = build_atom_table(corpus, addrs)
 
 	-- Detect rbind atoms + index Binds_* struct fields from the corpus.
@@ -2264,7 +2252,7 @@ function M.run(ctx)
 		duffle.ensure_dir(ctx.out_root)
 
 		-- Step 0: layout validation. Bail out safely if the .debug_info layout doesn't match what we expect (crt CU + DWARF5 main CU + final 0 byte).
-	-- A layout mismatch means the gcc emission changed; the safest response is to leave existing sections unchanged and emit no synthetic data, so the build's debug-info step never silently produces broken DWARF.
+		-- A layout mismatch means the gcc emission changed; the safest response is to leave existing sections unchanged and emit no synthetic data, so the build's debug-info step never silently produces broken DWARF.
 		local existing_info   = existing_sections[".debug_info"]   or ""
 		local existing_abbrev = existing_sections[".debug_abbrev"] or ""
 		local main_cu_start, main_cu_end_excl, main_abbrev_offset = find_main_cu_layout(existing_info)
@@ -2299,7 +2287,7 @@ function M.run(ctx)
 		local new_info  = build_debug_info_section(existing_info, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets, registries)
 
 		-- Step 2b: rebuild .debug_str now that we know which RR_<R_Name> entries get emitted.
-	-- This aligns with build_debug_info_section's by_alias loop.
+		-- This aligns with build_debug_info_section's by_alias loop.
 		local new_str = build_debug_str_section(existing_sections[".debug_str"] or "", atom_table, registries)
 
 		-- Step 3-5: independent sections.

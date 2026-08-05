@@ -6,7 +6,7 @@
 // One line per macro that appears in your atom sources.
 //
 // This file is encoding-macros-only. 
-// The auto-generated component macros (mac_X) live in duffle/gen/<dir>.macs.h (included separately by the unity build).
+// The auto-generated component macros (mac_X) live in the source directory's own gen/macs.h (per-directory aggregation; included separately by the unity build).
 // The unity build should include THIS file and the .macs.h file in the same TU, with both wrapped 
 // (or the include guard order handled) to avoid WORD_COUNT redeclaration.
 //

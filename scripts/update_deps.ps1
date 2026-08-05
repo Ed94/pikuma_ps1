@@ -56,7 +56,7 @@ if (-not $msbuild_exe) {
 }
 
 $path_pcsx_sln = join-path $path_pcsx_redux 'vsprojects\pcsx-redux.sln'
-&	$msbuild_exe $path_pcsx_sln /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /m /v:minimal
+& $msbuild_exe $path_pcsx_sln /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /m /v:minimal
 
 # Locate luajit via scoop. `luajit.exe` is on PATH via scoop's shim;
 # we use `scoop prefix` to find the install root for the include dir (needed to compile lpeg against luajit's headers).
@@ -70,8 +70,8 @@ if (-not $luajit_prefix -or -not (Test-Path (Join-Path $luajit_prefix 'bin/luaji
 # Discover the luajit include dir by globbing `include/luajit-*`.
 # This avoids hardcoding a specific version (e.g. `luajit-2.1`).
 $luajit_include_root = Join-Path $luajit_prefix 'include'
-$lua_inc_dir = Get-ChildItem -Path $luajit_include_root -Directory -Filter 'luajit-*' -ErrorAction SilentlyContinue |
-	Select-Object -First 1 -ExpandProperty FullName
+$lua_inc_dir         = Get-ChildItem -Path $luajit_include_root -Directory -Filter 'luajit-*' -ErrorAction SilentlyContinue |
+Select-Object -First 1 -ExpandProperty FullName
 if (-not $lua_inc_dir) {
 	write-error "No 'luajit-*' include dir found under '$luajit_include_root'. The scoop luajit install may be broken."
 	exit 1
@@ -90,7 +90,7 @@ $lpeg_compile_args = @(
 	'-o', 'lpeg.dll'
 ) + $lpeg_sources + @('-lluajit-5.1')
 push-location $path_lpeg
-&	gcc @lpeg_compile_args
+& gcc @lpeg_compile_args
 pop-location
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -101,8 +101,8 @@ pop-location
 
 $path_lfs = join-path $path_toolchain 'lfs'
 verify-path $path_lfs
-$lfs_src = join-path $path_pcsx_redux 'third_party\luafilesystem\src\lfs.c'
-$lfs_dll = join-path $path_lfs 'lfs.dll'
+$lfs_src        = join-path $path_pcsx_redux 'third_party\luafilesystem\src\lfs.c'
+$lfs_dll        = join-path $path_lfs 'lfs.dll'
 $lfs_dll_import = join-path $luajit_lib_dir 'libluajit-5.1.dll.a'
 & gcc -O2 -shared "-I$lua_inc_dir" -o $lfs_dll $lfs_src $lfs_dll_import
 

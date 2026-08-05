@@ -1,10 +1,10 @@
 #ifdef INTELLISENSE_DIRECTIVES
-#	include "duffle/gen/duffle.macs.h"
-#	include "duffle/gen/duffle.offsets.h"
+#	include "duffle/gen/macs.h"
+#	include "duffle/gen/offsets.h"
 #	include "duffle/atom_dsl.h"
 #	include "duffle/lottes_tape.h"
 #	include "duffle/word_count.metadata.h"
-#	include "gen/hello_gte.offsets.h"
+#	include "gen/offsets.h"
 #	include "hello_gte.h"
 #endif
 

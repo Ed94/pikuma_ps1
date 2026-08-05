@@ -6,10 +6,9 @@
 --- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations,
 --- then resolves the function-args string from the preceding `FI_ Slice_MipsCode ac_X(...)` declaration via a backward walk.
 ---
---- Emits one `<dir_basename>.macs.h` per source with `#define mac_X(sig) \` macros plus `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
----
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible.
+--- Emits one `gen/macs.h` per *immediate source directory* with `#define mac_X(sig) \` macros plus `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
+--- All sources inside the same directory contribute to the same file (per-directory aggregation).
+--- The directory itself is the namespace, so the filename does not repeat the module name.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -41,43 +40,44 @@ local MAC_PREFIX_LEN  = 4
 local BYTE_NEWLINE    = 10
 local BYTE_SLASH      = 47
 
--- Source dir basename used as the output `.macs.h` filename.
+-- Output gen subdirectory + filename (per-directory aggregation; the directory name is the namespace).
 local GEN_SUBDIR      = "gen"
+local MACS_FILENAME   = "macs.h"
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
---- @field scan     table   -- pre-scanned SourceScan payload (from duffle.scan_source)
+--- @field path     string  -- Absolute path to the source file
+--- @field text     string  -- Full source text
+--- @field dir      string  -- Directory containing the source
+--- @field basename string  -- Filename without extension
+--- @field scan     table   -- Pre-scanned SourceScan payload (from duffle.scan_source)
 
 --- @class PassCtx
---- @field sources            SourceFile[]           -- all source files in the build
---- @field metadata_path      string                 -- path to word_count.metadata.h
---- @field shared             table                  -- cross-pass shared state
---- @field out_root           string                 -- output root (e.g. "build/gen")
---- @field project_root       string                 -- project root (e.g. "code/")
---- @field upstream           table<string, table>   -- per-pass upstream outputs
+--- @field sources            SourceFile[]           -- All source files in the build
+--- @field metadata_path      string                 -- Path to word_count.metadata.h
+--- @field shared             table                  -- Cross-pass shared state
+--- @field out_root           string                 -- Output root (e.g. "build/gen")
+--- @field project_root       string                 -- Project root (e.g. "code/")
+--- @field upstream           table<string, table>   -- Per-pass upstream outputs
 --- @field flags              table                  -- CLI flags
---- @field verbose            boolean                -- log diagnostic info
+--- @field verbose            boolean                -- Log diagnostic info
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
---- @field errors   table[]  -- {line=, msg=} entries; build-stops
---- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
+--- @field errors   table[]  -- {line=, msg=}  entries; build-stops
+--- @field warnings table[]  -- {line=, msg=}  entries; build-succeeds
 
 --- @class Component
---- @field name       string     -- atom name (without `ac_` prefix)
---- @field body       string     -- brace-delimited body (without the braces)
---- @field args       string|nil -- function-args string (function form only)
---- @field line       integer    -- source line of the declaration
---- @field comment    string|nil -- scanner-owned `declaration_comment`; the components pass reads it from the scanner record
+--- @field name       string     -- Atom name (without `ac_` prefix)
+--- @field body       string     -- Brace-delimited body (without the braces)
+--- @field args       string|nil -- Function-args string (function form only)
+--- @field line       integer    -- Source line of the declaration
+--- @field comment    string|nil -- Scanner-owned `declaration_comment`; the components pass reads it from the scanner record
 --- @field kind       string     -- "comp_bare" | "comp_proc"
---- @field debug_skip boolean    -- mirror of `a.debug_skip` (scanner-owned); true iff a bare `atom_dbg_skip` marker immediately preceded the declaration
+--- @field debug_skip boolean    -- Mirror of `a.debug_skip` (scanner-owned); true iff a bare `atom_dbg_skip` marker immediately preceded the declaration
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Local helpers (file I/O + path normalization)
@@ -231,7 +231,6 @@ end
 --
 -- Skips `//` sequences that are inside string or character literals
 -- (a rough heuristic — sufficient for component bodies which don't have those constructs).
---
 --- @param s string
 --- @return string
 local function convert_line_comments_to_block(s)
@@ -300,7 +299,7 @@ local function word_count_rec(name, comp_by_name, wc, cache)
 			local trimmed = t.tok
 			if trimmed ~= "" then
 				local lookup = strip_mac_prefix(duffle.read_ident(trimmed, 1))
-				if lookup and comp_by_name[lookup] then
+				if    lookup and comp_by_name[lookup] then
 					-- It's a `mac_X(...)` call. Recurse.
 					n = n + word_count_rec(lookup, comp_by_name, wc, cache)
 				elseif lookup and wc and wc[lookup] then
@@ -350,7 +349,6 @@ end
 
 --- (internal) Recursive cycle-cost derivation. Sum `latency[ident]` per emitted instruction in the component body,
 --- recursing through nested `mac_*` calls (so `mac_format_g4_color`'s cost = 4 × `mac_pack_color_word`'s cost).
----
 --- Special rule: `mac_yield`'s cost = 0 (per `lottes_tape.h:125-130` "the runtime cost lands in the next atom's prologue").
 --- @param name         string  -- component bare name (e.g. "yield", "pack_color_word")
 --- @param comp_by_name table<string, Component>
@@ -394,7 +392,6 @@ end
 --- (internal) Recursive GP0 prim-buffer contribution. Count `store_word` / `store_half` / `store_byte` 
 --- calls in the component body that target `R_PrimCursor` (these are the
 --- RAM-side prim-buffer words the macro contributes), recursing through nested `mac_*` calls.
----
 --- Only `R_PrimCursor`-targeting stores count. Stores targeting other registers (e.g. `R_OtBase`, heap pointers) are not prim-buffer contributions.
 --- @param name         string
 --- @param comp_by_name table<string, Component>
@@ -410,9 +407,9 @@ local function gp0_contrib_rec(name, comp_by_name, cache)
 		local tokens = cc.body_tokens
 		for _, t in ipairs(tokens) do
 			local trimmed = t.tok
-			if trimmed ~= "" then
+			if    trimmed ~= "" then
 				local ident = duffle.read_ident(trimmed, 1)
-				if ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
+				if    ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
 					-- Nested `mac_X(...)` call: recurse.
 					local nested = ident:sub(MAC_PREFIX_LEN + 1)
 					n = n + gp0_contrib_rec(nested, comp_by_name, cache)
@@ -460,8 +457,8 @@ end
 --- @param s string
 --- @return string[]
 local function split_comment_lines(s)
-	local out  = {}
-	local pos  = 1
+	local out   = {}
+	local pos   = 1
 	local s_len = #s
 	while pos <= s_len do
 		local nl = s:find("\n", pos, true)
@@ -536,9 +533,9 @@ local function build_component_lines(c, counts)
 
 	local tokens = duffle.split_top_level_commas(c.body)
 	for i = 1, #tokens do tokens[i] = duffle.trim(tokens[i]) end
-	local sig    = signature_from_args(c.args)
+	local sig = signature_from_args(c.args)
 	-- Direct lookup against the per-source precomputed `counts` table (built once by count_all_components).
-	local n      = counts[c.name]
+	local n   = counts[c.name]
 
 	if n > 0 then
 		emit_macro_body(lines, c, sig, tokens)
@@ -557,9 +554,15 @@ end
 
 --- Build the boilerplate header lines (the `#ifdef INTELLISENSE_DIRECTIVES` block,
 --- the `// Auto-generated` comment, the `// Source:` line, and the self-contained `WORD_COUNT` macro definition).
---- @param src SourceFile
+--- @param dir     string       -- the absolute source directory
+--- @param sources SourceFile[] -- sources contributing to this directory (for the header comment)
 --- @return string[]
-local function header_boilerplate(src)
+local function header_boilerplate(dir, sources)
+	local source_lines = { "// Directory: " .. duffle.to_absolute_path(dir) .. "/" }
+	for _, src in ipairs(sources) do
+		source_lines[#source_lines + 1] = "//   source: " .. duffle.to_absolute_path(src.path)
+	end
+	local source_blob = table.concat(source_lines, "\n")
 	return {
 		-- #pragma once wrapped in #ifdef INTELLISENSE_DIRECTIVES, matching the convention in lottes_tape.h.
 		-- The build does manual unity includes (the user controls include order), so the pragma is only active for IDE/tooling.
@@ -567,7 +570,7 @@ local function header_boilerplate(src)
 		"#pragma once",
 		"#endif",
 		"// Auto-generated by ps1_meta.lua — DO NOT EDIT",
-		"// Source: " .. duffle.to_absolute_path(src.path),
+		source_blob,
 		"// Component atoms (MipsAtomComp_(ac_*)) -> macro variants (mac_*)",
 		"",
 		-- Self-contained: define WORD_COUNT if not already defined.
@@ -580,30 +583,30 @@ local function header_boilerplate(src)
 	}
 end
 
---- Compute the output path for one source's `.macs.h` file.
---- The pre-rework convention uses the *directory* basename (not the source file basename)
----  e.g. `code/duffle/lottes_tape.h` produces `code/duffle/gen/duffle.macs.h`.
---- This matches what the C codebase #includes.
---- @param src SourceFile
+--- Compute the per-directory output path for `.macs.h`.
+---  e.g. any source in `code/duffle/` produces `code/duffle/gen/macs.h` regardless of source filename.
+--- The directory name is the namespace; the filename does not repeat it.
+--- @param dir string  -- the absolute source directory
 --- @return string  -- the output directory
 --- @return string  -- the full output path
-local function compute_macs_h_path(src)
-	local  out_dir  = src.dir .. "/" .. GEN_SUBDIR
-	local  out_path = out_dir .. "/" .. duffle.basename_no_ext(src.dir) .. ".macs.h"
+local function compute_macs_h_path(dir)
+	local  out_dir  = dir .. "/" .. GEN_SUBDIR
+	local  out_path = out_dir .. "/" .. MACS_FILENAME
 	return out_dir, out_path
 end
 
---- Emit a per-source `.macs.h` header with the `mac_X` macros + `WORD_COUNT` entries. 
+--- Emit a per-directory `.macs.h` header with the aggregated `mac_X` macros + `WORD_COUNT` entries.
 --- Writes in BINARY mode so LF line endings are preserved (the git blob is LF; Windows text-mode would emit CRLF and break the byte-identical diff).
 --- @param ctx        PassCtx
---- @param src        SourceFile
---- @param components Component[]
+--- @param dir        string                  -- the absolute source directory
+--- @param sources    SourceFile[]            -- sources contributing to this directory (for the header comment)
+--- @param components Component[]             -- aggregated components from all sources in this directory
 --- @param counts     table<string, integer>  -- precomputed word counts (from count_all_components)
 --- @return string|nil  -- path to the written file (nil if no components)
-local function emit_component_macros_h(ctx, src, components, counts)
+local function emit_component_macros_h(ctx, dir, sources, components, counts)
 	if #components == 0 then return nil end
-	local out_dir, out_path = compute_macs_h_path(src)
-	local lines             = header_boilerplate(src)
+	local out_dir, out_path = compute_macs_h_path(dir)
+	local lines             = header_boilerplate(dir, sources)
 
 	for _, c in ipairs(components) do
 		for _, l in ipairs(build_component_lines(c, counts)) do
@@ -675,7 +678,7 @@ local function update_canonical_components(corpus, src, components, metadata)
 			-- Identical-shape declarations (same path + line) reuse the first-wins entry without a collision record.
 			local existing = corpus.components[c.name]
 			if existing.path ~= rel_path or existing.line ~= c.line then
-				local kind     = c.kind or "comp_bare"
+				local kind       = c.kind or "comp_bare"
 				local first_kind = existing.kind or "comp_bare"
 				corpus.collisions[#corpus.collisions + 1] = {
 					kind              = "component",
@@ -740,24 +743,39 @@ function M.run(ctx)
 	--   * `corpus.component_body_index[name]` — body / line_of / source index
 	-- The pass writes to the corpus only; consumers read from the corpus directly.
 
-	for _, src in ipairs(corpus.source_order) do
-		-- project_components reads from src.scan + does backward lookups on src.text
-		local components = project_components(src.text, src.scan)
-		if #components > 0 then
-			-- Compute all component word counts once per source.
-			-- Use `corpus.word_counts` so the recursive lookup sees both authored-metadata entries
-			-- (loaded by word_count_eval.run) AND same-source component entries (populated earlier in this loop by `update_canonical_word_counts`).
-			local counts = count_all_components(components, corpus.word_counts)
-			-- Derive cycle_cost + gp0_contrib from the original `MipsAtomComp_` body tokens
-			-- (NOT from the generated `mac_*` variants — those are written to disk above).
-			local metadata = compute_components_metadata(components, duffle.INSTRUCTION_LATENCY)
-			local macs_path = emit_component_macros_h(ctx, src, components, counts)
+	-- Per-directory aggregation: every source in the same directory contributes to one `gen/macs.h`.
+	-- The directory itself is the namespace. `corpus.sources_by_dir` preserves source-order within each bucket (matches `corpus.source_order`).
+	local sources_by_dir = corpus.sources_by_dir or duffle.group_sources_by_dir(corpus.source_order)
+	for dir, sources in pairs(sources_by_dir) do
+		-- Aggregate components from every source in this directory.
+		-- `project_components` returns nil for sources with no `MipsAtomComp_` declarations; we skip those.
+		local aggregated_components = {}
+		local metadata_per_source   = {}
+		for _, src in ipairs(sources) do
+			local per_source = project_components(src.text, src.scan) or {}
+			for _, c in ipairs(per_source) do
+				aggregated_components[#aggregated_components + 1] = c
+			end
+			if #per_source > 0 then
+				metadata_per_source[src] = compute_components_metadata(per_source, duffle.INSTRUCTION_LATENCY)
+			end
+		end
+		if #aggregated_components > 0 then
+			-- Compute word counts across the aggregated set. `corpus.word_counts` carries the
+			-- same-source + prior-directory entries so the recursive lookup sees both.
+			local counts    = count_all_components(aggregated_components, corpus.word_counts)
+			local macs_path = emit_component_macros_h(ctx, dir, sources, aggregated_components, counts)
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }
-				-- Populate the projections AFTER disk emission (so the byte-identical `.macs.h` contract is preserved before any current-count mutation).
-				update_canonical_word_counts(corpus, components, counts)
-				update_canonical_components(corpus, src, components, metadata)
-				update_canonical_component_body_index(corpus, src, components, src.scan)
+				-- Populate the projections AFTER disk emission (byte-identical `.macs.h` contract).
+				update_canonical_word_counts(corpus, aggregated_components, counts)
+				for _, src in ipairs(sources) do
+					local per_source = project_components(src.text, src.scan) or {}
+					if #per_source > 0 then
+						update_canonical_components(corpus, src, per_source, metadata_per_source[src])
+						update_canonical_component_body_index(corpus, src, per_source, src.scan)
+					end
+				end
 			end
 		end
 	end

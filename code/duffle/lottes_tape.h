@@ -1,13 +1,14 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	pragma once
+#	include "gen/macs.h"
+#	include "gen/offsets.h"
+
 #	include "dsl.h"
 #	include "gcc_asm.h"
 # include "mips.h"
 # include "gte.h"
 # include "memory.h"
-#	include "atom_dsl.h"
-#	include "gen/duffle.macs.h"
-#	include "gen/duffle.offsets.h"
+#	include "dsl.atom.h"
 #endif
 
 typedef U4 const MipsCode; // Underlying type to mips asm words.
@@ -28,7 +29,19 @@ typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that
 //   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
 #define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
 
-// Auto-generated component macros (<module>/gen/<dir>/<dir>.macs.h) are included manually by the unity build.
+/* Line-table anchor: gcc only adds a file to the .debug_line file table when the
+   file contains line-numbered content. Files containing only:
+     - `MipsAtomComp_` static-array declarations, or
+     - `MipsAtomComp_Proc_` (force-inline) function bodies whose line info gets
+       attributed to the call site at the include point are otherwise omitted from the file table,
+			 which breaks the DWARF injection when it tries to resolve atom-component provenance paths.
+
+   Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
+	 The macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
+	 The constant is in `.rodata` and unreferenced; the linker may eliminate it.
+	 The two-level concat + `__LINE__` suffix makes the identifier unique per call site
+	 (the identifier embeds the source line, so duplicates across `#include`d files don't collide). */
+#define ATOM_FILE_DEBUGGER_LINE_MARKER(file_name) internal U4 const tmpl(atom_file_debugger_line_marker,file_name) = 0
 
 /* Register aliases */
 enum {
@@ -59,15 +72,11 @@ enum {
 	R_TScratch6  = R_T6,
 	R_TScratch7  = R_T7,
 	R_TScratch8 =  R_T8,
-	R_TScratch10 = R_V0,
-	R_TScratch11 = R_V1,
+	R_TScratch10 = R_V0, // Tend to be used with gte DMAs
+	R_TScratch11 = R_V1, // Tend to be used with gte DMAs
 	// Note(Ed): We can technically clobber these, but don't unless we hit a bottleneck.
-	// R_TScratch12 = R_A0,
-	// R_TScratch13 = R_A1,
-	// R_TScratch14 = R_A3,
-	// TODO(Ed): Review S0-S7, they are technically avaialble, we just have to snapshot them at the ABI boundary.
-	// TODO(Ed): This is technically a waste of cycles for most work? so maybe only do this for expensive atoms on-demand or atom phases.
-// TODO(Ed): Sort out the other available registers... (Not sure how much is left avail)
+	// A 0-2
+	// S 0-7
 };
 
 #pragma region Tape Drive
@@ -79,7 +88,6 @@ typedef Slice_(MipsAtom); typedef Slice_MipsAtom Tape;
 /* The 'Exit' Atom */
 atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
 
-//TODO(Ed): Do we backup R_S0-7 here? Have it in a heavier tape run as a opt-in? Same with V0-1 and A0-3?
 /* Generalized Tape Engine Runner */
 FI_ void tape_run(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
 	asm_words(
@@ -97,6 +105,26 @@ FI_ void tape_run(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape
 		clb_mem_drain 
 ); }
 
+/* Fully Clobbered Tape */
+FI_ void tape_run_a02_s07(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
+	asm_words(
+		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
+		, add_ui_self(R_TapePtr, S_(MipsAtom)) /* Advance tape */
+		, call_reg(   R_AtomJmp)               /* jalr $t9 */
+		, nop                                  /* Branch delay slot */
+	)
+	asm_rpins, r_use(tape_ptr)
+	asm_clobber: 
+		rlit(R_AT),
+		rlit(R_V0), rlit(R_V1), rlit(R_A0), rlit(R_A1), rlit(R_A2),
+		rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
+		rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8),
+		rlit(R_S0), rlit(R_S1), rlit(R_S2), rlit(R_S3), rlit(R_S4),
+		rlit(R_S5), rlit(R_S6), rlit(R_S7),
+		clb_mem_drain 
+); }
+
+// Procedural authoring of tapes:
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
 FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->used = 0; }
 FI_ TapeBuilder tb_make_old(             FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
@@ -113,7 +141,6 @@ FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4
 
 FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_slice(tb[0])); }
 #define tb_scope_run(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_scope_run_end(tb))
-
 #pragma endregion Tape Drive
 
 #pragma region Macro Mips Atom Components
@@ -143,118 +170,10 @@ atom_dbg_skip MipsAtomComp_(ac_yield_tail) {
 	jump_reg(  R_AtomJmp), nop,
 };
 
-enum {
-	R_PrimCursor = R_T7 atom_reg atom_type(U4*),    /* VRAM output cursor (primitive buffer) */
-	R_FaceCursor = R_T4 atom_reg atom_type(V4_S2*), /* Cube face-index cursor (V4_S2*); floor context switches to V3_S2* via atom_phase */
-	R_VertBase   = R_T5 atom_reg atom_type(V3_S2*), /* Base address of the vertex array */
-	R_OtBase     = R_T6 atom_reg atom_type(U4*),    /* Base address of the Ordering Table */
-#define R_PrimCursor_Code  R_T7_Code
-#define R_FaceCursor_Code  R_T4_Code
-#define R_VertBase_Code    R_T5_Code
-#define R_OtBase_Code      R_T6_Code
-};
-
-/* Words: 3; Loads 3 S2 indices from the face array */
-atom_dbg_skip MipsAtomComp_(ac_load_tri_indices) {
-	load_half_u(R_T0, R_FaceCursor, 0 * S_(S2)),
-	load_half_u(R_T1, R_FaceCursor, 1 * S_(S2)),
-	load_half_u(R_T2, R_FaceCursor, 2 * S_(S2)),
-};
-
-/* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
-atom_dbg_skip MipsAtomComp_(ac_gte_load_tri_verts) {
-	shift_lleft(R_AT, R_T0, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
-	shift_lleft(R_AT, R_T1, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
-	shift_lleft(R_AT, R_T2, v3s2_byteoff), add_u_self(R_AT, R_VertBase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
-};
-
-/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
- * Hardcoded for Poly_F3 (5 words). For Poly_G4, use ac_insert_ot_tag_g4. */
-MipsAtomComp_(ac_insert_ot_tag_f3) {
-	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
-	add_u_self(  R_T1, R_OtBase),                              // T1 = & OrderingTable[OTZ]
-	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
-	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (5 - 1) << 24 = 4 << 24
-	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
-	or_u(        R_AT, R_AT, R_V0),                            // Merge length
-	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
-	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
-	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
-	store_word(  R_AT, R_T1,         O_(PolyTag,code)),        // OrderingTable[OTZ] = PrimCursor
-};
-
-/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
- * Hardcoded for Poly_G4 (9 words). For Poly_F3, use ac_insert_ot_tag_f3. */
-MipsAtomComp_(ac_insert_ot_tag_g4) {
-	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
-	add_u_self(  R_T1, R_OtBase),                              // T1 = & OrderingTable[OTZ]
-	load_word(   R_AT, R_T1,         O_(PolyTag,code)),        // AT = old_ot_head
-	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (9 - 1) << 24 = 8 << 24
-	mask_upper(  R_AT, R_AT,         S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
-	or_u(        R_AT, R_AT, R_V0),                            // Merge length
-	store_word(  R_AT, R_PrimCursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
-	shift_lleft( R_AT, R_PrimCursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
-	shift_lright(R_AT, R_AT,         S_(PolyTag_len_bits)),
-	store_word(  R_AT, R_T1,         O_(PolyTag,code)),        // OrderingTable[OTZ] = PrimCursor
-};
-
-/* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given
- * byte offset. Internal helper used by the *_format_*_color macros. */
-FI_ Slice_MipsCode ac_pack_color_word(U4 off, U4 cmd, U1 r, U1 g, U1 b)
-atom_dbg_skip MipsAtomComp_Proc_(ac_pack_color_word, {
-	load_upper_i(R_AT, (cmd) << 8  | (b)),
-	or_i_self(   R_AT, ((g)  << 8) | (r)),
-	store_word(  R_AT, R_PrimCursor, (off)),
-})
-
-/* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
- * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields). */
-FI_ Slice_MipsCode ac_format_f3_color(U1 r, U1 g, U1 b)
-atom_dbg_skip MipsAtomComp_Proc_(ac_format_f3_color, { mac_pack_color_word(O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b) })
-
-/* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
- * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
-atom_dbg_skip MipsAtomComp_(ac_gte_store_f3) {
-	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_F3,p0)),
-	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_F3,p1)),
-	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_F3,p2)),
-};
-
-/* Words: 12; Emits the four (code|color) words of a Poly_G4.
- * Args: rN,gN,bN are 8-bit RGB byte values for each of the 4 vertices. */
-FI_ Slice_MipsCode ac_format_g4_color(
-	U1 r0, U1 g0, U1 b0,
-  U1 r1, U1 g1, U1 b1,
-  U1 r2, U1 g2, U1 b2,
-  U1 r3, U1 g3, U1 b3)
-MipsAtomComp_Proc_(ac_format_g4_color, {
-	mac_pack_color_word(O_(Poly_G4,c0), gp0_cmd_poly_g4, r0,g0,b0),
-	mac_pack_color_word(O_(Poly_G4,c1), 0,               r1,g1,b1),
-	mac_pack_color_word(O_(Poly_G4,c2), 0,               r2,g2,b2),
-	mac_pack_color_word(O_(Poly_G4,c3), 0,               r3,g3,b3),
-})
-
-/* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
- * G4 triangle portion to p0/p1/p2.
- * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). 
- * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2 get overwritten with v3
- * (RTPS writes only to SXY2, but to keep the three registers aligned with v0/v1/v2 you must store before RTPS). */
-atom_dbg_skip MipsAtomComp_(ac_gte_store_g4_p012) {
-	gte_sw(C2_SXY0, R_PrimCursor, O_(Poly_G4,p0)),
-	gte_sw(C2_SXY1, R_PrimCursor, O_(Poly_G4,p1)),
-	gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p2)),
-};
-
-/* Words: 1; Stores the V3 screen coord to the G4's p3 slot.
- * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its single-vertex result to SXY2;
- * SXY0 still holds v0.screen from the earlier RTPT.
- */
-atom_dbg_skip MipsAtomComp_(ac_gte_store_g4_p3) { gte_sw(C2_SXY2, R_PrimCursor, O_(Poly_G4,p3)) };
-
 #pragma endregion Macro Atom Components
 
 #pragma region Mips Atom Builder
-// This allows for runtime procedural authoring of mips atoms.
+// This helps with runtime procedural authoring of mips atoms.
 
 typedef Struct_(FMipsAtom512) { U4 data[512]; U4 used; };
 
@@ -277,57 +196,9 @@ FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
 }
 
 #define mipsatom_from_builder(ab) (Slice_MipsCode){ab.start, ab.used}
-
 #pragma endregion Mips Atom Builder
 
 #pragma region Baked Mips Atoms
 // These atoms are resolved at compile time and are (usually) statically linked readonly data.
-
-enum {
-	bios_flushcache = 0x44,
-	bios_table_addr = 0xA0,
-};
-
-/* Flushes the Instruction Cache (PSX A-function 0x44 via BIOS stub at 0xA0).
- * Sequence (per MIPS ABI; arguments in arg registers, RA pushed to stack):
- *   1. sp -= 8;  sw $ra, 4($sp)        ; save RA
- *   2. $a0 = bios_flushcache (arg0)
- *   3. $t0 = bios_table_addr           ; t0 = &BIOS A-function table
- *   4. jalr $t0, $ra                   ; call BIOS(flushcache)
- *      nop                             ; branch delay slot
- *   5. lw $ra, 4($sp);  jr $ra         ; restore & return
- *   6. sp += 8
- */
-internal MipsAtom_(mips_flush_icache) {
-	add_ui(rstack_ptr, rstack_ptr, -MipsStackAlignment), // sp -= 8
-	store_word(rret_addr, rstack_ptr, S_(U4)),           // sw  $ra,   4($sp) 
-	add_ui(rret_0, rdiscard, bios_flushcache),           // addiu $a0, $0, 0x44 
-	add_ui(rtmp_0, rdiscard, bios_table_addr),           // addiu $t0, $0, 0xA0 
-	jump_link(rtmp_0, rret_addr), nop,                   // jalr  $t0, $ra, BD slot
-	load_word(rret_addr, rstack_ptr, S_(U4)),            // lw   $ra, 4($sp) 
-	jump_reg(rret_addr),                                 // jr   $ra 
-	add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment),  // sp += 8 (BD) 
-	mac_yield(),
-};
-
-typedef Struct_(Binds_SetGteWorld) {
-	M3_S2* transform;
-};
-internal MipsAtom_(set_gte_world) atom_info(
-		atom_bind(Binds_SetGteWorld)
-	,	atom_reads(R_TapePtr)
-){
-	/* Pop matrix address from tape into R_T3 ($11) */
-	load_word(R_T3, R_TapePtr, O_(Binds_SetGteWorld,transform)),
-	add_ui_self(    R_TapePtr, S_(Binds_SetGteWorld)),
-	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
-	load_word(R_T0, R_T3, 0),  load_word(R_T1, R_T3,  4),
-	gte_mv_to_ctrl_r(R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(R_T1, gte_cr_RT12),
-	load_word(R_T0, R_T3, 8),  load_word(R_T1, R_T3, 12), load_word(R_T2, R_T3, 16),
-	gte_mv_to_ctrl_r(R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(R_T2, gte_cr_RT22),
-	load_word(R_T0, R_T3, 20), load_word(R_T1, R_T3, 24), load_word(R_T2, R_T3, 28),
-	gte_mv_to_ctrl_r(R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(R_T2, gte_cr_TRZ),
-	mac_yield()
-};
 
 #pragma endregion Baked Mips Atoms

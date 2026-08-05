@@ -3,12 +3,11 @@
 --- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
 --- for `MipsAtom_(name)` and `MipsCode code_<name>` declarations, computes the word offset
 --- from each `atom_offset(F, T)` marker to its target `atom_label(T)` declaration, and emits
---- `<dir_basename>.offsets.h` with one `#define _atom_offset_F_T = N` per branch.
+--- `gen/offsets.h` with one `#define _atom_offset_F_T = N` per branch.
+--- Per-directory aggregation: every source in the same directory contributes to the same `gen/offsets.h`.
+--- The directory itself is the namespace; the filename does not repeat the module name.
 ---
 --- The offset is `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding: branch_offset = relative_pc_in_words - 1).
----
---- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,
---- Lua 5.3 compatible.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -16,12 +15,11 @@
 
 -- Bootstrap: same as entry scripts. See `ps1_meta.lua` for the rationale.
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
--- Uses `debug.getinfo` to find this file's own directory, so it works
--- both standalone and when require'd from the orchestrator.
+-- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
-local duffle = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -39,35 +37,35 @@ local OFFSET_MACRO_COL = 44
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
---- @field scan     table   -- pre-scanned SourceScan payload (from duffle.scan_source)
+--- @field path     string  -- Absolute path to the source file
+--- @field text     string  -- Full source text
+--- @field dir      string  -- Directory containing the source
+--- @field basename string  -- Filename without extension
+--- @field scan     table   -- Pre-scanned SourceScan payload (from duffle.scan_source)
 
 --- @class PassCtx
---- @field shared             table                  -- cross-pass shared state
---- @field shared.corpus      table                  -- canonical corpus projection
+--- @field shared             table -- Cross-pass shared state
+--- @field shared.corpus      table -- Corpus projection
 --- @field shared.word_counts table
---- @field out_root           string                 -- output root (e.g. "build/gen")
+--- @field out_root           string -- Output root (e.g. "build/gen")
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
---- @field errors   table[]  -- {line=, msg=} entries; build-stops
---- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
+--- @field errors   table[]  -- {line=, msg=}  entries; build-stops
+--- @field warnings table[]  -- {line=, msg=}  entries; build-succeeds
 
 --- @class BranchOffset
---- @field tag              string      -- the marker tag (e.g. "F" in `atom_offset(F, T)`)
---- @field target           string      -- the target label name (e.g. "T" in `atom_offset(F, T)`)
---- @field branch_word      integer     -- branch word position within the atom body
---- @field offset           integer     -- computed per consuming instruction (see `compute_offsets`)
---- @field consuming_encoder string|nil -- the instruction consuming the offset (e.g. "branch_le_zero", "jump", "call_addr")
+--- @field tag               string      -- Marker tag (e.g. "F" in `atom_offset(F, T)`)
+--- @field target            string      -- Target label name (e.g. "T" in `atom_offset(F, T)`)
+--- @field branch_word       integer     -- Branch word position within the atom body
+--- @field offset            integer     -- Computed per consuming instruction (see `compute_offsets`)
+--- @field consuming_encoder string|nil  -- Instruction consuming the offset (e.g. "branch_le_zero", "jump", "call_addr")
 --- @field consuming_arg_pos integer|nil -- 1-based arg position within the consuming instruction's arg list
 
 --- @class AtomData
---- @field name        string         -- atom name
---- @field total_words integer        -- total word count of the atom body
---- @field offsets     BranchOffset[] -- per-branch offset list
+--- @field name        string         -- Atom name
+--- @field total_words integer        -- Total word count of the atom body
+--- @field offsets     BranchOffset[] -- Per-branch offset list
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Canonical marker projection
@@ -99,7 +97,7 @@ local function project_markers(markers)
 	local state = { labels = {}, branches = {} }
 	for _, marker in ipairs(markers or {}) do
 		local project = MARKER_PROJECTORS[marker.kind]
-		if project then project(state, marker) end
+		if    project then project(state, marker) end
 	end
 	return state.labels, state.branches
 end
@@ -109,7 +107,6 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Compute branch offsets per consuming instruction.
----
 --- Disposition table:
 ---   `branch_*`           -> relative offset: `target_word - branch_word - 1` (MIPS branch-immediate encoding).
 ---   `jump` / `call_addr` -> same value as `branch_*` (a relative word offset). 
@@ -121,7 +118,7 @@ end
 ---
 --- Top-level `atom_offset(F, T)` markers (where the marker is the entire token — `consuming_encoder` == nil) default to `branch_*` behavior (relative offset).
 --- This preserves backward compatibility for any top-level marker that may exist outside a control-transfer instruction.
---- @param labels table<string, integer>
+--- @param labels   table<string, integer>
 --- @param branches table[]
 --- @return BranchOffset[]
 local function compute_offsets(labels, branches)
@@ -195,44 +192,48 @@ local function emit_atom_offsets(add, atom)
 	add("")
 end
 
---- Generate the per-source .offsets.h header.
---- @param source_path string
---- @param atoms_data  AtomData[]
+--- Generate the per-directory .offsets.h header.
+--- @param dir          string     -- the absolute source directory
+--- @param sources      table[]    -- sources contributing to this directory (for the header comment)
+--- @param atoms_data   AtomData[]
 --- @return string
-local function generate_header(source_path, atoms_data)
-	local basename = duffle.basename_no_ext(source_path)
+local function generate_header(dir, sources, atoms_data)
+	local dir_basename = duffle.basename_no_ext(dir)
 
 	local lines = {}
 	local function add(s) lines[#lines + 1] = s end
 
 	add("// Auto-generated by ps1_meta.lua (passes/offsets.lua) — DO NOT EDIT")
-	add("// Source: " .. source_path)
+	add("// Directory: " .. dir:gsub("/", "\\") .. "\\")
+	for _, src in ipairs(sources) do
+		add("//   source: " .. src.path:gsub("/", "\\"))
+	end
 	add("#pragma once")
 	add("")
-	add("#pragma region " .. basename)
+	add("#pragma region " .. dir_basename)
 	add("")
 	add("")
 	for _, atom in ipairs(atoms_data) do
 		emit_atom_offsets(add, atom)
 	end
-	add("#pragma endregion " .. basename)
+	add("#pragma endregion " .. dir_basename)
 	add("")
 	return table.concat(lines, "\n") .. "\n"
 end
 
 local M = {}
 
---- (internal) Process one source: render offsets from canonical atom paths.
+--- (internal) Aggregate atoms from every source in one directory, render the per-directory `offsets.h`.
 --- Returns the offsets_h path if a header was written, or nil.
---- @param ctx PassCtx
---- @param src SourceFile
+--- @param ctx     PassCtx
+--- @param dir     string       -- the absolute source directory
+--- @param sources SourceFile[] -- sources in this directory
 --- @return string|nil  -- the offsets_h path
-local function process_source(ctx, src)
+local function process_directory(ctx, dir, sources)
 	local atoms_data = {}
-	local scan = src.scan or {}
 
 	local function append_atom(atom)
-		local paths = atom and atom.paths
+		local  paths = atom and atom.paths
 		if not paths then return end
 		local labels, branches = project_markers(paths.markers)
 		atoms_data[#atoms_data + 1] = {
@@ -242,19 +243,22 @@ local function process_source(ctx, src)
 		}
 	end
 
-	for _, atom in ipairs(scan.atoms or {}) do append_atom(atom) end
-	for _, atom in ipairs(scan.raw_atoms or {}) do append_atom(atom) end
+	for _, src in ipairs(sources) do
+		local scan = src.scan or {}
+		for _, atom in ipairs(scan.atoms or {}) do append_atom(atom) end
+		for _, atom in ipairs(scan.raw_atoms or {}) do append_atom(atom) end
+	end
 	if #atoms_data == 0 then return nil end
 
-	local out_path = src.dir .. "/gen/" .. duffle.basename_no_ext(src.dir) .. ".offsets.h"
+	local out_path = dir .. "/gen/offsets.h"
 	duffle.ensure_dir(duffle.dirname(out_path))
-	duffle.write_file(out_path, generate_header(src.path:gsub("/", "\\"), atoms_data))
+	duffle.write_file(out_path, generate_header(dir, sources, atoms_data))
 	return out_path
 end
 
 --- Run the offsets pass.
---- For each canonical source, emits a per-module `<dir_basename>.offsets.h`
---- containing constants for every marker recorded in atom.paths.
+--- For each canonical source-directory, emits a per-directory `gen/offsets.h`
+--- containing constants for every marker recorded in atom.paths across every source in that directory.
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
@@ -263,12 +267,17 @@ function M.run(ctx)
 	local warnings = {}
 
 	local corpus = ctx.shared and ctx.shared.corpus
-	if type(corpus) ~= "table" or type(corpus.source_order) ~= "table" then
-		error("offsets.run requires ctx.shared.corpus.source_order (canonical corpus).", 0)
+	if type(corpus) ~= "table" then
+		error("offsets.run requires ctx.shared.corpus", 0)
+	end
+	if type(corpus.source_order) ~= "table" then
+		error("offsets.run requires ctx.shared.corpus.source_order.", 0)
 	end
 
-	for _, src in ipairs(corpus.source_order) do
-		local out_path = process_source(ctx, src)
+	-- Per-directory aggregation: every source in the same directory contributes to one `gen/offsets.h`.
+	local sources_by_dir = corpus.sources_by_dir or duffle.group_sources_by_dir(corpus.source_order)
+	for dir, sources in pairs(sources_by_dir) do
+		local out_path = process_directory(ctx, dir, sources)
 		if out_path then
 			outputs[#outputs + 1] = { offsets_h = out_path }
 		end

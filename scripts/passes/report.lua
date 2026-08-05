@@ -1,22 +1,21 @@
---- passes/report.lua — Per-MODULE annotation report renderer +
---- project-wide summary writer.
+--- passes/report.lua — Per-MODULE annotation report renderer + project-wide summary writer.
 ---
 --- Two output files per build:
 ---   - `build/gen/<dir_basename>.annotations.txt` — one per source-directory containing atoms; aggregates across all sources in the directory.
 ---   - `build/gen/annotation_validation.txt` — the project summary.
 ---
 --- The annotation pass emits `errors.h` files per module and the canonical `corpus.sources_by_dir` projection groups sources by directory.
---- This pass iterates the canonical dir projection directly and re-validates each source via `annotation.validate()` to get the detailed per-source results.
+--- This pass iterates the dir projection directly and re-validates each source via `annotation.validate()` to get the detailed per-source results.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Resolve `arg[0]` to an absolute-ish script directory so that `require("duffle")` resolves against `scripts/` regardless of CWD.
--- Bootstrap: see `ps1_meta.lua` for the rationale.
--- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
+-- Bootstrap: See `ps1_meta.lua` for the rationale.
+-- Bootstrap: Load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
--- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
+-- Bootstrap: Load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
@@ -37,7 +36,7 @@ local atoms_source_map = dofile(_bootstrap_dir .. "atoms_source_map.lua")
 
 -- Section separators used in the rendered text reports.
 -- The thin rules are hand-tuned to align with the per-section content width; do not change without also checking the section renderers below.
-local RULE_THICK = "========================================================"
+local RULE_THICK               = "========================================================"
 local SECTION_HEADER_ATOMS     = "── Atoms ────────────────────────────────────────────────"
 local SECTION_HEADER_ANNOTS    = "── Annotations ──────────────────────────────────────────"
 local SECTION_HEADER_BINDS     = "── Binds_* structs ──────────────────────────────────────"
@@ -59,83 +58,83 @@ local PASS_NAME = "report"
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
+--- @field path     string  -- Absolute path to the source file
+--- @field text     string  -- Full source text
+--- @field dir      string  -- Directory containing the source
+--- @field basename string  -- Filename without extension
 
 --- @class PassCtx
---- @field sources            SourceFile[]         -- all source files in the build
---- @field metadata_path      string               -- path to word_count.metadata.h
---- @field shared             table                -- cross-pass shared state
---- @field out_root           string               -- output root (e.g. "build/gen")
---- @field project_root       string               -- project root (e.g. "code/")
---- @field upstream           table<string, table> -- per-pass upstream outputs
+--- @field sources            SourceFile[]         -- All source files in the build
+--- @field metadata_path      string               -- Path to word_count.metadata.h
+--- @field shared             table                -- Cross-pass shared state
+--- @field out_root           string               -- Output root (e.g. "build/gen")
+--- @field project_root       string               -- Project root (e.g. "code/")
+--- @field upstream           table<string, table> -- Per-pass upstream outputs
 --- @field flags              table                -- CLI flags + per-pass stash
---- @field verbose            boolean              -- if true, log diagnostic info
+--- @field verbose            boolean              -- If true, log diagnostic info
 
 --- @class PassResult
 --- @field outputs  table[]  -- {kind=, path=} entries describing emit files
---- @field errors   table[]  -- {line=, msg=} entries; build-stops
---- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
+--- @field errors   table[]  -- {line=, msg=}  entries; build-stops
+--- @field warnings table[]  -- {line=, msg=}  entries; build-succeeds
 
 -- Shapes produced by `passes/annotation.lua`'s `M.validate()`.
 
 --- @class AtomEntry
---- @field name string   -- atom name (e.g. "cube_g4_face")
---- @field line integer  -- source line of the atom declaration
+--- @field name string   -- Atom name (e.g. "cube_g4_face")
+--- @field line integer  -- Source line of the atom declaration
 
 --- @class AnnotEntry
---- @field line    integer  -- source line
---- @field macro   string   -- the macro name (e.g. "atom_reads")
---- @field name    string   -- the atom name (if a `name(...)` was given)
---- @field kind    string   -- "atom_info" | "atom_bind" | ...
+--- @field line    integer     -- Source line
+--- @field macro   string      -- Macro name (e.g. "atom_reads")
+--- @field name    string      -- Atom name (if a `name(...)` was given)
+--- @field kind    string      -- "atom_info" | "atom_bind" | ...
 --- @field binds   string|nil  -- Binds_X name if any
 --- @field reads   string[]    -- R_* names (read targets)
 --- @field writes  string[]    -- R_* names (write targets)
---- @field error   string|nil  -- error message if annotation was malformed
+--- @field error   string|nil  -- Error message if annotation was malformed
 
 --- @class BindsField
---- @field name   string   -- field name
---- @field offset integer  -- byte offset within the Binds_X struct
+--- @field name   string   -- Field name
+--- @field offset integer  -- Byte offset within the Binds_X struct
 
 --- @class BindsStruct
---- @field name   string         -- struct name (e.g. "Binds_Floor")
---- @field line   integer        -- source line of the typedef
---- @field bytes  integer        -- total byte size
---- @field fields BindsField[]   -- the field list
+--- @field name   string         -- Struct name (e.g. "Binds_Floor")
+--- @field line   integer        -- Source line of the typedef
+--- @field bytes  integer        -- Total byte size
+--- @field fields BindsField[]   -- The field list
 
 --- @class MacroEntry
---- @field name  string   -- macro name (e.g. "WORD_COUNT(my_macro, 4)")
---- @field line  integer  -- source line
---- @field words integer  -- declared word count
+--- @field name  string   -- Macro name (e.g. "WORD_COUNT(my_macro, 4)")
+--- @field line  integer  -- Source line
+--- @field words integer  -- Declared word count
 
 --- @class Finding
---- @field line integer  -- source line
---- @field msg  string   -- finding message
+--- @field line integer  -- Source line
+--- @field msg  string   -- Finding message
 
 --- @class AnnotationResult
---- @field source   string         -- set by this pass; original source path
---- @field atoms    AtomEntry[]    -- atom declarations in this source
---- @field annots   AnnotEntry[]   -- annotation entries
---- @field macros   MacroEntry[]   -- macro word-count declarations
+--- @field source   string         -- Set by this pass; original source path
+--- @field atoms    AtomEntry[]    -- Atom declarations in this source
+--- @field annots   AnnotEntry[]   -- Annotation entries
+--- @field macros   MacroEntry[]   -- Macro word-count declarations
 --- @field binds    BindsStruct[]  -- Binds_* struct declarations
---- @field errors   Finding[]      -- errors from validation
---- @field warnings Finding[]      -- warnings from validation
---- @field info     table          -- info summary (not rendered here)
+--- @field errors   Finding[]      -- Errors from validation
+--- @field warnings Finding[]      -- Warnings from validation
+--- @field info     table          -- Info summary (not rendered here)
 
 --- @class ModuleEntry
---- @field dir          string   -- absolute directory path
---- @field dir_basename string   -- basename (e.g. "duffle", "gte_hello")
---- @field atoms_count  integer  -- pre-counted atoms for filtering
+--- @field dir          string   -- Absolute directory path
+--- @field dir_basename string   -- Basename (e.g. "duffle", "gte_hello")
+--- @field atoms_count  integer  -- Pre-counted atoms for filtering
 
 --- @class ModuleReport
---- @field dir       string             -- module directory
---- @field sources   SourceFile[]       -- sources in this module
---- @field results   AnnotationResult[] -- per-source validate() results
+--- @field dir       string             -- Module directory
+--- @field sources   SourceFile[]       -- Sources in this module
+--- @field results   AnnotationResult[] -- Per-source validate() results
 
 --- @class ProjectReport
---- @field results AnnotationResult[]  -- all per-source results
+--- @field results AnnotationResult[]  -- All per-source results
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Per-MODULE annotation report (aggregated across all sources in a dir)
@@ -153,9 +152,16 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Render the thin project-wide summary (`build/atom_meta_report.summary.md`).
---- @param all_results { module:string, atoms:integer, annots:integer, binds:integer,
----                       macros:integer, findings:integer, errors:integer,
----                       warnings:integer, info:integer }[]
+--- @param all_results { 
+--- 	module:string,
+--- 	atoms:integer, 
+--- 	annots:integer, 
+--- 	binds:integer,
+---		macros:integer,   
+---		findings:integer,
+---		errors:integer,
+--- 	warnings:integer,
+--- 	info:integer }[]
 --- @return string
 local function render_project_summary(all_results)
 	local lines = {
@@ -165,13 +171,10 @@ local function render_project_summary(all_results)
 		"| module | atoms | annots | binds | macros | findings | errors | warnings | info |",
 		"|--------|-------|--------|-------|--------|----------|--------|----------|------|",
 	}
-	local totals = { atoms = 0, annots = 0, binds = 0, macros = 0,
-		findings = 0, errors = 0, warnings = 0, info = 0 }
+	local totals = { atoms = 0, annots = 0, binds = 0, macros = 0, findings = 0, errors = 0, warnings = 0, info = 0 }
 	for _, e in ipairs(all_results) do
-		lines[#lines + 1] = string.format(
-			"| %s | %d | %d | %d | %d | %d | %d | %d | %d |",
-			e.module, e.atoms, e.annots, e.binds, e.macros,
-			e.findings, e.errors, e.warnings, e.info)
+		lines[#lines + 1] = string.format("| %s | %d | %d | %d | %d | %d | %d | %d | %d |"
+			, e.module, e.atoms, e.annots, e.binds, e.macros, e.findings, e.errors, e.warnings, e.info)
 		totals.atoms    = totals.atoms    + e.atoms
 		totals.annots   = totals.annots   + e.annots
 		totals.binds    = totals.binds    + e.binds
@@ -181,23 +184,21 @@ local function render_project_summary(all_results)
 		totals.warnings = totals.warnings + e.warnings
 		totals.info     = totals.info     + e.info
 	end
-	lines[#lines + 1] = string.format(
-		"| **TOTAL** | %d | %d | %d | %d | %d | %d | %d | %d |",
-		totals.atoms, totals.annots, totals.binds, totals.macros,
-		totals.findings, totals.errors, totals.warnings, totals.info)
+	lines[#lines + 1] = string.format("| **TOTAL** | %d | %d | %d | %d | %d | %d | %d | %d |"
+		, totals.atoms, totals.annots, totals.binds, totals.macros, totals.findings, totals.errors, totals.warnings, totals.info)
 	return table.concat(lines, "\n") .. "\n"
 end
 
 --- Render the per-module verbose source-map markdown (`build/<module>.atoms.md`).
 --- Per-source sub-section, per-atom stanza with sourcemap + provenance rows.
 --- Pulls sourcemap + provenance from `atoms_source_map` (no second source walk).
---- @param dir string
+--- @param dir         string
 --- @param dir_sources SourceFile[]
---- @param wc table<string, integer>
+--- @param wc          table<string, integer>
 --- @return string
 local function render_module_atoms_md(dir, dir_sources, wc)
 	local dir_basename = source_basename(dir)
-	local lines = {
+	local lines        = {
 		"# " .. dir_basename .. " — atoms (verbose source map)",
 		"> Per-word call-site + provenance. Auto-generated.",
 		"",
@@ -249,14 +250,14 @@ end
 --- Aggregates annotation + static-analysis content across all sources in `dir`.
 --- Annotations come from re-running `annotation.validate()` per source (the existing pattern);
 --- static-analysis comes from `corpus.static_analysis_results[dir_basename]` (populated by `static_analysis.lua` — no second corpus_pipe_ctx build).
---- @param dir string
---- @param dir_sources SourceFile[]
+--- @param dir           string
+--- @param dir_sources   SourceFile[]
 --- @param annot_results AnnotationResult[]
---- @param sa_results table                 -- corpus.static_analysis_results[dir_basename]
+--- @param sa_results    table -- corpus.static_analysis_results[dir_basename]
 --- @return string
 local function render_module_meta_report(dir, dir_sources, annot_results, sa_results)
 	local dir_basename = source_basename(dir)
-	local lines = {
+	local lines        = {
 		"# " .. dir_basename .. " — atom meta report",
 		"> Auto-generated by ps1_meta.lua (passes/report.lua). Do not edit.",
 		"",
@@ -326,8 +327,8 @@ local function render_module_meta_report(dir, dir_sources, annot_results, sa_res
 				local binds  = a.binds  or "—"
 				local reads  = (#a.reads  > 0 and table.concat(a.reads,  ",")) or "—"
 				local writes = (#a.writes > 0 and table.concat(a.writes, ",")) or "—"
-				add(string.format("| %s | %d | %s | %s | %s | %s |",
-					src_name, a.line, a.name, binds, reads, writes))
+				add(string.format("| %s | %d | %s | %s | %s | %s |"
+					, src_name, a.line, a.name, binds, reads, writes))
 			end
 		end
 	end
@@ -418,7 +419,7 @@ local function render_module_meta_report(dir, dir_sources, annot_results, sa_res
 	for _, a in ipairs(sorted) do
 		local p        = a.paths or {}
 		local src_name = a.source_path and source_basename(a.source_path) or ""
-		local notes   = ""
+		local notes    = ""
 		if p.has_loops then notes = notes .. " [loop!]" end
 		if p.unknown_macros and #p.unknown_macros > 0 then
 			notes = notes .. " [unknown: " .. table.concat(p.unknown_macros, ", ") .. "]"
@@ -426,7 +427,7 @@ local function render_module_meta_report(dir, dir_sources, annot_results, sa_res
 		add(string.format("| %s | %s | %d | %d | %d | %d | %s |",
 			a.name, src_name,
 			p.cycles_min or 0, p.cycles_max or 0,
-			p.branches or 0, p.paths or 0, notes))
+			p.branches   or 0, p.paths      or 0, notes))
 	end
 	add("")
 

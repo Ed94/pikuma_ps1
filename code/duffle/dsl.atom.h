@@ -1,5 +1,5 @@
 /*
- * atom_dsl.h
+ * dsl.atom.h
  * ============================================================================
  *
  * ATOM DSL: Annotation layer for tape atoms (lottes_tape.h).
@@ -57,7 +57,6 @@
 
 #ifdef INTELLISENSE_DIRECTIVES
 #pragma once
-// #include <stdint.h>
 #endif
 
 /* ============================================================================
@@ -148,12 +147,12 @@
  *   ... body ...
  *   atom_label(bounds_chk)                   ← another anchor
  *
- *   atom_offset(culling, bounds_chk)         ← resolved by gen/.offsets.h
+ *   atom_offset(culling, bounds_chk)         ← resolved by gen/offsets.h
  *
- * The metaprogram generates gen/atom_offsets.h with one #define with the offset value per atom_offset(F, T) call.
+ * The metaprogram generates gen/offsets.h with one #define with the offset value per atom_offset(F, T) call.
  * The preprocessor then expands the call to the right immediate value.
  *
- * If gen/atom_offsets.h is stale (or atom_label(name) is undefined), `atom_offset_F_T` becomes an undefined macro and the C build fails.
+ * If gen/offsets.h is stale (or atom_label(name) is undefined), `atom_offset_F_T` becomes an undefined macro and the C build fails.
  * ============================================================================*/
 #define atom_offset(F, T) atom_offset_ ## F ## _ ## T
 // atom_label is a pure annotation for the metaprogram's offset calculations.

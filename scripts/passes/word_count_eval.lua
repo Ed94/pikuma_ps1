@@ -93,7 +93,7 @@ end
 --- Load the authored `word_count.metadata.h` into `ctx.shared.corpus.word_counts`.
 --- Generated `.macs.h` files are OUTPUT artifacts and are NOT scanned as inputs.
 --- Current component counts are computed and inserted by `passes/components.lua`
---- after the components pass iterates `corpus.source_order` and writes each source's `<dir_basename>.macs.h` file.
+--- after the components pass iterates `corpus.source_order` and writes each source-directory's `gen/macs.h` file.
 ---
 --- Contract:
 ---   * `ctx.shared.corpus` MUST exist (canonical corpus ownership).

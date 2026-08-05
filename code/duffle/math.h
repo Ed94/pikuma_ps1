@@ -34,10 +34,10 @@ typedef Struct_(V4_S4)      { S4 x; S4 y; S4 z; S4 w; };
 typedef Struct_(R2_S2)      { V2_S2 p0; V2_S2 p1; };
 typedef Struct_(R2_S4)      { V2_S4 p0; V2_S4 p1; };
 
-typedef Struct_(Rect_S2) { S2 x; S2 y; S2 width; S2 height; };
-typedef Struct_(Rect_S4) { S4 x; S4 y; S4 width; S4 height; };
+typedef Struct_(Rect_S2)    { S2 x; S2 y; S2 width; S2 height; };
+typedef Struct_(Rect_S4)    { S4 x; S4 y; S4 width; S4 height; };
 
-typedef Struct_(M3_S2) { A3x3_S2 m; A3_S4 t; };
+typedef Struct_(M3_S2)      { A3x3_S2 m; A3_S4 t; };
 
 typedef Array_(V2_S2, 2);
 typedef Array_(V2_S2, 3);
@@ -61,10 +61,5 @@ FI_ void add_a3s4_fp(A3_S4_R out_a, A3_S4 b) {
 	(out_a[0])[2] += b[2] >> 1;
 }
 
-FI_ void add_v3s4(V3_S4_R out_a, V3_S4 b) { 
-	add_a3s4(pcast(A3_S4_R, out_a), pcast(A3_S4, b)); 
-}
-
-FI_ void add_v3s4_fp(V3_S4_R out_a, V3_S4 b) { 
-	add_a3s4_fp(pcast(A3_S4_R, out_a), pcast(A3_S4, b)); 
-}
+FI_ void add_v3s4   (V3_S4_R out_a, V3_S4 b) {  add_a3s4   (pcast(A3_S4_R, out_a), pcast(A3_S4, b));  }
+FI_ void add_v3s4_fp(V3_S4_R out_a, V3_S4 b) {  add_a3s4_fp(pcast(A3_S4_R, out_a), pcast(A3_S4, b));  }

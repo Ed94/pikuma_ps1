@@ -41,7 +41,6 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- Convert the recursive walk's body-relative line numbers into physical source lines once.
 -- The walker builds `line_of` from `body_text` and stamps body-relative line numbers (1..N) into `item.line` and `invocation.call_line`.
 -- This function converts those values to physical source lines at the close site with the forwarded source `line_of` closure.
---
 -- `call_line` discipline:
 --   * ROOT invocations (`inv.parent_id == 0`) receive body-relative `call_line` values directly from `M.LineIndex(body_text)` in the walker.
 --     The source `line_of` closure supplies physical lines at the close site, so this function converts each root value exactly once.
@@ -59,10 +58,9 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 	-- `root_body_line` is the physical source line of the ATOM HEADER byte containing the opening `{`; that byte is one byte BEFORE `atom_record.body_off`.
 	-- The walker assigns line 2 to the body's first content line because line 1 is the trailing `\n` after `{`. Body-text line k therefore maps to `root_body_line + (k - 1)`.
 	-- `body_off - 1` points at the opening `{`, whose line index identifies the header line. `body_off` points after `{` and would shift every word row forward by one line.
-	local root_body_line = root_line_of(atom_record.body_off - 1)
-		or atom_record.line or 0
+	local root_body_line  = root_line_of(atom_record.body_off - 1) or atom_record.line or 0
 	local component_index = corpus.component_body_index or {}
-	local word_items = {}
+	local word_items      = {}
 
 	for _, item in ipairs(projection.items) do
 		if item.kind == "word" then word_items[#word_items + 1] = item end
@@ -102,7 +100,7 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 	end
 
 	-- Normalize `inv.call_line` to a physical source line.
-	--   * ROOT invocations (`parent_id == 0`) carry body-relative `call_line` values from `M.LineIndex(body_text)`; convert them once with `root_body_line`.
+	--   * ROOT  invocations (`parent_id == 0`) carry body-relative `call_line` values from `M.LineIndex(body_text)`; convert them once with `root_body_line`.
 	--   * INNER invocations (`parent_id ~= 0`) carry physical `call_line` values from the component's `line_of`; retain them unchanged.
 	for _, inv in ipairs(projection.invocations) do
 		if inv.parent_id == 0 then
@@ -114,14 +112,14 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 	-- `atoms_source_map` and `dwarf_injection` read `inv.body_lines[k]` directly from the invocation record created here.
 	-- Component words already carry physical `item.line` values from the walker's COMPONENT line index, so `body_line_for` returns them unchanged.
 	for _, inv in ipairs(projection.invocations) do
-		local sw = inv.start_word
-		local ew = inv.end_word
+		local sw  = inv.start_word
+		local ew  = inv.end_word
 		local bls = {}
 		for i = sw, ew do
 			local it = projection.items and projection.items[i]
-			if it and it.kind == "word" then
+			if    it and it.kind == "word" then
 				local fake_event = { invocation_ids = { inv.id } }
-				bls[#bls + 1] = body_line_for(fake_event, it) or 0
+				bls[#bls + 1]    = body_line_for(fake_event, it) or 0
 			end
 		end
 		inv.body_lines = bls

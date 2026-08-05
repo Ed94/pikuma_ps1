@@ -1,8 +1,8 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	pragma once
-#	include "duffle/dsl.h"
-#	include "duffle/math.h"
-#	include "duffle/gp.h"
+#	include "dsl.h"
+#	include "math.h"
+#	include "gp.h"
 #endif
 
 typedef Struct_(DrawEnv_Packed) { U4 tag; U4 code[15]; };

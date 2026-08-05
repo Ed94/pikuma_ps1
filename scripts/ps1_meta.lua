@@ -269,9 +269,9 @@ PASS_FLAGS:
   Or pick any subset:
     --scan-source         Scan sources into the fat SourceScan payload
     --word-counts         Load metadata.h + scan for existing .macs.h
-    --components          Generate <module>/gen/<basename>.macs.h
+    --components          Generate <srcdir>/gen/macs.h (per-directory aggregation)
     --validate            Run atom annotation DSL validation
-    --offsets             Generate <module>/gen/<basename>.offsets.h
+    --offsets             Generate <srcdir>/gen/offsets.h (per-directory aggregation)
     --atoms-source-map    Generate <basename>.atoms.sourcemap.txt per source
     --dwarf-injection     [opt-in] Select the post-link dwarf-injection pass + set the opt-in flag. Requires --elf.
     --static-analysis     Static analysis: GTE pipeline-fill, mac_yield, ABI handoff, cycle budget

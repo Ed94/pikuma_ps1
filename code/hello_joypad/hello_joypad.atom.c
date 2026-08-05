@@ -1,50 +1,28 @@
 #ifdef INTELLISENSE_DIRECTIVES
-#	include "duffle/gen/duffle.macs.h"
-#	include "duffle/gen/duffle.offsets.h"
-#	include "duffle/atom_dsl.h"
+#	pragma once
+#		include "duffle/gen/macs.h"
+#		include "duffle/gen/offsets.h"
+#	include "duffle/dsl.atom.h"
 #	include "duffle/lottes_tape.h"
 #	include "duffle/mips.h"
 #	include "duffle/gte.h"
 #	include "duffle/gp.h"
 #	include "duffle/pad.h"
 #	include "duffle/word_count.metadata.h"
-#	include "psyq.h"
-#	include "gen/hello_joypad.offsets.h"
-#	include "gen/hello_joypad.macs.h"
+#	include "duffle/psyq.h"
+#	include "duffle/math.atom.c"
+#	include "duffle/mips.atom.c"
+#	include "duffle/gte.atom.c"
+#	include "duffle/gp.atom.c"
+#	include "duffle/psyq.atom.c"
+#		include "gen/offsets.h"
+#		include "gen/macs.h"
 #	include "hello_joypad.h"
 #endif
 
+ATOM_FILE_DEBUGGER_LINE_MARKER(hello_joypad_atom_c);
+
 #pragma region MACs (Mips Atom components)
-
-FI_ Slice_MipsCode ac_load_v2s2(U4 rs_x, U4 rs_y, U4 r_base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_load_v2s2, {
-	load_half( rs_x, r_base, O_(V3_S2,x)),
-	load_half( rs_y, r_base, O_(V3_S2,y)),
-})
-
-FI_ Slice_MipsCode ac_store_v2s2(U4 rt_x, U4 rt_y, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_v2s2, {
-	store_half(rt_x, base, offset + O_(V2_S2,x)),
-	store_half(rt_y, base, offset + O_(V2_S2,y)),
-})
-
-FI_ Slice_MipsCode ac_store_rects2(U4 rt_x, U4 rt_y, U4 rt_width, U4 rt_height, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_rects2, {
-	store_half(rt_x,      base, offset + O_(Rect_S2,x)),
-	store_half(rt_y,      base, offset + O_(Rect_S2,y)),
-	store_half(rt_width,  base, offset + O_(Rect_S2,width)),
-	store_half(rt_height, base, offset + O_(Rect_S2,height)),
-})
-
-FI_ Slice_MipsCode ac_store_rgb8(U1 rr, U1 rg, U1 rb, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_rgb8, {
-	store_byte(rr, base, offset + O_(DrawEnv,initial_bg_color.r)),
-	store_byte(rg, base, offset + O_(DrawEnv,initial_bg_color.g)),
-	store_byte(rb, base, offset + O_(DrawEnv,initial_bg_color.b)),	
-})
-
-FI_ Slice_MipsCode ac_gcmd_push(U4 cmd, U4 reg_transfer, U4 reg_base, U2 port)
-MipsAtomComp_Proc_(ac_gcmd_push, {
-	load_upper_i(reg_transfer, cmd >> 16),
-	or_i_self(   reg_transfer, cmd & 0xFFFF),
-	store_word(  reg_transfer, reg_base, port),
-})
 
 FI_ Slice_MipsCode ac_put_disp_env(U4 reg_transfer, U4 reg_base, U2 port)
 MipsAtomComp_Proc_(ac_put_disp_env, {
@@ -202,6 +180,17 @@ internal MipsAtom_(gp_screen_init) atom_info(atom_phase(screen_init), atom_reads
 	mac_yield(),
 };
 
+enum {
+	R_PrimCursor = R_T7 atom_reg atom_type(U4*),    /* VRAM output cursor (primitive buffer) */
+	R_FaceCursor = R_T4 atom_reg atom_type(V4_S2*), /* Cube face-index cursor (V4_S2*); floor context switches to V3_S2* via atom_phase */
+	R_VertBase   = R_T5 atom_reg atom_type(V3_S2*), /* Base address of the vertex array */
+	R_OtBase     = R_T6 atom_reg atom_type(U4*),    /* Base address of the Ordering Table */
+#define R_PrimCursor_Code  R_T7_Code
+#define R_FaceCursor_Code  R_T4_Code
+#define R_VertBase_Code    R_T5_Code
+#define R_OtBase_Code      R_T6_Code
+};
+
 typedef Struct_(Binds_CubeTri) {
 	U4     PrimCursor;
 	V4_S2* FaceCursor;
@@ -232,23 +221,23 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	load_half_u(R_T2, R_FaceCursor, 2 * S_(S2)),
 	load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)),
 
-	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
+	mac_gte_load_tri_verts(R_VertBase, R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple, // required cpu -> gte delay slot
 	gte_cmdw_nclip,
 
 	gte_mv_from_data_r(R_T0, C2_MAC0), nop,
 	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
 		/* BD-slot: write the prim tag (R_0=0; overwrites the legacy tag word in the prim_buffer).
-		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded — harmless
-		 * because the OT entry that points to this prim is created later, only on the body path. */
+		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded — 
+		 * harmless because the OT entry that points to this prim is created later, only on the body path. */
 		store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
 		shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
 		load_word(R_V0, R_AT, O_(V3_S2, x)),   load_word(R_V1, R_AT, O_(V3_S2, z)),
 		gte_mv_to_data_r(R_V0, C2_VXY0),       gte_mv_to_data_r(R_V1, C2_VZ0),
 
-		mac_gte_store_g4_p012(),
+		mac_gte_store_g4_p012(R_PrimCursor),
 		gte_cmdw_rotate_translate_perspective_single,
-		mac_gte_store_g4_p3(),
+		mac_gte_store_g4_p3(R_PrimCursor),
 
 		gte_cmdw_avg_sort_z4,
 		gte_mv_from_data_r(R_T1, C2_OTZ),
@@ -256,8 +245,8 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 		set_lt_u(    R_AT, R_T1, R_AT),
 
 		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
-			mac_insert_ot_tag_g4(),
-			mac_format_g4_color(
+			mac_insert_ot_tag_g4(R_OtBase, R_PrimCursor),
+			mac_format_g4_color(R_PrimCursor,
 				/* c0 magenta */ 0xFF, 0x00, 0xFF,
 				/* c1 yellow  */ 0xFF, 0xFF, 0x00,
 				/* c2 cyan    */ 0x00, 0xFF, 0xFF,
@@ -297,8 +286,8 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 	, atom_writes(R_PrimCursor, R_FaceCursor)
 ) {
-	mac_load_tri_indices(  R_T0, R_T1, R_T2),
-	mac_gte_load_tri_verts(R_T0, R_T1, R_T2),
+	mac_load_tri_indices(  R_FaceCursor, R_T0, R_T1, R_T2),
+	mac_gte_load_tri_verts(R_VertBase,   R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple, // 2 nops retire the final cpu -> gte writes before RTPT
 	gte_cmdw_nclip,
 
@@ -306,7 +295,7 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	gte_mv_from_data_r(R_T0, C2_MAC0),
 	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot. 
 		/* Format Primitive */
-		mac_gte_store_f3(),
+		mac_gte_store_f3(R_PrimCursor),
 
 		/* Calculate Depth */
 		gte_avg_sort_z3,
@@ -315,8 +304,8 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 		add_ui(      R_AT, R_0,  OrderingTbl_Len),
 		set_lt_u(    R_AT, R_T1, R_AT),
 		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
-			mac_format_f3_color(0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
-			mac_insert_ot_tag_f3(),                 /* Insert into Ordering Table Linked List */
+			mac_format_f3_color(R_PrimCursor, 0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
+			mac_insert_ot_tag_f3(R_OtBase, R_PrimCursor),         /* Insert into Ordering Table Linked List */
 			add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 				// Note(Ed): No bounds checking, should be checked before atom runs.
 		// end: branch(bounds_chk)

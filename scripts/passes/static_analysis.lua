@@ -1,20 +1,17 @@
 --- passes/static_analysis.lua — Per-atom static-analysis checks.
----
---- Ownership: `ctx.shared.corpus` is the canonical merged registry; per-source fallback synthesis is rejected.
+--- Ownership: `ctx.shared.corpus` canonical merged registry; per-source fallback synthesis is rejected.
 --- `atom.paths` supplies the emitted and analysis projections consumed by this pass.
 ---
 --- Per-atom rules:
 ---   1. transfer_hazards: A single forward walker (`analyze_hardware_relations`) reads `atom.paths.word_events` once per atom.
----      For each emitted word event it (a) inspects pending CPU/COP0/COP2/GTE relations against the event as CONSUMER 
+---      For each emitted word event it (a) inspects pending CPU / COP0 / COP2 / GTE relations against the event as CONSUMER 
 ---      (recording a hazard on `atom.paths.hazards` when the producer→consumer gap is below the required retire-slot count), 
----      (b) applies the event's GPR value effects (`duffle.INSTRUCTION_GPR_EFFECTS`) to `atom.paths.forward_state.gpr_values`, 
+---      (b) Applies the event's GPR value effects (`duffle.INSTRUCTION_GPR_EFFECTS`) to `atom.paths.forward_state.gpr_values`, 
 ---      applies bounded constant propagation, and stages matching relation rows as PRODUCERS (with `destination_match` filters, e.g. for the IRGB fan-out).
 ---      The `transfer_hazards` CHECK_RULES reader projects `atom.paths.hazards` into per-atom findings.
----      The reader does NOT re-walk source; this is the per-check purity contract.
----      The walker runs once per atom before the per-atom dispatch; the reader runs inside the same dispatch.
+---      The reader does NOT re-walk source. The walker runs once per atom before the per-atom dispatch; the reader runs inside the same dispatch.
 ---   2. control_transfer_delay_slot_use: For every emitted branch/jump/call encoder in `duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES` 
----      (the six `branch_*` encoders plus `jump` / `jump_reg` / `jump_link` / `call_reg` / `call_addr`),
----      inspect the next emitted event in `atom.paths.word_events`.
+---      (the six `branch_*` encoders plus `jump` / `jump_reg` / `jump_link` / `call_reg` / `call_addr`), inspect the next emitted event in `atom.paths.word_events`.
 ---      Emit an `info`-severity finding when the successor is `nop` or absent (the next emitted word IS the hardware delay slot).
 ---      `jump_reg(R_AtomJmp)` is suppressed by policy (the fixed `mac_yield()` handshake).
 ---      `nop2` needs no special case: emission-model emits two `nop` events for it, so the first expansion is the hardware delay slot.
@@ -101,10 +98,10 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
+--- @field path     string  -- Absolute path to the source file
+--- @field text     string  -- Full source text
+--- @field dir      string  -- Directory containing the source
+--- @field basename string  -- Filename without extension
 
 --- @class PassCtx
 --- @field sources            SourceFile[]
@@ -121,43 +118,42 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 --- @field outputs  table[]
 --- @field errors   table[]
 --- @field warnings table[]
---- @field info     table[]   -- finding-level info (kind == "info"); distinct from per-source scanned/cycles summary rows
+--- @field info     table[]   -- Finding-level info (kind == "info"); distinct from per-source scanned/cycles summary rows
 
 --- @alias AtomName    string  -- lower_snake_case atom nameMacroName   string  -- lower_snake_case macro identifier
 --- @alias CheckName   string  -- "transfer_hazards" | "control_transfer_delay_slot_use" | "mac_yield_uniformity" | "yield_load_tail_pairing" | "abi_handoff" | "gpu_portstore_shape" | "per_atom_cycle_budget" | "enum_alias_membership" | "atom_type_consistency" | "binds_no_substruct_deref"
 
 --- @class AtomBody
---- @field line     integer  -- source line of the atom declaration
---- @field name     AtomName -- atom name (e.g. "cube_g4_face")
---- @field body     string   -- the brace-delimited body (without the braces)
+--- @field line     integer  -- Source line of the atom declaration
+--- @field name     AtomName -- Atom name (e.g. "cube_g4_face")
+--- @field body     string   -- Brace-delimited body (without the braces)
 --- @field body_off integer  -- char offset of body[1] in source
 --- @field kind     string   -- "atom" | "comp_bare" | "comp_proc"
 
 --- @class Token
---- @field tok      string     -- the raw token text (trimmed)
---- @field line     integer    -- source line of the token's start
---- @field ident    string|nil -- the leading ident of the token (if any)
+--- @field tok      string     -- Raw token text (trimmed)
+--- @field line     integer    -- Source line of the token's start
+--- @field ident    string|nil -- Leading ident of the token (if any)
 --- @field kind     string     -- "n_words" | "mac_yield" | "gte_cmdw" | "mac_format" | "mac_gte_store" | "mac_insert_ot_tag" | "atom_label" | "atom_offset" | "other"
 
 --- @class Finding 
---- @field line     integer   -- source line of the finding
---- @field atom     AtomName  -- the atom this finding is for (or "")
---- @field check    CheckName -- the check identifier
+--- @field line     integer   -- Source line of the finding
+--- @field atom     AtomName  -- Atom this finding is for (or "")
+--- @field check    CheckName -- Check identifier
 --- @field kind     string    -- "error" | "warning" | "info"
---- @field msg      string    -- the finding message
+--- @field msg      string    -- Finding message
 
 --- @class AtomAnalysis
 --- @field atom       AtomBody
---- @field tokens     Token[]   -- the tokens in the atom body, annotated
---- @field findings   Finding[] -- findings for this atom
---- @field total_cycles integer -- sum of token cycle costs
+--- @field tokens     Token[]   -- Tokens in the atom body, annotated
+--- @field findings   Finding[] -- Findings for this atom
+--- @field total_cycles integer -- Sum of token cycle costs
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Per-word-event helpers
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Pick the source-line field that best represents "where in the user's source file is this word?".
---
 -- `word_events` (populated by `passes/emission_model.lua::stamp_root_provenance`) carry four line fields:
 --   * `call_line`  — physical line in the ROOT atom's source (the line of the `mac_X(...)` call site that triggered this emission, or `body_line` for direct words in the atom body)
 --   * `body_line`  — physical line in the body containing the emitted word (the atom body for direct words; the component body for words expanded inside `mac_X(...)`)
@@ -169,8 +165,7 @@ local OUTPUT_EXTENSION = ".static_analysis.txt"
 -- The user editing their atom body expects the line to point at THEIR source — i.e. the line where `mac_yield()`
 -- was called (e.g. `hello_gte_tape.c:35`). That line is `call_line`.
 --
--- For direct words in the atom body (no invocation wrapping them), `call_line == body_line` already,
--- so `call_line` works for both cases.
+-- For direct words in the atom body (no invocation wrapping them), `call_line == body_line` already, so `call_line` works for both cases.
 local function line_for_word_event(ev)
     if ev == nil then return 0 end
     return ev.call_line or ev.body_line or ev.line or ev.def_line or 0
@@ -193,46 +188,44 @@ end
 --
 -- The classification is stored on `atom.paths.tok_class` as an array indexed by token index (1..#tokens). 
 -- Each entry has:
---   ident              — the leading identifier (e.g. "load_word", "gte_cmdw_rtpt", "nop", "mac_yield")
---   nop_words          — 0 / 1 / 2 (for "nop" / "nop2" / anything else)
---   nop_prefix         — consecutive nop words ending just BEFORE this token (forward-pass pre-compute;
---                        makes preceding-nop lookup O(N))
---   is_yield           — true if this token is `mac_yield` or `mac_yield(...)`
---   is_atom_label      — true if this token is `atom_label(name)`; label_name has the name
---   is_branch          — true if this token is `branch_*(...)` OR an unconditional-jump-with-offset (`jump(off)` / `call_addr(off)`); branch_label has the target label or false
+--   ident                 — the leading identifier (e.g. "load_word", "gte_cmdw_rtpt", "nop", "mac_yield")
+--   nop_words             — 0 / 1 / 2 (for "nop" / "nop2" / anything else)
+--   nop_prefix            — consecutive nop words ending just BEFORE this token (forward-pass pre-compute; makes preceding-nop lookup O(N))
+--   is_yield              — true if this token is `mac_yield` or `mac_yield(...)`
+--   is_atom_label         — true if this token is `atom_label(name)`; label_name has the name
+--   is_branch             — true if this token is `branch_*(...)` OR an unconditional-jump-with-offset (`jump(off)` / `call_addr(off)`); branch_label has the target label or false
 --   is_unconditional_jump — true if this token is `jump` or `call_addr` (BD slot + single successor — taken only; no fall-through).
 --                           Mutually exclusive with the conditional-branch semantics; combined with `is_branch` above.
---   is_terminal_jump   — true if this token is `jump_reg` / `call_reg` / `jump_link` (transfers control OUT of the current atom; the `mac_yield()` handshake ends in `jump_reg(R_AtomJmp), nop`). 
---                        No offset field — `atom_offset` is invalid here. Terminates the current path in the CFG.
---   is_load            — true if this token starts with any of: load_word, load_half, load_half_u, load_byte,
---                        load_byte_u, gte_lw, gte_lwc2. These all have MIPS load-delay semantics (the
---                        destination register is volatile for 1 word after the load).
---   is_store_word      — true if this token starts with `store_word(`
+--   is_terminal_jump      — true if this token is `jump_reg` / `call_reg` / `jump_link` (transfers control OUT of the current atom; the `mac_yield()` handshake ends in `jump_reg(R_AtomJmp), nop`). 
+--                           No offset field — `atom_offset` is invalid here. Terminates the current path in the CFG.
+--   is_load               — true if this token starts with any of: load_word, load_half, load_half_u, load_byte,
+--                           load_byte_u, gte_lw, gte_lwc2. These all have MIPS load-delay semantics (the destination register is volatile for 1 word after the load).
+--   is_store_word         — true if this token starts with `store_word(`
 --
 -- Checks that need the leading ident use `tok_class.ident` instead of re-matching the token string.
 -- Checks that need "how many nops before token i" use `tok_class.nop_prefix` instead of walking backwards.
 
 --- @class TokClass
---- @field ident              string          -- leading identifier
---- @field nop_words          integer         -- 0/1/2
---- @field nop_prefix         integer         -- consecutive nop words before this token
+--- @field ident              string           -- lLading identifier
+--- @field nop_words          integer          -- 0 / 1 / 2
+--- @field nop_prefix         integer          -- Consecutive nop words before this token
 --- @field is_yield           boolean
 --- @field is_atom_label      boolean
---- @field label_name         string|nil      -- for atom_label(name)
---- @field is_branch          boolean         -- conditional branch OR unconditional-jump-with-offset
---- @field is_unconditional_jump boolean      -- `jump` / `call_addr` only
---- @field is_terminal_jump   boolean         -- `jump_reg` / `call_reg` / `jump_link` only
---- @field branch_label       string|false|nil -- for branch_*(..., atom_offset(F, label)) OR jump/call_addr
---- @field is_load            boolean         -- load_word | load_half | load_half_u | load_byte | load_byte_u | gte_lw | gte_lwc2
+--- @field label_name         string|nil       -- For atom_label(name)
+--- @field is_branch          boolean          -- Conditional branch OR unconditional-jump-with-offset
+--- @field is_unconditional_jump boolean       -- `jump` / `call_addr` only
+--- @field is_terminal_jump   boolean          -- `jump_reg` / `call_reg` / `jump_link` only
+--- @field branch_label       string|false|nil -- For branch_*(..., atom_offset(F, label)) OR jump/call_addr
+--- @field is_load            boolean          -- load_word | load_half | load_half_u | load_byte | load_byte_u | gte_lw | gte_lwc2
 --- @field is_store_word      boolean
---- @field mac_format_shape   string|nil      -- "f3" / "g4" etc. for mac_format_X_color; nil otherwise
---- @field is_gte_store       boolean         -- ident matches `mac_gte_store_<shape>`
---- @field is_ot_tag          boolean         -- ident matches `mac_insert_ot_tag_<shape>`
---- @field writes_r_prim_cursor boolean       -- store_word targeting R_PrimCursor
---- @field reads_r_tape_ptr   boolean         -- any token referencing R_TapePtr
---- @field o_arg1             string|nil      -- first arg of O_(<a>, <b>) captures; nil for non-O_ tokens
---- @field o_arg2             string|nil      -- second arg of O_(<a>, <b>) captures
---- @field s_arg1             string|nil      -- arg of S_(<a>) captures; nil for non-S_ tokens
+--- @field mac_format_shape   string|nil       -- "f3" / "g4" etc. for mac_format_X_color; nil otherwise
+--- @field is_gte_store       boolean          -- Ident matches `mac_gte_store_<shape>`
+--- @field is_ot_tag          boolean          -- Ident matches `mac_insert_ot_tag_<shape>`
+--- @field writes_r_prim_cursor boolean        -- store_word targeting R_PrimCursor
+--- @field reads_r_tape_ptr   boolean          -- Any token referencing R_TapePtr
+--- @field o_arg1             string|nil       -- First arg of O_(<a>, <b>) captures; nil for non-O_ tokens
+--- @field o_arg2             string|nil       -- Second arg of O_(<a>, <b>) captures
+--- @field s_arg1             string|nil       -- Arg of S_(<a>) captures; nil for non-S_ tokens
 
 -- The set of MIPS instruction idents that have a load-delay slot.
 -- Per MIPS I R3000A: `lw`, `lh`, `lhu`, `lb`, `lbu`, `lwc2` (gte_lw).
@@ -343,7 +336,7 @@ local function classify_tokens(tokens)
 			is_atom_label          = is_atom_label,
 			label_name             = label_name,
 			is_branch              = is_branch,
-			is_unconditional_jump = is_unconditional_jump,
+			is_unconditional_jump  = is_unconditional_jump,
 			is_terminal_jump       = is_terminal_jump,
 			branch_label           = branch_label,
 			is_load                = is_load,
@@ -401,15 +394,13 @@ end
 -- therefore counts ONLY words strictly between the producer and the consumer.
 -- ─────────────────────────────────────────────────────────────────────────
 
--- True iff `consumer_event` is a GTE command (gte_cmdw_* or one of the human-readable aliases
--- mapped in `duffle.GTE_COMMAND_ALIASES`). Used by the LWC2 retirement-regime dispatch in the
--- forward walker: a GTE-command consumer can read the LWC2 result in the very next slot (the GTE
--- pipeline latches the LWC2 data); any other consumer must observe the standard MIPS load delay
--- (gap >= 1).
+-- True iff `consumer_event` is a GTE command (gte_cmdw_* or one of the human-readable aliases mapped in `duffle.GTE_COMMAND_ALIASES`).
+-- Used by the LWC2 retirement-regime dispatch in the forward walker: a GTE-command consumer can read the LWC2 result in the very next slot
+-- (the GTE pipeline latches the LWC2 data); any other consumer must observe the standard MIPS load delay (gap >= 1).
 local function is_gte_command(consumer_event)
 	local tok = consumer_event.encoder or consumer_event.ident or ""
 	if tok:sub(1, 9) == "gte_cmdw_" then return true end
-	local aliases = duffle.GTE_COMMAND_ALIASES or {}
+	local  aliases = duffle.GTE_COMMAND_ALIASES or {}
 	return aliases[tok] ~= nil
 end
 
@@ -422,7 +413,7 @@ local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
 	-- not used by MTC2/CTC2 today because the "consumer" is a GTE command and its reads are not operand positions.)
 	local args = consumer_event.args or {}
 	for _, pos in ipairs(args) do
-		if pos == destination then return true end
+		if   pos == destination then return true end
 	end
 	-- Match via the command's input set: the consumer encoder resolves to a `gte_cmdw_*`
 	-- short form whose `duffle.GTE_COMMAND_INPUTS` entry includes the destination (or a fan-out target).
@@ -718,8 +709,8 @@ local function consume_cu2_transition(atom, event, ev_word, forward)
 	local transition = forward.cu2_transition
 	if not transition then return end
 
-	local gap = ev_word - transition.producer_word - 1
-	local target = transition.target_state
+	local gap        = ev_word - transition.producer_word - 1
+	local target     = transition.target_state
 	local event_line = line_for_word_event(event)
 	if target == "unknown" then
 		append_cu2_finding(atom, event, forward, transition, gap, "info", "unknown",
@@ -752,8 +743,7 @@ local function consume_cu2_transition(atom, event, ev_word, forward)
 	else
 		append_cu2_finding(atom, event, forward, transition, gap,
 			"error", "exact",
-			string.format(
-				"%s at line %d: COP2 unavailable after SR.CU2 was disabled"
+			string.format("%s at line %d: COP2 unavailable after SR.CU2 was disabled"
 				.. " (gap=%d, required=%d)",
 				atom.name, event_line,
 				gap, transition.required))
@@ -831,8 +821,8 @@ local function analyze_hardware_relations(atom)
 			local is_match = false
 			if semantic == "MTC2" or semantic == "CTC2" or semantic == "LWC2_to_GTE" or semantic == "LWC2_to_other" then
 				-- Consumer is a GTE command whose input set contains the producer's COP2 destination (or a fan-out target).
-				-- LWC2_to_GTE  — GTE-command consumer: gap = 0 OK (the pipeline latches the LWC2 result).
-				-- LWC2_to_other — non-GTE consumer: standard load delay applies.
+				-- LWC2_to_GTE   — GTE-command consumer: gap = 0 OK (the pipeline latches the LWC2 result).
+				-- LWC2_to_other — non-GTE consumer:     standard load delay applies.
 				if relation.id == "lwc2_to_gte_command" then
 					is_match = is_gte_command(ev) and is_cop2_consumer_of(ev, prod.destination, relation)
 				elseif relation.id == "lwc2_to_other_consumer" then
@@ -1266,21 +1256,26 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 				else
 					-- Track the slot_kind so the BD-separation case can assert the mac_yield handshake is still suppressed.
 					local slot_kind = "plain"
-					-- MIPS load-delay slot: a `load_*` wrote a register in the previous slot, and the result
-					-- is unavailable for 1 cycle. This `nop` is structurally required; classifying it as
-					-- `modeled-required` is the correct signal (removing it would make the following
-					-- instruction read the OLD value of the loaded register, a load-use hazard). The
-					-- `load_delay_violations` check (Concern 3) catches the actual read-side error; here
-					-- we suppress the `modeled-redundant` misclassification.
+					-- MIPS load-delay slot: a `load_*` wrote a register in the previous slot, and the result is unavailable for 1 cycle.
+					-- This `nop` is structurally required; classifying it as `modeled-required` is the correct signal
+					-- (removing it would make the following instruction read the OLD value of the loaded register, a load-use hazard).
+					-- The `load_delay_violations` check (Concern 3) catches the actual read-side error; here we suppress the `modeled-redundant` misclassification.
 					-- The set of load instructions mirrors the LOAD_INSTRUCTION_IDENTS in `check_load_delay_slots`.
-					local load_idents    = { load_word = true, load_half = true, load_half_u = true,
-					                         load_byte = true, load_byte_u = true, gte_lw = true, gte_lwc2 = true }
+					local load_idents = {
+						 load_word   = true,
+						 load_half   = true,
+						 load_half_u = true,
+					   load_byte   = true,
+						 load_byte_u = true,
+						 gte_lw      = true,
+						 gte_lwc2    = true 
+					}
 					local is_load_delay = load_idents[prev_ident] == true
-					if is_load_delay then
+					if    is_load_delay then
 						-- Determine the destination register from the load's `writes` field.
-						local prev_writes   = gpr_effects[prev_ident] and gpr_effects[prev_ident].writes or {}
-						local prev_args     = prev_ev.args or {}
-						local load_dest     = prev_writes[1] and prev_args[prev_writes[1]] or "<load-destination>"
+						local prev_writes = gpr_effects[prev_ident] and gpr_effects[prev_ident].writes or {}
+						local prev_args   = prev_ev.args or {}
+						local load_dest   = prev_writes[1] and prev_args[prev_writes[1]] or "<load-destination>"
 						findings[#findings + 1] = {
 							check                = "hazard_nop_use",
 							kind                 = "info",
@@ -1447,7 +1442,7 @@ end
 local function check_load_delay_slots(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" then return end
 	local events = atom.paths.word_events or {}
-	if #events == 0 then return end
+	if   #events == 0 then return end
 	if is_runtime_helper(atom) then return end
 
 	local gpr_effects = duffle.INSTRUCTION_GPR_EFFECTS or {}
@@ -2349,20 +2344,20 @@ end
 -- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
 
 local CHECK_RULES = {
-	{ name = "transfer_hazards",               per_atom   = check_transfer_hazards               },
-	{ name = "gte_input_latch",                per_atom   = check_gte_input_latch                },
-	{ name = "gte_role_mismatch",              per_atom   = check_gte_role_mismatch              },
-	{ name = "hazard_nop_use",                 per_atom   = check_hazard_nop_use                 },
-	{ name = "control_transfer_delay_slot_use",per_atom   = check_control_transfer_delay_slot_use},
-	{ name = "load_delay_violation",          per_atom   = check_load_delay_slots             },
-	{ name = "mac_yield_uniformity",           per_atom   = check_mac_yield_uniformity           },
-	{ name = "yield_load_tail_pairing",       per_atom   = check_yield_load_tail_pairing       },
-	{ name = "abi_handoff",                    per_atom   = check_abi_handoff                    },
-	{ name = "gpu_portstore_shape",            per_atom   = check_gpu_portstore_shape            },
-	{ name = "per_atom_cycle_budget",          per_atom   = check_per_atom_cycle_budget          },
-	{ name = "enum_alias_membership",          per_source = check_enum_alias_membership          },
-	{ name = "atom_type_consistency",          per_source = check_atom_type_consistency          },
-	{ name = "binds_no_substruct_deref",       per_source = check_binds_no_substruct_deref       },
+	{ name = "transfer_hazards",                per_atom   = check_transfer_hazards                },
+	{ name = "gte_input_latch",                 per_atom   = check_gte_input_latch                 },
+	{ name = "gte_role_mismatch",               per_atom   = check_gte_role_mismatch               },
+	{ name = "hazard_nop_use",                  per_atom   = check_hazard_nop_use                  },
+	{ name = "control_transfer_delay_slot_use", per_atom   = check_control_transfer_delay_slot_use },
+	{ name = "load_delay_violation",            per_atom   = check_load_delay_slots                },
+	{ name = "mac_yield_uniformity",            per_atom   = check_mac_yield_uniformity            },
+	{ name = "yield_load_tail_pairing",         per_atom   = check_yield_load_tail_pairing         },
+	{ name = "abi_handoff",                     per_atom   = check_abi_handoff                     },
+	{ name = "gpu_portstore_shape",             per_atom   = check_gpu_portstore_shape             },
+	{ name = "per_atom_cycle_budget",           per_atom   = check_per_atom_cycle_budget           },
+	{ name = "enum_alias_membership",           per_source = check_enum_alias_membership           },
+	{ name = "atom_type_consistency",           per_source = check_atom_type_consistency           },
+	{ name = "binds_no_substruct_deref",        per_source = check_binds_no_substruct_deref        },
 }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -2521,28 +2516,27 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		-- Hazard readers (transfer_hazards) populate `f.check`, `f.relation_id`, `f.semantic`, `f.direction`, `f.producer_destination`, `f.gap`, `f.required`, `f.evidence_confidence`, etc.;
 		-- Copying them through keeps the per-severity bucket schema compatible with the renderer while making the diagnostic payload queryable.
 		local payload = {
-			line = f.line,
-			msg  = f.msg,
-			check = f.check,
-			atom = f.atom,
-			source = f.source,
-			relation_id       = f.relation_id,
-			semantic          = f.semantic,
-			direction         = f.direction,
+			line                 = f.line,
+			msg                  = f.msg,
+			check                = f.check,
+			atom                 = f.atom,
+			source               = f.source,
+			relation_id          = f.relation_id,
+			semantic             = f.semantic,
+			direction            = f.direction,
 			producer_destination = f.producer_destination,
-			producer_word     = f.producer_word,
-			producer_line     = f.producer_line,
-			producer_source   = f.producer_source,
-			consumer_word     = f.consumer_word,
-			consumer_token    = f.consumer_token,
-			gap               = f.gap,
-			required          = f.required,
-			evidence_confidence = f.evidence_confidence,
-			evidence_source   = f.evidence_source,
+			producer_word        = f.producer_word,
+			producer_line        = f.producer_line,
+			producer_source      = f.producer_source,
+			consumer_word        = f.consumer_word,
+			consumer_token       = f.consumer_token,
+			gap                  = f.gap,
+			required             = f.required,
+			evidence_confidence  = f.evidence_confidence,
+			evidence_source      = f.evidence_source,
 		}
-		-- Preserve relation fields such as target_state and status_register,
-		-- status_value, and future policy metadata) without making the binner
-		-- another semantic walker.
+		-- Preserve relation fields such as target_state and status_register status_value,
+		-- and future policy metadata) without making the binner another semantic walker.
 		for key, value in pairs(f) do
 			if payload[key] == nil then payload[key] = value end
 		end
@@ -2624,7 +2618,7 @@ function M.run(ctx)
 	-- Build the corpus-wide pipe_ctx ONCE per pass run.
 	-- The pipe_ctx is shared across every validate() invocation in this M.run so cross-source visibility is constant.
 	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx)
-	local corpus = ctx.shared.corpus
+	local corpus          = ctx.shared.corpus
 
 	-- Aggregate per-DIRECTORY (per-module).
 	-- One static_analysis.txt per source-directory, emitted only if the directory contains at least one atom.
@@ -2676,8 +2670,8 @@ function M.run(ctx)
 
 		-- Aggregate per-dir errors/warnings/info into the orchestrator totals.
 		-- Hoisted out of any per-dir file-emit so `report.lua` can drop the on-disk file emitter without losing the cross-module rollup.
-		for _, e in ipairs(dir_errors)   do errors  [#errors   + 1] = e end
-		for _, w in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
+		for _, e  in ipairs(dir_errors)   do errors  [#errors   + 1] = e end
+		for _, w  in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
 		for _, i_ in ipairs(dir_info)     do info    [#info     + 1] = i_ end
 		-- (No per-dir emit: per-module findings are stashed on `corpus.static_analysis_results` above. 
 		-- `report.lua` reads that projection to render `<module>.atom_meta_report.md` without re-running validate().)

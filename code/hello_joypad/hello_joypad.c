@@ -1,9 +1,17 @@
+#pragma region Vendors
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
 // #include "libgpu.h"
 // #include "libetc.h"
 // #include "libgte.h"
+#pragma endregion Vendors
+
+#pragma region Duffle Headers
+#	include "duffle/gen/macs.h"
+#	include "duffle/gen/offsets.h"
+
+#include "duffle/word_count.metadata.h"
 
 #include "duffle/dsl.h"
 #include "duffle/memory.h"
@@ -15,96 +23,30 @@
 #include "duffle/gte.h"
 #include "duffle/pad.h"
 
-#	include "duffle/gen/duffle.macs.h"
-#	include "duffle/gen/duffle.offsets.h"
-#include "duffle/atom_dsl.h"
+#include "duffle/dsl.atom.h"
 #include "duffle/lottes_tape.h"
-#include "duffle/word_count.metadata.h"
 
-#include "psyq.h"
+#include "duffle/psyq.h"
+#pragma endregion Duffle Headers
 
-#	include "gen/hello_joypad.macs.h"
-#	include "gen/hello_joypad.offsets.h"
+#pragma region Duffle TUs
+#include "duffle/math.atom.c"
+#include "duffle/mips.atom.c"
+#include "duffle/gte.atom.c"
+#include "duffle/gp.atom.c"
+#include "duffle/psyq.atom.c"
+#pragma endregion Duffle TUs
+
+#pragma region Joypade Headers
+#	include "gen/macs.h"
+#	include "gen/offsets.h"
+
 #include "hello_joypad.h"
+#pragma region Joypad Headers
 
-#include "psyq.c"
-#include "hello_joypad.tape.c"
-
-
-typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
-typedef Array_(OrderingTable_Buffer, 2);
-
-typedef B1 PrimitiveBuffer[PrimitiveBuff_Len];
-typedef Array_(PrimitiveBuffer, 2);
-typedef Struct_(PrimitiveArena) {
-	A2_PrimitiveBuffer buf;
-	U4                 used;
-};
-
-#define Cube_num_verts 8
-typedef Array_(V3_S2, Cube_num_verts);
-#define Cube_num_faces 6
-typedef Array_(V4_S2, Cube_num_faces);
-I_ void ent_cube128_init(A8_V3_S2* verts, A6_V4_S2* faces) {
-	LP_ A8_V3_S2 baked_verts = (A8_V3_S2) {
-		{ -128, -128, -128 },
-		{  128, -128, -128 },
-		{  128, -128,  128 },
-		{ -128, -128,  128 },
-		{ -128,  128, -128 },
-		{  128,  128, -128 },
-		{  128,  128,  128 },
-		{ -128,  128,  128 }
-	};
-	LP_ A6_V4_S2 baked_faces = (A6_V4_S2) {
-		{ 3, 2, 0, 1 },
-		{ 0, 1, 4, 5 },
-		{ 4, 5, 7, 6 },
-		{ 1, 2, 5, 6 },
-		{ 2, 3, 6, 7 },
-		{ 3, 0, 7, 4 },
-	};
-	mem_copy(u4_(verts), u4_(& baked_verts), S_(A8_V3_S2) );
-	mem_copy(u4_(faces), u4_(& baked_faces), S_(A6_V4_S2) );
-	return;
-}
-typedef Struct_(Ent_Cube) {
-	V3_S4 accel;
-	V3_S4 vel;
-	V3_S4 pos;
-	V3_S4 scale;
-	V3_S2 rot;
-	A8_V3_S2 verts;
-	A6_V4_S2 faces;
-};
-
-#define Floor_num_verts 4
-typedef Array_(V3_S2, Floor_num_verts);
-#define Floor_num_faces 2
-typedef Array_(V3_S2, Floor_num_faces);
-I_ void ent_floor_init(A4_V3_S2* verts, A2_V3_S2* faces) {
-	LP_ A4_V3_S2 baked_verts = (A4_V3_S2) {
-		{ -900, 0, -900 },
-		{ -900, 0,  900 },
-		{  900, 0, -900 },
-		{  900, 0,  900 },
-	};
-	LP_ A2_V3_S2 baked_faces = (A2_V3_S2) {
-		{ 0, 1, 2 },
-		{ 1, 3, 2 },
-	};
-	mem_copy(u4_(verts), u4_(& baked_verts), S_(A4_V3_S2));
-	mem_copy(u4_(faces), u4_(& baked_faces), S_(A2_V3_S2));
-};
-typedef Struct_(Ent_Floor) {
-	V3_S4 accel;
-	V3_S4 pos;
-	V3_S4 scale;
-	V3_S2 rot;
-	A4_V3_S2 verts;
-	A2_V3_S2 faces;
-};
-
+#pragma region Hello Joypad TUs
+#include "hello_joypad.atom.c"
+#pragma endregion Hello Joypad TUs
 
 enum { 
 	Scratchpad_Len = 1024, 
@@ -210,50 +152,6 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 			rlit(R_RA),
 			clb_mem_drain
 	);
-}
-
-void gp_screen_init_c11(DoubleBuffer* screen_buf, S4* active_buf_id)
-{
-	reset_graph(0);
-
-	// Set the current initial buffer
-	active_buf_id[0] = 0;
-
-	// Just setting env data, not interacting with console hw.
-	// First buffer area
-	displayenv_init(& r_(screen_buf->display)[0], 0, 0,           ScreenRes_X, ScreenRes_Y);
-	drawenv_init   (& r_(screen_buf->draw   )[0], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
-	// Second buffer area
-	displayenv_init(& r_(screen_buf->display)[1], 0, ScreenRes_Y, ScreenRes_X, ScreenRes_Y);
-	drawenv_init   (& r_(screen_buf->draw   )[1], 0, 0,           ScreenRes_X, ScreenRes_Y);
-	// Set the back/drawing buffer
-	screen_buf->draw[0].enable_auto_clear = true;
-	screen_buf->draw[1].enable_auto_clear = true;
-	// Set the background clear color
-	screen_buf->draw[0].initial_bg_color = rgb8( .r = 7, .g = 7,  .b = 7 );
-	screen_buf->draw[1].initial_bg_color = rgb8( .r = 7, .g = 7,  .b = 7 );
-	// screen_buf->draw[1].initial_bg_color = rgb8( .r = 47, .g = 13, .b = 0 );
-	displayenv_put(& r_(screen_buf->display)[ active_buf_id[0] ]);
-	drawenv_put   (& r_(screen_buf->draw   )[ active_buf_id[0] ]);
-
-	// Initialize and setup the GTE geometry offsets
-	geom_init();
-	geom_set_offset(ScreenRes_CenterX, ScreenRes_CenterY);
-	geom_set_screen(ScreenZ);
-
-	set_display_enabled(1); // gp_DisplayEnabled
-}
-
-void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_buf, PrimitiveArena* pa) {
-	draw_sync(0);
-	vsync(0);
-	displayenv_put(& r_(screen_buf->display)[active_buf_id[0] ]);
-	drawenv_put   (& r_(screen_buf->draw)   [active_buf_id[0] ]);
-	{
-		draw_orderingtbl(ordering_buf + OrderingTbl_Len - 1);
-		pa->used = 0;
-	}
-	active_buf_id[0] = ! active_buf_id[0]; // Swap current buffer
 }
 
 GCC_OPTIMIZATION_DISABLE
@@ -484,6 +382,19 @@ GCC_OPTIMIZATION_ENABLE
 void render(void) {
 }
 
+void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_buf, PrimitiveArena* pa) {
+	draw_sync(0);
+	vsync(0);
+	displayenv_put(& r_(screen_buf->display)[active_buf_id[0] ]);
+	drawenv_put   (& r_(screen_buf->draw)   [active_buf_id[0] ]);
+	{
+		draw_orderingtbl(ordering_buf + OrderingTbl_Len - 1);
+		pa->used = 0;
+	}
+	active_buf_id[0] = ! active_buf_id[0]; // Swap current buffer
+}
+
+GCC_OPTIMIZATION_DISABLE
 int main(void)
 {
 	smem = (SMemory){0};
@@ -527,3 +438,4 @@ int main(void)
 	};
 	return 0;
 }
+GCC_OPTIMIZATION_ENABLE

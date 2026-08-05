@@ -43,7 +43,9 @@
 
 #define R_    restrict 
 #define V_    volatile 
-// Fictional, used for intiution.
+
+#pragma region Fictional //, used for intiution
+
 #define EUB_  restrict // Execute Unit Bound:    Data is siloed in the ALU Register File. The Load/Store Unit is bypassed. (Route to Execution Unit.  Keep in registers)
 #define ISO_  restrict // Isolated Provenance:   Alternative to Exu_. Guarantees electrical memory isolation, 
                        //                        unlocking the compiler’s ability to safely pack data across multiple parallel SIMD lanes (vectorization).
@@ -67,7 +69,8 @@
 #define latch_load_anchor(ptr)       //__atomic_load_n(ptr, ooo_anchor_)
 #define latch_store_drain(ptr, val)  //__atomic_store_n(ptr, val, ooo_drain_)
 #define pulse_xchg_weld(ptr, val)    //__atomic_exchange_n(ptr, val, ooo_weld_)
-//end of: Fictional.
+
+#pragma endreigon Fictional
 
 
 // R_ (restrict) establishes an "Eigen" or "Proprius" mapping.
