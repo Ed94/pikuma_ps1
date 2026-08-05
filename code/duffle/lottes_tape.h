@@ -12,9 +12,69 @@
 #endif
 
 #pragma region Tape Drive
-/* ---------------------------------------------------------------------------
+/* -----------------------------------------------------------------------------
  *  TAPE DRIVE ABI
- * ---------------------------------------------------------------------------*/
+ * -----------------------------------------------------------------------------
+ * Note(Ed): One of the main purposes of this codebase is to help me
+ * learn this, as such the information below may be entirely realized 
+ * or finalized conceptually.
+ * -----------------------------------------------------------------------------
+ * This ABI and its associated legos were directly inspired by researching
+ * the work of Timothy Lottes and Onat Türkçüoğlu; along with many others.
+ * It's the simplest bootstrap of a a directly executed chain of assemby
+ * arrays (Atoms) that terminate with a yield sequence to the next atom.
+ * These eventually lead to a terminal atom for the tape which is defined
+ * below as "tape_exit".
+ * 
+ * This behaves as one of the simplest runtime harnesses ontop of a 
+ * host-enviornment's execution engine to author and compose programs with.
+ * From here various conventions can be further applied.
+ * To make things easier to understand it may be better to focus on what this
+ * ABI does not have. It does not have have any branching within the tape but
+ * relative branches between atoms. Branching nearly is always downstream.
+ * Stack usage is non-existent. Push/Pop, FIFO, or Arena/Bump data structures
+ * are used by atoms explicitly. In it's current form withe C11 macro dsl,
+ * the user also has to do manual register allocation per atom.
+ * 
+ * One of the remarkable things about utilizing this abi is its essentially
+ * interopable with CPUs, GPUs, FPGA, or, basically anything
+ * from the 5th generation consoles and onward.
+ * The ABI directly reflects how all computational hardware must be architected
+ * in order to execute digital logic effectively on current era tech.
+ * On the PS1 we don't have access to a few features like multi-threading,
+ * speculative execution, or L3 cache; but, we can set the foundation for legoing
+ * whats required baseline wise for eventually expanding the harness and core atoms
+ * to take those newer hardware features into account. For example, you can easily
+ * expand this to support wave-based execution model on a PS2 or PS3.
+ * Not having a stack or automatic register allocation means the user can't ignore
+ * excessive argument shuffle across workload or waves and thier phases.
+ * Crossing ABI boundaries to other runtimes that do has an obviouss penalties.
+ * 
+ * Learning data-oreinted code becomes a natural progression. Your not fighting
+ * a stack-based procedural paradigm that wants to argument shuffle on the stack
+ * by lack of constraints on how the user may "call" a procedure. The user doesn't
+ * have to hammer down "rules" or patterns to know how to massage the compiler
+ * to get the asesmbly into its natural form. The form is obvious, and once
+ * the user gets to author their compoonents it becomes a game of tetris.
+ * 
+ * Another feature is this ABI is very compatible with bootstrapping and developing
+ * simple toolchains built off of bit-packed annotated command streams the user can
+ * directly author, maintatain, and immediately execute. That being a color forth.
+ * This can make the tetris less of a chore with some helpful policy generation for
+ * allocation of registers, helping to choose resuable components, designing DSL on
+ * the fly, etc.
+ * -----------------------------------------------------------------------------
+ * TODO(Ed): We ned pretty ascii diagrams and proper guides, articles, etc.
+ * -----------------------------------------------------------------------------
+ * For now this thing is just functioning and I'm abusing C11 + a lua metaprogram
+ * to help establish a hybrid toolchain to ideate on a traditional text-based
+ * authoring UX for this paradigm.
+ * If pcsx-redux gets me viable hot-reload and persistent data storage beyond
+ * save-states (just copying ram to filesystem). I can author a color forth to
+ * mess around with, with an editor in-emulator or on the actual machine itself.
+ * Assembly is tedius, but I think this codebase most likely has some of the most,
+ * ergonomic you can come across..
+ * */
 /* Register Allocation Info */
 enum {
 	R_AtomJmp  = R_T8 atom_reg,  /* debug-visible; tape yield handshake scratch */
