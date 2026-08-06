@@ -180,12 +180,9 @@ function link-modules { param([string[]]$link_modules, [string]  $elf, [string[]
 	$link_args += ($f_link_pass_through_prefix + $f_link_mapfile + $map)
 
 	$link_args += ($f_link_pass_through_prefix + $f_link_start_group)
-	# raw_sio_pad_poll_20260802 — Task 5.1c surgical library-list trim.
-	# The 16 removed entries (c2, card, cd, comb, ds, gs, gun, hmd, math,
-	# mcrd, mcx, press, sio, snd, spu, tap) had LOAD lines in the map but
-	# ZERO .o files pulled in — they were unused. The 5 kept libraries
-	# (api, c, etc, gpu, gte) are required by the C-side calls in
-	# hello_joypad.c (reset_graph, draw_sync, vsync, etc.).
+	# 16 removed entries (c2, card, cd, comb, ds, gs, gun, hmd, math, mcrd, mcx, press, sio, snd, spu, tap)
+	# had LOAD lines in the map but ZERO .o files pulled in — they were unused.
+	# 5 kept libraries (api, c, etc, gpu, gte) are required by the C-side calls in hello_joypad.c (reset_graph, draw_sync, vsync, etc.).
 	$libraries = @(
 		"api",
 		"c",
@@ -227,9 +224,7 @@ function ps1-meta { param(
 		[string[]]$passes = @('--pre-link'),
 		[string[]]$extra_args = @()
 	)
-	# `--unity-root` and `--source` are
-	# mutually exclusive. Exactly one of `$unity_root` / `$sources` must
-	# be supplied; the other must be absent.
+	# `--unity-root` and `--source` are mutually exclusive. Exactly one of `$unity_root` / `$sources` must be supplied; the other must be absent.
 	if ($null -ne $unity_root -and $unity_root -ne '') 
 	{
 		if ($null -ne $sources -and $sources.Count -gt 0) {
@@ -522,7 +517,7 @@ function build-hello_camera {
 	$path_build_gen     = join-path $path_build  'gen'
 
 	$src_c = join-path $path_module 'hello_camera.c'
-	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen
+	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen -passes @('--pre-link')
 
 	$assemble_args = @()
 	$assemble_args += $f_debug
@@ -557,7 +552,6 @@ function build-hello_camera {
 	link-modules $link_modules $elf $link_args
 	make-binary $elf $exe
 
-	# Post-link: gdb-runtime + dwarf-injection in a single Lua invocation (one luajit cold start).
 	ps1-meta -unity_root $src_c -metadata $path_atom_metadata -out_root $path_build_gen -passes @('--post-link') ` -extra_args @('--elf', $elf)
 
 	inject-dwarf $elf $path_build_gen

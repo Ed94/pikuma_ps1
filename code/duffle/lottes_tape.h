@@ -31,10 +31,11 @@
  * From here various conventions can be further applied.
  * To make things easier to understand it may be better to focus on what this
  * ABI does not have. It does not have have any branching within the tape but
- * relative branches between atoms. Branching nearly is always downstream.
- * Stack usage is non-existent. Push/Pop, FIFO, or Arena/Bump data structures
- * are used by atoms explicitly. In it's current form withe C11 macro dsl,
- * the user also has to do manual register allocation per atom.
+ * relative branches within atoms or between atoms.
+ * Branching nearly is always downstream. Stack usage is non-existent.
+ * Push/Pop, FIFO, or Arena/Bump data structures are used by atoms explicitly.
+ * In it's current form withe C11 macro dsl, the user also has to do manual register 
+ * allocation per atom.
  * 
  * One of the remarkable things about utilizing this abi is its essentially
  * interopable with CPUs, GPUs, FPGA, or, basically anything
@@ -43,37 +44,38 @@
  * in order to execute digital logic effectively on current era tech.
  * On the PS1 we don't have access to a few features like multi-threading,
  * speculative execution, or L3 cache; but, we can set the foundation for legoing
- * whats required baseline wise for eventually expanding the harness and core atoms
+ * whats required for eventually expanding this ABI's paradigm and core atoms
  * to take those newer hardware features into account. For example, you can easily
  * expand this to support wave-based execution model on a PS2 or PS3.
  * Not having a stack or automatic register allocation means the user can't ignore
  * excessive argument shuffle across workload or waves and thier phases.
- * Crossing ABI boundaries to other runtimes that do has an obviouss penalties.
+ * Crossing ABI boundaries to other runtimes that do has obviouss penalties.
  * 
  * Learning data-oreinted code becomes a natural progression. Your not fighting
- * a stack-based procedural paradigm that wants to argument shuffle on the stack
- * by lack of constraints on how the user may "call" a procedure. The user doesn't
+ * a stack-based procedural paradigm that wants to argument shuffle on by lack of 
+ * constraints on how the user may "call" a procedure. The user doesn't
  * have to hammer down "rules" or patterns to know how to massage the compiler
- * to get the asesmbly into its natural form. The form is obvious, and once
- * the user gets to author their compoonents it becomes a game of tetris.
+ * to dissolve those call frames to get the asesmbly into its desired form.
+ * The form is obvious, and once the user gets to author these compoonents
+ * it becomes a game of tetris.
  * 
  * Another feature is this ABI is very compatible with bootstrapping and developing
  * simple toolchains built off of bit-packed annotated command streams the user can
- * directly author, maintatain, and immediately execute. That being a color forth.
+ * directly author, maintatain, and immediately execute. That being like a color forth.
  * This can make the tetris less of a chore with some helpful policy generation for
  * allocation of registers, helping to choose resuable components, designing DSL on
  * the fly, etc.
  * -----------------------------------------------------------------------------
- * TODO(Ed): We ned pretty ascii diagrams and proper guides, articles, etc.
+ * TODO(Ed): We need pretty ascii diagrams and proper guides, articles, etc.
  * -----------------------------------------------------------------------------
- * For now this thing is just functioning and I'm abusing C11 + a lua metaprogram
+ * For now this ideation is just started functioning. I'm abusing C11 & a lua metaprogram
  * to help establish a hybrid toolchain to ideate on a traditional text-based
  * authoring UX for this paradigm.
- * If pcsx-redux gets me viable hot-reload and persistent data storage beyond
- * save-states (just copying ram to filesystem). I can author a color forth to
- * mess around with, with an editor in-emulator or on the actual machine itself.
- * Assembly is tedius, but I think this codebase most likely has some of the most,
- * ergonomic you can come across..
+ * If pcsx-redux provides viable hot-reload and persistent data storage beyond
+ * save-states (just copying ram to filesystem), I can author a color forth to
+ * mess around with. With either an editor in-emulator or on the actual machine itself.
+ * Assembly is tedius, but I think this codebase most likely has a pretty ergonomic 
+ * flavor worst case...
  * */
 /* Register Allocation Info */
 enum {

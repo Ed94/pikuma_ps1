@@ -992,7 +992,7 @@ local function build_dwarf_line_section(existing, atom_table)
 	while unit_pos < #existing do
 		if unit_pos + 4 > #existing then return existing end
 		local unit_length =  elf_dwarf.read_u32_le(existing, unit_pos)
-		if    unit_length == elf_dwarf.ELF32.dw_dwarf32_terminator then return existing end
+		if    unit_length == elf_dwarf.dw_dwarf32_terminator then return existing end
 		local unit_end_excl = unit_pos + 4 + unit_length
 		if unit_end_excl > #existing then return existing end
 		last_pos, last_length, last_end = unit_pos, unit_length, unit_end_excl
@@ -1053,7 +1053,7 @@ local function build_dwarf_aranges_section(existing, atom_table)
 	while i < #existing do
 		-- Read this unit's length.
 		local ul = elf_dwarf.read_u32_le(existing, i)
-		if    ul == elf_dwarf.ELF32.dw_dwarf32_terminator then
+		if    ul == elf_dwarf.dw_dwarf32_terminator then
 			-- DWARF64 marker - not supported.
 			io.stderr:write("[dwarf_injection] WARN: .debug_aranges contains a DWARF64 marker (0xFFFFFFFF); the 64-bit extension is not supported by this metaprogram; passing through unchanged\n")
 			return existing
