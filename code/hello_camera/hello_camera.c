@@ -290,6 +290,19 @@ void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_
 }
 
 GCC_OPTIMIZATION_DISABLE
+void hot_reload_entry(void)
+{
+	smem.primitives.used = 0;
+	while (1) {
+		gknown S4* active_buf_id  = & smem.active_buf_id;
+		gknown U4* ordering_buf   = r_(smem.ordering_tbl)[active_buf_id[0]];
+		gknown PrimitiveArena* pa = & smem.primitives;
+		update(pa, ordering_buf);
+		render();
+		gp_display_frame(& smem.screen_buf, active_buf_id, ordering_buf, pa);
+	}
+}
+
 int main(void)
 {
 	smem = (SMemory){0};
@@ -323,14 +336,7 @@ int main(void)
 			tb_emit(& tb, gp_screen_init);
 		}
 	}
-	while (1) {
-		gknown S4* active_buf_id  = & smem.active_buf_id;
-		gknown U4* ordering_buf   = r_(smem.ordering_tbl)[active_buf_id[0]];
-		gknown PrimitiveArena* pa = & smem.primitives;
-		update(pa, ordering_buf);
-		render();
-		gp_display_frame(& smem.screen_buf, active_buf_id, ordering_buf, pa);
-	};
+	hot_reload_entry();
 	return 0;
 }
 GCC_OPTIMIZATION_ENABLE

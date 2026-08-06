@@ -16,36 +16,60 @@
 -- Companion: scripts/gdb/gdb_tape_atoms.gdb (covers GPRs + atom-aware stepping).
 
 local function register_handlers()
-    if not PCSX.WebServer then PCSX.WebServer = {} end
-    if not PCSX.WebServer.Handlers then PCSX.WebServer.Handlers = {} end
+	if not PCSX.WebServer then PCSX.WebServer = {} end
+	if not PCSX.WebServer.Handlers then PCSX.WebServer.Handlers = {} end
 
-    -- ── GTE state ──
-    PCSX.WebServer.Handlers.gte = function(req)
-        local r = PCSX.getRegisters()
-        local out = { "pc=0x" .. string.format("%x", r.pc) }
-        for i = 0, 31 do
-            out[#out + 1] = string.format("D[%d]=0x%08x C[%d]=0x%08x",
-                i, r.CP2D.r[i], i, r.CP2C.r[i])
-        end
-        return table.concat(out, "\n")
-    end
+	-- ── GTE state ──
+	PCSX.WebServer.Handlers.gte = function(req)
+		local r = PCSX.getRegisters()
+		local out = { "pc=0x" .. string.format("%x", r.pc) }
+		for i = 0, 31 do
+			out[#out + 1] = string.format("D[%d]=0x%08x C[%d]=0x%08x",
+				i, r.CP2D.r[i], i, r.CP2C.r[i])
+		end
+		return table.concat(out, "\n")
+	end
 
-		-- ── GP state (pointer to existing endpoints) ──
-		-- pcsx-redux's Lua GPU API exposes only takeScreenShot(); no GPUSTAT / GP0 / GP1 command log / display state.
-		-- We point to the existing web endpoints that DO expose those (when the emulator is actually rendering. Paused-at-BP frames won't have a fresh frame).
-    PCSX.WebServer.Handlers.gp = function(req)
-        local out = {
-            "gpu_screenshot_png=http://localhost:8080/api/v1/state/still",
-            "vram_raw=http://localhost:8080/api/v1/gpu/vram/raw (1MB VRAM)",
-            "gpustat=NOT_AVAILABLE_VIA_LUA",
-            "gp_command_log=NOT_AVAILABLE_VIA_LUA (use pcsx-redux Debug > GPU Logger)",
-            "hint_run_emulator_unpaused_for_screenshot",
-        }
-        return table.concat(out, "\n")
-    end
+	-- ── GP state (pointer to existing endpoints) ──
+	-- pcsx-redux's Lua GPU API exposes only takeScreenShot(); no GPUSTAT / GP0 / GP1 command log / display state.
+	-- We point to the existing web endpoints that DO expose those (when the emulator is actually rendering. Paused-at-BP frames won't have a fresh frame).
+	PCSX.WebServer.Handlers.gp = function(req)
+		local out = {
+			"gpu_screenshot_png=http://localhost:8080/api/v1/state/still",
+			"vram_raw=http://localhost:8080/api/v1/gpu/vram/raw (1MB VRAM)",
+			"gpustat=NOT_AVAILABLE_VIA_LUA",
+			"gp_command_log=NOT_AVAILABLE_VIA_LUA (use pcsx-redux Debug > GPU Logger)",
+			"hint_run_emulator_unpaused_for_screenshot",
+		}
+		return table.concat(out, "\n")
+	end
 end
 
 local ok, err = pcall(register_handlers)
 if ok then print("[pcsx_debug_helper] handlers registered: gte, gp")
 else       print("[pcsx_debug_helper] registration failed: " .. tostring(err))
+end
+
+-- ── reload handler (Task 6) ──
+-- After gte and gp register successfully, load reload.lua through Support.extra.dofile and call its install(pcsx, support).
+-- The whole sequence runs inside pcall so a missing zip, missing module table,
+-- or throwing install never disturbs the gte and gp handlers already registered above (handler isolation).
+--
+-- The failure messages are intentionally single-line so the helper's boot log stays scannable.
+if    type(Support)              == "table"
+	and type(Support.extra)        == "table"
+	and type(Support.extra.dofile) == "function" then
+	local load_ok, reload_mod = pcall(Support.extra.dofile, "reload.lua")
+	if load_ok and type(reload_mod) == "table" and type(reload_mod.install) == "function" then
+		local install_ok, install_err = pcall(reload_mod.install, PCSX, Support)
+		if install_ok then
+			print("[pcsx_debug_helper] reload handler registered")
+		else
+			print("[pcsx_debug_helper] reload registration failed: " .. tostring(install_err))
+		end
+	else
+		print("[pcsx_debug_helper] reload load failed: " .. tostring(reload_mod))
+	end
+else
+	print("[pcsx_debug_helper] reload load failed: Support.extra.dofile unavailable")
 end

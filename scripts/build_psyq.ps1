@@ -1,3 +1,13 @@
+# --- Parameter Surface (Task 8) -----------------------------------------
+# -Reload         : After a successful build, invoke reload.ps1 as a child pwsh and propagate its exit code.
+# -HelperZipOnly  : Skip the build entirely; regenerate the helper zip and exit. Honors -HelperZipOutput for out-of-tree paths.
+# -HelperZipOutput: When -HelperZipOnly is set, writes the archive to this path instead of the scripts/pcsx_debug_helper.zip.
+param(
+	[switch]$Reload,
+	[switch]$HelperZipOnly,
+	[string]$HelperZipOutput = ''
+)
+
 $path_root      = split-path -Path $PSScriptRoot -Parent
 $path_build     = join-path $path_root 'build'
 $path_code      = join-path $path_root 'code'
@@ -6,6 +16,98 @@ $path_toolchain = join-path $path_root 'toolchain'
 
 if ((test-path $path_build) -eq $false) {
 	new-item -itemtype directory -path $path_build
+}
+
+# --- HelperZipOnly short-circuit ----------------------------------------
+# Must run before any compile/link work.
+# Inlines the same logic as Make-HelperZip below to avoid an extra pwsh process spawn (~200 ms).
+#The helper zip is small and the BCL call is in-process; cold ~14 ms, warm ~10 ms (assembly load + tiny zip write).
+if ($HelperZipOnly) {
+	$zipDest = if ([string]::IsNullOrEmpty($HelperZipOutput)) {
+		join-path $path_scripts 'pcsx_debug_helper.zip'
+	}
+	else {
+		$HelperZipOutput
+	}
+	$HelperDir = join-path $path_scripts 'pcsx_debug_helper'
+	$elf32Src  = join-path $path_scripts 'elf32.lua'
+	$elf32Dest = join-path $HelperDir    'elf32.lua'
+	if (-not (test-path -LiteralPath $HelperDir)) {
+		write-error "helper dir not found: $HelperDir"
+		exit 1
+	}
+	if (-not (test-path -LiteralPath $elf32Src)) {
+		write-error "elf32.lua not found at $elf32Src"
+		exit 1
+	}
+	write-host "[build] HelperZipOnly mode -> $zipDest"
+
+	# --- Timestamp gate (Fix 1) -------------------------------------------
+	# PCSX-Redux holds pcsx_debug_helper.zip open via -archive at startup.
+	# The zip is consumed once at startup; the reload endpoint reads it
+	# from package.loaded on subsequent calls. Writing it on every build
+	# is dead work that fights the file lock. Skip the rewrite when the
+	# three sources (autoexec.lua, reload.lua, elf32.lua) are all older
+	# than the existing zip.
+	$sources = @(
+		(join-path $HelperDir 'autoexec.lua'),
+		(join-path $HelperDir 'reload.lua'),
+		$elf32Src
+	)
+	$zipMtime = $null
+	if (test-path -LiteralPath $zipDest) {
+		$zipMtime = (Get-Item -LiteralPath $zipDest).LastWriteTime
+	}
+	$needsRewrite = $false
+	if ($null -eq $zipMtime) {
+		$needsRewrite = $true
+	}
+	else {
+		foreach ($s in $sources) {
+			if (-not (test-path -LiteralPath $s)) { continue }
+			if ((Get-Item -LiteralPath $s).LastWriteTime -gt $zipMtime) {
+				$needsRewrite = $true
+				break
+			}
+		}
+	}
+	if (-not $needsRewrite) {
+		$sz = (Get-Item -LiteralPath $zipDest).Length
+		Write-Host "[build] helper zip up to date: $zipDest ($sz bytes); skipping"
+		return
+	}
+
+	Copy-Item -LiteralPath $elf32Src -Destination $elf32Dest -Force
+	try {
+		# Force the inode release so CreateFromDirectory can write fresh.
+		# ZipFile.CreateFromDirectory throws if the destination exists.
+		# If PCSX-Redux holds the file open, Remove-Item raises — fall
+		# back to writing pcsx_debug_helper.zip.new alongside. The next
+		# PCSX-Redux restart will read the canonical path; the .new file
+		# is a hint for the optional launch-script patch in fix 3.
+		if (test-path -LiteralPath $zipDest) {
+			try {
+				# -ErrorAction Stop is required so the catch below fires.
+				# Remove-Item raises a non-terminating error by default
+				# (ErrorActionPreference=Continue), which bypasses catch.
+				Remove-Item -LiteralPath $zipDest -Force -ErrorAction Stop
+			}
+			catch {
+				$zipDest = [System.IO.Path]::ChangeExtension($zipDest, '.zip.new')
+				Write-Warning "[build] canonical helper zip is locked; writing to $zipDest instead"
+			}
+		}
+		Add-Type -AssemblyName System.IO.Compression.FileSystem
+		[System.IO.Compression.ZipFile]::CreateFromDirectory(
+			$HelperDir, $zipDest,
+			[System.IO.Compression.CompressionLevel]::Optimal, $false) | Out-Null
+		$sz = (Get-Item -LiteralPath $zipDest).Length
+		Write-Host "[build] wrote $sz bytes to $zipDest"
+	}
+	finally {
+		if (test-path -LiteralPath $elf32Dest) { Remove-Item -LiteralPath $elf32Dest -Force }
+	}
+	return
 }
 
 # --- Toolchain Definition ---
@@ -214,17 +316,17 @@ function link-modules { param([string[]]$link_modules, [string]  $elf, [string[]
 function make-binary { param([string]$elf, [string]$exe)
 	Write-Host "--- Creating Binary ---" -ForegroundColor Cyan
 	write-host "Converting $elf to PS-EXE -> '$exe'"
-	$objcopy_args = ($f_objcopy_format + "binary"), $elf, $exe
+	$objcopy_args = ($f_objcopy_format + "binary"), $elf, $exe 
 		& $Objcopy $objcopy_args
 	if ($LASTEXITCODE -ne 0) { Write-Error "Objcopy failed. Aborting."; exit 1 }
 }
 
 function ps1-meta { param(
-		[string]$unity_root,
+		[string]  $unity_root,
 		[string[]]$sources,
 		[Parameter(Mandatory=$true)][string]$metadata,
-		[string]$out_root = (join-path $path_build 'gen'),
-		[string[]]$passes = @('--pre-link'),
+		[string]  $out_root   = (join-path $path_build 'gen'),
+		[string[]]$passes     = @('--pre-link'),
 		[string[]]$extra_args = @()
 	)
 	# `--unity-root` and `--source` are
@@ -236,10 +338,44 @@ function ps1-meta { param(
 			write-error 'ps1-meta: -unity_root and -sources are mutually exclusive'
 			exit 2
 		}
-	} 
+	}
 	elseif ($null -eq $sources -or $sources.Count -eq 0) {
 		write-error 'ps1-meta: either -unity_root <file> or -sources <file...> is required'
 		exit 2
+	}
+
+	# --- Defensive attribute clear on tracked gen files ------------------------
+	# Git tracks code/<dir>/gen/*.h files and Windows keeps the Archive bit set
+	# on them. Combined with transient editor locks or co-running processes,
+	# this can make io.open(path, "wb") fail with Access Denied / Sharing
+	# Violation even though Get-ChildItem shows IsReadOnly = False. Clearing
+	# the Read-only + Archive bits locally is safe; git re-asserts them on
+	# the next operation but the metaprogram write always wins.
+	#
+	# Derived from the caller's parameters: $metadata lives in $path_duffle
+	# (so its parent is the duffle dir), and $unity_root / $sources[0] lives
+	# in $path_module (so its parent is the module dir).
+	$pathToDuffle = split-path -Path $metadata -Parent
+	$pathToModule = $null
+	if ($null -ne $unity_root -and $unity_root -ne '') {
+		$pathToModule = split-path -Path $unity_root -Parent
+	}
+	elseif ($null -ne $sources -and $sources.Count -gt 0) {
+		$pathToModule = split-path -Path $sources[0] -Parent
+	}
+	$genFiles = @(
+		join-path $pathToDuffle 'gen\macs.h'
+		join-path $pathToDuffle 'gen\offsets.h'
+	)
+	if ($null -ne $pathToModule) {
+		$genFiles += join-path $pathToModule 'gen\macs.h'
+		$genFiles += join-path $pathToModule 'gen\offsets.h'
+	}
+	foreach ($f in $genFiles) {
+		if (test-path -LiteralPath $f) {
+			attrib -R $f 2>&1 | Out-Null
+			attrib -A $f 2>&1 | Out-Null
+		}
 	}
 
 	$script = join-path $path_scripts 'ps1_meta.lua'
@@ -270,14 +406,14 @@ function inject-dwarf { param(
 	[string]$path_gen
 )
 	$base_name               = [System.IO.Path]::GetFileNameWithoutExtension($elf)
-	$path_dwarf_line_bin     = join-path $path_gen  "$base_name.dwarf_line.bin"
-	$path_dwarf_aranges_bin  = join-path $path_gen  "$base_name.dwarf_aranges.bin"
-	$path_dwarf_rnglists_bin = join-path $path_gen  "$base_name.dwarf_rnglists.bin"
-	$path_dwarf_info_bin     = join-path $path_gen  "$base_name.dwarf_info.bin"
-	$path_dwarf_abbrev_bin   = join-path $path_gen  "$base_name.dwarf_abbrev.bin"
-	$path_dwarf_str_bin      = join-path $path_gen  "$base_name.dwarf_str.bin"
-	$path_dwarf_loc_bin      = join-path $path_gen  "$base_name.dwarf_loc.bin"
-	$path_dwarf_loclists_bin = join-path $path_gen  "$base_name.dwarf_loclists.bin"
+	$path_dwarf_line_bin     = join-path $path_gen   "$base_name.dwarf_line.bin"
+	$path_dwarf_aranges_bin  = join-path $path_gen   "$base_name.dwarf_aranges.bin"
+	$path_dwarf_rnglists_bin = join-path $path_gen   "$base_name.dwarf_rnglists.bin"
+	$path_dwarf_info_bin     = join-path $path_gen   "$base_name.dwarf_info.bin"
+	$path_dwarf_abbrev_bin   = join-path $path_gen   "$base_name.dwarf_abbrev.bin"
+	$path_dwarf_str_bin      = join-path $path_gen   "$base_name.dwarf_str.bin"
+	$path_dwarf_loc_bin      = join-path $path_gen   "$base_name.dwarf_loc.bin"
+	$path_dwarf_loclists_bin = join-path $path_gen   "$base_name.dwarf_loclists.bin"
 	$path_inject_elf         = join-path $path_build "$base_name.dwarf-injected.elf"
 
 	if (-not (Test-Path $path_dwarf_line_bin))     { return }
@@ -564,44 +700,122 @@ function build-hello_camera {
 }
 build-hello_camera
 
-# NO idea if this works yet...
-function Send-ToEmulator { param( [string]$exePath )
-    $uri = "http://localhost:8080/api/v1/load-exec"
+# ── Helper-zip + reload helpers (Task 8) ──
+# Defined right after the final build-hello_camera function so they're in scope for the post-build calls below.
+# The Make-HelperZip function is also reused by the -HelperZipOnly short-circuit at the top of this script.
+# Both call the in-process BCL CreateFromDirectory rather than spawning a child pwsh to avoid the ~200 ms process-spawn overhead.
+function Make-HelperZip {
+	param([string]$OutputPath = '')
 
-    # Absolute path is safest for the emulator web server
-    $absolutePath = [System.IO.Path]::GetFullPath($exePath)
+	$dest = if ([string]::IsNullOrEmpty($OutputPath)) {
+		join-path $path_scripts 'pcsx_debug_helper.zip'
+	}
+	else {
+		$OutputPath
+	}
 
-    # Create JSON payload pointing to your compiled .ps-exe
-    $body = @{ filename = $absolutePath } | ConvertTo-Json
+	$HelperDir = join-path $path_scripts 'pcsx_debug_helper'
+	$elf32Src  = join-path $path_scripts 'elf32.lua'
+	$elf32Dest = join-path $HelperDir   'elf32.lua'
+	if (-not (test-path -LiteralPath $HelperDir)) {
+		write-warning "[build] helper dir not found: $HelperDir; skipping helper zip"
+		return
+	}
+	if (-not (test-path -LiteralPath $elf32Src)) {
+		write-warning "[build] elf32.lua not found at $elf32Src; skipping helper zip"
+		return
+	}
 
-    Write-Host "Pushing hot-reload to PCSX-Redux..." -ForegroundColor Magenta
-    try {
-        $response = Invoke-RestMethod -Uri $uri -Method Post -Body $body -ContentType "application/json"
-        Write-Host "Hot-reload successful!" -ForegroundColor Green
-    } catch {
-        Write-Warning "Could not connect to PCSX-Redux web server. Ensure the emulator is running and Web Server is enabled."
-    }
+	# --- Timestamp gate (Fix 1) -------------------------------------------
+	# PCSX-Redux holds pcsx_debug_helper.zip open via -archive at startup.
+	# The zip is consumed once at startup; the reload endpoint reads it
+	# from package.loaded on subsequent calls. Writing it on every build
+	# is dead work that fights the file lock. Skip the rewrite when the
+	# three sources (autoexec.lua, reload.lua, elf32.lua) are all older
+	# than the existing zip.
+	$sources = @(
+		(join-path $HelperDir 'autoexec.lua'),
+		(join-path $HelperDir 'reload.lua'),
+		$elf32Src
+	)
+	$zipMtime = $null
+	if (test-path -LiteralPath $dest) {
+		$zipMtime = (Get-Item -LiteralPath $dest).LastWriteTime
+	}
+	$needsRewrite = $false
+	if ($null -eq $zipMtime) {
+		$needsRewrite = $true
+	}
+	else {
+		foreach ($s in $sources) {
+			if (-not (test-path -LiteralPath $s)) { continue }
+			if ((Get-Item -LiteralPath $s).LastWriteTime -gt $zipMtime) {
+				$needsRewrite = $true
+				break
+			}
+		}
+	}
+	if (-not $needsRewrite) {
+		$sz = (Get-Item -LiteralPath $dest).Length
+		Write-Host "[build] helper zip up to date: $dest ($sz bytes); skipping"
+		return
+	}
+
+	write-host "[build] regenerating helper zip -> $dest"
+	Copy-Item -LiteralPath $elf32Src -Destination $elf32Dest -Force
+	try {
+		# Force the inode release so CreateFromDirectory can write fresh.
+		# ZipFile.CreateFromDirectory throws if the destination exists.
+		# If PCSX-Redux holds the file open, Remove-Item raises — fall
+		# back to writing pcsx_debug_helper.zip.new alongside. The next
+		# PCSX-Redux restart will read the canonical path; the .new file
+		# is a hint for the optional launch-script patch in fix 3.
+		if (test-path -LiteralPath $dest) {
+			try {
+				# -ErrorAction Stop is required so the catch below fires.
+				# Remove-Item raises a non-terminating error by default
+				# (ErrorActionPreference=Continue), which bypasses catch.
+				Remove-Item -LiteralPath $dest -Force -ErrorAction Stop
+			}
+			catch {
+				$dest = [System.IO.Path]::ChangeExtension($dest, '.zip.new')
+				Write-Warning "[build] canonical helper zip is locked; writing to $dest instead"
+			}
+		}
+		Add-Type -AssemblyName System.IO.Compression.FileSystem
+		[System.IO.Compression.ZipFile]::CreateFromDirectory(
+			$HelperDir, $dest,
+			[System.IO.Compression.CompressionLevel]::Optimal, $false) | Out-Null
+		$sz = (Get-Item -LiteralPath $dest).Length
+		Write-Host "[build] wrote $sz bytes to $dest"
+	}
+	finally {
+		if (test-path -LiteralPath $elf32Dest) { Remove-Item -LiteralPath $elf32Dest -Force }
+	}
 }
 
-# # Automatically hot-reloads it into the running emulator
-# Send-ToEmulator (join-path $path_build 'hello_gte.ps-exe')
+# Invokes reload.ps1 as a child pwsh instead of POSTing to the nonexistent /api/v1/load-exec endpoint.
+# Exit code is propagated so the build fails loud if the reload fails.
+function Send-ToEmulator {
+	param([string]$ElfPath = (join-path $path_build 'hello_camera.elf'))
 
-# --- Hot Reload via PCSX-Redux Web Server ---
-# $exe_path = join-path $path_build 'hello_gte.ps-exe'
-# $absolute_path = [System.IO.Path]::GetFullPath($exe_path)
+	$reloadScript = join-path $path_scripts 'reload.ps1'
+	if (-not (test-path -LiteralPath $reloadScript)) {
+		write-error "[build] reload.ps1 not found at $reloadScript"
+		exit 1
+	}
 
-# PCSX-Redux expects the file location in the URL query string?
-# We URL-encode the path to ensure backslashes and spaces don't break the HTTP request?
-# $encoded_path = [uri]::EscapeDataString($absolute_path)
-# $uri = "http://localhost:8080/api/v1/load-exec?path=$encoded_path"
+	write-host "[build] hot-reloading $ElfPath via reload.ps1" -ForegroundColor Magenta
+	& pwsh -NoProfile -File $reloadScript -Mode elf -Target hello_camera -ElfPath $ElfPath
+	if ($LASTEXITCODE -ne 0) {
+		write-error "[build] reload.ps1 failed (exit $LASTEXITCODE)"
+		exit $LASTEXITCODE
+	}
+}
 
-# Write-Host "Pushing hot-reload to PCSX-Redux..." -ForegroundColor Magenta
-# try {
-#     # Send the request with the query string included
-#     Invoke-RestMethod -Uri $uri -Method Post 
-#     Write-Host "Hot-reload successful!" -ForegroundColor Green
-# } catch {
-#     Write-Host "Failed to hot-reload." -ForegroundColor Red
-#     # This will print the *actual* HTTP error instead of our generic warning
-#     Write-Host $_.Exception.Message -ForegroundColor Yellow
-# }
+# Post-build: Regenerate the helper zip (canonical output) and, if -Reload was passed, kick a hot-reload against the just-built ELF.
+# Any future targets compiled by this script should add their own Make-HelperZip call after their build step; today's only target is hello_camera.
+Make-HelperZip
+if ($Reload) {
+	Send-ToEmulator
+}
