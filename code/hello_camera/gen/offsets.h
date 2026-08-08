@@ -26,6 +26,24 @@ enum {
     atom_offset_end_low_exit_stick = _atom_offset_end_low_exit_stick,
 };
 
+// --- atom: pad_input_cam (41 words) ---
+
+#define _atom_offset_left_x_exit_left_x               3
+#define _atom_offset_right_x_exit_right_x             3
+#define _atom_offset_up_y_exit_up_y                   3
+#define _atom_offset_down_y_exit_down_y               3
+#define _atom_offset_cross_z_exit_cross_z             3
+#define _atom_offset_circle_z_exit_circle_z           3
+
+enum {
+    atom_offset_left_x_exit_left_x = _atom_offset_left_x_exit_left_x,
+    atom_offset_right_x_exit_right_x = _atom_offset_right_x_exit_right_x,
+    atom_offset_up_y_exit_up_y = _atom_offset_up_y_exit_up_y,
+    atom_offset_down_y_exit_down_y = _atom_offset_down_y_exit_down_y,
+    atom_offset_cross_z_exit_cross_z = _atom_offset_cross_z_exit_cross_z,
+    atom_offset_circle_z_exit_circle_z = _atom_offset_circle_z_exit_circle_z,
+};
+
 // --- atom: cube_g4_face (76 words) ---
 
 #define _atom_offset_cull_cube_g4_face_exit           41

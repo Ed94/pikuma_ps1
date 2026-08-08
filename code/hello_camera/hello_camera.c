@@ -134,27 +134,28 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data_(state, & smem.pad[1]);
 
 			// TODO(Ed): Implement based on below.
-			// tb_emit_(pad_input_cam);
-			// 	tb_data_(cam, & smem.cam);
+			tb_emit_(pad_input_cam);
+				tb_data_(state, & smem.pad[0]);
+				tb_data_(cam, & smem.cam);
 
-			if (pad0_btn_(Pad_Left)) {
-				smem.cam.pos.x -= 50;
-			}
-			if (pad0_btn_(Pad_Right)) {
-				smem.cam.pos.x += 50;
-			}
-			if (pad0_btn_(Pad_Up)) {
-				smem.cam.pos.y -= 50;
-			}
-			if (pad0_btn_(Pad_Down)) {
-				smem.cam.pos.y += 50;
-			}
-			if (pad0_btn_(Pad_Cross)) {
-				smem.cam.pos.z -= 50;
-			}
-			if (pad0_btn_(Pad_Circle)) {
-				smem.cam.pos.z += 50;
-			}
+			// if (pad0_btn_(Pad_Left)) {
+			// 	smem.cam.pos.x -= 50;
+			// }
+			// if (pad0_btn_(Pad_Right)) {
+			// 	smem.cam.pos.x += 50;
+			// }
+			// if (pad0_btn_(Pad_Up)) {
+			// 	smem.cam.pos.y -= 50;
+			// }
+			// if (pad0_btn_(Pad_Down)) {
+			// 	smem.cam.pos.y += 50;
+			// }
+			// if (pad0_btn_(Pad_Cross)) {
+			// 	smem.cam.pos.z -= 50;
+			// }
+			// if (pad0_btn_(Pad_Circle)) {
+			// 	smem.cam.pos.z += 50;
+			// }
 
 
 			// Demo input (not longer using)
