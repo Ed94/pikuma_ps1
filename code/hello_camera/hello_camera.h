@@ -21,12 +21,6 @@ enum {
 	ScreenRes_CenterY = (ScreenRes_Y >> 1),
 };
 
-enum {
-	fp_one = (1 << 12),
-};
-
-#define v3s4_fp_one() v3s4(fp_one, fp_one, fp_one)
-
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
 typedef Array_(OrderingTable_Buffer, 2);
 
@@ -99,4 +93,10 @@ typedef Struct_(Ent_Floor) {
 	V3_S2 rot;
 	A4_V3_S2 verts;
 	A2_V3_S2 faces;
+};
+
+typedef Struct_(Camera) {
+	V3_S4    pos;
+	V3_S2    rot;
+	MT3_S2S4 look_at;
 };

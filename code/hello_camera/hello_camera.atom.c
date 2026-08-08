@@ -210,7 +210,7 @@ enum {
 	R_CubeRot    = R_T1 atom_reg,
 	R_FloorRot   = R_T2 atom_reg,
 };
-internal MipsAtom_(pad_apply_input) atom_info(atom_bind(Binds_PadApplyInput)
+internal MipsAtom_(pad_input_cube_rotation) atom_info(atom_bind(Binds_PadApplyInput)
 , atom_reads(R_T0, R_CubeRot, R_FloorRot, R_T3, R_T4, R_PadStateT5, R_TapePtr)
 , atom_writes(     R_CubeRot, R_FloorRot)
 ) {
@@ -225,7 +225,7 @@ internal MipsAtom_(pad_apply_input) atom_info(atom_bind(Binds_PadApplyInput)
 	// Note(Ed): Potential op with delay slot?
 
 	/* D-pad Left: cube_rot.y += 30, floor_rot.y += 5.  */
-	and_i(R_T3, R_T0, pad0_(Pad_Left)), branch_le_zero(R_T3, atom_offset(dpad_left, exit_dpad_left)),
+	and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(dpad_left, exit_dpad_left)),
 		load_half( R_T4, R_CubeRot,  O_(V3_S2,y)),   /* BD-slot */
 		load_half( R_T3, R_FloorRot, O_(V3_S2,y)),
 		add_si(    R_T4, R_T4, 30),
@@ -235,7 +235,7 @@ internal MipsAtom_(pad_apply_input) atom_info(atom_bind(Binds_PadApplyInput)
 	atom_label(exit_dpad_left)
 
 	/* D-pad Right: cube_rot.y -= 30, floor_rot.y -= 5. */
-	and_i(R_T3, R_T0, pad0_(Pad_Right)), branch_le_zero(R_T3, atom_offset(dpad_right, exit_dpad_right)),
+	and_i(R_T3, R_T0, Pad_Right), branch_le_zero(R_T3, atom_offset(dpad_right, exit_dpad_right)),
 		load_half( R_T4, R_CubeRot,  O_(V3_S2,y)),   /* BD-slot */
 		load_half( R_T3, R_FloorRot, O_(V3_S2,y)),
 		add_si(    R_T4, R_T4, -30),
@@ -310,6 +310,32 @@ atom_label(no_jump_fallthrough)
 atom_label(exit_stick)
 	/* NOT mac_yield() — R_AtomJmp was already loaded in the BD-slot of the dead-zone/exit branch. */
 	mac_yield_tail(),
+};
+
+enum {
+	R_Cam = R_T4 atom_reg,
+};
+typedef Struct_(Binds_PadInputCam) {
+	Camera* cam;
+};
+internal MipsAtom_(pad_input_cam) atom_info(atom_bind(Binds_PadInputCam)) {
+	load_word(R_Cam, R_TapePtr, O_(Binds_PadInputCam,cam)),
+	add_ui_self(     R_TapePtr, S_(Binds_PadInputCam)),
+	// TODO(Ed): Implement.
+
+	mac_yield(),
+};
+
+enum {
+	_LookAt_WIP,
+};
+typedef Struct_(Binds_ResolveLookAt) {
+	U1 bla;
+};
+internal MipsAtom_(resolve_look_at) atom_info(atom_bind(Binds_ResolveLookAt)) {
+	add_ui_self(R_TapePtr, S_(Binds_ResolveLookAt)),
+
+	mac_yield(),
 };
 
 enum {

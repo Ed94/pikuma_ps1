@@ -33,9 +33,6 @@ enum {
 	Pad1 = 1 << PadId_Offset,
 };
 
-#define pad0_(btn_id) (btn_id << Pad0)
-#define pad1_(btn_id) (btn_id << Pad1)
-
 /* =============================================================================
  * BIOS pad-buffer subsystem: docs/psx-spx/docs/kernelbios.md (B(12h) + B(13h))
  * ============================================================================= */
@@ -113,3 +110,5 @@ typedef Struct_(PadState) {
 		};
 	};
 };
+
+internal void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1);

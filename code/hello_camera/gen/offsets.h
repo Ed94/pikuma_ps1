@@ -8,7 +8,7 @@
 #pragma region hello_camera
 
 
-// --- atom: pad_apply_input (60 words) ---
+// --- atom: pad_input_cube_rotation (60 words) ---
 
 #define _atom_offset_dpad_left_exit_dpad_left         6
 #define _atom_offset_dpad_right_exit_dpad_right       6

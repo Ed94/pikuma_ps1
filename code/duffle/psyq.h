@@ -64,9 +64,9 @@ typedef Struct_(Tile) {
 	Linear Algebra
 */
 
-M3_S2* m3s2_rotation   (V3_S2* vec, M3_S2* mat) asm("RotMatrix");
-M3_S2* m3s2_translation(M3_S2* mat, V3_S4* vec) asm("TransMatrix");
-M3_S2* m3s2_scale      (M3_S2* mat, V3_S4* vec) asm("ScaleMatrix");
+MT3_S2S4* mt3s2s4_rotation   (V3_S2*    vec, MT3_S2S4* mat) asm("RotMatrix");
+MT3_S2S4* mt3s2s4_translation(MT3_S2S4* mat, V3_S4*    vec) asm("TransMatrix");
+MT3_S2S4* mt3s2s4_scale      (MT3_S2S4* mat, V3_S4*    vec) asm("ScaleMatrix");
 
 // Rotation, Translation, Perspective
 
@@ -99,5 +99,17 @@ FI_ S4 rtp_avg_nclip_a4_v3s2(
 	);
 }
 
-void gte_matrix_set_rotation   (M3_S2* mat) asm("SetRotMatrix");
-void gte_matrix_set_translation(M3_S2* mat) asm("SetTransMatrix");
+void gte_matrix_set_rotation   (MT3_S2S4* mat) asm("SetRotMatrix");
+void gte_matrix_set_translation(MT3_S2S4* mat) asm("SetTransMatrix");
+
+// Einheit, Metrication to unit vector. "Normalization", not Orthogonal "Normal, Normalis". Directionalization.
+S4 normalize_v3s4(V3_S4* v0, V3_S4* v1) asm("VectorNormal");
+
+V3_S4* mul_m3s2_v3s4(MT3_S2S4* m, V3_S4* v, V3_S4* result) asm("ApplyMatrixLV");
+
+MT3_S2S4* trans_m3s2(MT3_S2S4* m, V3_S4* off) asm("TransMatrix");
+
+MT3_S2S4* gte_comp_coord_m3s2(MT3_S2S4* m0, MT3_S2S4* m1, MT3_S2S4* result) asm("CompMatrixLV");
+
+// TODO(Ed): Want to interpret this under the lens of Eric Lengyel's geometric algebra
+void cross_v3s4(V3_S4* v0, V3_S4* v1, V3_S4* result) asm("OuterProduct12");

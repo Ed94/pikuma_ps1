@@ -53,16 +53,16 @@ FI_ Slice_MipsCode ac_gte_store_g4_p3(U4 r_primitive_cursor) atom_dbg_skip MipsA
 
 #pragma region Bsked Atoms
 
-typedef Struct_(Binds_SetGteWorld) {
-	M3_S2* transform;
+typedef Struct_(Binds_SetGteMT3S2S4) {
+	MT3_S2S4* transform;
 };
-internal MipsAtom_(set_gte_world) atom_info(
-		atom_bind(Binds_SetGteWorld)
+internal MipsAtom_(set_gte_mt3s2s4) atom_info(
+		atom_bind(Binds_SetGteMT3S2S4)
 	,	atom_reads(R_TapePtr)
 ){
 	/* Pop matrix address from tape into R_T3 ($11) */
-	load_word(R_T3, R_TapePtr, O_(Binds_SetGteWorld,transform)),
-	add_ui_self(    R_TapePtr, S_(Binds_SetGteWorld)),
+	load_word(R_T3, R_TapePtr, O_(Binds_SetGteMT3S2S4,transform)),
+	add_ui_self(    R_TapePtr, S_(Binds_SetGteMT3S2S4)),
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
 	load_word(R_T0, R_T3, 0),  load_word(R_T1, R_T3,  4),
 	gte_mv_to_ctrl_r(R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(R_T1, gte_cr_RT12),

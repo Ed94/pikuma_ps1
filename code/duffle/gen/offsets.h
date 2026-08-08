@@ -13,6 +13,7 @@
 //   source: C:\projects\Pikuma\ps1\code\duffle\lottes_tape.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\bios.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\psyq.h
+//   source: C:\projects\Pikuma\ps1\code\duffle\pad.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\math.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\mips.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.c

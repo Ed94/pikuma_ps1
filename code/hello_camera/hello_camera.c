@@ -31,6 +31,7 @@
 #pragma endregion Duffle Headers
 
 #pragma region Duffle TUs
+#include "duffle/pad.c"
 #include "duffle/math.atom.c"
 #include "duffle/mips.atom.c"
 #include "duffle/gte.atom.c"
@@ -62,7 +63,10 @@ typedef Struct_(SMemory) {
 
 	U4 MemTape[MemTape_Len];
 
-	M3_S2 tform_world;
+	MT3_S2S4 tform_world;
+	MT3_S2S4 tform_view;
+
+	Camera cam;
 
 	Ent_Cube  cube;
 	Ent_Floor floor;
@@ -75,6 +79,9 @@ typedef Struct_(SMemory) {
 global SMemory smem;
 extern SMemory smem;
 
+#define pad0_btn_(btn) btn & smem.pad[0].buttons
+#define pad1_btn_(btn) btn & smem.pad[1].buttons
+
 I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 	gknown PrimitiveArena* pa  = & smem.primitives;
 	gknown B1*             buf = (B1*) r_(smem.primitives.buf)[smem.active_buf_id];
@@ -85,76 +92,30 @@ I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 }
 #define prim_alloc(type) (type*)prim__alloc(S_(type), slit( stringify(type)))
 
-/* Uses ONE 8-byte frame allocated via the compiler's standard prologue.
- * The 4 wasted-arg words for B(12h) InitPAD2 live at [SP+0..15] but are not explicitly allocated.
- * The compiler handles the MIPS O32 "wasted stack" convention for us by treating the B-call as a 4-arg call.
- *
- * The buffer pointers are passed as arguments so the compiler keeps them in callee-saved registers;
- * The B(12h) asm volatile block does NOT clobber those registers (it clobbers only the volatile GPRs + the B-table arg registers explicitly).
- * The C-level writes after the call re-load the pointers from their callee-saved homes.
- *
- * The clobber list for both B-calls names the full BIOS destroy set documented in kernelbios.md:167-174 (R1..R15, R24..R25, R31, HI/LO).
- * The kernel-ABI "volatile GPRs" subset is clb_system; the rest of the destroy set is enumerated explicitly here. */
-NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
-{
-	/* Pin raw0 + raw1 to $a0 + $a1 via rgcc; the B(12h) call uses these directly.
-	 * The `(void)` casts mark them as unread after the call so the compiler doesn't need to move them back. */
-	register PadBiosRaw* p0 rgcc(R_A0) = raw0;
-	register PadBiosRaw* p1 rgcc(R_A1) = raw1;
-	(void)p0; (void)p1;
+void
+resolve_look_at_c11(MT3_S2S4* look_at, V3_S4* eye, V3_S4* target, V3_S4* up_in) {
+// TODO(Ed): Want to interpret this under the lens of Eric Lengyel's geometric algebra
+	V3_S4 right, up, forward;
+	V3_S4 ux, uy, uz;
+	V3_S4 pos, off;
 
-	// TODO(Ed): Properly annotate the raw values in the inline asm instructions.
-	// Use enums.
+	forward = target[0]; sub_v3s4(& forward, eye[0]);
+	normalize_v3s4(& forward, & uz);
 
-	/* B(12h) InitPAD2(raw0, 0x22, raw1, 0x22)
-	 *   $a0 = raw0 (rgcc-bound; survives the sequence below)
-	 *   $a1 = raw1 (preserved into $a2 before $a1 is overwritten)
-	 *   $a2 = raw1 (moved from $a1; survives $a1's overwrite)
-	 *   $a3 = 0x22 (immediate)
-	 *   $t1 = 0x12 (function number)
-	 *   $t2 = 0xB0 (BIOS B-table address) */
-	asm volatile(
-		asm_words(
-			or_u(    rarg_2, rarg_1, rdiscard), /* $a2 = $a1 = raw1 */
-			add_ui(  rarg_1, rdiscard, bios_pad_buffer_size), /* $a1 = 0x22 */
-			add_ui(  rarg_3, rdiscard, bios_pad_buffer_size), /* $a3 = 0x22 */
-			add_ui(  rtmp_1, rdiscard, bios_init_pad_2),      /* $t1 = 0x12 */
-			add_ui(  rtmp_2, rdiscard, bios_btable_addr),     /* $t2 = 0xB0 */
-			call_reg(rtmp_2),                   /* jalr $t2, $ra */
-			nop                                 /* BD slot */
-		)
-		asm_rpins, r_use(p0), r_use(p1)
-		asm_clobber: 
-			rlit(R_AT), 
-			rlit(R_V0), rlit(R_V1), 
-			rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
-			rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8), rlit(R_T9),
-			rlit(R_RA),
-			clb_mem_drain
-	);
+	cross_v3s4(& uz,   up_in, & right); normalize_v3s4(& right, & ux);
+	cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy);
 
-	/* The C-level writes re-load the pointers via the parameter names and write 0xFF to each 
-	 * buffer's status byte to mark the initial-state hazard documented in kernelbios.md:1621-1624. */
-	u1_v(raw0)[0] = 0xFF;
-	u1_v(raw1)[0] = 0xFF;
+	look_at->m[0][0] = ux.x; look_at->m[0][1] = ux.y; look_at->m[0][2] = ux.z;
+	look_at->m[1][0] = uy.x; look_at->m[1][1] = uy.y; look_at->m[1][2] = uy.z;
+	look_at->m[2][0] = uz.x; look_at->m[2][1] = uz.y; look_at->m[2][2] = uz.z;
+	
+	pos = eye[0]; mul_v3s4(& pos, v3s4(-1,-1,-1));
 
-	/* B(13h) StartPAD2() — no args. The BIOS preserves $sp. */
-	asm volatile(
-		asm_words(
-			add_ui(  rtmp_1, rdiscard, bios_start_pad_2), /* $t1 = 0x13 */
-			add_ui(  rtmp_2, rdiscard, bios_btable_addr), /* $t2 = 0xB0 (re-load) */
-			call_reg(rtmp_2),                 /* jalr $t2, $ra */
-			nop                               /* BD slot */
-		)
-		asm_clobber:
-			rlit(R_AT),
-			rlit(R_V0), rlit(R_V1),
-			rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
-			rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8), rlit(R_T9),
-			rlit(R_RA),
-			clb_mem_drain
-	);
+	mul_m3s2_v3s4(look_at, & pos, & off);
+	trans_m3s2(look_at, & off);
 }
+
+FI_ void camera_look_at_c11(Camera* c, V3_S4* target, V3_S4* up_in) { resolve_look_at_c11(& c->look_at, & c->pos, target, up_in); }
 
 GCC_OPTIMIZATION_DISABLE
 void update(PrimitiveArena* pa, U4* ordering_buf) 
@@ -171,11 +132,36 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			tb_emit_(pad_bios_snapshot);
 				tb_data_(raw,   & smem.pad_raw[1]);
 				tb_data_(state, & smem.pad[1]);
-			// Demo input
-			tb_emit_(pad_apply_input);
-				tb_data_(state,     & smem.pad[0]);
-				tb_data_(cube_rot,  & smem.cube.rot);
-				tb_data_(floor_rot, & smem.floor.rot);
+
+			// TODO(Ed): Implement based on below.
+			// tb_emit_(pad_input_cam);
+			// 	tb_data_(cam, & smem.cam);
+
+			if (pad0_btn_(Pad_Left)) {
+				smem.cam.pos.x -= 50;
+			}
+			if (pad0_btn_(Pad_Right)) {
+				smem.cam.pos.x += 50;
+			}
+			if (pad0_btn_(Pad_Up)) {
+				smem.cam.pos.y -= 50;
+			}
+			if (pad0_btn_(Pad_Down)) {
+				smem.cam.pos.y += 50;
+			}
+			if (pad0_btn_(Pad_Cross)) {
+				smem.cam.pos.z -= 50;
+			}
+			if (pad0_btn_(Pad_Circle)) {
+				smem.cam.pos.z += 50;
+			}
+
+
+			// Demo input (not longer using)
+			// tb_emit_(pad_input_cube_rotation);
+			// 	tb_data_(state,     & smem.pad[0]);
+			// 	tb_data_(cube_rot,  & smem.cube.rot);
+			// 	tb_data_(floor_rot, & smem.floor.rot);
 		}
 	}
 
@@ -202,15 +188,34 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	A2_S2 p;    //???
 	S4 flag; //????
 
+	// Camera Look at
+	if (1)
+	{
+		camera_look_at_c11(& smem.cam, & smem.cube.pos, & v3s4(0, -fp_one, 0));
+	}
+	// Camera look at (Tape)
+	if (0)
+	{
+		tb.used = 0; tb_scope_run(& tb) {
+			tb_emit_(resolve_look_at);
+				// tb_data_();
+		}
+	}
 
 	// Draw cube
 	if (1)
 	{
-		m3s2_rotation   (& smem.cube.rot,    & smem.tform_world);
-		m3s2_translation(& smem.tform_world, & smem.cube.pos);
-		m3s2_scale      (& smem.tform_world, & smem.cube.scale);
-		gte_matrix_set_rotation   (& smem.tform_world);
-		gte_matrix_set_translation(& smem.tform_world);
+		mt3s2s4_rotation   (& smem.cube.rot,    & smem.tform_world);
+		mt3s2s4_translation(& smem.tform_world, & smem.cube.pos);
+		mt3s2s4_scale      (& smem.tform_world, & smem.cube.scale);
+
+		// Combine world and look_at matrix.
+		gte_comp_coord_m3s2(& smem.cam.look_at, & smem.tform_world, & smem.tform_view);
+		gte_matrix_set_rotation   (& smem.tform_view);
+		gte_matrix_set_translation(& smem.tform_view);
+
+		// gte_matrix_set_rotation   (& smem.tform_world);
+		// gte_matrix_set_translation(& smem.tform_world);
 
 		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
@@ -238,9 +243,15 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	// Draw floor
 	if (1)
 	{
-		m3s2_rotation   (& smem.floor.rot,   & smem.tform_world);
-		m3s2_translation(& smem.tform_world, & smem.floor.pos);
-		m3s2_scale      (& smem.tform_world, & smem.floor.scale);
+		mt3s2s4_rotation   (& smem.floor.rot,   & smem.tform_world);
+		mt3s2s4_translation(& smem.tform_world, & smem.floor.pos);
+		mt3s2s4_scale      (& smem.tform_world, & smem.floor.scale);
+
+		// Combine world and look_at matrix.
+		gte_comp_coord_m3s2(& smem.cam.look_at, & smem.tform_world, & smem.tform_view);
+
+		gte_matrix_set_rotation   (& smem.tform_view);
+		gte_matrix_set_translation(& smem.tform_view);
 
 		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
 		U4 prim_cursor = prim_base + pa->used;
@@ -250,8 +261,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		// Prepare the tape. (Push protocol to tape)
 		tb.used = 0; tb_scope(& tb) {
-			tb_emit(& tb, set_gte_world);
-				tb_data(& tb, u4_(& smem.tform_world));
+			// tb_emit(& tb, set_gte_mt3s2s4);
+			// 	tb_data(& tb, u4_(& smem.tform_view));
 
 			tb_emit(& tb, rbind_floor_f3_face);
 			// TODO(Ed): Just use a single context struct ref?
@@ -297,6 +308,7 @@ int main(void)
 	smem.scratchpad = C_(U4_V, 0x1F800000);
 	// smem.primitives.used = 0;
 	// smem.active_buf_id   = 0;
+	smem.cam.pos = v3s4(500, -1000, -1500);
 	/*Persistent Entity Setup*/{
 		ent_cube128_init(& smem.cube.verts, & smem.cube.faces); {
 			Ent_Cube* cube = & smem.cube;
