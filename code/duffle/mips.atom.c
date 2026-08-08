@@ -1,17 +1,13 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	include "gen/macs.h"
 #	include "gen/offsets.h"
+#	include "bios.h"
 #	include "lottes_tape.h"
 #endif
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(mips_atom_c);
 
 #pragma region Baked Atoms
-
-enum {
-	bios_flushcache = 0x44,
-	bios_table_addr = 0xA0,
-};
 
 /* Flushes the Instruction Cache (PSX A-function 0x44 via BIOS stub at 0xA0).
  * Sequence (per MIPS ABI; arguments in arg registers, RA pushed to stack):

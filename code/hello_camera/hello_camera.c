@@ -26,6 +26,7 @@
 #include "duffle/dsl.atom.h"
 #include "duffle/lottes_tape.h"
 
+#include "duffle/bios.h"
 #include "duffle/psyq.h"
 #pragma endregion Duffle Headers
 
@@ -115,10 +116,10 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 	asm volatile(
 		asm_words(
 			or_u(    rarg_2, rarg_1, rdiscard), /* $a2 = $a1 = raw1 */
-			add_ui(  rarg_1, rdiscard, 0x22),   /* $a1 = 0x22 */
-			add_ui(  rarg_3, rdiscard, 0x22),   /* $a3 = 0x22 */
-			add_ui(  rtmp_1, rdiscard, 0x12),   /* $t1 = 0x12 */
-			add_ui(  rtmp_2, rdiscard, 0xB0),   /* $t2 = 0xB0 */
+			add_ui(  rarg_1, rdiscard, bios_pad_buffer_size), /* $a1 = 0x22 */
+			add_ui(  rarg_3, rdiscard, bios_pad_buffer_size), /* $a3 = 0x22 */
+			add_ui(  rtmp_1, rdiscard, bios_init_pad_2),      /* $t1 = 0x12 */
+			add_ui(  rtmp_2, rdiscard, bios_btable_addr),     /* $t2 = 0xB0 */
 			call_reg(rtmp_2),                   /* jalr $t2, $ra */
 			nop                                 /* BD slot */
 		)
@@ -140,8 +141,8 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 	/* B(13h) StartPAD2() — no args. The BIOS preserves $sp. */
 	asm volatile(
 		asm_words(
-			add_ui(  rtmp_1, rdiscard, 0x13), /* $t1 = 0x13 */
-			add_ui(  rtmp_2, rdiscard, 0xB0), /* $t2 = 0xB0 (re-load) */
+			add_ui(  rtmp_1, rdiscard, bios_start_pad_2), /* $t1 = 0x13 */
+			add_ui(  rtmp_2, rdiscard, bios_btable_addr), /* $t2 = 0xB0 (re-load) */
 			call_reg(rtmp_2),                 /* jalr $t2, $ra */
 			nop                               /* BD slot */
 		)

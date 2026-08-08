@@ -14,6 +14,7 @@
 //   source: C:\projects\Pikuma\ps1\code\duffle\pad.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\dsl.atom.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\lottes_tape.h
+//   source: C:\projects\Pikuma\ps1\code\duffle\bios.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\psyq.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\math.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\mips.atom.c

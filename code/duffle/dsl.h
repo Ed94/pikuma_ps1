@@ -28,8 +28,9 @@
 #define internal static // internal
 
 #define asm           __asm__
-#define align_(value) __attribute__((aligned (value)))             // for easy alignment
 
+#define A_(data)      (& data)
+#define align_(value) __attribute__((aligned (value)))             // for easy alignment
 #define align_(value) __attribute__((aligned (value)))             // for easy alignment
 #define C_(type,data) ((type)(data))                               // for enforced precedence
 #define expect_(x, y) __builtin_expect(x, y)                       // so compiler knows the common path
