@@ -163,14 +163,14 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	if (1) // Pad Input
 	{
 		tb.used = 0; tb_scope_run(& tb) {
-			/* BIOS-owned polling: per-frame snapshot of both ports. */
+			// Grab latest state from bios.
 			tb_emit_(pad_bios_snapshot);
-				tb_data_(raw, & smem.pad_raw[0]);
+				tb_data_(raw,   & smem.pad_raw[0]);
 				tb_data_(state, & smem.pad[0]);
 			tb_emit_(pad_bios_snapshot);
 				tb_data_(raw,   & smem.pad_raw[1]);
 				tb_data_(state, & smem.pad[1]);
-			/* Per-frame rotation apply: consume pad[0].buttons + pad[0].left_x */
+			// Demo input
 			tb_emit_(pad_apply_input);
 				tb_data_(state,     & smem.pad[0]);
 				tb_data_(cube_rot,  & smem.cube.rot);
@@ -253,7 +253,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data(& tb, u4_(& smem.tform_world));
 
 			tb_emit(& tb, rbind_floor_f3_face);
-			// TODO(Ed): Just use a single context struct ref
+			// TODO(Ed): Just use a single context struct ref?
 				tb_data(& tb, prim_cursor);
 				tb_data(& tb, u4_(smem.floor.faces));
 				tb_data(& tb, u4_(smem.floor.verts));

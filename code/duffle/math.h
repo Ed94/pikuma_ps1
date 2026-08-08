@@ -39,6 +39,7 @@ typedef Struct_(Rect_S4)    { S4 x; S4 y; S4 width; S4 height; };
 
 typedef Struct_(M3_S2)      { A3x3_S2 m; A3_S4 t; };
 
+typedef Array_(V2_U1, 2);
 typedef Array_(V2_S2, 2);
 typedef Array_(V2_S2, 3);
 typedef Array_(V2_S2, 4);

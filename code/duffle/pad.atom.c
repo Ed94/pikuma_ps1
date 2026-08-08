@@ -9,6 +9,34 @@
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(pad_atom_c);
 
+#pragma region MACs (Mips Atom Components)
+
+FI_ Slice_MipsCode ac_pad_set_centered_axes(U4 r_state, U4 r_scratch) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_centered_axes, {
+    load_upper_i(r_scratch, (PadAxis_Centered_Word >> 16) & 0xFFFF),
+    or_i_self(   r_scratch,  PadAxis_Centered_Word        & 0xFFFF),
+    store_word(  r_scratch, r_state, O_(PadState,axes)),
+})
+
+FI_ Slice_MipsCode ac_pad_set_id_byte(U1 r_state, U1 r_id, U1 id_value) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_id_byte, {
+    add_ui(    r_id, R_0, id_value),
+    store_byte(r_id, r_state, O_(PadState,id)),
+})
+
+FI_ Slice_MipsCode ac_pad_set_status(U4 r_tmp, U1 r_state, U4 pad_status) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_status, {
+    add_ui(    r_tmp, R_0, pad_status),
+    store_word(r_tmp, r_state, O_(PadState,status)),
+})
+
+/* Invert r_buttons (active-low → active-high) and store to PadState.buttons.
+ * r_buttons must already be loaded (the caller is responsible for filling the load-delay slot of
+ * the preceding load_half_u with an instruction that doesn't read r_buttons). */
+FI_ Slice_MipsCode ac_pad_store_inverted_buttons(U1 r_buttons, U1 r_pad_state) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_store_inverted_buttons, {
+    nor_u(       r_buttons, r_buttons, R_0),
+    store_half(  r_buttons, r_pad_state, O_(PadState,   buttons)),
+})
+
+#pragma endregion MACs (Mips Atom Components)
+
 #pragma region Baked Atoms
 
 /* ----- pad_bios_snapshot -----
@@ -35,7 +63,7 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(pad_atom_c);
  */
 enum {
 	R_PadRaw    = R_T0 atom_reg atom_type(U1),
-	R_PadState  = R_T1 atom_reg,
+	R_PadState  = R_T1 atom_reg atom_type(PadState*),
 	R_RawStatus = R_T2 atom_reg,
 	R_RawId     = R_T3 atom_reg,
 };
@@ -44,8 +72,8 @@ typedef Struct_(Binds_PadBiosSnapshot) {
     PadState*   state;
 };
 internal MipsAtom_(pad_bios_snapshot) atom_info(atom_bind(Binds_PadBiosSnapshot)
-, atom_reads( R_PadRaw, R_PadState, R_RawStatus, R_RawId, R_T4, R_T5, R_TapePtr)
-, atom_writes(R_PadRaw, R_PadState, R_RawStatus, R_RawId, R_T4, R_T5, R_TapePtr)
+, atom_reads( R_PadRaw, R_PadState, R_RawStatus, R_RawId)
+, atom_writes(R_PadRaw, R_PadState, R_RawStatus, R_RawId)
 ) {
 	/* === Bind consumption: T0 = raw, T1 = state, advance R_TapePtr by 8. */
 	load_word(R_PadRaw,   R_TapePtr, O_(Binds_PadBiosSnapshot,raw)),
@@ -53,111 +81,97 @@ internal MipsAtom_(pad_bios_snapshot) atom_info(atom_bind(Binds_PadBiosSnapshot)
 	add_ui_self(          R_TapePtr, S_(Binds_PadBiosSnapshot)),
 
 	/* === Read raw[0] (status) + raw[1] (id) */
-	load_byte_u(R_RawStatus, R_PadRaw, 0),
-	load_byte_u(R_RawId,     R_PadRaw, 1),
+	load_byte_u(R_RawStatus, R_PadRaw, O_(PadBiosRaw,status)),
+	load_byte_u(R_RawId,     R_PadRaw, O_(PadBiosRaw,id)),
 
 atom_label(snap_root) /* === Case 1: Disconnected (status == 0xFF). */
-	add_ui(R_T4, R_0, 0xFF), branch_ne(R_RawStatus, R_T4, atom_offset(snap_root, skip_disconnected)),
+	add_ui(R_T4, R_0, PadRawStatus_Timeout), branch_ne(R_RawStatus, R_T4, atom_offset(snap_root, skip_disconnected)),
 	/* BD-slot: pre-compute PadStatus_Disconnected. Branch reads R_T4=0xFF in EX before this WB completes.
 	 * If branch NOT taken (fall through to pending/id_dispatch), R_T4 is overwritten by the next case body's add_ui — harmless. */
 
 atom_label(disconnected) /* === Disconnected body. */
-	/* R_T4 = PadStatus_Disconnected from snap_root BD-slot. */
-	store_word(R_T4, R_PadState, O_(PadState,status)),
-	store_half(R_0,  R_PadState, O_(PadState,buttons)),
-	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
-	load_upper_i(R_T4, 0x8080), or_i_self(R_T4, 0x8080),
-	store_word(  R_T4,    R_PadState, O_(PadState,left_x)),
-	store_byte(  R_RawId, R_PadState, O_(PadState,id)),
+	mac_pad_set_status(R_T4,  R_PadState, PadStatus_Disconnected),
+	store_half(        R_0,   R_PadState, O_(PadState,buttons)),
+	mac_pad_set_centered_axes(R_PadState, R_T4),
+	mac_pad_set_id_byte(      R_PadState, R_RawId, PadRawStatus_Timeout),
 	jump_rel(atom_offset(disconnected, snap_end)),
 		/* BD-slot: load next atom's entry point (replaces the nop).
-		 * The unconditional branch always jumps to snap_end, where mac_yield_tail()
-		 * transfers control to R_AtomJmp without re-loading it. */
+		 * Always jumps to snap_end, where mac_yield_tail() transfers control to R_AtomJmp without re-loading it. */
 		mac_yield_load(),
 atom_label(skip_disconnected)
 
 	/* === Case 2: Pending (status == 0 && id == 0)
-	 * Combined check: if (status | id) != 0 then skip to id_dispatch.
-	 * Falls through to the Pending case only when both are zero. */
+	 * Combined check: if (status | id) != 0 then skip to id_dispatch. Falls through to the Pending case only when both are zero. */
 	or_u_self(R_RawStatus, R_RawId), branch_ne(R_RawStatus, R_0, atom_offset(case_2, id_dispatch)),
 	/* BD-slot: pre-compute PadStatus_Pending. Branch reads R_RawStatus in EX before this WB completes.
-	 * If branch NOT taken (fall through to id_dispatch), R_T4 is overwritten by the digital/analog body add_ui — harmless. */
+	 * If branch NOT taken (fall through to id_dispatch), R_T4 is overwritten by the digital/analog body add_ui - harmless. */
 
-atom_label(pending) /* === Pending body */
-	/* R_T4 = PadStatus_Pending from case_2 BD-slot. */
-	store_word(R_T4, R_PadState, O_(PadState,status)),
-	store_half(R_0,  R_PadState, O_(PadState,buttons)),
-	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
-	load_upper_i(R_T4, 0x8080), or_i_self(R_T4, 0x8080),
-	store_word(  R_T4,    R_PadState, O_(PadState,left_x)),
-	store_byte(  R_RawId, R_PadState, O_(PadState,id)),
-	jump_rel(atom_offset(pending, snap_end)),
+atom_label(pending) /* === Pending body (status=0, id=0 — pre-IRQ-empty buffer). */
+	mac_pad_set_status(R_T4,  R_PadState, PadStatus_Pending),
+	store_half(        R_0,   R_PadState, O_(PadState,buttons)),
+	mac_pad_set_centered_axes(R_PadState, R_T4),
+	store_byte(R_RawId, R_PadState, O_(PadState,id)),
+	jump_rel(atom_offset(pending, snap_end)), 
 		mac_yield_load(),
 
 atom_label(id_dispatch) /* === Case 3-6: ID dispatch */
-	add_ui(R_T4, R_0, 0x41), branch_ne(R_RawId, R_T4, atom_offset(id_dispatch, try_analog_stick)),
+	add_ui(R_T4, R_0, PadRawId_Digital), branch_ne(R_RawId, R_T4, atom_offset(id_dispatch, try_analog_stick)),
 	/* BD-slot: pre-compute PadStatus_Digital. Branch reads R_RawId in EX before this WB completes.
 	 * If branch NOT taken (fall through to try_analog_stick), R_T4 is overwritten by the analog body add_ui. */
 
-	/* === Digital body (status, buttons normalize, axes=0x80, id, branch. */
-	/* R_T4 = PadStatus_Digital from id_dispatch BD-slot. */
-	store_word( R_T4, R_PadState, O_(PadState,status)),
-	load_half_u(R_T4, R_PadRaw,   2 * S_(U1)),
-	/* Fill R_T4's load-delay slot with the 0x80808080 axes constant into R_T5
-	 * (R_T5 is dead on this path; it's only consumed at the analog_pad range check). */
-	load_upper_i(R_T5, 0x8080), or_i_self(R_T5, 0x8080),
-	nor_u(      R_T4, R_T4, R_0), /* raw_buttons is already in host bit order; no swap needed */
-	store_half( R_T4, R_PadState, O_(PadState,buttons)),
-
-	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
-	store_word(  R_T5, R_PadState, O_(PadState,left_x)),
-	add_ui(      R_T4, R_0, 0x41),
-	store_byte(  R_T4, R_PadState, O_(PadState,id)),
+	/* === Digital body (status, buttons normalize, axes=0x80, id, branch.
+	 * R_T5 holds the 0x80808080 axes constant (loaded into the load-delay slot of the buttons-load).
+	 * R_T5 is then "dead" — only consumed at the analog_pad range check downstream. */
+	mac_pad_set_status(R_T4, R_PadState, PadStatus_Digital),
+	load_half_u(       R_T4, R_PadRaw, O_(PadBiosRaw, buttons)), /* R_T4 = raw_buttons; */
+	load_upper_i(R_T5, PadAxis_Centered_Hi), or_i_self(R_T5, PadAxis_Centered_Lo), /* fills the buttons-load's delay slot (doesn't read R_T4) */
+	mac_pad_store_inverted_buttons(R_T4, R_PadState),            /* R_T4 settled: nor + sh writes ~raw_buttons to state.buttons */
+	store_word(R_T5,    R_PadState, O_(PadState, axes)),         /* single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y) */
+	mac_pad_set_id_byte(R_PadState, R_T4, PadRawId_Digital),
 
 	jump_rel(atom_offset(id_dispatch, snap_end)),
 		mac_yield_load(),
 
 atom_label(try_analog_stick) /* === Case 4: AnalogStick (id == 0x53)*/
-	add_ui(R_T4, R_0, 0x53), branch_ne(R_RawId, R_T4, atom_offset(try_analog_stick, try_analog_pad)),
+	add_ui(R_T4, R_0, PadRawId_AnalogStick), branch_ne(R_RawId, R_T4, atom_offset(try_analog_stick, try_analog_pad)),
 	/* BD-slot: pre-compute PadStatus_AnalogStick. Branch reads R_RawId in EX before this WB completes.
 	 * If branch NOT taken (fall through to try_analog_pad), R_T4 is overwritten by the analog_pad body add_ui. */
 
 atom_label(analog_stick) /* === AnalogStick body
-	* Axes are loaded as two halfwords: raw[6..7] → left_xy (sh at offset 8), raw[4..5] → right_xy (sh at offset 10).
-	* R_T5 holds left_xy / id-value in turn (it's dead on this path — only consumed at the analog_pad range check). */
-	/* R_T4 = PadStatus_AnalogStick from try_analog_stick BD-slot. */
-	store_word(  R_T4, R_PadState, O_(PadState,status)),
-	load_half_u( R_T4, R_PadRaw,   2 * S_(U1)),           /* R_T4 = raw_buttons */
-	load_half_u( R_T5, R_PadRaw,   6 * S_(U1)),           /* R_T5 = left_xy; fills R_T4's load-delay slot (doesn't read R_T4) */
-	nor_u(       R_T4, R_T4, R_0),                        /* R_T4 = ~raw_buttons */
-	store_half(  R_T4, R_PadState, O_(PadState,buttons)),
-	load_half_u( R_T4, R_PadRaw,   4 * S_(U1)),           /* R_T4 = right_xy; fills R_T5's load-delay slot */
-	store_half(  R_T5, R_PadState, O_(PadState,left_x)),  /* R_T5 settled, store left_xy */
-	store_half(  R_T4, R_PadState, O_(PadState,right_x)),
-	add_ui(      R_T5, R_0, 0x53),                        /* R_T5 = id value (clobbers left_xy, already stored) */
-	store_byte(  R_T5, R_PadState, O_(PadState,id)),
+	* R_T5 holds left_xy (loaded into the load-delay slot of the buttons-load via the left-axis load_half_u).
+	* R_T4 holds right_xy (loaded into the load-delay slot of the left-load).
+	* R_T5 is then "dead" — reused for the id-byte value load in mac_pad_write_id_byte.
+	* The buttons invert+store happens BEFORE R_T4 is overwritten by the right_xy load. */
+	mac_pad_set_status(R_T4, R_PadState, PadStatus_AnalogStick),
+	load_half_u(       R_T4, R_PadRaw, O_(PadBiosRaw,buttons)),  /* R_T4 = raw_buttons; delay slot at the next instruction */
+	load_half_u(       R_T5, R_PadRaw, O_(PadBiosRaw,left)),     /* fills the buttons-load's delay slot (doesn't read R_T4) */
+	mac_pad_store_inverted_buttons(R_T4, R_PadState),            /* R_T4 settled: nor + sh writes ~raw_buttons to state.buttons */
+	load_half_u( R_T4,  R_PadRaw,   O_(PadBiosRaw,right)),       /* fills R_T5's load-delay slot (doesn't read R_T5); overwrites R_T4 (was buttons) with right_xy */
+	store_half(  R_T5,  R_PadState, O_(PadState,  left)),
+	store_half(  R_T4,  R_PadState, O_(PadState,  right)),
+	mac_pad_set_id_byte(R_PadState, R_T5, PadRawId_AnalogStick),
 	jump_rel(atom_offset(analog_stick, snap_end)),
 		mac_yield_load(),
 
 atom_label(try_analog_pad) /* === Case 5-6: AnalogPad (id & 0xF0 == 0x70) */
-	and_i(    R_T4, R_RawId, 0xF0),
-	add_ui(   R_T5, R_0,     0x70),
+	and_i(    R_T4, R_RawId, PadRawId_AnalogPadMask),
+	add_ui(   R_T5, R_0,     PadRawId_AnalogPadValue),
 	branch_ne(R_T4, R_T5, atom_offset(try_analog_pad, try_unsupported)),
 	/* BD-slot: pre-compute PadStatus_AnalogPad. Branch reads R_T4 in EX before this WB completes.
 	 * If branch NOT taken (fall through to try_unsupported), R_T4 is overwritten by the unsupported body add_ui. */
 
 atom_label(analog_pad) /* === AnalogPad body
-	* Same shape as AnalogStick with AnalogPad status. R_T5 holds left_xy (it's dead on this path). */
-	/* R_T4 = PadStatus_AnalogPad from try_analog_pad BD-slot. */
-	store_word( R_T4, R_PadState, O_(PadState,status)),
-	load_half_u(R_T4, R_PadRaw,   2 * S_(U1)),           /* R_T4 = raw_buttons */
-	load_half_u(R_T5, R_PadRaw,   6 * S_(U1)),           /* R_T5 = left_xy; fills R_T4's load-delay slot */
-	nor_u(      R_T4, R_T4, R_0),                        /* R_T4 = ~raw_buttons */
-	store_half( R_T4, R_PadState, O_(PadState,buttons)),
-	load_half_u(R_T4, R_PadRaw,   4 * S_(U1)),           /* R_T4 = right_xy; fills R_T5's load-delay slot */
-	store_half( R_T5, R_PadState, O_(PadState,left_x)),  /* R_T5 settled, store left_xy */
-	store_half( R_T4, R_PadState, O_(PadState,right_x)),
-	store_byte( R_RawId, R_PadState, O_(PadState,id)),
+	* Same shape as AnalogStick with AnalogPad status. R_T5 holds left_xy (it's dead on this path).
+	* The id byte is raw id from the BIOS buffer (R_RawId already holds raw[1]).
+	* Buttons invert + store happens before R_T4 is overwritten by the right_xy load. */
+	mac_pad_set_status(R_T4, R_PadState, PadStatus_AnalogPad),
+	load_half_u(       R_T4, R_PadRaw, O_(PadBiosRaw,buttons)), /* R_T4 = raw_buttons; delay slot at the next instruction */
+	load_half_u(       R_T5, R_PadRaw, O_(PadBiosRaw,left)),    /* fills the buttons-load's delay slot (doesn't read R_T4) */
+	mac_pad_store_inverted_buttons(R_T4, R_PadState),           /* R_T4 settled: nor + sh writes ~raw_buttons to state.buttons */
+	load_half_u(R_T4,    R_PadRaw,   O_(PadBiosRaw,right)),     /* fills R_T5's load-delay slot (doesn't read R_T5); overwrites R_T4 with right_xy */
+	store_half( R_T5,    R_PadState, O_(PadState,  left)),
+	store_half( R_T4,    R_PadState, O_(PadState,  right)),
+	store_byte( R_RawId, R_PadState, O_(PadState,  id)),
 
 	jump_rel(atom_offset(analog_pad, snap_end)),
 		mac_yield_load(),
@@ -166,11 +180,8 @@ atom_label(try_unsupported) /* === Case 7: Unsupported — fall through from the
 	add_ui(    R_T4, R_0, PadStatus_Unsupported),
 	store_word(R_T4, R_PadState, O_(PadState,status)),
 	store_half(R_0,  R_PadState, O_(PadState,buttons)),
-	/* axes = 0x80808080 (centered) — single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y). */
-	load_upper_i(R_T4, 0x8080), or_i_self(R_T4, 0x8080),
-	store_word(  R_T4, R_PadState, O_(PadState,left_x)),
-	add_ui(      R_T4, R_0, 0xFF),                      /* 0xFF sentinel: "unknown id" */
-	store_byte(  R_T4, R_PadState, O_(PadState,id)),
+	mac_pad_set_centered_axes(R_PadState, R_T4),
+	mac_pad_set_id_byte(      R_PadState, R_RawId, PadUnknownId_Sentinel),
 	/* Fall through to snap_end. */
 
 atom_label(no_jump_fallthrough)

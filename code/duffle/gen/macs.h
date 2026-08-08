@@ -156,29 +156,41 @@ WORD_COUNT(mac_format_f3_color, 3)
 ,	mac_pack_color_word(r_prim_cursor, O_(Poly_G4,c3), 0,               r3,g3,b3)
 WORD_COUNT(mac_format_g4_color, 12)
 
-#define mac_insert_ot_tag_f3(r_ot_base, r_prim_cursor) \
+#define mac_insert_ot_tag(r_ot_base, r_prim_cursor, poly_size) \
 	shift_lleft( R_T1, R_T1, S_(U4)/2)                        /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */ \
 ,	add_u_self(  R_T1, r_ot_base)                             /* T1 = & OrderingTable[OTZ] */ \
 ,	load_word(   R_AT, R_T1,          O_(PolyTag,code))       /* AT = old_ot_head */ \
-,	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits) /* V0 = (5 - 1) << 24 = 4 << 24 */ \
+,	load_upper_i(R_V0, (poly_size/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits) \
 ,	mask_upper(  R_AT, R_AT,          S_(PolyTag_len_bits))   /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
 ,	or_u(        R_AT, R_AT, R_V0)                            /* Merge length */ \
 ,	store_word(  R_AT, r_prim_cursor, O_(PolyTag,code))       /* prim->tag = packed(prim_length, old_addr) */ \
 ,	shift_lleft( R_AT, r_prim_cursor, S_(PolyTag_len_bits))   /* AT = (prim_length << 24) | old_addr */ \
 ,	shift_lright(R_AT, R_AT,          S_(PolyTag_len_bits)) \
 ,	store_word(  R_AT, R_T1,          O_(PolyTag,code))       /* OrderingTable[OTZ] = PrimCursor */
-WORD_COUNT(mac_insert_ot_tag_f3, 11)
+WORD_COUNT(mac_insert_ot_tag, 11)
 
-#define mac_insert_ot_tag_g4(r_ot_base, r_prim_cursor) \
-	shift_lleft( R_T1, R_T1, S_(U4)/2)                         /* T1 = otz * S_(U4) (otz arg is implicit R_T1) */ \
-,	add_u_self(  R_T1, r_ot_base)                              /* T1 = & OrderingTable[OTZ] */ \
-,	load_word(   R_AT, R_T1,          O_(PolyTag,code))        /* AT = old_ot_head */ \
-,	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits) /* V0 = (9 - 1) << 24 = 8 << 24 */ \
-,	mask_upper(  R_AT, R_AT,          S_(PolyTag_len_bits))    /* Strip upper 8 bits (length from prev cell) → keep only low 24 */ \
-,	or_u(        R_AT, R_AT, R_V0)                             /* Merge length */ \
-,	store_word(  R_AT, r_prim_cursor, O_(PolyTag,code))        /* prim->tag = packed(prim_length, old_addr) */ \
-,	shift_lleft( R_AT, r_prim_cursor, S_(PolyTag_len_bits))    /* AT = (prim_length << 24) | old_addr */ \
-,	shift_lright(R_AT, R_AT,          S_(PolyTag_len_bits)) \
-,	store_word(  R_AT, R_T1,          O_(PolyTag,code))        /* OrderingTable[OTZ] = PrimCursor */
-WORD_COUNT(mac_insert_ot_tag_g4, 11)
+/* atom_dbg_skip */
+#define mac_pad_set_centered_axes(r_state, r_scratch) \
+	load_upper_i(r_scratch, (PadAxis_Centered_Word >> 16) & 0xFFFF) \
+,	or_i_self(   r_scratch,  PadAxis_Centered_Word        & 0xFFFF) \
+,	store_word(  r_scratch, r_state, O_(PadState,axes))
+WORD_COUNT(mac_pad_set_centered_axes, 3)
+
+/* atom_dbg_skip */
+#define mac_pad_set_id_byte(r_state, r_id, id_value) \
+	add_ui(    r_id, R_0, id_value) \
+,	store_byte(r_id, r_state, O_(PadState,id))
+WORD_COUNT(mac_pad_set_id_byte, 2)
+
+/* atom_dbg_skip */
+#define mac_pad_set_status(r_tmp, r_state, pad_status) \
+	add_ui(    r_tmp, R_0, pad_status) \
+,	store_word(r_tmp, r_state, O_(PadState,status))
+WORD_COUNT(mac_pad_set_status, 2)
+
+/* atom_dbg_skip */
+#define mac_pad_store_inverted_buttons(r_buttons, r_pad_state) \
+	nor_u(       r_buttons, r_buttons, R_0) \
+,	store_half(  r_buttons, r_pad_state, O_(PadState,   buttons))
+WORD_COUNT(mac_pad_store_inverted_buttons, 2)
 

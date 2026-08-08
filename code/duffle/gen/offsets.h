@@ -23,17 +23,17 @@
 #pragma region duffle
 
 
-// --- atom: pad_bios_snapshot (78 words) ---
+// --- atom: pad_bios_snapshot (84 words) ---
 
-#define _atom_offset_snap_root_skip_disconnected      8
-#define _atom_offset_disconnected_snap_end            61
-#define _atom_offset_case_2_id_dispatch               8
-#define _atom_offset_pending_snap_end                 51
-#define _atom_offset_id_dispatch_try_analog_stick     11
-#define _atom_offset_id_dispatch_snap_end             38
-#define _atom_offset_try_analog_stick_try_analog_pad  12
-#define _atom_offset_analog_stick_snap_end            24
-#define _atom_offset_try_analog_pad_try_unsupported   11
+#define _atom_offset_snap_root_skip_disconnected      10
+#define _atom_offset_disconnected_snap_end            65
+#define _atom_offset_case_2_id_dispatch               9
+#define _atom_offset_pending_snap_end                 54
+#define _atom_offset_id_dispatch_try_analog_stick     12
+#define _atom_offset_id_dispatch_snap_end             40
+#define _atom_offset_try_analog_stick_try_analog_pad  13
+#define _atom_offset_analog_stick_snap_end            25
+#define _atom_offset_try_analog_pad_try_unsupported   12
 #define _atom_offset_analog_pad_snap_end              10
 
 enum {

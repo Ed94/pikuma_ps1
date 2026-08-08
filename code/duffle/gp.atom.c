@@ -49,34 +49,18 @@ MipsAtomComp_Proc_(ac_format_g4_color, {
 	mac_pack_color_word(r_prim_cursor, O_(Poly_G4,c3), 0,               r3,g3,b3),
 })
 
-/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
- * Hardcoded for Poly_F3 (5 words). For Poly_G4, use ac_insert_ot_tag_g4. */
-I_ Slice_MipsCode ac_insert_ot_tag_f3(U4 r_ot_base, U4 r_prim_cursor) MipsAtomComp_Proc_(ac_insert_ot_tag_f3, {
+/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list. */
+I_ Slice_MipsCode ac_insert_ot_tag(U4 r_ot_base, U4 r_prim_cursor, U4 poly_size) MipsAtomComp_Proc_(ac_insert_ot_tag, {
 	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
 	add_u_self(  R_T1, r_ot_base),                             // T1 = & OrderingTable[OTZ]
 	load_word(   R_AT, R_T1,          O_(PolyTag,code)),       // AT = old_ot_head
-	load_upper_i(R_V0, (S_(Poly_F3)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (5 - 1) << 24 = 4 << 24
+	load_upper_i(R_V0, (poly_size/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits),
 	mask_upper(  R_AT, R_AT,          S_(PolyTag_len_bits)),   // Strip upper 8 bits (length from prev cell) → keep only low 24
 	or_u(        R_AT, R_AT, R_V0),                            // Merge length
 	store_word(  R_AT, r_prim_cursor, O_(PolyTag,code)),       // prim->tag = packed(prim_length, old_addr)
 	shift_lleft( R_AT, r_prim_cursor, S_(PolyTag_len_bits)),   // AT = (prim_length << 24) | old_addr
 	shift_lright(R_AT, R_AT,          S_(PolyTag_len_bits)),
 	store_word(  R_AT, R_T1,          O_(PolyTag,code)),       // OrderingTable[OTZ] = PrimCursor
-})
-
-/* Words: 11; Correctly inserts a primitive into the Ordering Table linked list.
- * Hardcoded for Poly_G4 (9 words). For Poly_F3, use ac_insert_ot_tag_f3. */
-I_ Slice_MipsCode ac_insert_ot_tag_g4(U4 r_ot_base, U4 r_prim_cursor) MipsAtomComp_Proc_(ac_insert_ot_tag_g4, {
-	shift_lleft( R_T1, R_T1, S_(U4)/2),                         // T1 = otz * S_(U4) (otz arg is implicit R_T1)
-	add_u_self(  R_T1, r_ot_base),                              // T1 = & OrderingTable[OTZ]
-	load_word(   R_AT, R_T1,          O_(PolyTag,code)),        // AT = old_ot_head
-	load_upper_i(R_V0, (S_(Poly_G4)/S_(U4) - S_(PolyTag)/S_(U4)) << PolyTag_len_bits), // V0 = (9 - 1) << 24 = 8 << 24
-	mask_upper(  R_AT, R_AT,          S_(PolyTag_len_bits)),    // Strip upper 8 bits (length from prev cell) → keep only low 24
-	or_u(        R_AT, R_AT, R_V0),                             // Merge length
-	store_word(  R_AT, r_prim_cursor, O_(PolyTag,code)),        // prim->tag = packed(prim_length, old_addr)
-	shift_lleft( R_AT, r_prim_cursor, S_(PolyTag_len_bits)),    // AT = (prim_length << 24) | old_addr
-	shift_lright(R_AT, R_AT,          S_(PolyTag_len_bits)),
-	store_word(  R_AT, R_T1,          O_(PolyTag,code)),        // OrderingTable[OTZ] = PrimCursor
 })
 
 #pragma endregion MACs (Mips Atom Components)

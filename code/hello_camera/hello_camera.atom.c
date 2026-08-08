@@ -246,21 +246,21 @@ internal MipsAtom_(pad_apply_input) atom_info(atom_bind(Binds_PadApplyInput)
 
 	/* Analog left-stick X: dead zone 0x70..0x90.
 	 * Cube delta = (0x80 - left_x) >> 2; floor delta = (0x80 - left_x) >> 5. */
-	load_byte_u(R_T3, R_PadStateT5, O_(PadState,left_x)),
+	load_byte_u(R_T3, R_PadStateT5, O_(PadState,left.x)),
 
 	/* Dead-zone check: skip analog if left_x in [0x70, 0x90] inclusive. Outside dead zone on LOW side: left_x < 0x70 (strictly).
 	 * set_lt_u(R_T4, R_T3, R_T4=0x70) → R_T4 = (left_x < 0x70) ? 1 : 0. */
-	add_ui(R_T4, R_0, 0x70), set_lt_u(R_T4, R_T3, R_T4), branch_ne(R_T4, R_0, atom_offset(dead_zone_low_check, dead_low_active)),
-	add_ui(R_T4, R_0, 0x80), /* BD-slot: pre-load 0x80 for dead_low_active */
+	add_ui(R_T4, R_0, PadDeadZone_HighBound), set_lt_u(R_T4, R_T3, R_T4), branch_ne(R_T4, R_0, atom_offset(dead_zone_low_check, dead_low_active)),
+	add_ui(R_T4, R_0, PadDeadZone_Center), /* BD-slot: pre-load 0x80 for dead_low_active */
 
 atom_label(dead_check_upper)
 	/* left_x >= 0x70 → check upper bound. */
-	load_byte_u(R_T3, R_PadStateT5, O_(PadState,left_x)), /* reload */
-	add_ui(     R_T4, R_0, 0x90),
+	load_byte_u(R_T3, R_PadStateT5, O_(PadState,left.x)), /* reload */
+	add_ui(     R_T4, R_0, PadDeadZone_HighBound),
 
 	/* R_T4 = (0x90 < left_x) ? 1 : 0 → (left_x > 0x90) ? 1 : 0 */
 	set_lt_u(R_T4, R_T4, R_T3), branch_ne(R_T4, R_0, atom_offset(dead_zone_high_check, dead_high_active)),
-	add_ui(  R_T4, R_0, 0x80), /* BD-slot: pre-load 0x80 for dead_high_active */
+	add_ui(  R_T4, R_0, PadDeadZone_Center), /* BD-slot: pre-load 0x80 for dead_high_active */
 	jump_rel(atom_offset(dead_zone_skip, exit_stick)),
 		mac_yield_load(),
 
@@ -273,8 +273,7 @@ atom_label(dead_low_active)
 
 	/* R_T4 = cube_delta */
 	shift_aright(R_T4, R_T3, 2),
-	load_half(   R_T0, R_CubeRot, O_(V3_S2,y)),
-	nop,
+	load_half(   R_T0, R_CubeRot, O_(V3_S2,y)), nop,
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_CubeRot, O_(V3_S2,y)),
 	/* R_T4 = floor_delta — moved into the load-delay slot of the floor load below (fills the 1-instruction gap;
@@ -295,8 +294,7 @@ atom_label(dead_high_active)
 	/* delta = 0x80 - left_x (signed negative). */
 
 	shift_aright(R_T4, R_T3, 2),                      /* R_T4 = cube_delta (signed) */
-	load_half(   R_T0, R_CubeRot, O_(V3_S2,y)),
-	nop,
+	load_half(   R_T0, R_CubeRot, O_(V3_S2,y)), nop,
 	add_u(       R_T0, R_T0, R_T4),
 	store_half(  R_T0, R_CubeRot, O_(V3_S2,y)),
 
@@ -344,7 +342,7 @@ internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri), atom_
 	mac_yield()
 };
 
- // cube_g4_face — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
+// cube_g4_face — Draw one cube face (Gouraud-shaded quad) via the GTE tape pipeline
 internal
 MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 		atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase),
@@ -379,7 +377,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 		set_lt_u(    R_AT, R_T1, R_AT),
 
 		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), nop,
-			mac_insert_ot_tag_g4(R_OtBase, R_PrimCursor),
+			mac_insert_ot_tag(R_OtBase, R_PrimCursor, S_(Poly_G4)),
 			mac_format_g4_color(R_PrimCursor,
 				/* c0 magenta */ 0xFF, 0x00, 0xFF,
 				/* c1 yellow  */ 0xFF, 0xFF, 0x00,
@@ -439,7 +437,7 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 		set_lt_u(    R_AT, R_T1, R_AT),
 		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
 			mac_format_f3_color(R_PrimCursor, 0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
-			mac_insert_ot_tag_f3(R_OtBase, R_PrimCursor),         /* Insert into Ordering Table Linked List */
+			mac_insert_ot_tag(R_OtBase, R_PrimCursor, S_(Poly_F3)),   /* Insert into Ordering Table Linked List */
 			add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
 				// Note(Ed): No bounds checking, should be checked before atom runs.
 		// end: branch(bounds_chk)
