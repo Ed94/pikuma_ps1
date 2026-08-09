@@ -103,13 +103,19 @@ void gte_matrix_set_rotation   (MT3_S2S4* mat) asm("SetRotMatrix");
 void gte_matrix_set_translation(MT3_S2S4* mat) asm("SetTransMatrix");
 
 // Einheit, Metrication to unit vector. "Normalization", not Orthogonal "Normal, Normalis". Directionalization.
+// RGA(Lengyel): Normalize the bulk of a zero-weight direction. This is not finite-point unitization (which forces w=1).
 S4 normalize_v3s4(V3_S4* v0, V3_S4* v1) asm("VectorNormal");
 
+// RGA(Lengyel): Apply the matrix expansion of a rigid transformation.
+// Motor antiproduct is equivalent for unitized points; LA form is what GTE consumes.
 V3_S4* mul_m3s2_v3s4(MT3_S2S4* m, V3_S4* v, V3_S4* result) asm("ApplyMatrixLV");
 
+// RGA(Lengyel): Store the full translation column. The motor translator would store half this displacement in m.xyz.
 MT3_S2S4* trans_m3s2(MT3_S2S4* m, V3_S4* off) asm("TransMatrix");
 
 MT3_S2S4* gte_comp_coord_m3s2(MT3_S2S4* m0, MT3_S2S4* m1, MT3_S2S4* result) asm("CompMatrixLV");
 
-// TODO(Ed): Want to interpret this under the lens of Eric Lengyel's geometric algebra
+// RGA(Lengyel): Complement(Wedge(a,b)), i.e. the Euclidean 3D complement of the exterior product, stored as a V3_S4.
+// The underlying GTE OP is a specialized signed-16-bit D x IR command; the wedge interpretation is a 3D dual of the same 3 scalars.
 void cross_v3s4(V3_S4* v0, V3_S4* v1, V3_S4* result) asm("OuterProduct12");
+

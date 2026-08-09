@@ -71,6 +71,27 @@ WORD_COUNT(mac_load_v2s2, 2)
 WORD_COUNT(mac_store_v2s2, 2)
 
 /* atom_dbg_skip */
+#define mac_load_v3s4(rs_x, rs_y, rs_z, r_base, offset) \
+	load_word( rs_x, r_base, O_(V3_S4,x)) \
+,	load_word( rs_y, r_base, O_(V3_S4,y)) \
+,	load_word( rs_z, r_base, O_(V3_S4,z))
+WORD_COUNT(mac_load_v3s4, 3)
+
+/* atom_dbg_skip */
+#define mac_store_v3s4(rt_x, rt_y, rt_z, base, offset) \
+	store_word(rt_x, base, offset + O_(V3_S4,x)) \
+,	store_word(rt_y, base, offset + O_(V3_S4,y)) \
+,	store_word(rt_z, base, offset + O_(V3_S4,z))
+WORD_COUNT(mac_store_v3s4, 3)
+
+/* atom_dbg_skip */
+#define mac_sub_v3s4(rds_x, rds_y, rds_z, rt_x, rt_y, rt_z) \
+	sub_s(rds_x, rds_x, rt_x) \
+,	sub_s(rds_y, rds_y, rt_y) \
+,	sub_s(rds_z, rds_z, rt_z)
+WORD_COUNT(mac_sub_v3s4, 3)
+
+/* atom_dbg_skip */
 #define mac_store_rects2(rt_x, rt_y, rt_width, rt_height, base, offset) \
 	store_half(rt_x,      base, offset + O_(Rect_S2,x)) \
 ,	store_half(rt_y,      base, offset + O_(Rect_S2,y)) \

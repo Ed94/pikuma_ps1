@@ -378,11 +378,15 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_cmdw_nclip  (gte_cmd_base | enc_gte_cmd(gte_cmd_nclip))
 #define gte_cmdw_op     (gte_cmd_base | enc_gte_cmd(gte_cmd_op   ))
 #define gte_cmdw_outer_product gte_cmdw_op      /* "outer product" -- NOCASH/Sdk terminology */
-#define gte_cmdw_wedge        gte_cmdw_op      /* "wedge product"  -- geometric-algebra terminology */
+#define gte_cmdw_wedge         gte_cmdw_op      /* "wedge product"  -- geometric-algebra terminology.
+	* RGA(Lengyel): the GTE OP is a 3D signed-16-bit D x IR cross, not a generic RGA exterior product.
+	* The wedge alias is the 3D complement interpretation of the same 3 scalars (MAC1..MAC3). */
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
 
 #define gte_cmdw_rotate_translate_perspective_single gte_cmdw_rtps
 #define gte_cmdw_rotate_translate_perspective_triple gte_cmdw_rtpt
+/* RGA(Lengyel): RTPS/RTPT consume the matrix expansion of a rigid transformation (rotation matrix + translation vector) loaded into the RT/TR control registers.
+ * For unitized points the same result equals the motor antiproduct; the GTE executes the LA form, not a symbolic antiproduct. */
 
 /* PsyQ compatibility bits for AVSZ3 (Bits 20, 22, 24 must be set) */
 #define gte_cmdw_psyq_avsz3_compat (0x15 << 20)

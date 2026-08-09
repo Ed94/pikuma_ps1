@@ -134,8 +134,8 @@ typedef __UINT32_TYPE__ TSet_(B4);
 #define u4_v(value) C_(U4 V_*, value)
 enum { false = 0, true  = 1, true_overflow, };
 
-#define u4_lo(value) ((value) & 0xFFFFU)
-#define u4_hi(value) ((value) >> 12)
+#define u4_lo(value) (u4_(value) & 0xFFFFU)
+#define u4_hi(value) (u4_(value) >> (S_(U2) * 8))
 
 typedef void Proc_(VoidFn) (void);
 

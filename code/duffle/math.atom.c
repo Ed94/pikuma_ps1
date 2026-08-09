@@ -19,6 +19,24 @@ FI_ Slice_MipsCode ac_store_v2s2(U4 rt_x, U4 rt_y, U4 base, U4 offset) atom_dbg_
 	store_half(rt_y, base, offset + O_(V2_S2,y)),
 })
 
+FI_ Slice_MipsCode ac_load_v3s4(U4 rs_x, U4 rs_y, U4 rs_z, U4 r_base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_load_v3s4, {
+	load_word( rs_x, r_base, O_(V3_S4,x)),
+	load_word( rs_y, r_base, O_(V3_S4,y)),
+	load_word( rs_z, r_base, O_(V3_S4,z)),
+})
+
+FI_ Slice_MipsCode ac_store_v3s4(U4 rt_x, U4 rt_y, U4 rt_z, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_v3s4, {
+	store_word(rt_x, base, offset + O_(V3_S4,x)),
+	store_word(rt_y, base, offset + O_(V3_S4,y)),
+	store_word(rt_z, base, offset + O_(V3_S4,z)),
+})
+
+FI_ Slice_MipsCode ac_sub_v3s4(U4 rds_x, U4 rds_y, U4 rds_z, U4 rt_x,  U4 rt_y,  U4 rt_z) atom_dbg_skip MipsAtomComp_Proc_(ac_sub_v3s4, {
+	sub_s(rds_x, rds_x, rt_x),
+	sub_s(rds_y, rds_y, rt_y),
+	sub_s(rds_z, rds_z, rt_z),
+})
+
 FI_ Slice_MipsCode ac_store_rects2(U4 rt_x, U4 rt_y, U4 rt_width, U4 rt_height, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_store_rects2, {
 	store_half(rt_x,      base, offset + O_(Rect_S2,x)),
 	store_half(rt_y,      base, offset + O_(Rect_S2,y)),

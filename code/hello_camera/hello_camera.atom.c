@@ -180,26 +180,6 @@ internal MipsAtom_(gp_screen_init) atom_info(atom_phase(screen_init), atom_reads
 	mac_yield(),
 };
 
-/* ----- pad_apply_input -----
- * Reads pad[0].buttons + pad[0].left_x; 
- * Applies the input-semantics deltas to cube_rot.y + floor_rot.y:
- *   - D-pad Left:  cube_rot.y += 30, floor_rot.y += 5
- *   - D-pad Right: cube_rot.y -= 30, floor_rot.y -= 5
- *   - Analog stick X (dead zone 0x70..0x90):
- *       cube delta  = (0x80 - left_x) >> 2  (range approx -32..+32)
- *       floor delta = (0x80 - left_x) >> 5  (range approx -4..+4)
- *   - D-pad + analog deltas add when used together.
- *
- * Convention:
- *   pad_state = 0 means no buttons active. 
- *   The fail-safe zero-button value flows through unchanged, so a disconnected/fresh pad produces no rotation.
- *   The branch_le_zero pattern below matches the existing pad_input_demo convention (atom body lines 248/257).
- *
- * Signed-delta trick:
- * load_byte_u zero-extends left_x to 32 bits; sub_u from 0x80 wraps to a SIGNED two's-complement value in the negative range;
- * shift_aright (sra) then correctly sign-extends the shift for both positive (left_x < 0x80) and negative (left_x > 0x80) cases.
- * Digital pads publish left_x = 0x80 → delta = 0 → no rotation, so the analog step is naturally a no-op for digital controllers.
- */
 typedef Struct_(Binds_PadApplyInput) {
     PadState* state;
     V3_S2*    cube_rot;
@@ -334,10 +314,9 @@ internal MipsAtom_(pad_input_cam) atom_info(atom_bind(Binds_PadInputCam)
 	load_word(R_T1, R_Cam, O_(Camera,pos.x)), // BD-Slot.
 
 	// D-pad Left → cam.pos.x -= 50.  and_i fulfills BD-slot for load on R_Cam.
-	and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(left_x, exit_left_x)), nop,
+	and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(left_x, exit_left_x)), mac_yield_load(),
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.x)),
 atom_label(exit_left_x)
-
 	/* D-pad Right → cam.pos.x += 50. Reuses R_T1 from Left. */
 	and_i(R_T3, R_T0, Pad_Right), branch_le_zero(R_T3, atom_offset(right_x, exit_right_x)), nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.x)),
@@ -348,7 +327,6 @@ atom_label(exit_right_x)
 	and_i(R_T3, R_T0, Pad_Up), branch_le_zero(R_T3, atom_offset(up_y, exit_up_y)), nop,
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.y)),
 atom_label(exit_up_y)
-
 	/* D-pad Down → cam.pos.y += 50. Reuses R_T1 from Up. */
 	and_i(R_T3, R_T0, Pad_Down), branch_le_zero(R_T3, atom_offset(down_y, exit_down_y)), nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.y)),
@@ -359,23 +337,54 @@ atom_label(exit_down_y)
 	and_i(R_T3, R_T0, Pad_Cross), branch_le_zero(R_T3, atom_offset(cross_z, exit_cross_z)), nop,
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
 atom_label(exit_cross_z)
-
 	/* D-pad Circle → cam.pos.z += 50. Reuses R_T1 from Cross. */
 	and_i(R_T3, R_T0, Pad_Circle), branch_le_zero(R_T3, atom_offset(circle_z, exit_circle_z)), nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
 atom_label(exit_circle_z)
 
-	mac_yield(),
+	mac_yield_tail(),
 };
 
 enum {
-	_LookAt_WIP,
+	R_LookAt    = R_T0 atom_reg atom_type(MT3_S2S4*),
+	R_CamEye    = R_T1 atom_reg atom_type(P3_S4*),
+	R_CamTarget = R_T2 atom_reg atom_type(P3_S4*),
+	R_WorldUp   = R_T3 atom_reg atom_type(V3_S4*),
+
+	R_LkAt_Fwdx = R_T4 atom_reg atom_type(V3_S4*),
+	R_LkAt_Fwdy = R_T5 atom_reg atom_type(V3_S4*),
+	R_LkAt_Fwdz = R_T6 atom_reg atom_type(V3_S4*),
+	R_Eye_x     = R_T7 atom_reg atom_type(V3_S4*),
+	R_Eye_y     = R_T8 atom_reg atom_type(V3_S4*),
+	R_Eye_z     = R_V0 atom_reg atom_type(V3_S4*),
+
+	R_LkAt_Up    = R_T5 atom_reg atom_type(V3_S4*),
+	R_LkAt_Right = R_T6 atom_reg atom_type(V3_S4*),
+
+	R_AxisX      = R_T7 atom_reg atom_type(V3_S4*),
+	R_AxisY      = R_T8 atom_reg atom_type(V3_S4*),
+	R_AxisZ      = R_T7 atom_reg atom_type(V3_S4*),
 };
 typedef Struct_(Binds_ResolveLookAt) {
-	U1 bla;
+	MT3_S2S4* look_at;
+	P3_S4*    eye;
+	P3_S4*    target;
+	V3_S4*    up_in;
 };
 internal MipsAtom_(resolve_look_at) atom_info(atom_bind(Binds_ResolveLookAt)) {
-	add_ui_self(R_TapePtr, S_(Binds_ResolveLookAt)),
+	load_word(R_LookAt,    R_TapePtr, O_(Binds_ResolveLookAt,look_at)),
+	load_word(R_CamEye,    R_TapePtr, O_(Binds_ResolveLookAt,eye)),
+	load_word(R_CamTarget, R_TapePtr, O_(Binds_ResolveLookAt,target)),
+	load_word(R_WorldUp,   R_TapePtr, O_(Binds_ResolveLookAt,up_in)),
+	add_ui_self(           R_TapePtr, S_(Binds_ResolveLookAt)),
+
+	// load look_at and eye, then subtract (get direction), then normalize to unit vector.
+	mac_load_v3s4(R_LkAt_Fwdx, R_LkAt_Fwdy, R_LkAt_Fwdz, R_LookAt, 0),
+	mac_load_v3s4(R_Eye_x,     R_Eye_y,     R_Eye_z,     R_CamEye, 0),
+	mac_sub_v3s4( R_LkAt_Fwdx, R_LkAt_Fwdy, R_LkAt_Fwdz,
+	              R_Eye_x,     R_Eye_y,     R_Eye_z),
+	
+	
 
 	mac_yield(),
 };

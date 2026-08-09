@@ -93,36 +93,40 @@ I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 #define prim_alloc(type) (type*)prim__alloc(S_(type), slit( stringify(type)))
 
 void
-resolve_look_at_c11(MT3_S2S4* look_at, V3_S4* eye, V3_S4* target, V3_S4* up_in) {
-// TODO(Ed): Want to interpret this under the lens of Eric Lengyel's geometric algebra
+resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4* up_in) {
+// RGA(Lengyel): Build matrix expansion of a rigid transformation. Corresponding motor is not constructed; we write the LA form for GTE.
+// Preconditions: eye != target, up_in not collinear with (target - eye).
 	V3_S4 right, up, forward;
 	V3_S4 ux, uy, uz;
 	V3_S4 pos, off;
 
-	forward = target[0]; sub_v3s4(& forward, eye[0]);
-	normalize_v3s4(& forward, & uz);
+	forward = target[0]; sub_v3s4(& forward, eye[0]); // RGA(Lengyel): Affine point - point = zero-weight direction.
+	normalize_v3s4(& forward, & uz);                  // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.
 
-	cross_v3s4(& uz,   up_in, & right); normalize_v3s4(& right, & ux);
-	cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy);
+	cross_v3s4(& uz,   up_in, & right); normalize_v3s4(& right, & ux); // RGA(Lengyel): Complement(Wedge(forward, up_in)) -> right axis.
+	cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy); // RGA(Lengyel): Complement(Wedge(forward, right)) -> up axis.
 
+	// RGA(Lengyel): matrix expansion of the world-to-camera rotation (basis rows).
 	look_at->m[0][0] = ux.x; look_at->m[0][1] = ux.y; look_at->m[0][2] = ux.z;
 	look_at->m[1][0] = uy.x; look_at->m[1][1] = uy.y; look_at->m[1][2] = uy.z;
 	look_at->m[2][0] = uz.x; look_at->m[2][1] = uz.y; look_at->m[2][2] = uz.z;
-	
-	pos = eye[0]; mul_v3s4(& pos, v3s4(-1,-1,-1));
 
+	pos = eye[0]; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
+
+	// RGA(Lengyel): R * (-eye) is the full matrix translation column. 
+	// Motor translator would store half this displacement in m.xyz; GTE consumes full column.
 	mul_m3s2_v3s4(look_at, & pos, & off);
-	trans_m3s2(look_at, & off);
+	trans_m3s2(   look_at,        & off);
 }
 
-FI_ void camera_look_at_c11(Camera* c, V3_S4* target, V3_S4* up_in) { resolve_look_at_c11(& c->look_at, & c->pos, target, up_in); }
+FI_ void camera_look_at_c11(Camera* c, P3_S4* target, V3_S4* up_in) { resolve_look_at_c11(& c->look_at, & c->pos, target, up_in); }
 
 GCC_OPTIMIZATION_DISABLE
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
 
-	if (1) // Pad Input
+	// Pad Input
 	{
 		tb.used = 0; tb_scope_run(& tb) {
 			// Grab latest state from bios.
@@ -133,32 +137,10 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data_(raw,   & smem.pad_raw[1]);
 				tb_data_(state, & smem.pad[1]);
 
-			// TODO(Ed): Implement based on below.
 			tb_emit_(pad_input_cam);
 				tb_data_(state, & smem.pad[0]);
 				tb_data_(cam, & smem.cam);
 
-			// if (pad0_btn_(Pad_Left)) {
-			// 	smem.cam.pos.x -= 50;
-			// }
-			// if (pad0_btn_(Pad_Right)) {
-			// 	smem.cam.pos.x += 50;
-			// }
-			// if (pad0_btn_(Pad_Up)) {
-			// 	smem.cam.pos.y -= 50;
-			// }
-			// if (pad0_btn_(Pad_Down)) {
-			// 	smem.cam.pos.y += 50;
-			// }
-			// if (pad0_btn_(Pad_Cross)) {
-			// 	smem.cam.pos.z -= 50;
-			// }
-			// if (pad0_btn_(Pad_Circle)) {
-			// 	smem.cam.pos.z += 50;
-			// }
-
-
-			// Demo input (not longer using)
 			// tb_emit_(pad_input_cube_rotation);
 			// 	tb_data_(state,     & smem.pad[0]);
 			// 	tb_data_(cube_rot,  & smem.cube.rot);
@@ -197,10 +179,36 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	// Camera look at (Tape)
 	if (0)
 	{
+		MT3_S2S4* look_at = & smem.cam.look_at;
+		P3_S4*    eye     = & smem.cam.pos;
+		V3_S4*    up_in   = & v3s4(0,  -fp_one, 0);
+
+		V3_S4 right, up, forward;
+		V3_S4 ux, uy, uz;
+		V3_S4 pos, off;
+
 		tb.used = 0; tb_scope_run(& tb) {
 			tb_emit_(resolve_look_at);
 				// tb_data_();
 		}
+
+		// forward = target[0]; sub_v3s4(& forward, eye[0]); // RGA(Lengyel): Affine point - point = zero-weight direction.
+		// normalize_v3s4(& forward, & uz);                  // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.
+
+		cross_v3s4(& uz,   up_in, & right); normalize_v3s4(& right, & ux); // RGA(Lengyel): Complement(Wedge(forward, up_in)) -> right axis.
+		cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy); // RGA(Lengyel): Complement(Wedge(forward, right)) -> up axis.
+
+		// RGA(Lengyel): matrix expansion of the world-to-camera rotation (basis rows).
+		look_at->m[0][0] = ux.x; look_at->m[0][1] = ux.y; look_at->m[0][2] = ux.z;
+		look_at->m[1][0] = uy.x; look_at->m[1][1] = uy.y; look_at->m[1][2] = uy.z;
+		look_at->m[2][0] = uz.x; look_at->m[2][1] = uz.y; look_at->m[2][2] = uz.z;
+
+		pos = eye[0]; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
+
+		// RGA(Lengyel): R * (-eye) is the full matrix translation column. 
+		// Motor translator would store half this displacement in m.xyz; GTE consumes full column.
+		mul_m3s2_v3s4(look_at, & pos, & off);
+		trans_m3s2(   look_at,        & off);
 	}
 
 	// Draw cube
