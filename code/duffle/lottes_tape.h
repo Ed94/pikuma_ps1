@@ -106,6 +106,12 @@ typedef Slice_(MipsCode);
 typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that must terminate with an ac_yield.
 #define MipsAtom_(sym) MipsCode sym [] align_(4) =
 
+// Used for atoms with value-args
+//   FI_ void ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
+// expands to:
+//   FI_ void ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return ac_X; }
+#define MipsAtom_Proc_(sym, abuilder, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_unroll(abuilder, slice_from_array(MipsCode, sym)); }
+
 // Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
 //   MipsAtomComp_(ac_X) { body }
 // expands to:
@@ -118,12 +124,18 @@ typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that
 //   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
 #define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
 
-/* Line-table anchor: gcc only adds a file to the .debug_line file table when the
-   file contains line-numbered content. Files containing only:
-     - `MipsAtomComp_` static-array declarations, or
-     - `MipsAtomComp_Proc_` (force-inline) function bodies whose line info gets
-       attributed to the call site at the include point are otherwise omitted from the file table,
-			 which breaks the DWARF injection when it tries to resolve atom-component provenance paths.
+// Used for components with value-args (e.g., ac_format_f3_color).
+//   FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
+// expands to:
+//   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
+// #define MipsAtomComp_Proc_(sym, abuilder, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_unroll(abuilder, slice_from_array(MipsCode, sym)); }
+
+/* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.
+	Files containing only:
+	- `MipsAtomComp_` static-array declarations, or
+	- `MipsAtomComp_Proc_` (force-inline) function bodies whose line info gets
+	  attributed to the call site at the include point are otherwise omitted from the file table, 
+		which breaks the DWARF injection when it tries to resolve atom-component provenance paths.
 
    Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
 	 The macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
@@ -181,10 +193,12 @@ FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start
 FI_ TapeBuilder tb_make_old(             FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
 FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ mem.ptr, mem.len, 0 }; }
 
-FI_ void tb_emit(TapeBuilder* tb, MipsCode* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
+FI_ void tb_emit(TapeBuilder* tb, MipsAtom* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
 FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 #define tb_emit_(atom)        tb_emit(& tb, atom)
 #define tb_data_(field, data) tb_data(& tb, u4_(data))
+
+FI_ void tb_emit_bundle(TapeBuilder_R tb, Slice_MipsAtom atoms) { mem_copy(u4_(tb->ptr), u4_(atoms.ptr), tb->used); tb->used += atoms.len; }
 
 FI_ Tape tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Tape){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4*,tb.ptr),  tb.used }; }
@@ -233,21 +247,48 @@ typedef Relative_(FArena) Struct_(MipsAtomBuilder) { U4 start; U4 capacity; U4 u
 // Whatever the builder is writting to should most likely coresspond
 // to something that can fit within instruction cache?
 
-FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode_R code) {
-	assert(ab->capacity - ab->used - code->len);
-	mem_copy(ab->start, u4_(code->ptr), code->len);
-	mem_bump(ab->start, ab->capacity, & ab->used, code->len);
+FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode code) {
+	assert(ab->capacity - ab->used - code.len);
+	mem_copy(ab->start, u4_(code.ptr), code.len);
+	mem_bump(ab->start, ab->capacity, & ab->used, code.len);
 }
 #define atombuilder_unroll_mac(ab, mac) atombuilder_unroll(ab, slice_arg_from_array(Slice_MipsCode, mac))
 
-// When done authoring, utilize this to cap-off the atom
+// When done authoring, utilize this to cap-off the atom (if not utilizing a MipsAtom_Proc).
 FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
 	mem_copy(ab->start, u4_(ac_yield), S_(ac_yield));
 	mem_bump(ab->start, ab->capacity, & ab->used, S_(ac_yield));
 }
 
-#define mipsatom_from_builder(ab) (Slice_MipsCode){ab.start, ab.used}
+#define mipsatom_from_builder(ab) C_(MipsAtom*, (ab).start)
 #pragma endregion Mips Atom Builder
+
+#pragma region Mips Atom Procs
+
+#if 0
+typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
+FI_ void sync_prim_arean_proc_demo(MipsAtomBuilder_R ab, U4 r_extra, U4 add_amnt_extra) 
+MipsAtom_Proc_(sync_primitive_arena_proc_demo, ab, atom_info(atom_bind(Binds_SyncPrimitiveArena)
+	, atom_reads( R_TapePtr, R_PrimCursor)
+	, atom_writes(R_TapePtr)
+){
+	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,used)),
+	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)),
+	add_ui_self(    R_TapePtr, S_(Binds_SyncPrimitiveArena)),
+	/* Calculate byte offset and store directly back to RAM */
+	sub_u(     R_T0, R_PrimCursor, R_T0), // R_T0    = R_PrimCursor - binds.cursor
+	store_word(R_T0, R_AT, 0),            // R_AT[0] = R_T0
+	add_ui_self(r_extra, add_amnt_extra), // extra op for demonstration purposes.
+	mac_yield()
+})
+
+void demo_make_make_and_emit_atom(TapeBuilder* tb, MipsAtomBuilder* ab){
+	sync_prim_arean_proc_demo(ab, R_T4, 4);
+	tb_emit(tb, mipsatom_from_builder(ab[0]));
+}
+#endif
+
+#pragma endregion Mips Atom Procs
 
 #pragma region Baked Mips Atoms
 // These atoms are resolved at compile time and are (usually) statically linked readonly data.

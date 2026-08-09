@@ -383,8 +383,14 @@ internal MipsAtom_(resolve_look_at) atom_info(atom_bind(Binds_ResolveLookAt)) {
 	mac_load_v3s4(R_Eye_x,     R_Eye_y,     R_Eye_z,     R_CamEye, 0),
 	mac_sub_v3s4( R_LkAt_Fwdx, R_LkAt_Fwdy, R_LkAt_Fwdz,
 	              R_Eye_x,     R_Eye_y,     R_Eye_z),
-	
-	
+
+	// ac_normalize_v3s4(9 args): in-place normalize direction → unit vector.
+	// Reg-aliasing across the 4 stages: R_T7 = r_sq_y → r_lzcr, R_T8 = r_sq_z → r_shift,
+	// R_V0 = r_recip_est (always), R_V1 = r_tmp. r_sx/r_sy/r_sz = R_LkAt_Fwdx/y/z (in-place).
+	// mac_normalize_v3s4(R_LkAt_Fwdx, R_LkAt_Fwdy, R_LkAt_Fwdz,
+	//                    R_T7, R_T8,
+	//                    R_V0,
+	//                    R_T7, R_T8, R_V1),
 
 	mac_yield(),
 };
@@ -438,7 +444,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
 		/* BD-slot: write the prim tag (R_0=0; overwrites the legacy tag word in the prim_buffer).
 		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded — 
-		 * harmless because the OT entry that points to this prim is created later, only on the body path. */
+		 * harmless because the OT entry that points to this prim is created later. */
 		store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
 		shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
 		load_word(R_V0, R_AT, O_(V3_S2, x)),   load_word(R_V1, R_AT, O_(V3_S2, z)),

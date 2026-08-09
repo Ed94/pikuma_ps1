@@ -21,8 +21,6 @@ FI_ Slice_MipsCode ac_store_rgb8(U1 rr, U1 rg, U1 rb, U4 base, U4 offset) atom_d
 	store_byte(rb, base, offset + O_(RGB8,b)),	
 })
 
-/* Words: 3; Emits one (cmd|color) word to R_PrimCursor at the given
- * byte offset. Internal helper used by the *_format_*_color macros. */
 FI_ Slice_MipsCode ac_pack_color_word(U4 r_base, U4 off, U4 cmd, U1 r, U1 g, U1 b)
 atom_dbg_skip MipsAtomComp_Proc_(ac_pack_color_word, {
 	load_upper_i(R_AT, (cmd) << 8  | (b)),
@@ -30,13 +28,9 @@ atom_dbg_skip MipsAtomComp_Proc_(ac_pack_color_word, {
 	store_word(  R_AT, r_base, (off)),
 })
 
-/* Words: 3; Emits the F3 command+color word (cmd byte | BLUE | GREEN | RED)
- * Args: _r, _g, _b are 8-bit RGB byte values (not raw 16-bit fields). */
 FI_ Slice_MipsCode ac_format_f3_color(U4 r_base, U1 r, U1 g, U1 b)
 atom_dbg_skip MipsAtomComp_Proc_(ac_format_f3_color, { mac_pack_color_word(r_base, O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b) })
 
-/* Words: 12; Emits the four (code|color) words of a Poly_G4.
- * Args: rN,gN,bN are 8-bit RGB byte values for each of the 4 vertices. */
 FI_ Slice_MipsCode ac_format_g4_color(U4 r_prim_cursor,
 	U1 r0, U1 g0, U1 b0,
   U1 r1, U1 g1, U1 b1,

@@ -348,6 +348,12 @@ enum { _BitOffsets = 0
 #define shift_lright(rd, rt, shamt) enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_srl)
 #define shift_aright(rd, rt, shamt) enc_r(op_special, R_0,  (rt), (rd), (shamt), fc_sra)
 
+/* Shift Variable — register-shift forms.
+ * shift_lleft_var(rd, rt, rs)  → sllv rd, rt, rs   (shamt in low 5 bits of rs)
+ * shift_aright_var(rd, rt, rs) → srav rd, rt, rs */
+#define shift_lleft_var(rd, rt, rs)  enc_r(op_special, (rs), (rt), (rd), 0, fc_sllv)
+#define shift_aright_var(rd, rt, rs) enc_r(op_special, (rs), (rt), (rd), 0, fc_srav)
+
 #define shift_lleft_self(rd_rt, shamt) enc_r(op_special, R_0, (rd_rt), (rd_rt), (shamt), fc_sll)
 
 #define mask_upper(rd, rt, shamt) shift_lleft(rd, rt, shamt), shift_lright(rd, rt, shamt)
@@ -366,20 +372,18 @@ enum { _BitOffsets = 0
  * WARNING: `jump(off)` CANNOT BE USED for within-atom jumps in the current pipeline.
  * The MIPS j opcode encodes `(target_addr >> 2)` in its 26-bit immediate field; an  ABSOLUTE byte address, not a relative word offset.
  * The metaprogram computes `off` as a relative word offset (`target_word_idx - branch_word_idx - 1`), which the assembler/linker does NOT resolve.
- *
  * `jump(off)` is only safe when the BUILD PIPELINE owns the absolute position of the emitted code — i.e. when: s
  *   - the build emits a symbol-relative `.word` expression that the linker resolvess via `R_MIPS_26`, OR
  *   - the code is hand-assembled with explicit absolute targets, OR a custom post-build patcher resolves the 26-bit field.
+ * TODO(Ed): Review this.. technically we can resolve aboslute jumps on baked atoms? (Even proedurally generated ones...)
  */
 #define jump(off)                  enc_i(op_j,     R_0, R_0, (off))
 
 /* jump_rel off — unconditional relative jump (the within-atom-safe `jump`).
- * MIPS I R3000A has no "branch always" opcode. The idiom for an unconditional relative jump is `beq $0, $0, off`.
- */
+ * MIPS I R3000A has no "branch always" opcode. The idiom for an unconditional relative jump is `beq $0, $0, off`. */
 #define jump_rel(off)              branch_equal(R_0, R_0, (off))
 
 /* call_addr off — jump-and-link to immediate address.
- *
  * Same WARNING as `jump(off)` above: the jal opcode also encodes an absolute 26-bit target.
  * For within-atom calls, the current pipeline has no equivalent always-taken call-and-link idiom.
  * Workaround: `branch_link` (always-taken branch + explicit `la $ra, next_word_addr; jr $ra`), or just use `call_reg($tmp)` after loading the target into a register.
@@ -397,13 +401,7 @@ enum { _BitOffsets = 0
  * sub_s / sub_u  → sub / subu
  * mult_s / mult_u → mult / multu   (writes HI/LO; result in LO)
  * div_s / div_u   → div / divu     (LO = quot, HI = rem)
- *
- * NOTE: dsl.h defines `add_s`/`sub_s`/`mut_s`/`gt_s`/etc. as _Generic-based signed integer-arithmetic helpers for U1/U2/U4.
- * Those live in a different conceptual layer (generic arithmetic on DSL types) and would collide with the instruction encoders here.
- * The `#undef` below lets the gas-style names below win; if a file needs both, the dsl.h versions can be reached via their long forms
- * (e.g. `def_signed_op`-style or the underlying `add_s1/s2/s4`). */
-#undef add_s
-#undef sub_s
+ */
 #define add_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_add)
 #define add_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_addu)
 #define sub_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_sub)
@@ -457,6 +455,9 @@ enum { _BitOffsets = 0
 /* nop — sll $0, $0, 0 */
 #define nop  shift_lleft(rdiscard, rdiscard, 0)
 #define nop2 nop, nop
+
+// li_s — load signed 16-bit immediate into GPR (addiu rt, $0, imm — sign-extends).
+#define li_s(rt, imm)  add_ui((rt), R_0, (imm))
 
 #define load_imm_1w(rt, imm)    add_ui((rt),  R_0, (imm))
 #define load_imm_1w_s0(rt, imm) add_si((rt)), R_0, (imm))

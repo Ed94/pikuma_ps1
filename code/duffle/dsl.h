@@ -169,6 +169,8 @@ def_signed_ops(le, <=)
 #undef def_signed_ops
 #undef def_signed_op
 
+// Unused, we arent' doing any C-like asm since we have the asm dsl. We'll keep the non-generics if we somehow do.
+#if 0
 #define def_generic_sop(op, a, ...) _Generic((a), U1:  op ## _s1, U2: op ## _s2, U4: op ## _s4) (a, __VA_ARGS__)
 #define add_s(a,b) def_generic_sop(add,a,b)
 #define sub_s(a,b) def_generic_sop(sub,a,b)
@@ -178,6 +180,7 @@ def_signed_ops(le, <=)
 #define ge_s(a,b)  def_generic_sop(ge, a,b)
 #define le_s(a,b)  def_generic_sop(le, a,b)
 #undef def_generic_sop
+#endif
 
 #define alignas                             _Alignas
 #define alignof                             _Alignof

@@ -299,7 +299,9 @@ local function word_count_rec(name, comp_by_name, wc, cache)
 			local trimmed = t.tok
 			if trimmed ~= "" then
 				local lookup = strip_mac_prefix(duffle.read_ident(trimmed, 1))
-				if    lookup and comp_by_name[lookup] then
+				if lookup == "atom_label" or lookup == "atom_offset" then
+					-- Pure metaprogram anchors; emit zero words.
+				elseif lookup and comp_by_name[lookup] then
 					-- It's a `mac_X(...)` call. Recurse.
 					n = n + word_count_rec(lookup, comp_by_name, wc, cache)
 				elseif lookup and wc and wc[lookup] then

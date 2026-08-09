@@ -147,6 +147,86 @@ WORD_COUNT(mac_gte_store_g4_p012, 3)
 	gte_sw(C2_SXY2, r_primitive_cursor, O_(Poly_G4,p3))
 WORD_COUNT(mac_gte_store_g4_p3, 1)
 
+/* atom_dbg_skip */
+#define mac_gte_sqr_v3(r_sx, r_sy, r_sz, r_sq_x, r_sq_y, r_sq_z) \
+	gte_mv_to_data_r(r_sx, C2_IR1) \
+,	gte_mv_to_data_r(r_sy, C2_IR2) \
+,	gte_mv_to_data_r(r_sz, C2_IR3) \
+,	nop \
+,	gte_cmdw_sqr \
+,	gte_mv_from_data_r(r_sq_x, C2_MAC1) \
+,	gte_mv_from_data_r(r_sq_y, C2_MAC2) \
+,	gte_mv_from_data_r(r_sq_z, C2_MAC3)
+WORD_COUNT(mac_gte_sqr_v3, 8)
+
+/* atom_dbg_skip */
+#define mac_gte_gpf_scale(r_sx, r_sy, r_sz, r_recip_est, r_shift, r_dx, r_dy, r_dz) \
+	gte_mv_to_data_r(r_recip_est, C2_IR0) \
+,	gte_mv_to_data_r(r_sx,        C2_IR1) \
+,	gte_mv_to_data_r(r_sy,        C2_IR2) \
+,	gte_mv_to_data_r(r_sz,        C2_IR3) \
+,	nop2 /* retire IR0..IR3 → GPF input pre-fill (matches libgte 0x80016134..0x80016138) */ \
+,	gte_cmdw_gpf \
+,	gte_mv_from_data_r(r_dx, C2_MAC1) \
+,	gte_mv_from_data_r(r_dy, C2_MAC2) \
+,	gte_mv_from_data_r(r_dz, C2_MAC3) \
+,	shift_aright_var(r_dx, r_dx, r_shift) \
+,	shift_aright_var(r_dy, r_dy, r_shift) \
+,	shift_aright_var(r_dz, r_dz, r_shift)
+WORD_COUNT(mac_gte_gpf_scale, 13)
+
+/* atom_dbg_skip */
+#define mac_normalize_v3s4(r_sx, r_sy, r_sz, r_sq_y, r_sq_z, r_recip_est, r_lzcr, r_shift, r_tmp) \
+	gte_mv_to_data_r(r_sx, C2_IR1) \
+,	gte_mv_to_data_r(r_sy, C2_IR2) \
+,	gte_mv_to_data_r(r_sz, C2_IR3) \
+,	nop \
+,	gte_cmdw_sqr	/* ─── Stage 2: mfc2 MAC1/2/3, sum, mtc2 LZCS ───	// Note: r_recip_est first used as the sum accumulator (= |v|²), which is also what LZCS needs. */ \
+,	gte_mv_from_data_r(r_sq_y,      C2_MAC1) /* r_sq_y = MAC1 = sx² */ \
+,	gte_mv_from_data_r(r_sq_z,      C2_MAC2) /* r_sq_z = MAC2 = sy² */ \
+,	gte_mv_from_data_r(r_recip_est, C2_MAC3) /* r_recip_est = MAC3 = sz² */ \
+,	nop                                      /* MFC2→GPR load delay (1 slot) */ \
+,	add_u(r_recip_est, r_recip_est, r_sq_z)  /* r_recip_est += sy² */ \
+,	add_u(r_recip_est, r_recip_est, r_sq_y)  /* r_recip_est += sx² (sum = |v|²) */ \
+,	gte_mv_to_data_r(  r_recip_est, C2_LZCS) /* LZCS = |v|² */ \
+,	nop2 \
+,	gte_mv_from_data_r(r_lzcr, C2_LZCR)      /* r_lzcr = LZCR (count of leading bits) */ \
+,	nop                                      /* MFC2→GPR load delay (1 slot) */	/* ─── Stage 3: compute shift amount, align |v|² to bit 24, lookup 1/|v| ───	// Matches libgte `bltz +0x10 ; nop ; b +0x14 ; sllv t4,v0,t3` pattern:	//   - bltz TAKEN  → nop (BD), jump to srav_path; sllv SKIPPED	//   - bltz !TAKEN → nop (BD), b +0x14 jumps to aligned_done; sllv (BD of b) executes */ \
+,	and_i(         r_lzcr, r_lzcr, -2)       /* r_lzcr &= ~1 (force even for halving) */ \
+,	li_s(          r_shift, 31)              /* r_shift = 31 */ \
+,	sub_s(         r_shift, r_shift, r_lzcr) /* r_shift = 31 - LZCR */ \
+,	shift_aright(  r_shift, r_shift,  1)     /* r_shift = (31 - LZCR) / 2 */ \
+,	add_si(        r_tmp,   r_lzcr, -24)     /* r_tmp = LZCR - 24 (signed, for branch) */ \
+,	branch_lt_zero(r_tmp, atom_offset(srav_path, aligned_done)) \
+,	nop \
+,	jump_rel(             atom_offset(aligned_done, srav_path)) \
+,	shift_lleft_var(r_recip_est, r_recip_est, r_tmp)     /* BD-slot of branch_equal: r_recip_est = |v|² << (LZCR - 24) */ \
+,	atom_label(srav_path)                                 /* SRAV path: |v|² is small (top bit < bit 24) */ \
+,	li_s(          r_tmp, 24) \
+,	sub_s(         r_tmp, r_tmp, r_lzcr)                 /* r_tmp = 24 - LZCR */ \
+,	shift_aright_var(r_recip_est, r_recip_est, r_tmp)    /* r_recip_est = |v|² >> (24 - LZCR) */ \
+,	atom_label(aligned_done)                                /* Both paths converge here with |v|² aligned to bit 24 */	/* r_recip_est now holds |v|² aligned to bit 24 — convert to byte offset, -64 to skip zero pad. */ \
+,	add_si(        r_recip_est, r_recip_est, -64) \
+,	shift_lleft(   r_recip_est, r_recip_est, 1)           /* r_recip_est *= 2 (half-word index) */	/* Reference OUR local sqrtbl via &-address split. Compiler/linker resolves both halves. */ \
+,	load_upper_i(  r_tmp, u4_hi(& gte_normalize_sqr_tbl)) /* lui */ \
+,	or_i_self(     r_tmp, u4_lo(& gte_normalize_sqr_tbl)) /* ori */ \
+,	add_u(         r_tmp, r_tmp, r_recip_est)             /* r_tmp = sqrtbl base + byte offset (matches libgte 0x80016118: addu t5,t5,t4) */ \
+,	load_half(     r_recip_est, r_tmp, 0)                 /* r_recip_est = sqrtbl[r_recip_est] = 1/|v| estimate */ \
+,	nop                                                   /* retire load_half before MTC2 (matches libgte 0x80016120: nop) */	/* ─── Stage 4: mtc2 IR0..3, GPF (MAC = IR0*IR), mfc2 MAC, srav finalize ───	// Componentized equivalent: mac_gte_gpf_scale. */ \
+,	gte_mv_to_data_r(r_recip_est, C2_IR0)  /* IR0 = 1/|v| estimate */ \
+,	gte_mv_to_data_r(r_sx,        C2_IR1)  /* IR1 = src.x */ \
+,	gte_mv_to_data_r(r_sy,        C2_IR2)  /* IR2 = src.y */ \
+,	gte_mv_to_data_r(r_sz,        C2_IR3)  /* IR3 = src.z */ \
+,	nop2                                   /* COP2 transfer latency (2 slots) */ \
+,	gte_cmdw_gpf \
+,	gte_mv_from_data_r(r_sx, C2_MAC1)      /* MAC1 → r_sx (overwrites src.x with raw reciprocal-scaled) */ \
+,	gte_mv_from_data_r(r_sy, C2_MAC2) \
+,	gte_mv_from_data_r(r_sz, C2_MAC3) \
+,	shift_aright_var(r_sx, r_sx, r_shift) \
+,	shift_aright_var(r_sy, r_sy, r_shift) \
+,	shift_aright_var(r_sz, r_sz, r_shift)
+WORD_COUNT(mac_normalize_v3s4, 48)
+
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	load_upper_i(reg_transfer, cmd >> 16) \
 ,	or_i_self(   reg_transfer, cmd & 0xFFFF) \

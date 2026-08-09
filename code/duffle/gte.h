@@ -161,6 +161,8 @@ enum {
 	gte_cmd_nclip     = 0x06, /* Normal Clipping (Backface culling) */
 	gte_cmd_op        = 0x0C, /* Outer Product */
 	gte_cmd_mvmva     = 0x12, /* Matrix Vector Multiply & Add (Custom math) */
+	gte_cmd_sqr       = 0x28, /* Square vector — MAC[i] = IR[i]²; IR[i] ← MAC[i] saturated */
+	gte_cmd_gpf       = 0x3D, /* General-purpose Interpolation — MAC[i] = IR0 * IR[i]  */
 
 /* --- GTE Command Bit-Field Layout ---
  * A GTE command word (sent to COP2 with RS=1) is laid out as:
@@ -171,17 +173,22 @@ enum {
  *   +------------+--+-----+------+------+------+------+---+--------+----------+
  *                                    \_____ GTE_PAYLOAD _____/       \__ GTE_CMD __/
  *
- * Shifts/masks below are the *bit positions* and *bit widths* of each
- * configurable field, used by the ENC_GTE_CMD encoder. 
+ * Shifts/masks below are the *bit positions* and *bit widths* of each configurable field, used by the ENC_GTE_CMD encoder. 
  * Mirrors the OPCODE_SHIFT / RS_SHIFT convention used in mips.h.
  */
 
 	gte_shift_sf  = 19,  gte_width_sf  = 1,  gte_mask_sf  = 0x1,
 	gte_shift_mx  = 17,  gte_width_mx  = 2,  gte_mask_mx  = 0x3,
 	gte_shift_v   = 15,  gte_width_v   = 2,  gte_mask_v   = 0x3,
-	gte_shift_cv  = 13,  gte_width_cv  = 2,  gte_mask_cv  = 0x3,
+	gte_shift_cv  = 13,  gte_width_cv  = 2,  gte_mask_cv = 0x3,
 	gte_shift_lm  = 10,  gte_width_lm  = 1,  gte_mask_lm  = 0x1,
 	gte_shift_cmd =  0,  gte_width_cmd = 6,  gte_mask_cmd = 0x3F,
+
+	/* Fake command number (bits 24-20) — IGNORED by the GTE hardware per PSX-SPX `geometrytransformationenginegte.md` line 48.
+	 * libgte's compiler emits non-zero values in this field as a disassembly signature. */
+	gte_shift_fake_cmd = 20,
+	gte_width_fake_cmd = 5,
+	gte_mask_fake_cmd  = 0x1F,
 };
 
 /* --- GTE Control Register Indices (for ctc2/cfc2) ---
@@ -243,10 +250,10 @@ enum { _C2_OPS_ = 0
  *   bit 1 (0x02): register class — 0 = data,  1 = control
  *   bit 2 (0x04): direction      — 0 = read,  1 = write
  *
- * The values 0x00 (sub_mfc2) and 0x04 (sub_mtc2) are the same 5-bit numbers as the general MIPS `cop_mf` / `cop_mt` defined in mips.h
+ * The values 0x00 (sub_mfc2) and 0x04 (sub_mtc2) are the same 5-bit numbers as general MIPS `cop_mf` / `cop_mt` defined in mips.h
  * (which target the data register file on any coprocessor).
  * They are re-aliased here so the four-way table reads like the spec mnemonics (MFC2 / CFC2 / MTC2 / CTC2)
- * and so the encoding lives next to its only consumer (this header).
+ * and so the encoding is next to its only consumer (this header).
  *
  * Vendor mnemonic aliases (gte_mfc2 / gte_mtc2 / gte_cfc2 / gte_ctc2) live in gte_vendor_sym.h. */
 enum { _C2_TX_SUBS_ = 0
@@ -309,23 +316,24 @@ enum { _C2_TX_SUBS_ = 0
 
 /* GTE Command Format
  * Opcode is always MIPS_OP_COP2, RS is always 1 (CO).
- * The lower 25 bits are the GTE-specific command payload.
+ * Lower 25 bits are GTE-specific command payload.
  *
- * The granular `enc_gte_<field>(x)` macros below mirror the `enc_op`/`enc_rs` pattern in mips.h:
+ * The `enc_gte_<field>(x)` macros below mirror the `enc_op`/`enc_rs` pattern in mips.h:
  * Each one self-masks and shifts its own field, so a caller can build up a GTE command piece by piece
  * (handy for state-driven MVMVA emitters that vary one field at a time).
  *
- * `ENC_GTE_CMD` is the all-in-one convenience for emitting a full command word in one go.
+ * `ENC_GTE_CMD` is an all-in-one convenience for emitting a full command word.
  * It just ORs the per-field encoders together. */
 #define gte_cmd_base (enc_op(op_cop2) | (1 << 25))
 
 /* Per-field encoders. Each one does (value & mask) << shift on its own. */
-#define enc_gte_sf(sf)   (((sf)  & gte_mask_sf ) << gte_shift_sf )
-#define enc_gte_mx(mx)   (((mx)  & gte_mask_mx ) << gte_shift_mx )
-#define enc_gte_v(v)     (((v)   & gte_mask_v  ) << gte_shift_v  )
-#define enc_gte_cv(cv)   (((cv)  & gte_mask_cv ) << gte_shift_cv )
-#define enc_gte_lm(lm)   (((lm)  & gte_mask_lm ) << gte_shift_lm )
-#define enc_gte_cmd(cmd) (((cmd) & gte_mask_cmd) << gte_shift_cmd)
+#define enc_gte_sf(sf)          (((sf)  & gte_mask_sf      ) << gte_shift_sf )
+#define enc_gte_mx(mx)          (((mx)  & gte_mask_mx      ) << gte_shift_mx )
+#define enc_gte_v(v)            (((v)   & gte_mask_v       ) << gte_shift_v  )
+#define enc_gte_cv(cv)          (((cv)  & gte_mask_cv      ) << gte_shift_cv )
+#define enc_gte_lm(lm)          (((lm)  & gte_mask_lm      ) << gte_shift_lm )
+#define enc_gte_cmd(cmd)        (((cmd) & gte_mask_cmd     ) << gte_shift_cmd )
+#define enc_gte_fake_cmd(x)     (((x)   & gte_mask_fake_cmd) << gte_shift_fake_cmd)
 
 /* Composite: all six GTE fields + the COP2/CO base. */
 #define enc_gte_cmdw(sf, mx, v, cv, lm, cmd) ( \
@@ -363,11 +371,11 @@ enum { _C2_TX_SUBS_ = 0
  *  (the perspective divide happens regardless of `sf`).
  *
  *  If we emit a strictly-spec-compliant word (`sf=0`, reserved bits clear),
- *  PCSX-Redux's GTE checks those bits more strictly than the silicon does and RTPT silently no-ops — 
- *  the floor's screen coordinates come out as raw projection-of-rotation (Z never divided),
+ *  PCSX-Redux's GTE checks those bits more strictly than the silicon does and RTPT silently no-ops.
+ *  The floor's screen coordinates come out as raw projection-of-rotation (Z never divided), 
  *  `nclip` ends up wrong, and the triangle is culled.
  *
- *  So for RTPS and RTPT we OR-in the `0x28` "PsyQ compat" pattern to match the working bit pattern everyone has shipped for 25 years.
+ *  So for RTPS and RTPT we OR-in the `0x28` "PsyQ compat" pattern to match the working bit pattern.
  *  NCLIP / OP / MVMVA stay spec-clean — their reserved bits really are zero in the original PsyQ source.
  * --------------------------------------------------------------------------
  */
@@ -382,6 +390,36 @@ enum { _C2_TX_SUBS_ = 0
 	* RGA(Lengyel): the GTE OP is a 3D signed-16-bit D x IR cross, not a generic RGA exterior product.
 	* The wedge alias is the 3D complement interpretation of the same 3 scalars (MAC1..MAC3). */
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
+
+/* SQR / GPF cosmetic-bits compat helpers.
+ * Each command's `_compat` macro ORs in the `fake_cmd` field value libgte happens to emit.
+ * The hardware ignores these bits (per PSX-SPX line 48). */
+#define gte_cmdw_sqr_fake_sig  enc_gte_fake_cmd(0x0A)
+#define gte_cmdw_gpf_fake_sig  enc_gte_fake_cmd(0x19)
+
+/* SQR — Square Vector.
+ * PSX-SPX `geometrytransformationenginegte.md` §"SQR":
+ *   [MAC1,MAC2,MAC3] = [IR1*IR1, IR2*IR2, IR3*IR3] SHR (sf*12)
+ *   [IR1,IR2,IR3]    = [MAC1,MAC2,MAC3] (saturated to 0x7FFF when lm=1)
+ * Sourced verbatim from libgte msc02 VectorNormal disassembly at 0x800160b0:
+ *   0x4AA00428 = gte_cmd_base | gte_cmdw_sqr_compat | enc_gte_lm(1) | enc_gte_cmd(0x28)
+ *   bit 19     sf=0
+ *   bit 10     lm=1
+ *   bits 5-0   cmd=0x28=SQR
+ *   bits 24-20 = 0x0A (libgte "nonsense SDK command number" signature) */
+#define gte_cmdw_sqr   (gte_cmd_base | enc_gte_cmd(gte_cmd_sqr) | enc_gte_lm(1) | gte_cmdw_sqr_fake_sig)
+
+/* GPF — General-purpose Interpolation.
+ * PSX-SPX `geometrytransformationenginegte.md` §"GPF":
+ *   [MAC1,MAC2,MAC3] = (([IR1,IR2,IR3] * IR0) + [MAC1,MAC2,MAC3]) SAR (sf*12)
+ *   [IR1,IR2,IR3]    = [MAC1,MAC2,MAC3]
+ * Sourced verbatim from libgte msc02 VectorNormal disassembly at 0x8001613c:
+ *   0x4B90003D = gte_cmd_base | gte_cmdw_gpf_compat | enc_gte_cmd(0x3D)
+ *   bit 19     sf=0
+ *   bit 10     lm=0
+ *   bits 5-0   cmd=0x3D=GPF
+ *   bits 24-20 = 0x19 (libgte "nonsense SDK command number" signature) */
+#define gte_cmdw_gpf   (gte_cmd_base | enc_gte_cmd(gte_cmd_gpf) | gte_cmdw_gpf_fake_sig)
 
 #define gte_cmdw_rotate_translate_perspective_single gte_cmdw_rtps
 #define gte_cmdw_rotate_translate_perspective_triple gte_cmdw_rtpt
@@ -437,7 +475,6 @@ enum {
 #define gte_lw_v2_z(base)   enc_gte_lw(gte_in_v2_z,  (base), GTE_Z_Offset)
 
 /* gte_load_vN(r_ptr, base) — placeholder-punned lwc2 loaders
- *
  * Emits `.word` constants encoding `lwc2 $N, off(<base>)` for the chosen GTE vector register, where `<base>` is the GPR number you pass in
  * (typically one of R_T4..R_T9 for the standard "3-pointer" pattern).
  *

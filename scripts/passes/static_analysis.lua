@@ -256,8 +256,21 @@ local BRANCH_PATTERN          = "^branch_[%w_]+%s*%("
 -- The C preprocessor expands it BEFORE the metaprogram sees the source, but for source-level metadata consistency we still match it here and classify it as a branch_equal.
 -- This keeps `consuming_encoder` canonical for any downstream tooling that consults the metadata field.
 local JUMP_REL_PATTERN      = "^jump_rel%s*%("
-local UNCOND_JUMP_PATTERN   = "^%f[%w](jump|call_addr)%f[%W]"
-local TERMINAL_JUMP_PATTERN = "^%f[%w](jump_reg|call_reg|jump_link)%f[%W]"
+local UNCOND_JUMP_PATTERNS = {
+    "^%f[%w]jump%f[%W]",
+    "^%f[%w]call_addr%f[%W]",
+}
+local TERMINAL_JUMP_PATTERNS = {
+    "^%f[%w]jump_reg%f[%W]",
+    "^%f[%w]call_reg%f[%W]",
+    "^%f[%w]jump_link%f[%W]",
+}
+local function matches_any(tok, patterns)
+    for i = 1, #patterns do
+        if tok:match(patterns[i]) then return true end
+    end
+    return false
+end
 
 local function classify_tokens(tokens)
 	local n       = #tokens
@@ -301,13 +314,13 @@ local function classify_tokens(tokens)
 			-- Both encode a 16-bit signed relative word offset.
 			is_branch    = true
 			branch_label = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
-		elseif tok:match(UNCOND_JUMP_PATTERN) then
+		elseif matches_any(tok, UNCOND_JUMP_PATTERNS) then
 			-- Unconditional absolute jump / call: `jump(off)` / `call_addr(off)`.
 			-- One immediate offset field; can carry an `atom_offset(F, T)` marker (the offsets pass dispatches on `consuming_encoder` — see `passes/offsets.lua::compute_offsets`).
 			is_branch              = true
 			is_unconditional_jump = true
 			branch_label           = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
-		elseif tok:match(TERMINAL_JUMP_PATTERN) then
+		elseif matches_any(tok, TERMINAL_JUMP_PATTERNS) then
 			-- Register-form jump / call: no offset field; `atom_offset` is invalid here (the offsets pass will error if one is supplied).
 			-- Transfers control OUT of the current atom — the CFG treats this as a path terminator.
 			is_terminal_jump = true
@@ -567,13 +580,31 @@ local function evaluate_gpr_value_rule(rule, ev_args, gpr_values)
 		return shift_left_u4(immediate % 0x10000, 16)
 	end
 
-	local source = nil
+	-- Encoders that take `R_0` implicitly (e.g. `li_s(rt, imm)` which is `add_ui(rt, R_0, imm)`) have a non-GPR operand at the source position.
+	-- Fall back to R_0 = 0.
+	-- The implicit-R_0 macros also use a different immediate position (e.g. `li_s`'s `add_ui` rule has source = 2 / immediate = 3
+	-- but the macro takes 2 args); when the configured immediate position is out of bounds.
+	-- Fall back instead to scanning the macro's args for the first integer literal and use that as the immediate.
+	local source = 0
 	if rule.source then
-		source = constant_for_operand(gpr_values, ev_args[rule.source])
-		if source == nil then return nil end
+		if is_gpr_operand(ev_args[rule.source]) then
+			source = constant_for_operand(gpr_values, ev_args[rule.source])
+			if source == nil then return nil end
+		end
+		-- Non-GPR at source position = implicit R_0; source stays 0.
 	end
-	local immediate = rule.immediate and parse_integer_literal(ev_args[rule.immediate]) or nil
-	if rule.immediate and immediate == nil then return nil end
+	local immediate = nil
+	if rule.immediate and ev_args[rule.immediate] ~= nil then
+		immediate = parse_integer_literal(ev_args[rule.immediate])
+		if immediate == nil then return nil end
+	elseif rule.immediate then
+		-- Immediate position out of bounds: scan for the first integer literal in the args.
+		for _, arg in ipairs(ev_args) do
+			immediate = parse_integer_literal(arg)
+			if immediate ~= nil then break end
+		end
+		if immediate == nil then return nil end
+	end
 	if     operation == "add_ui"      then return wrap_u4(      source + sign_extend_i16(immediate))
 	elseif operation == "or_i"        then return bit_binary(   source, immediate % 0x10000, "or")
 	elseif operation == "and_i"       then return bit_binary(   source, immediate % 0x10000, "and")
@@ -1433,17 +1464,20 @@ end
 --- The register becomes non-volatile again at word N+2 (the load has retired), OR sooner if a non-load instruction overwrites the register
 --- (the overwriter's write is the fresh producer; the load's value is shadowed and never observed by any reader).
 ---
---- Runtime-helper atoms / components (`debug_skip == true`) are exempt: their internal load-then-use sequences
---- are part of the fixed handshake (e.g. `ac_load_tri_indices` loads into R_T0..R_T2, but those are caller-supplied).
+--- Runtime-helper atoms / components (`debug_skip == true`) are exempt from some checks, but load-delay
+--- safety applies to their emitted instructions as well.
 ---
 --- The walker reads `duffle.OPERAND_READ_POSITIONS[event.encoder]` to determine which args are read-source
 --- (the destination of a load is in `writes`, not `reads` — see `duffle.INSTRUCTION_GPR_EFFECTS`).
---- The check is purely structural; it does not consult the GPR-value lattice (no constant propagation needed for load-delay detection — the volatility window is unconditional).
+--- The check is purely structural; it does not consult the GPR-value lattice
+--- (no constant propagation needed for load-delay detection — the volatility window is unconditional).
 local function check_load_delay_slots(atom, pipe_ctx, findings)
+	-- The load-delay check applies to every atom and component body, including debug-skipped components (`ac_*` and `atom_dbg_skip MipsAtom_(...)`).
+	-- The `atom_dbg_skip` marker controls debugger stepping, not instruction safety.
+	local p = atom.paths or {}
 	if atom.kind ~= "atom" then return end
-	local events = atom.paths.word_events or {}
+	local events = p.word_events or {}
 	if   #events == 0 then return end
-	if is_runtime_helper(atom) then return end
 
 	local gpr_effects = duffle.INSTRUCTION_GPR_EFFECTS or {}
 	local read_positions = duffle.OPERAND_READ_POSITIONS or {}
@@ -1656,21 +1690,39 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		return atom.line + line_in_body[tokens[idx].rel]
 	end
 
-	-- ── Rule 1: every `mac_yield_load()` must be in a branch BD-slot.
+	-- ── Rule 1: every `mac_yield_load()` must be in a branch BD-slot, OR sit between two `atom_label`s (natural fall-through load pattern).
+	-- When the pattern is satisfied, the check stays silent; only violations emit findings.
 	for tok_idx = 1, n do
 		local c = tc[tok_idx]
 		if c.ident == "mac_yield_load" then
-			if tok_idx < 2 or not tc[tok_idx - 1].is_branch then
-				local prev_ident = (tok_idx >= 2) and (tc[tok_idx - 1].ident or "?") or "<none>"
-				findings[#findings + 1] = {
-					atom  = atom.name,
-					line  = tok_idx >= 2 and line_for(tok_idx) or atom.line,
-					check = "yield_load_tail_pairing",
-					kind  = "error",
-					msg   = string.format(
-						"%s at line %d has `mac_yield_load()` at word %d but the previous token is `%s`, not a branch — `mac_yield_load()` must fill a branch BD-slot."
-						, atom.name, tok_idx >= 2 and line_for(tok_idx) or atom.line, tok_idx, prev_ident),
-				}
+			local prev_tc = (tok_idx >= 2) and tc[tok_idx - 1] or nil
+			-- Look for the next `atom_label()` token (skip `atom_offset` markers; check immediately-adjacent first).
+			local next_label_tc = (tok_idx + 1 <= n) and tc[tok_idx + 1] or nil
+			if    next_label_tc and next_label_tc.ident ~= "atom_label" then
+				next_label_tc = nil
+				for j = tok_idx + 1, n do
+					local t = tc[j]
+					if t.ident == "atom_label" then
+						next_label_tc = t
+						break
+					end
+				end
+			end
+			local  natural_fallthrough = prev_tc and prev_tc.is_atom_label and next_label_tc ~= nil
+			if not natural_fallthrough then
+				if tok_idx < 2 or not prev_tc.is_branch then
+					local prev_ident = prev_tc and (prev_tc.ident or "?") or "<none>"
+					local next_ident = next_label_tc and (next_label_tc.ident .. "(" .. (next_label_tc.label_name or "?") .. ")") or "<no following label>"
+					findings[#findings + 1] = {
+						atom  = atom.name,
+						line  = tok_idx >= 2 and line_for(tok_idx) or atom.line,
+						check = "yield_load_tail_pairing",
+						kind  = "error",
+						msg   = string.format(
+							"%s at line %d has `mac_yield_load()` at word %d but the previous token is `%s`, not a branch — and the next `atom_label()` token is `%s` — `mac_yield_load()` must fill a branch BD-slot or sit between two `atom_label`s for the natural fall-through load."
+							, atom.name, tok_idx >= 2 and line_for(tok_idx) or atom.line, tok_idx, prev_ident, next_ident),
+					}
+				end
 			end
 		end
 	end
@@ -2015,8 +2067,9 @@ local function analyze_atom_paths(atom, pipe_ctx)
 						succ[#succ + 1] = label_pos + 1
 					end
 				end
-				-- For literal-offset jumps (label == false), the target is a non-tracked address; conservatively omit.
-				return succ, nil
+				-- For literal-offset jumps (label == false), control transfers out unconditionally.
+				-- Treat as a terminator so the path is recorded (NOT as a silent fall-through to the next token, which is unreachable in this atom's execution).
+				return {}, tok_idx
 			end
 			-- Conditional branch: BD slot absorbed; two successors — fall-through (tok_idx+2) + taken (if known).
 			if tok_idx + 2 <= n then
@@ -2032,9 +2085,11 @@ local function analyze_atom_paths(atom, pipe_ctx)
 			-- Return (succ, nil), the second value is the terminator marker (nil = not a terminator).
 			return succ, nil
 		end
-		-- Normal token: just the next one
+		-- Normal token: just the next one.
+		-- The final ordinary word of the body has no successor and terminates the path;
+		-- record it as an implicit endpoint so the cycle budget for non-yield components is not silently zeroed.
 		if tok_idx + 1 <= n then return { tok_idx + 1 }, nil end
-		return {}, nil
+		return {}, tok_idx
 	end
 
 	-- DFS through all paths. Track the current cycle sum, a visited set scoped to the current path (to detect loops), and a count of paths.

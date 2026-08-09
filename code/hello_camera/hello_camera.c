@@ -172,12 +172,12 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	S4 flag; //????
 
 	// Camera Look at
-	if (1)
+	if (0)
 	{
 		camera_look_at_c11(& smem.cam, & smem.cube.pos, & v3s4(0, -fp_one, 0));
 	}
 	// Camera look at (Tape)
-	if (0)
+	if (1)
 	{
 		MT3_S2S4* look_at = & smem.cam.look_at;
 		P3_S4*    eye     = & smem.cam.pos;
@@ -188,8 +188,36 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		V3_S4 pos, off;
 
 		tb.used = 0; tb_scope_run(& tb) {
-			tb_emit_(resolve_look_at);
-				// tb_data_();
+			// tb_emit_bundle(resolve_look_at);
+			{
+				tb_emit_(resolve_look_at); {
+					tb_data_(look_at, & smem.cam.look_at);
+					tb_data_(eye, & smem.cam.pos);
+					tb_data_(target, & smem.cube.pos);
+					tb_data_(up_in, up_in);
+					// tb_emit(a_normalize_v3s4(/*Todo: resolve dependent register allocation*/));
+						// tb_data_(fwd_out);
+				}
+				#if 0
+				{
+					tb_emit_(resolve_look_at__resolve_right); {
+							//...
+						tb_emit_(a_normalize_v3s4(...));
+							tb_data_(right_out);
+					}
+					tb_emit(resolve_look_at__resolve_up); {
+							//...
+						tb_emit_(ac_normalize_v3s4(...));
+							tb_data_(up_out);
+					}
+					tb_emit(world_to_cam_expand_mt3_s2s4(...)); {
+						tb_data(look_at, & smem.cam.look_at);
+					}
+					tb_emit_(resolve_look_at__final); {
+					}
+				}
+				#endif
+			}
 		}
 
 		// forward = target[0]; sub_v3s4(& forward, eye[0]); // RGA(Lengyel): Affine point - point = zero-weight direction.
@@ -205,7 +233,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		pos = eye[0]; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
 
-		// RGA(Lengyel): R * (-eye) is the full matrix translation column. 
+		// RGA(Lengyel): R * (-eye) -- full matrix translation column. 
 		// Motor translator would store half this displacement in m.xyz; GTE consumes full column.
 		mul_m3s2_v3s4(look_at, & pos, & off);
 		trans_m3s2(   look_at,        & off);

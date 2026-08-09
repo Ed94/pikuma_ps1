@@ -1053,6 +1053,8 @@ M.GTE_COMMAND_ALIASES = {
 	-- gte_avg_sort_z3 / gte_avg_sort_z4 are the duffle-side aliases for AVSZ3/4.
 	["gte_avg_sort_z3"]                              = "gte_cmdw_avsz3",
 	["gte_avg_sort_z4"]                              = "gte_cmdw_avsz4",
+	["gte_cmdw_sqr"]                                 = "gte_cmdw_sqr",
+	["gte_cmdw_gpf"]                                 = "gte_cmdw_gpf",
 }
 
 -- GTE command input-set table.
@@ -1136,6 +1138,14 @@ M.GTE_COMMAND_INPUTS = {
 		"C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3",
 		"gte_cr_ZSF4",
 	},
+	-- SQR: reads IR1..IR3 (per PSX-SPX gte.md SQR section; libgte disassembly 0x800160b0).
+	["gte_cmdw_sqr"] = {
+		"C2_IR1", "C2_IR2", "C2_IR3",
+	},
+	-- GPF: reads IR0 + IR1..IR3 (per PSX-SPX gte.md GPF section; libgte disassembly 0x8001613c).
+	["gte_cmdw_gpf"] = {
+		"C2_IR0", "C2_IR1", "C2_IR2", "C2_IR3",
+	},
 }
 
 -- GTE command output-set + semantic role table.
@@ -1208,6 +1218,22 @@ M.GTE_COMMAND_OUTPUTS = {
 		{ register = "C2_IR2", role = "latest_color" },
 		{ register = "C2_IR3", role = "latest_color" },
 	},
+	["gte_cmdw_sqr"] = {
+		{ register = "C2_MAC1", role = "mac_result" },
+		{ register = "C2_MAC2", role = "mac_result" },
+		{ register = "C2_MAC3", role = "mac_result" },
+		{ register = "C2_IR1",  role = "latest_color" },
+		{ register = "C2_IR2",  role = "latest_color" },
+		{ register = "C2_IR3",  role = "latest_color" },
+	},
+	["gte_cmdw_gpf"] = {
+		{ register = "C2_MAC1", role = "mac_result" },
+		{ register = "C2_MAC2", role = "mac_result" },
+		{ register = "C2_MAC3", role = "mac_result" },
+		{ register = "C2_IR1",  role = "latest_color" },
+		{ register = "C2_IR2",  role = "latest_color" },
+		{ register = "C2_IR3",  role = "latest_color" },
+	},
 }
 
 -- GTE command/post-command latch-window table.
@@ -1270,6 +1296,22 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 		{ register = "C2_IR2", required = 4 },
 		{ register = "C2_IR3", required = 4 },
 	},
+	["gte_cmdw_sqr"] = {
+		{ register = "C2_MAC1", required = 4 },
+		{ register = "C2_MAC2", required = 4 },
+		{ register = "C2_MAC3", required = 4 },
+		{ register = "C2_IR1",  required = 4 },
+		{ register = "C2_IR2",  required = 4 },
+		{ register = "C2_IR3",  required = 4 },
+	},
+	["gte_cmdw_gpf"] = {
+		{ register = "C2_MAC1", required = 4 },
+		{ register = "C2_MAC2", required = 4 },
+		{ register = "C2_MAC3", required = 4 },
+		{ register = "C2_IR1",  required = 4 },
+		{ register = "C2_IR2",  required = 4 },
+		{ register = "C2_IR3",  required = 4 },
+	},
 }
 
 -- Operand-class table for the COP2->GPR load-delay check.
@@ -1285,6 +1327,7 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 M.OPERAND_READ_POSITIONS = {
 	-- CPU ALU with one or two GPR operands. Reads every GPR operand.
 	["add_ui"]                 = {1, 2},
+	["li_s"]                   = {1, 2},  -- rt (write), imm16 (immediate)
 	["add_ui_self"]            = {1},
 	["add_si"]                 = {1, 2},
 	["add_u"]                  = {1, 2, 3},
@@ -1354,6 +1397,8 @@ M.OPERAND_READ_POSITIONS = {
 	["gte_mv_to_ctrl_r"]       = {},
 	["gte_lw"]                 = {},
 	["gte_sw"]                 = {},
+	["shift_lleft_var"]        = {1, 2, 3},  -- rd, rt, rs (variable shift amount)
+	["shift_aright_var"]       = {1, 2, 3},
 }
 
 -- GP0 packet sizes (total words including the 1-word tag) per GP0 cmd byte.
@@ -1435,8 +1480,10 @@ M.INSTRUCTION_LATENCY = {
 	["xor_i"]               = 1,  ["xor_u"]           = 1,
 	["nor_u"]               = 1,
 	["shift_lleft"]         = 1,  ["shift_lleft_self"]  = 1,
+	["shift_lleft_var"]     = 1,  -- sllv: 1 cycle
 	["shift_lright"]        = 1,
 	["shift_aright"]        = 1,
+	["shift_aright_var"]    = 1,  -- srav: 1 cycle
 	["mask_upper"]          = 1,
 	["mov_from_high"]       = 2,  -- mfhi: 2 cycles
 	["mov_from_low"]        = 2,  -- mflo: 2 cycles
@@ -1454,6 +1501,7 @@ M.INSTRUCTION_LATENCY = {
 	["load_half_u"]         = 1,  ["load_half"]   = 1,
 	["load_byte_u"]         = 1,  ["load_byte"]   = 1,
 	["load_upper_i"]        = 1,
+	["li_s"]                = 1,  -- aliased to add_ui(rt, R_0, imm); 1 cycle
 	-- 2-word loads (lui + ori) used for >16-bit immediates
 	["load_imm"]                = 2,
 	["load_imm_1w"]             = 1,
@@ -1497,6 +1545,8 @@ M.INSTRUCTION_LATENCY = {
 	["gte_cmdw_op"]            = 6,   -- OP: 6 cycles (PSX-SPX)
 	["gte_cmdw_outer_product"] = 6,   -- alias for OP
 	["gte_cmdw_wedge"]         = 6,   -- alias for OP
+	["gte_cmdw_sqr"]           = 5,   -- SQR(sf): 5 cycles (PSX-SPX); +2 nops for pre-fill if sf=0/1
+	["gte_cmdw_gpf"]           = 5,   -- GPF(sf,lm): 5 cycles (PSX-SPX); +2 nops for pre-fill if needed
 	-- Long-form aliases (same cycle cost as their short form)
 	["gte_cmdw_rotate_translate_perspective_single"] = 15,  -- alias for rtps
 	["gte_cmdw_rotate_translate_perspective_triple"] = 23,  -- alias for rtpt
@@ -1777,6 +1827,7 @@ M.CU2_TRANSITION_POLICY = {
 M.INSTRUCTION_GPR_EFFECTS = {
 	-- CPU ALU with one or two GPR operands. Reads every GPR operand position.
 	add_ui                  = { reads = {1, 2}, writes = {1} },
+	li_s                    = { reads = {1, 2}, writes = {1} },  -- RMW: rt is both read + written
 	add_ui_self             = { reads = {1},    writes = {1} },
 	add_si                  = { reads = {1, 2}, writes = {1} },
 	add_u                   = { reads = {2, 3}, writes = {1} },
@@ -1893,6 +1944,8 @@ M.INSTRUCTION_GPR_EFFECTS = {
 	atom_writes             = { reads = {},     writes = {}  },
 	-- mac_yield transfers control to the next atom; zero GPR effects.
 	mac_yield               = { reads = {},     writes = {}  },
+	shift_lleft_var         = { reads = {2, 3}, writes = {1} },
+	shift_aright_var        = { reads = {2, 3}, writes = {1} },
 }
 
 -- Bounded GPR-value rules consumed by the same forward event walk as `INSTRUCTION_GPR_EFFECTS`.
@@ -1903,18 +1956,19 @@ M.INSTRUCTION_GPR_EFFECTS = {
 --   * passes/static_analysis.lua::apply_gpr_effects
 -- No second `bounded_value_pass` is permitted.
 M.GPR_VALUE_RULES = {
-	load_upper_i = { op = "load_upper_i", dest = 1,             immediate = 2, },
-	add_ui       = { op = "add_ui",       dest = 1, source = 2, immediate = 3, },
-	or_i         = { op = "or_i",         dest = 1, source = 2, immediate = 3, },
-	and_i        = { op = "and_i",        dest = 1, source = 2, immediate = 3, },
-	xor_i        = { op = "xor_i",        dest = 1, source = 2, immediate = 3, },
-	add_ui_self  = { op = "add_ui",       dest = 1, source = 1, immediate = 2, },
-	or_i_self    = { op = "or_i",         dest = 1, source = 1, immediate = 2, },
+	load_upper_i     = { op = "load_upper_i", dest = 1,             immediate = 2, },
+	add_ui           = { op = "add_ui",       dest = 1, source = 2, immediate = 3, },
+	li_s             = { op = "add_ui",       dest = 1, source = 2, immediate = 3 },  -- R_0 + sign-ext(imm) folds into a constant
+	or_i             = { op = "or_i",         dest = 1, source = 2, immediate = 3, },
+	and_i            = { op = "and_i",        dest = 1, source = 2, immediate = 3, },
+	xor_i            = { op = "xor_i",        dest = 1, source = 2, immediate = 3, },
+	add_ui_self      = { op = "add_ui",       dest = 1, source = 1, immediate = 2, },
+	or_i_self        = { op = "or_i",         dest = 1, source = 1, immediate = 2, },
 	-- Present register-form self variants. They are included here so a
 	-- known value is not needlessly lost when these encoders are used.
-	add_u_self       = { op = "add_u",       dest = 1, sources = {1, 2}, },
-	or_u_self        = { op = "or",          dest = 1, sources = {1, 2}, },
-	shift_lleft_self = { op = "shift_lleft", dest = 1, source = 1, immediate = 2, },
+	add_u_self       = { op = "add_u",        dest = 1, sources = {1, 2}, },
+	or_u_self        = { op = "or",           dest = 1, sources = {1, 2}, },
+	shift_lleft_self = { op = "shift_lleft",  dest = 1, source = 1, immediate = 2, },
 }
 
 -- Control-transfer (branch/jump/call) delay-slot policy table.
