@@ -8,6 +8,36 @@
 #pragma region hello_camera
 
 
+// --- atom: resolve_look_at__normalize_fwd_to_uz (62 words) ---
+
+#define _atom_offset_srav_path_fwd_to_uz_aligned_done_fwd_to_uz  6
+#define _atom_offset_aligned_done_fwd_to_uz_srav_path_fwd_to_uz  1
+
+enum {
+    atom_offset_srav_path_fwd_to_uz_aligned_done_fwd_to_uz = _atom_offset_srav_path_fwd_to_uz_aligned_done_fwd_to_uz,
+    atom_offset_aligned_done_fwd_to_uz_srav_path_fwd_to_uz = _atom_offset_aligned_done_fwd_to_uz_srav_path_fwd_to_uz,
+};
+
+// --- atom: resolve_look_at__normalize_right_to_ux (62 words) ---
+
+#define _atom_offset_srav_path_right_to_ux_aligned_done_right_to_ux  6
+#define _atom_offset_aligned_done_right_to_ux_srav_path_right_to_ux  1
+
+enum {
+    atom_offset_srav_path_right_to_ux_aligned_done_right_to_ux = _atom_offset_srav_path_right_to_ux_aligned_done_right_to_ux,
+    atom_offset_aligned_done_right_to_ux_srav_path_right_to_ux = _atom_offset_aligned_done_right_to_ux_srav_path_right_to_ux,
+};
+
+// --- atom: resolve_look_at__normalize_up_to_uy (62 words) ---
+
+#define _atom_offset_srav_path_up_to_uy_aligned_done_up_to_uy  6
+#define _atom_offset_aligned_done_up_to_uy_srav_path_up_to_uy  1
+
+enum {
+    atom_offset_srav_path_up_to_uy_aligned_done_up_to_uy = _atom_offset_srav_path_up_to_uy_aligned_done_up_to_uy,
+    atom_offset_aligned_done_up_to_uy_srav_path_up_to_uy = _atom_offset_aligned_done_up_to_uy_srav_path_up_to_uy,
+};
+
 // --- atom: pad_input_cube_rotation (60 words) ---
 
 #define _atom_offset_dpad_left_exit_dpad_left         6

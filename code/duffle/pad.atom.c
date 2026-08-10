@@ -11,18 +11,18 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(pad_atom_c);
 
 #pragma region MACs (Mips Atom Components)
 
-FI_ Slice_MipsCode ac_pad_set_centered_axes(U4 r_state, U4 r_scratch) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_centered_axes, {
+FI_ Slice_MipsCode ac_pad_set_centered_axes(MipsAtomBuilder_R ab, U4 r_state, U4 r_scratch) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_centered_axes, ab, {
     load_upper_i(r_scratch, (PadAxis_Centered_Word >> 16) & 0xFFFF),
     or_i_self(   r_scratch,  PadAxis_Centered_Word        & 0xFFFF),
     store_word(  r_scratch, r_state, O_(PadState,axes)),
 })
 
-FI_ Slice_MipsCode ac_pad_set_id_byte(U1 r_state, U1 r_id, U1 id_value) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_id_byte, {
+FI_ Slice_MipsCode ac_pad_set_id_byte(MipsAtomBuilder_R ab, U1 r_state, U1 r_id, U1 id_value) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_id_byte, ab, {
     add_ui(    r_id, R_0, id_value),
     store_byte(r_id, r_state, O_(PadState,id)),
 })
 
-FI_ Slice_MipsCode ac_pad_set_status(U4 r_tmp, U1 r_state, U4 pad_status) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_status, {
+FI_ Slice_MipsCode ac_pad_set_status(MipsAtomBuilder_R ab, U4 r_tmp, U1 r_state, U4 pad_status) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_status, ab, {
     add_ui(    r_tmp, R_0, pad_status),
     store_word(r_tmp, r_state, O_(PadState,status)),
 })
@@ -30,7 +30,7 @@ FI_ Slice_MipsCode ac_pad_set_status(U4 r_tmp, U1 r_state, U4 pad_status) atom_d
 /* Invert r_buttons (active-low → active-high) and store to PadState.buttons.
  * r_buttons must already be loaded (the caller is responsible for filling the load-delay slot of
  * the preceding load_half_u with an instruction that doesn't read r_buttons). */
-FI_ Slice_MipsCode ac_pad_store_inverted_buttons(U1 r_buttons, U1 r_pad_state) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_store_inverted_buttons, {
+FI_ Slice_MipsCode ac_pad_store_inverted_buttons(MipsAtomBuilder_R ab, U1 r_buttons, U1 r_pad_state) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_store_inverted_buttons, ab, {
     nor_u(       r_buttons, r_buttons, R_0),
     store_half(  r_buttons, r_pad_state, O_(PadState,   buttons)),
 })
@@ -93,7 +93,7 @@ atom_label(disconnected) /* === Disconnected body. */
 	mac_pad_set_status(R_T4,  R_PadState, PadStatus_Disconnected),
 	store_half(        R_0,   R_PadState, O_(PadState,buttons)),
 	mac_pad_set_centered_axes(R_PadState, R_T4),
-	mac_pad_set_id_byte(      R_PadState, R_RawId, PadRawStatus_Timeout),
+	mac_pad_set_id_byte(R_PadState, R_RawId, PadRawStatus_Timeout),
 	jump_rel(atom_offset(disconnected, snap_end)),
 		/* BD-slot: load next atom's entry point (replaces the nop).
 		 * Always jumps to snap_end, where mac_yield_tail() transfers control to R_AtomJmp without re-loading it. */
@@ -111,7 +111,7 @@ atom_label(pending) /* === Pending body (status=0, id=0 — pre-IRQ-empty buffer
 	store_half(        R_0,   R_PadState, O_(PadState,buttons)),
 	mac_pad_set_centered_axes(R_PadState, R_T4),
 	store_byte(R_RawId, R_PadState, O_(PadState,id)),
-	jump_rel(atom_offset(pending, snap_end)), 
+	jump_rel(atom_offset(pending, snap_end)),
 		mac_yield_load(),
 
 atom_label(id_dispatch) /* === Case 3-6: ID dispatch */
@@ -181,7 +181,7 @@ atom_label(try_unsupported) /* === Case 7: Unsupported — fall through from the
 	store_word(R_T4, R_PadState, O_(PadState,status)),
 	store_half(R_0,  R_PadState, O_(PadState,buttons)),
 	mac_pad_set_centered_axes(R_PadState, R_T4),
-	mac_pad_set_id_byte(      R_PadState, R_RawId, PadUnknownId_Sentinel),
+	mac_pad_set_id_byte(R_PadState, R_RawId, PadUnknownId_Sentinel),
 	/* Fall through to snap_end. */
 
 atom_label(no_jump_fallthrough)

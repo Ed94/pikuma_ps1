@@ -118,25 +118,20 @@ typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that
 //   MipsCode ac_X[] align_(4) = { body };
 #define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
 
-// Used for components with value-args (e.g., ac_format_f3_color).
-//   FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
+// Used for components with value-args (mandatory `ab` (atom-builder) arg).
+//   FI_ void ac_X(MipsAtomBuilder_R ab, args) MipsAtomComp_Proc_(ac_X, ab, { body })
 // expands to:
-//   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
-#define MipsAtomComp_Proc_(sym, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return slice_from_array(MipsCode, sym); }
-
-// Used for components with value-args (e.g., ac_format_f3_color).
-//   FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
-// expands to:
-//   FI_ Slice_MipsCode ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return slice_from_array(MipsCode, ac_X); }
-// #define MipsAtomComp_Proc_(sym, abuilder, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_unroll(abuilder, slice_from_array(MipsCode, sym)); }
+//   FI_ void ac_X(MipsAtomBuilder_R ab, args) {
+//       MipsCode ac_X[] align_(4) = { body };
+//       atombuilder_unroll(ab, slice_from_array(MipsCode, ac_X));
+//   }
+// The body must NOT include mac_yield() (the parent atom yields).
+// Inline-only callers (the generated `mac_<name>` aliases) skip this arg via metaprogram filtering;
+// escape callers (ac_<name> invoked as a function) pass a long-lived builder.
+#define MipsAtomComp_Proc_(sym, ab, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_unroll(ab, slice_from_array(MipsCode, sym)); }
 
 /* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.
-	Files containing only:
-	- `MipsAtomComp_` static-array declarations, or
-	- `MipsAtomComp_Proc_` (force-inline) function bodies whose line info gets
-	  attributed to the call site at the include point are otherwise omitted from the file table, 
-		which breaks the DWARF injection when it tries to resolve atom-component provenance paths.
-
+	Files containing only atoms and atom components.
    Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
 	 The macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
 	 The constant is in `.rodata` and unreferenced; the linker may eliminate it.
@@ -234,7 +229,6 @@ atom_dbg_skip MipsAtomComp_(ac_yield_tail) {
 	add_ui_self(R_TapePtr, S_(MipsCode)),
 	jump_reg(  R_AtomJmp), nop,
 };
-
 #pragma endregion Macro Atom Components
 
 #pragma region Mips Atom Builder
@@ -249,44 +243,28 @@ typedef Relative_(FArena) Struct_(MipsAtomBuilder) { U4 start; U4 capacity; U4 u
 
 FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode code) {
 	assert(ab->capacity - ab->used - code.len);
-	mem_copy(ab->start, u4_(code.ptr), code.len);
+	U4* dest = (U4*)ab->start + ab->used;  /* write at next-available slot (arena accumulation) */
+	mem_copy(u4_(dest), u4_(code.ptr), code.len);
 	mem_bump(ab->start, ab->capacity, & ab->used, code.len);
 }
 #define atombuilder_unroll_mac(ab, mac) atombuilder_unroll(ab, slice_arg_from_array(Slice_MipsCode, mac))
 
 // When done authoring, utilize this to cap-off the atom (if not utilizing a MipsAtom_Proc).
 FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
-	mem_copy(ab->start, u4_(ac_yield), S_(ac_yield));
+	U4* dest = (U4*)ab->start + ab->used;  /* write at next-available slot */
+	mem_copy(u4_(dest), u4_(ac_yield), S_(ac_yield));
 	mem_bump(ab->start, ab->capacity, & ab->used, S_(ac_yield));
 }
 
 #define mipsatom_from_builder(ab) C_(MipsAtom*, (ab).start)
+
+// tb_emit_builder(tb, ab) — emit the builder's atom into the tape and advance tb->used.
+// Thin wrapper around tb_emit(tb, mipsatom_from_builder(ab[0])).
+// Equivalent to tb_emit(tb, code_<name>) for runtime-built atoms.
+FI_ void tb_emit_builder(TapeBuilder_R tb, MipsAtomBuilder_R ab) { tb_emit(tb, mipsatom_from_builder(ab[0])); }
 #pragma endregion Mips Atom Builder
 
 #pragma region Mips Atom Procs
-
-#if 0
-typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
-FI_ void sync_prim_arean_proc_demo(MipsAtomBuilder_R ab, U4 r_extra, U4 add_amnt_extra) 
-MipsAtom_Proc_(sync_primitive_arena_proc_demo, ab, atom_info(atom_bind(Binds_SyncPrimitiveArena)
-	, atom_reads( R_TapePtr, R_PrimCursor)
-	, atom_writes(R_TapePtr)
-){
-	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,used)),
-	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)),
-	add_ui_self(    R_TapePtr, S_(Binds_SyncPrimitiveArena)),
-	/* Calculate byte offset and store directly back to RAM */
-	sub_u(     R_T0, R_PrimCursor, R_T0), // R_T0    = R_PrimCursor - binds.cursor
-	store_word(R_T0, R_AT, 0),            // R_AT[0] = R_T0
-	add_ui_self(r_extra, add_amnt_extra), // extra op for demonstration purposes.
-	mac_yield()
-})
-
-void demo_make_make_and_emit_atom(TapeBuilder* tb, MipsAtomBuilder* ab){
-	sync_prim_arean_proc_demo(ab, R_T4, 4);
-	tb_emit(tb, mipsatom_from_builder(ab[0]));
-}
-#endif
 
 #pragma endregion Mips Atom Procs
 

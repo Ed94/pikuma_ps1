@@ -188,11 +188,11 @@ function M.run(ctx)
 	if type(corpus.source_order) ~= "table" then error("emission_model: ctx.shared.corpus.source_order is required", 0) end
 
 	-- Project once, collect errors + warnings for one atom.
-	-- Kind must be one of: atom | raw_atom | comp_bare | comp_proc.
+	-- Kind must be one of: atom | atom_proc | raw_atom | comp_bare | comp_proc.
 	local function process_atom(atom, src)
 		if not (atom and atom.body) then return end
 		local kind = atom.kind
-		if kind ~= "atom" and kind ~= "raw_atom" and kind ~= "comp_bare" and kind ~= "comp_proc" then
+		if kind ~= "atom" and kind ~= "atom_proc" and kind ~= "raw_atom" and kind ~= "comp_bare" and kind ~= "comp_proc" then
 			return
 		end
 		local proj = project_atom(atom, src, corpus)
@@ -215,7 +215,7 @@ function M.run(ctx)
 	end
 
 	-- Walk `corpus.source_order`; within each source, visit atoms followed by raw_atoms.
-	-- Recognized kinds (atom | raw_atom | comp_bare | comp_proc) each receive the atom.paths projection via duffle.project_emission.
+	-- Recognized kinds (atom | atom_proc | raw_atom | comp_bare | comp_proc) each receive the atom.paths projection via duffle.project_emission.
 	-- Components are macros inlined into atom bodies; focused tests and isolated component analyses consume atom.paths directly.
 	for _, src in ipairs(corpus.source_order) do
 		local scan = src.scan or {}

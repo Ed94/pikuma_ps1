@@ -51,9 +51,10 @@
 #include "hello_camera.atom.c"
 #pragma endregion Hello Joypad TUs
 
-enum { 
-	Scratchpad_Len = 1024, 
-	MemTape_Len    = 512,
+enum {
+	Scratchpad_Len           = 1024,
+	MemTape_Len              = 512,
+	ResolveLookAtArena_Words = 512,
 };
 typedef Struct_(SMemory) {
 	PrimitiveArena          primitives;
@@ -75,6 +76,17 @@ typedef Struct_(SMemory) {
 	PadState   pad[2];
 
 	U4_V scratchpad; // d-cache
+
+	/* resolve_look_at bundle: pre-built atom arena + atom-refs.
+	 * (Task 12.5 fix: moved from file-scope globals to smem fields.
+	 *  Task 12.7 fix: dropped the ResolveLookAtScratch struct-as-view; the
+	 *  C-side helper uses `& smem.scratchpad[N]` at hardcoded offsets directly.
+	 *  Task 12.8 fix: chain atoms use r_scratch + offset internally; no C-side magic offsets anywhere.
+	 *  Task 12.11 fix: ResolveLookAtScratch offset schema moved to hello_camera.atom.c — gte.atom.c
+	 *  is the GENERIC GTE primitives file and must not know about the resolve_look_at bundle's scratch layout.) */
+	U4              resolve_look_at_arena[ResolveLookAtArena_Words]; /* ~2 KB; bumped from 420 per Task 4 subagent */
+	MipsAtom*       resolve_look_at_atom_addrs[7];
+	MipsAtomBuilder resolve_look_at_ab_static;
 };
 global SMemory smem;
 extern SMemory smem;
@@ -117,6 +129,159 @@ resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4* up_in) 
 	// Motor translator would store half this displacement in m.xyz; GTE consumes full column.
 	mul_m3s2_v3s4(look_at, & pos, & off);
 	trans_m3s2(   look_at,        & off);
+}
+
+/* Pre-build all 7 chain atoms of the resolve_look_at bundle into the static arena.
+ * Called ONCE from main() before the frame loop. 
+ * After this returns, the smem.resolve_look_at_atom_addrs[] array contains valid MIPS atom pointers 
+ * for the frame-time bundle helper to emit via tb_emit(tb, captured_addr).
+ *
+ * 7 atoms are within hello_camera.atom.c:
+ * 	0: resolve_look_at__input_and_sub_proc
+ * 	1: resolve_look_at__normalize_fwd_to_uz_proc
+ * 	2: resolve_look_at__cross_uz_up_in_to_right_proc
+ * 	3: resolve_look_at__normalize_right_to_ux_proc
+ * 	4: resolve_look_at__cross_uz_ux_to_up_proc
+ * 	5: resolve_look_at__normalize_up_to_uy_proc
+ * 	6: resolve_look_at__populate_and_translate_proc
+ *
+ * (gte.atom.c contains only normalize_v3s4_proc — bundle-specific scratch layout is no longer exposed to the GTE primitives file.)
+ *
+ * GPR pool per atom: 10 free GPRs (R_T0..R_T3 + R_T5..R_T7 + R_V0 + R_V1 + R_AT).
+ * R_T4 is reserved as the wave-context carrier (R_ResolveScratch).
+ */
+internal void resolve_look_at_init(void) {
+	/* Wrap the static arena in a MipsAtomBuilder. */
+	MipsAtomBuilder_R ab = & smem.resolve_look_at_ab_static;
+	ab->start    = u4_(smem.resolve_look_at_arena);
+	ab->capacity = ResolveLookAtArena_Words;
+	ab->used     = 0;
+
+	/* Atom 0: resolve_look_at__input_and_sub — stages eye/up_in into scratchpad,
+	 * computes fwd = target - eye; binds R_ResolveScratch (R_T4) as the wave-context carrier for atoms 1-6.
+	 * The body hardcodes R_AT and R_V0 as eye.y/eye.z temps (the existing sub_u(eye.x, eye.y, eye.z) chain from the prior Task 12.7 design). */
+	smem.resolve_look_at_atom_addrs[0] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
+	resolve_look_at__input_and_sub_proc(ab,
+		R_T0,             /* r_target_ptr (popped from tape) */
+		R_T1,             /* r_eye_ptr    (popped from tape) */
+		R_T2,             /* r_up_in_ptr  (popped from tape) */
+		R_ResolveScratch, /* r_scratch (wave-context carrier; popped from tape) */
+		R_T3,             /* r_tmp0 */
+		R_T5,             /* r_tmp1 */
+		R_T6,             /* r_tmp2 */
+		R_T7);            /* r_tmp3 */
+
+	/* Atom 1: resolve_look_at__normalize_fwd_to_uz — src=scratch+0, dst=scratch+16 (HARDCODED in body).
+	 * GPR pool: r_scratch (R_T4 carrier) + 10 body GPRs = 11.
+	 *   r_a/r_b (R_T0/R_T1) : src/dst pointers (r_a overlaps r_recip_est after the loads)
+	 *   r_e/r_f/r_i (R_T2/R_T3/R_T5) : src.x/y/z → result.x/y/z
+	 *   r_d/r_g (R_T6/R_T7) : MAC1/2 scratch (dead after stage 2)
+	 *   r_h (R_V0) : LZCR
+	 *   r_recip_est (R_V1), r_shift (R_AT) : saved throughout */
+	smem.resolve_look_at_atom_addrs[1] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
+	resolve_look_at__normalize_fwd_to_uz_proc(ab,
+		R_ResolveScratch, /* r_scratch (wave-context carrier; src/dst base) */
+		R_T0, R_T1,       /* r_a, r_b (src/dst ptrs) */
+		R_T2, R_T3, R_T5, /* r_e, r_f, r_i (src components) */
+		R_T6, R_T7,       /* r_d, r_g (MAC scratch) */
+		R_V0,             /* r_h (LZCR) */
+		R_V1,             /* r_recip_est */
+		R_AT);            /* r_shift */
+
+	/* Atom 2: resolve_look_at__cross_uz_up_in_to_right — a=scratch+16, b=scratch+128,
+	 * out=scratch+32 (HARDCODED in body). GPR pool: r_scratch + 7 body + R_AT + R_V0 = 10. */
+	smem.resolve_look_at_atom_addrs[2] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
+	resolve_look_at__cross_uz_up_in_to_right_proc(ab,
+		R_ResolveScratch,   /* r_scratch (wave-context carrier; src/dst base) */
+		R_T0, R_T1, R_T2,   /* r_a, r_b, r_c (a.x/y/z → out.x/y/z) */
+		R_T3,               /* r_d (b.x) */
+		R_T5,               /* r_f (out ptr = scratch+32) */
+		R_T6,               /* r_g (a ptr = scratch+16) */
+		R_T7);              /* r_h (b ptr = scratch+128) */
+
+	/* Atom 3: resolve_look_at__normalize_right_to_ux — src=scratch+32, dst=scratch+48 (HARDCODED). */
+	smem.resolve_look_at_atom_addrs[3] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
+	resolve_look_at__normalize_right_to_ux_proc(ab,
+		R_ResolveScratch,
+		R_T0, R_T1,
+		R_T2, R_T3, R_T5,
+		R_T6, R_T7,
+		R_V0,
+		R_V1,
+		R_AT);
+
+	/* Atom 4: resolve_look_at__cross_uz_ux_to_up — a=scratch+16, b=scratch+48, out=scratch+64 (HARDCODED). */
+	smem.resolve_look_at_atom_addrs[4] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
+	resolve_look_at__cross_uz_ux_to_up_proc(ab,
+		R_ResolveScratch,
+		R_T0, R_T1, R_T2,
+		R_T3,
+		R_T5,  /* r_f (out ptr = scratch+64) */
+		R_T6,  /* r_g (a ptr = scratch+16) */
+		R_T7); /* r_h (b ptr = scratch+48) */
+
+	/* Atom 5: resolve_look_at__normalize_up_to_uy — src=scratch+64, dst=scratch+80 (HARDCODED). */
+	smem.resolve_look_at_atom_addrs[5] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
+	resolve_look_at__normalize_up_to_uy_proc(ab,
+		R_ResolveScratch,
+		R_T0, R_T1,
+		R_T2, R_T3, R_T5,
+		R_T6, R_T7,
+		R_V0,
+		R_V1,
+		R_AT);
+
+	/* Atom 6: resolve_look_at__populate_and_translate — write look_at->m[][] from ux/uy/uz (computed from r_scratch+offset internally),
+	then compute translation column t[] = R * (-eye). GPR pool: r_look_at + r_scratch + 4 ptr regs + 3 tmp regs = 9. */
+	smem.resolve_look_at_atom_addrs[6] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
+	resolve_look_at__populate_and_translate_proc(ab,
+		R_T0,                    /* r_look_at (popped from tape; MT3_S2S4*) */
+		R_ResolveScratch,        /* r_scratch (wave-context carrier) */
+		R_T1, R_T3, R_T5, R_T7,  /* r_pux, r_puy, r_puz, r_peye */
+		R_T2, R_T6, R_V0);       /* r_tmp0, r_tmp1, r_tmp2 */
+
+	/* Sanity check: arena didn't overflow. */
+	assert(ab->used <= ResolveLookAtArena_Words);
+}
+
+/* Emit the resolve_look_at bundle into the tape. Called once per frame from update().
+ * The 7 chain atoms are pre-built at init time (resolve_look_at_init) and referenced by address via smem.resolve_look_at_atom_addrs[].
+ * Per-frame work: 7 tb_emit (atom pointer emissions) + 5 tb_data (C-side pointers for atom 0 + look_at for atom 6).
+ *
+ * Binds_ contract (the field-name labels are for human readability):
+ *   Atom 0  input_and_sub              target(4) eye(4) up_in(4) scratch_base(4) = 4 words
+ *   Atoms 1-5                           (no tape data — atom uses r_scratch + offset internally)
+ *   Atom 6  populate_and_translate     look_at(4)                                = 1 word
+ *                                       ----
+ *                                       5 tb_data words total per frame.
+ */
+I_ void resolve_look_at(
+		TapeBuilder_R tb
+	,	MT3_S2S4* look_at
+	,	P3_S4*    eye
+	,	P3_S4*    target
+	,	V3_S4*    up_in
+){
+	/* Atom 0: input_and_sub — stages eye/up_in into scratchpad + computes fwd.  */
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[0]); {
+		tb_data(tb, u4_(target));              /* Binds_ResolveLookAtSub.target  (C-side P3_S4*) */
+		tb_data(tb, u4_(eye));                 /* Binds_ResolveLookAtSub.eye     (C-side P3_S4*) */
+		tb_data(tb, u4_(up_in));               /* Binds_ResolveLookAtSub.up_in   (C-side V3_S4*) */
+		tb_data(tb, u4_(smem.scratchpad));     /* Binds_ResolveLookAtScratch.scratch_base */
+	}
+
+	/* Atoms 1-5: NO tb_data — each chain atom uses r_scratch + hardcoded_offset internally (no tape-data pointers between atoms).
+	Context carrier R_ResolveScratch (R_T4) is preserved across atoms. */
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[1]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[2]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[3]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
+
+	/* Atom 6: populate_and_translate — only output pointer is the matrix destination. */
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[6]); {
+		tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
+	}
 }
 
 FI_ void camera_look_at_c11(Camera* c, P3_S4* target, V3_S4* up_in) { resolve_look_at_c11(& c->look_at, & c->pos, target, up_in); }
@@ -172,71 +337,19 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	S4 flag; //????
 
 	// Camera Look at
-	if (0)
+	if (1)
 	{
 		camera_look_at_c11(& smem.cam, & smem.cube.pos, & v3s4(0, -fp_one, 0));
 	}
 	// Camera look at (Tape)
-	if (1)
 	{
 		MT3_S2S4* look_at = & smem.cam.look_at;
 		P3_S4*    eye     = & smem.cam.pos;
-		V3_S4*    up_in   = & v3s4(0,  -fp_one, 0);
-
-		V3_S4 right, up, forward;
-		V3_S4 ux, uy, uz;
-		V3_S4 pos, off;
+		V3_S4*    up_in   = & v3s4(0, -fp_one, 0);
 
 		tb.used = 0; tb_scope_run(& tb) {
-			// tb_emit_bundle(resolve_look_at);
-			{
-				tb_emit_(resolve_look_at); {
-					tb_data_(look_at, & smem.cam.look_at);
-					tb_data_(eye, & smem.cam.pos);
-					tb_data_(target, & smem.cube.pos);
-					tb_data_(up_in, up_in);
-					// tb_emit(a_normalize_v3s4(/*Todo: resolve dependent register allocation*/));
-						// tb_data_(fwd_out);
-				}
-				#if 0
-				{
-					tb_emit_(resolve_look_at__resolve_right); {
-							//...
-						tb_emit_(a_normalize_v3s4(...));
-							tb_data_(right_out);
-					}
-					tb_emit(resolve_look_at__resolve_up); {
-							//...
-						tb_emit_(ac_normalize_v3s4(...));
-							tb_data_(up_out);
-					}
-					tb_emit(world_to_cam_expand_mt3_s2s4(...)); {
-						tb_data(look_at, & smem.cam.look_at);
-					}
-					tb_emit_(resolve_look_at__final); {
-					}
-				}
-				#endif
-			}
+			resolve_look_at(& tb, & smem.cam.look_at, & smem.cam.pos, & smem.cube.pos, & v3s4(0, -fp_one, 0));
 		}
-
-		// forward = target[0]; sub_v3s4(& forward, eye[0]); // RGA(Lengyel): Affine point - point = zero-weight direction.
-		// normalize_v3s4(& forward, & uz);                  // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.
-
-		cross_v3s4(& uz,   up_in, & right); normalize_v3s4(& right, & ux); // RGA(Lengyel): Complement(Wedge(forward, up_in)) -> right axis.
-		cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy); // RGA(Lengyel): Complement(Wedge(forward, right)) -> up axis.
-
-		// RGA(Lengyel): matrix expansion of the world-to-camera rotation (basis rows).
-		look_at->m[0][0] = ux.x; look_at->m[0][1] = ux.y; look_at->m[0][2] = ux.z;
-		look_at->m[1][0] = uy.x; look_at->m[1][1] = uy.y; look_at->m[1][2] = uy.z;
-		look_at->m[2][0] = uz.x; look_at->m[2][1] = uz.y; look_at->m[2][2] = uz.z;
-
-		pos = eye[0]; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
-
-		// RGA(Lengyel): R * (-eye) -- full matrix translation column. 
-		// Motor translator would store half this displacement in m.xyz; GTE consumes full column.
-		mul_m3s2_v3s4(look_at, & pos, & off);
-		trans_m3s2(   look_at,        & off);
 	}
 
 	// Draw cube
@@ -273,7 +386,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data(& tb, u4_(& pa->used));
 				tb_data(& tb, prim_base);
 		}
-		tape_run(tb_slice(tb));
+		tape_run_a02_s07(tb_slice(tb));// Fire off the tape (bigger-clobber variant).
 
 		// smem.cube.rot.y += 30;
 	}
@@ -315,7 +428,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data(& tb, u4_(& pa->used));
 				tb_data(& tb, prim_base);
 		}
-		tape_run(tb_slice(tb));// Fire off the tape.
+		tape_run_a02_s07(tb_slice(tb));// Fire off the tape (bigger-clobber variant).
 
 		// C-side state (pa->used) has already been updated by the tape!
 		// smem.floor.rot.y += 5;
@@ -365,6 +478,10 @@ int main(void)
 		reset_graph(0);
 		/* Direct BIOS: poll both ports during VBlank. */
 		pad_bios_init_start(& smem.pad_raw[0], & smem.pad_raw[1]);
+
+		/* Pre-build the resolve_look_at bundle atoms into the static arena. */
+		resolve_look_at_init();
+
 		/* Pinned registers for the GPU init atom. */
 		register U4*           io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
 		register DoubleBuffer* screen_buf   rgcc(R_ScreenBuf)   = & smem.screen_buf;

@@ -118,6 +118,12 @@ local PASSES = {
 		kind   = "header-output",
 		deps   = {"scan-source", "word-counts"},
 	},
+	auto_reg = {
+		module = "passes.auto_reg",
+		kind   = "header-output",
+		deps   = {"components"},
+		groups = { "pre-link" },
+	},
 	["emission-model"] = {
 		module = "passes.emission_model",
 		kind   = "validation",

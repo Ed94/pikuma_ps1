@@ -25,7 +25,7 @@
 #pragma region duffle
 
 
-// --- atom: ac_normalize_v3s4 (48 words) ---
+// --- atom: normalize_v3s4 (62 words) ---
 
 #define _atom_offset_srav_path_aligned_done           6
 #define _atom_offset_aligned_done_srav_path           1

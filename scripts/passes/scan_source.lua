@@ -3,6 +3,7 @@
 --- Single source-walk pass that produces the fat `SourceScan` payload consumed by all downstream passes. Walks each corpus source record once,
 --- extracting every construct type the metaprograms need:
 ---   MipsAtom_              (kind = "atom", with optional atom_info inner)
+---   MipsAtom_Proc_         (kind = "atom_proc", body inside last {})
 ---   MipsAtomComp_          (kind = "comp_bare")
 ---   MipsAtomComp_Proc_     (kind = "comp_proc", body inside last {})
 ---   atom_dbg_skip          — bare whole-atom/component debug-step marker; following declaration disambiguates
@@ -34,7 +35,7 @@ local parse_enum_int_literal
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class SourceScan
---- @field atoms             AtomEntry[]     -- MipsAtom_ + MipsAtomComp_ + MipsAtomComp_Proc_
+--- @field atoms             AtomEntry[]     -- MipsAtom_ + MipsAtom_Proc_ + MipsAtomComp_ + MipsAtomComp_Proc_
 --- @field raw_atoms         AtomEntry[]     -- MipsCode code_<name> { body } (offsets pass only)
 --- @field binds             BindsEntry[]    -- typedef Struct_(Binds_X) { fields } (fields pre-parsed)
 --- @field atom_infos        AtomInfoEntry[] -- MipsAtom_(name) atom_info(...) (sub-calls pre-parsed)
@@ -55,7 +56,7 @@ local parse_enum_int_literal
 --- @field args           string|nil  -- Trimmed args inside the `(...)` (nil when has_parens is false)
 --- @field pending        boolean     -- true while awaiting the following declaration
 --- @field superseded_by_marker_line integer|nil -- set when a newer marker bumped this one out of the pending slot
---- @field target_kind    string|nil  -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed (nil if no declaration ever followed)
+--- @field target_kind    string|nil  -- "atom" | "atom_proc" | "comp_bare" | "comp_proc" | "unrelated" once observed (nil if no declaration ever followed)
 --- @field proc_prelude   boolean|nil -- true after the marker crossed an `FI_` prelude and awaits `MipsAtomComp_Proc_`
 
 --- @class RegTypeDefault
@@ -111,7 +112,7 @@ local parse_enum_int_literal
 --- @field name              string       -- Atom name (for components: without ac_ prefix)
 --- @field body              string       -- Brace-delimited body (without the braces)
 --- @field body_off          integer      -- Char offset of body[1] in source
---- @field kind              string       -- "atom" | "comp_bare" | "comp_proc" | "raw_atom"
+--- @field kind              string       -- "atom" | "atom_proc" | "comp_bare" | "comp_proc" | "raw_atom"
 --- @field raw_name          string       -- Un-stripped name (for components: with ac_ prefix)
 --- @field ident_pos         integer      -- Position of the MipsAtom_/MipsAtomComp_ ident start
 --- @field after_paren       integer      -- Position past the closing paren
@@ -268,7 +269,7 @@ end
 ---   marker_kind == "atom_dbg_skip" AND is_bare == true
 --- Any other spelling or shape (parenthesized form, legacy name) is recorded as a raw marker for annotation validation but never stamps `debug_skip`.
 --- @param out         SourceScan
---- @param target_kind string|nil -- "atom" | "comp_bare" | "comp_proc" | "unrelated" once observed
+--- @param target_kind string|nil -- "atom" | "atom_proc" | "comp_bare" | "comp_proc" | "unrelated" once observed
 --- @return boolean|nil -- true iff the marker is the positive bare form
 local function attach_debug_skip_marker(out, target_kind)
 	local markers = out.debug_skip_markers
@@ -799,6 +800,11 @@ local BYTE_x          = 0x78   -- 'x'
 local BYTE_X          = 0x58   -- 'X'
 local BYTE_OPEN_BRACE = 0x7B   -- '{'
 local BYTE_CLOSE_BRACE= 0x7D   -- '}'
+local BYTE_SLASH      = 0x2F   -- '/'
+local BYTE_STAR       = 0x2A   -- '*'
+local BYTE_SPACE      = 0x20   -- ' '
+local BYTE_TAB        = 0x09   -- '\t'
+local BYTE_CR         = 0x0D   -- '\r'
 
 -- Maximum chain depth when resolving `R_*_Code` symbol RHS references.
 -- Eight hops is enough for any production chain (R_TapePtr_Code -> R_T8_Code -> ...).
@@ -819,6 +825,44 @@ local function hex_digit_value(b)
 	if b >= BYTE_0 and b <= BYTE_9 then return b - BYTE_0 end
 	if b >= BYTE_a and b <= BYTE_f then return b - BYTE_a + 10 end
 	if b >= BYTE_A and b <= BYTE_F then return b - BYTE_A + 10 end
+	return nil
+end
+
+-- Read one trailing C-comment that appears immediately after `pos` in `body`,
+-- skipping horizontal whitespace and newlines first. Used by `parse_enum_entry` to
+-- recover the `atom_auto_reg:` / `phase_auto_reg:` scope annotation embedded by
+-- the `atom_auto_reg` / `phase_auto_reg` macros' RHS expansion
+-- (`R_<Sym> = R_<Sym>_Code /* atom_auto_reg: <scope> */`).
+-- Handles both block (`/* ... */`) and line (`// ...`) forms.
+-- Returns the comment text (without delimiters), or nil if no comment is adjacent.
+local function read_trailing_cmt_after(body, pos)
+	local body_len = #body
+	while pos <= body_len do
+		local b = body:byte(pos)
+		if b == BYTE_SPACE or b == BYTE_TAB or b == BYTE_NEWLINE or b == BYTE_CR then
+			pos = pos + 1
+		elseif b == BYTE_SLASH then
+			local b2 = body:byte(pos + 1)
+			if b2 == BYTE_STAR then
+				-- Block comment /* ... */
+				local i = pos + 2
+				while i < body_len do
+					if body:byte(i) == BYTE_STAR and body:byte(i + 1) == BYTE_SLASH then
+						return body:sub(pos + 2, i - 1)
+					end
+					i = i + 1
+				end
+				return nil  -- unterminated; treat as no comment
+			elseif b2 == BYTE_SLASH then
+				-- Line comment // ... (strip the trailing newline)
+				local end_pos = duffle.find_byte(body, BYTE_NEWLINE, pos + 2) or (body_len + 1)
+				return body:sub(pos + 2, end_pos - 1)
+			end
+			return nil
+		else
+			return nil
+		end
+	end
 	return nil
 end
 
@@ -1128,6 +1172,46 @@ local function parse_dbg_skip_marker(source, pos, ident_end, line_of, out)
 	return marker_end
 end
 
+--- Parse `atom_auto_reg(<atom>, R_<Sym>)` and `phase_auto_reg(<phase>, R_<Sym>)` markers.
+---
+--- The macros expand to `sym = sym##_Code` per their definition in dsl.atom.h.
+--- After preprocessing, the marker renders as a full enum entry of the form `R_<Sym> = R_<Sym>_Code,`.
+--- This parser detects the macro invocation site, extracts `(scope_name, sym)`, and stores it
+--- in the per-source table (atom_auto_regs or phase_auto_regs) under the scope's name.
+---
+--- @param source    string
+--- @param pos       integer
+--- @param ident_end integer
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
+--- @return integer
+local function parse_auto_reg_marker(source, pos, ident_end, line_of, out)
+	local marker_kind = source:sub(pos, ident_end - 1)  -- "atom_auto_reg" or "phase_auto_reg"
+	local scope_kind  = marker_kind == "atom_auto_reg" and "atom" or "phase"
+
+	local inner, after_paren = read_parens_after(source, ident_end)
+	if not inner then return after_paren end
+
+	local args = duffle.split_top_level_commas(inner)
+	local scope_name = args[1] and duffle.trim(args[1]) or nil
+	local sym        = args[2] and duffle.trim(args[2]) or nil
+
+	-- Filter: only accept `R_<Sym>` form (matches `^R_[%w_]+$`).
+	if scope_name and sym and sym:match("^R_[%w_]+$") then
+		if scope_kind == "atom" then
+			out.atom_auto_regs = out.atom_auto_regs or {}
+			out.atom_auto_regs[scope_name] = out.atom_auto_regs[scope_name] or {}
+			out.atom_auto_regs[scope_name][sym] = sym
+		else
+			out.phase_auto_regs = out.phase_auto_regs or {}
+			out.phase_auto_regs[scope_name] = out.phase_auto_regs[scope_name] or {}
+			out.phase_auto_regs[scope_name][sym] = sym
+		end
+	end
+
+	return after_paren
+end
+
 -- Parse `atom_dbg_reg_default(R_X, <type>...)`;
 -- the second argument may be a `Type` or `Type*`/`Type**` chain. Records in `out.types[R_X]`.
 local function parse_atom_dbg_reg_default(source, pos, ident_end, line_of, out)
@@ -1278,6 +1362,49 @@ local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
 	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
 	local body_off = open_paren + 2 + last_brace_pos
 	register_atom(out, "comp_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
+
+	return after_paren
+end
+
+--- Parse: `MipsAtom_Proc_(<name>, <abuilder>, { <body> })` — body is inside the LAST `{` in args.
+--- Per Task 12.10: full support for the runtime-proc atom form. Registers the atom
+--- with kind `"atom_proc"` so offsets.lua / components.lua can emit
+---   * `mac_<name>` aliases in `gen/macs.h` (the components pass)
+---   * `atom_offset__X__Y` defs in `gen/offsets.h` (the offsets pass)
+--- The atom name is the FIRST ident of the args (the second arg `ab` is the
+--- atom-builder, not the name). Unlike `MipsAtomComp_Proc_`, there is no `ac_`
+--- prefix on the symbol — `MipsAtom_Proc_` is the runtime-proc wrapper, so the
+--- symbol IS the bare atom name (e.g. `normalize_v3s4`, not `ac_normalize_v3s4`).
+--- @param source    string
+--- @param pos       integer
+--- @param ident_end integer
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
+--- @return integer
+local function parse_mips_atom_proc(source, pos, ident_end, line_of, out)
+	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
+	if not inner then return after_paren end
+
+	-- Find the LAST `{` in inner (the body brace, not any potential embedded braces in expressions).
+	local last_brace_pos = nil
+	for search_pos = #inner, 1, -1 do
+		if inner:sub(search_pos, search_pos) == "{" then last_brace_pos = search_pos; break end
+	end
+	if not last_brace_pos then return after_paren end
+
+	-- Use duffle.read_braces to find the matching close brace.
+	-- Uses `read_balanced` for delimiter-depth tracking.
+	-- If close_pos is past the end of inner, the brace didn't match (malformed input); skip.
+	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
+	if close_pos > #inner + 1 then return after_paren end
+
+	-- The atom name is the FIRST ident of the args (matches MipsAtomComp_Proc_'s "first ident" rule).
+	-- MipsAtom_Proc_ has no `ac_` prefix; `strip_ac_prefix` is a no-op for unprefixed names.
+	local raw_name = inner:match("^%s*([%w_]+)") or "?"
+	local name     = strip_ac_prefix(raw_name)
+	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
+	local body_off = open_paren + 2 + last_brace_pos
+	register_atom(out, "atom_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
 
 	return after_paren
 end
@@ -1602,6 +1729,16 @@ local function parse_enum_entry(source, body, body_offset, line_of, out, entry_n
 	local value, value_end = parse_enum_value(body, after_ws, out)
 	if value == nil then return value_start end
 
+	-- Capture the trailing C-comment (if any) before `skip_ws_and_cmt` discards it.
+	-- The `atom_auto_reg(<scope>, <sym>)` macro expands to `R_<Sym> = R_<Sym>_Code /* atom_auto_reg: <scope> */`,
+	-- so the scope name lives in the comment after the RHS value. Routes through `out.atom_entry_comments`
+	-- for downstream `parse_enum` to split into `out.atom_auto_regs` / `out.phase_auto_regs`.
+	local trailing_cmt = read_trailing_cmt_after(body, value_end)
+	if trailing_cmt then
+		out.atom_entry_comments = out.atom_entry_comments or {}
+		out.atom_entry_comments[entry_name] = trailing_cmt
+	end
+
 	local after_value       = duffle.skip_ws_and_cmt(body, value_end)
 	local has_atom_reg, end_after_atom_reg = check_bare_atom_reg(body, after_value)
 
@@ -1657,15 +1794,24 @@ local function parse_enum_body(source, body, body_offset, line_of, out)
 		else
 			local entry_name, name_end = duffle.read_ident(body, pos)
 			if entry_name then
-				local after_name = duffle.skip_ws_and_cmt(body, name_end)
-				if body:byte(after_name) == BYTE_EQUAL then
-					local new_pos = parse_enum_entry(
-						source, body, body_offset, line_of, out,
-						entry_name, pos, after_name + 1
-					)
-					if new_pos > pos then pos = new_pos else pos = after_name + 1 end
+				-- In-enum `atom_auto_reg(<scope>, R_<Sym>)` / `phase_auto_reg(<scope>, R_<Sym>)` markers:
+				-- the C preprocessor expands them to `R_<Sym> = R_<Sym>_Code /* atom_auto_reg: <scope> */`,
+				-- but the metaprogram reads source-as-written so we must dispatch the parser here too.
+				-- Mirrors the top-level `DECL_PARSERS` entry for `atom_auto_reg` / `phase_auto_reg`.
+				if entry_name == "atom_auto_reg" or entry_name == "phase_auto_reg" then
+					local new_pos = parse_auto_reg_marker(body, pos, name_end, line_of, out)
+					if new_pos > pos then pos = new_pos else pos = name_end end
 				else
-					pos = name_end
+					local after_name = duffle.skip_ws_and_cmt(body, name_end)
+					if body:byte(after_name) == BYTE_EQUAL then
+						local new_pos = parse_enum_entry(
+							source, body, body_offset, line_of, out,
+							entry_name, pos, after_name + 1
+						)
+						if new_pos > pos then pos = new_pos else pos = after_name + 1 end
+					else
+						pos = name_end
+					end
 				end
 			else
 				pos = pos + 1
@@ -1695,6 +1841,25 @@ local function parse_enum(source, pos, ident_end, line_of, out)
 	if not body then return after_brace end
 	parse_enum_body(source, body, body_off, line_of, out)
 
+	-- Route `atom_auto_reg:` / `phase_auto_reg:` markers discovered in trailing C-comments
+	-- into the per-source `atom_auto_regs` / `phase_auto_regs` projections.
+	-- Pattern matches the RHS expansion `R_<Sym> = R_<Sym>_Code /* <kind>_auto_reg: <scope> */`
+	-- emitted by the `atom_auto_reg` / `phase_auto_reg` macros in dsl.atom.h.
+	for entry_name, cmt_text in pairs(out.atom_entry_comments or {}) do
+		local atom_scope = cmt_text:match("atom_auto_reg:%s*([%w_]+)")
+		if atom_scope then
+			out.atom_auto_regs = out.atom_auto_regs or {}
+			out.atom_auto_regs[atom_scope] = out.atom_auto_regs[atom_scope] or {}
+			out.atom_auto_regs[atom_scope][entry_name] = entry_name
+		end
+		local phase_scope = cmt_text:match("phase_auto_reg:%s*([%w_]+)")
+		if phase_scope then
+			out.phase_auto_regs = out.phase_auto_regs or {}
+			out.phase_auto_regs[phase_scope] = out.phase_auto_regs[phase_scope] or {}
+			out.phase_auto_regs[phase_scope][entry_name] = entry_name
+		end
+	end
+
 	return after_brace
 end
 
@@ -1708,12 +1873,18 @@ end
 
 local DECL_PARSERS = {
 	MipsAtom_                  = parse_mips_atom,
+	MipsAtom_Proc_             = parse_mips_atom_proc,
 	MipsAtomComp_              = parse_mips_atom_comp,
 	MipsAtomComp_Proc_         = parse_mips_atom_comp_proc,
 	-- `atom_dbg_skip` is the only debug-skip parser entry. Every other
 	-- identifier follows the ordinary unrelated-token path; there is no alias.
 	atom_dbg_skip              = parse_dbg_skip_marker,
 	atom_dbg_reg_default       = parse_atom_dbg_reg_default,
+	-- `atom_auto_reg(atom, R_<Sym>)` and `phase_auto_reg(phase, R_<Sym>)` populate per-source
+	-- `out.atom_auto_regs` / `out.phase_auto_regs`; the cross-source merge lands in
+	-- `corpus.atom_auto_regs` / `corpus.phase_auto_regs` (first-wins).
+	atom_auto_reg              = parse_auto_reg_marker,
+	phase_auto_reg             = parse_auto_reg_marker,
 	MipsCode                   = parse_mips_code,
 	typedef                    = parse_typedef_binds,
 	_Pragma                    = parse_pragma_macro,
@@ -1748,6 +1919,14 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		debug_skip_markers = {},
 		types             = {},
 		atom_views        = {},
+		-- Per-source projection for `atom_auto_reg(<atom>, R_<Sym>)` markers.
+		-- Each entry is keyed by atom_name; the inner table maps `R_<Sym>` -> `R_<Sym>` (raw LHS sym).
+		-- Merged cross-source into `corpus.atom_auto_regs` (first-wins).
+		atom_auto_regs    = {},
+		-- Per-source projection for `phase_auto_reg(<phase>, R_<Sym>)` markers.
+		-- Each entry is keyed by phase_label; the inner table maps `R_<Sym>` -> `R_<Sym>` (raw LHS sym).
+		-- Merged cross-source into `corpus.phase_auto_regs` (first-wins).
+		phase_auto_regs   = {},
 		line_of           = line_of,
 		-- Source-derived register-alias registry (atom_reg opt-in entries).
 		-- Keys are full R_* idents (never stripped); see parse_enum / parse_enum_body.
@@ -1987,6 +2166,8 @@ local function merge_corpus_registries(corpus)
 	corpus.atom_ctxs               = corpus.atom_ctxs               or {}
 	corpus.atom_phases             = corpus.atom_phases             or {}
 	corpus.atom_infos              = corpus.atom_infos              or {}
+	corpus.atom_auto_regs          = corpus.atom_auto_regs          or {}
+	corpus.phase_auto_regs         = corpus.phase_auto_regs         or {}
 	corpus.collisions              = corpus.collisions              or {}
 
 	-- Replace the existing corpus collections with empty tables so a re-run on the same corpus produces identical state (deterministic merge).
@@ -2030,7 +2211,7 @@ local function merge_corpus_registries(corpus)
 					corpus.collisions, "binds", bind_shape)
 			end
 
-			-- atoms_by_name: MipsAtom_(name) + MipsAtomComp_(name) + MipsAtomComp_Proc_(name).
+			-- atoms_by_name: MipsAtom_(name) + MipsAtom_Proc_(name) + MipsAtomComp_(name) + MipsAtomComp_Proc_(name).
 			-- Each atom carries `{line, name, body, body_off, kind, raw_name, ...}`.
 			-- Duplicate atom names across sources are first-wins + collision; see the atom_infos block below for the evidence list.
 			for _, atom_entry in ipairs(scan.atoms or {}) do
@@ -2063,6 +2244,22 @@ local function merge_corpus_registries(corpus)
 				merge_named_with_sites(
 					corpus.atom_phases, name, entry, site,
 					corpus.collisions, "phase", phase_shape)
+			end
+
+			-- atom_auto_regs: keyed by atom scope name; each carries a `{R_<Sym> = R_<Sym>}` map.
+			-- Per-source entries are simple inner maps (no body / no shape comparison); first-wins suffices.
+			for atom_scope, syms in pairs(scan.atom_auto_regs or {}) do
+				if corpus.atom_auto_regs[atom_scope] == nil then
+					corpus.atom_auto_regs[atom_scope] = syms
+				end
+			end
+
+			-- phase_auto_regs: keyed by phase label; each carries a `{R_<Sym> = R_<Sym>}` map.
+			-- Per-source entries are simple inner maps (no body / no shape comparison); first-wins suffices.
+			for phase_label, syms in pairs(scan.phase_auto_regs or {}) do
+				if corpus.phase_auto_regs[phase_label] == nil then
+					corpus.phase_auto_regs[phase_label] = syms
+				end
 			end
 
 			-- atom_infos: ALWAYS append every record in source/declaration order.

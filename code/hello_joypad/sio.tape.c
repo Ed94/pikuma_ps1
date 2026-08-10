@@ -24,8 +24,8 @@
  * Emits 9 instructions (status/buttons/axes/attempt stores plus the
  * two-instruction zero-extended buttons load).
  */
-FI_ Slice_MipsCode ac_pad_sio_write_pad_state(U4 status_val, U4 state_ptr_reg, U4 scratch_reg)
-MipsAtomComp_Proc_(ac_pad_sio_write_pad_state, {
+FI_ Slice_MipsCode ac_pad_sio_write_pad_state(MipsAtomBuilder_R ab, U4 status_val, U4 state_ptr_reg, U4 scratch_reg)
+MipsAtomComp_Proc_(ac_pad_sio_write_pad_state, ab, {
 	add_ui(scratch_reg, R_0, status_val),
 	store_word(scratch_reg, state_ptr_reg, O_(PadState,status)),
 	/* FIX 2026-08-02: buttons = 0x0000FFFF = "no buttons pressed" in

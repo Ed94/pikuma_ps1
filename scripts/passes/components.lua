@@ -3,7 +3,7 @@
 --- Ownership: `corpus.word_counts`, `corpus.components`, and `corpus.component_body_index`.
 --- Scanner owns `declaration_comment` and `debug_skip` on each declaration record; this pass projects both forward.
 ---
---- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations,
+--- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)`, `MipsAtomComp_Proc_(ac_X, { body })`, and `MipsAtom_Proc_(X, ab, { body })` declarations,
 --- then resolves the function-args string from the preceding `FI_ Slice_MipsCode ac_X(...)` declaration via a backward walk.
 ---
 --- Emits one `gen/macs.h` per *immediate source directory* with `#define mac_X(sig) \` macros plus `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
@@ -76,7 +76,7 @@ local MACS_FILENAME   = "macs.h"
 --- @field args       string|nil -- Function-args string (function form only)
 --- @field line       integer    -- Source line of the declaration
 --- @field comment    string|nil -- Scanner-owned `declaration_comment`; the components pass reads it from the scanner record
---- @field kind       string     -- "comp_bare" | "comp_proc"
+--- @field kind       string     -- "comp_bare" | "comp_proc" | "atom_proc"
 --- @field debug_skip boolean    -- Mirror of `a.debug_skip` (scanner-owned); true iff a bare `atom_dbg_skip` marker immediately preceded the declaration
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -200,8 +200,16 @@ end
 local function project_components(source, scan)
 	local out = {}
 	for _, a in ipairs(scan.atoms) do
-		if a.kind == "comp_bare" or a.kind == "comp_proc" then
-			local args = find_function_args_for(source, a.raw_name, a.ident_pos)
+		if a.kind == "comp_bare" or a.kind == "comp_proc" or a.kind == "atom_proc" then
+			-- `MipsAtom_Proc_` atoms have no `FI_ Slice_MipsCode ac_X(...)` function-decl prelude
+			-- (the macro sits inside a wrapping `I_ void <proc_name>(...)` body), so the function-args
+			-- lookup is meaningless; signature defaults to `...` (variadic-ignored).
+			-- The `mac_<name>` alias expansion discards the `ab` (atom-builder) arg the same way
+			-- `MipsAtomComp_Proc_` components do.
+			local args = nil
+			if a.kind ~= "atom_proc" then
+				args = find_function_args_for(source, a.raw_name, a.ident_pos)
+			end
 			-- Comment ownership: scan_source.lua stamps `declaration_comment` on the record by walking backward past any associated bare marker.
 			-- The pass reads `declaration_comment` directly.
 			local comment = a.declaration_comment or ""
@@ -213,7 +221,7 @@ local function project_components(source, scan)
 				body_tokens = a.body_tokens,
 				args        = args,
 				comment     = comment,
-				kind        = a.kind,  -- "comp_bare" | "comp_proc"; provenance emitter reads this.
+				kind        = a.kind,  -- "comp_bare" | "comp_proc" | "atom_proc"; provenance emitter reads this.
 				debug_skip  = a.debug_skip == true,
 			}
 		end
@@ -475,12 +483,26 @@ local function split_comment_lines(s)
 end
 
 --- Determine the macro signature: function-args list (function form) or variadic-ignored (bare form).
+--- For `MipsAtomComp_Proc_` components, the leading `ab` (atom-builder) arg is dropped:
+--- the generated `mac_<name>` macros are inline-expansion aliases for baked atoms; their bodies
+--- don't reference `ab` (the builder is only consumed by the procedural `atombuilder_unroll` line
+--- that `MipsAtomComp_Proc_` appends after the body). Inline callers therefore don't need to thread
+--- a builder context.
 --- @param args_str string|nil
 --- @return string
 local function signature_from_args(args_str)
 	local arg_names = extract_arg_names(args_str)
 	if    arg_names and #arg_names > 0 then
-		return table.concat(arg_names, ", ")
+		-- Drop the leading `ab` (atom-builder) first arg if present.
+		-- Convention: `MipsAtomComp_Proc_` components always declare `ab` as the first function-arg
+		-- (type `MipsAtomBuilder_R`), mirroring the macro signature in `lottes_tape.h`.
+		if arg_names[1] == "ab" then
+			table.remove(arg_names, 1)
+		end
+		if #arg_names > 0 then
+			return table.concat(arg_names, ", ")
+		end
+		return "..."  -- `ab` was the only arg; fall through to variadic
 	end
 	return "..."
 end
@@ -646,7 +668,7 @@ end
 --- @field name       string  -- bare name (without ac_/mac_ prefix)
 --- @field line       integer -- definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
 --- @field path       string  -- absolute source path of the definition
---- @field kind       string  -- "comp_bare" | "comp_proc"
+--- @field kind       string  -- "comp_bare" | "comp_proc" | "atom_proc"
 --- @field debug_skip boolean -- mirror of the scanner-owned `a.debug_skip`; consumers read this directly
 
 --- (internal) Populate `corpus.components` with this source's components-by-name map.

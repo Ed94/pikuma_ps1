@@ -1,6 +1,7 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	pragma once
 #	include "dsl.h"
+#	include "math.h"
 #endif
 
 /* PSX button bit positions — 1:1 with PSX-SPX docs at docs/psx-spx/docs/controllersandmemorycards.md:405-421.

@@ -175,13 +175,19 @@ WORD_COUNT(mac_gte_sqr_v3, 8)
 ,	shift_aright_var(r_dz, r_dz, r_shift)
 WORD_COUNT(mac_gte_gpf_scale, 13)
 
-/* atom_dbg_skip */
-#define mac_normalize_v3s4(r_sx, r_sy, r_sz, r_sq_y, r_sq_z, r_recip_est, r_lzcr, r_shift, r_tmp) \
-	gte_mv_to_data_r(r_sx, C2_IR1) \
+#define mac_normalize_v3s4(...) \
+	load_word(r_src, R_TapePtr, O_(Binds_NormalizeV3S4,src))     /* pop src ptr (scratch addr) */ \
+,	load_word(r_dst, R_TapePtr, O_(Binds_NormalizeV3S4,dst))     /* pop dst ptr (scratch addr) */ \
+,	add_ui_self(   R_TapePtr, S_(Binds_NormalizeV3S4)) \
+,	load_word(r_sx, r_src, O_(V3_S4,x)) \
+,	load_word(r_sy, r_src, O_(V3_S4,y)) \
+,	load_word(r_sz, r_src, O_(V3_S4,z)) \
+,	nop /* load-delay */	/* ── 48-word normalize body (preserved verbatim from ac_normalize_v3s4) ─────── */	/* Stage 1: mtc2 src → IR1/2/3, SQR fires (MAC1/2/3 = IR², IR ← MAC saturated) */ \
+,	gte_mv_to_data_r(r_sx, C2_IR1) \
 ,	gte_mv_to_data_r(r_sy, C2_IR2) \
 ,	gte_mv_to_data_r(r_sz, C2_IR3) \
 ,	nop \
-,	gte_cmdw_sqr	/* ─── Stage 2: mfc2 MAC1/2/3, sum, mtc2 LZCS ───	// Note: r_recip_est first used as the sum accumulator (= |v|²), which is also what LZCS needs. */ \
+,	gte_cmdw_sqr	/* Stage 2: mfc2 MAC1/2/3, sum, mtc2 LZCS */ \
 ,	gte_mv_from_data_r(r_sq_y,      C2_MAC1) /* r_sq_y = MAC1 = sx² */ \
 ,	gte_mv_from_data_r(r_sq_z,      C2_MAC2) /* r_sq_z = MAC2 = sy² */ \
 ,	gte_mv_from_data_r(r_recip_est, C2_MAC3) /* r_recip_est = MAC3 = sz² */ \
@@ -191,7 +197,7 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	gte_mv_to_data_r(  r_recip_est, C2_LZCS) /* LZCS = |v|² */ \
 ,	nop2 \
 ,	gte_mv_from_data_r(r_lzcr, C2_LZCR)      /* r_lzcr = LZCR (count of leading bits) */ \
-,	nop                                      /* MFC2→GPR load delay (1 slot) */	/* ─── Stage 3: compute shift amount, align |v|² to bit 24, lookup 1/|v| ───	// Matches libgte `bltz +0x10 ; nop ; b +0x14 ; sllv t4,v0,t3` pattern:	//   - bltz TAKEN  → nop (BD), jump to srav_path; sllv SKIPPED	//   - bltz !TAKEN → nop (BD), b +0x14 jumps to aligned_done; sllv (BD of b) executes */ \
+,	nop                                      /* MFC2→GPR load delay (1 slot) */	/* Stage 3: compute shift amount, align |v|² to bit 24, lookup 1/|v| */ \
 ,	and_i(         r_lzcr, r_lzcr, -2)       /* r_lzcr &= ~1 (force even for halving) */ \
 ,	li_s(          r_shift, 31)              /* r_shift = 31 */ \
 ,	sub_s(         r_shift, r_shift, r_lzcr) /* r_shift = 31 - LZCR */ \
@@ -212,7 +218,7 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	or_i_self(     r_tmp, u4_lo(& gte_normalize_sqr_tbl)) /* ori */ \
 ,	add_u(         r_tmp, r_tmp, r_recip_est)             /* r_tmp = sqrtbl base + byte offset (matches libgte 0x80016118: addu t5,t5,t4) */ \
 ,	load_half(     r_recip_est, r_tmp, 0)                 /* r_recip_est = sqrtbl[r_recip_est] = 1/|v| estimate */ \
-,	nop                                                   /* retire load_half before MTC2 (matches libgte 0x80016120: nop) */	/* ─── Stage 4: mtc2 IR0..3, GPF (MAC = IR0*IR), mfc2 MAC, srav finalize ───	// Componentized equivalent: mac_gte_gpf_scale. */ \
+,	nop                                                   /* retire load_half before MTC2 (matches libgte 0x80016120: nop) */	/* Stage 4: mtc2 IR0..3, GPF (MAC = IR0*IR), mfc2 MAC, srav finalize */ \
 ,	gte_mv_to_data_r(r_recip_est, C2_IR0)  /* IR0 = 1/|v| estimate */ \
 ,	gte_mv_to_data_r(r_sx,        C2_IR1)  /* IR1 = src.x */ \
 ,	gte_mv_to_data_r(r_sy,        C2_IR2)  /* IR2 = src.y */ \
@@ -224,8 +230,12 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	gte_mv_from_data_r(r_sz, C2_MAC3) \
 ,	shift_aright_var(r_sx, r_sx, r_shift) \
 ,	shift_aright_var(r_sy, r_sy, r_shift) \
-,	shift_aright_var(r_sz, r_sz, r_shift)
-WORD_COUNT(mac_normalize_v3s4, 48)
+,	shift_aright_var(r_sz, r_sz, r_shift)	/* ── I/O wrapper tail (~3 words) ───────────────────────────────────────────── */ \
+,	store_word(r_sx, r_dst, O_(V3_S4,x)) \
+,	store_word(r_sy, r_dst, O_(V3_S4,y)) \
+,	store_word(r_sz, r_dst, O_(V3_S4,z))	/* ── atom_reads(R_TapePtr) atom_writes(R_TapePtr) ────────────────────────── */ \
+,	mac_yield()
+WORD_COUNT(mac_normalize_v3s4, 62)
 
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	load_upper_i(reg_transfer, cmd >> 16) \

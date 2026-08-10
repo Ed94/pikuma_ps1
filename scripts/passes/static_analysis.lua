@@ -1474,8 +1474,9 @@ end
 local function check_load_delay_slots(atom, pipe_ctx, findings)
 	-- The load-delay check applies to every atom and component body, including debug-skipped components (`ac_*` and `atom_dbg_skip MipsAtom_(...)`).
 	-- The `atom_dbg_skip` marker controls debugger stepping, not instruction safety.
+	-- `atom_proc` atoms have full bodies with loads that need delay slots, so the check applies to them too.
 	local p = atom.paths or {}
-	if atom.kind ~= "atom" then return end
+	if atom.kind ~= "atom" and atom.kind ~= "atom_proc" then return end
 	local events = p.word_events or {}
 	if   #events == 0 then return end
 
@@ -1579,6 +1580,8 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	if is_runtime_helper(atom) then return end
 	-- Per-kind semantics:
 	--   MipsAtom_          (baked atom): exactly 1 mac_yield at the end of the body. Control transfer is the atom's job.
+	--   MipsAtom_Proc_     (runtime-proc atom): exactly 1 mac_yield at the end of the body. Same as baked atom;
+	--                      the proc IS the atom; the runtime call to `atombuilder_unroll` doesn't introduce a parent atom.
 	--   MipsAtomComp_      (bare static-array component): ZERO mac_yield.
 	--                      The component is invoked from inside an atom body; the parent atom does the yield.
 	--   MipsAtomComp_Proc_ (procedural component): ZERO mac_yield.
@@ -1602,7 +1605,7 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 		return atom.line + line_in_body[tokens[idx].rel]
 	end
 
-	if atom.kind == "atom" then
+	if atom.kind == "atom" or atom.kind == "atom_proc" then
 		-- Baked atom: exactly 1 yield at the end.
 		if count == 0 then
 			findings[#findings + 1] = {
@@ -1647,6 +1650,7 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 		-- The parent atom does the yield.
 		-- A yield inside a component would either be dead code (bare) or prematurely terminate the function (proc).
 		-- Both are bugs.
+		-- `atom_proc` atoms are NOT components; they're runtime-proc atoms that own their own yield (handled in the `if` branch above).
 		if count > 0 then
 			findings[#findings + 1] = {
 				atom  = atom.name,
@@ -1678,7 +1682,7 @@ end
 --- Per-atom. Runtime-helper atoms (`debug_skip`) are exempt.
 --- Takes `(atom, pipe_ctx, findings)`; `pipe_ctx` is unused.
 local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
-	if atom.kind ~= "atom" then return end
+	if atom.kind ~= "atom" and atom.kind ~= "atom_proc" then return end
 	if is_runtime_helper(atom) then return end
 
 	local tokens       = atom.paths.tokens
@@ -1897,9 +1901,9 @@ end
 ---   - Atoms containing a `mac_<name>(...)` call whose `name` is not registered in `pipe_ctx.components_by_name` emit a "new macro;
 ---     Not in corpus.components" advisory — the auto-derivation returned nil for that name.
 ---
---- Applies only to `kind = "atom"` (baked atoms). Components don't emit full primitives.
+--- Applies only to `kind = "atom"` or `kind = "atom_proc"` (full-atom bodies). Components don't emit full primitives.
 local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
-	if atom.kind ~= "atom" then return end
+	if atom.kind ~= "atom" and atom.kind ~= "atom_proc" then return end
 	local tokens         = atom.paths.tokens
 	local line_in_body   = atom.paths.line_in_body
 	local tc             = atom.paths.tok_class

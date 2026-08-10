@@ -75,6 +75,26 @@
  * ----------------------------------------------------------------------------*/
 #define atom_reg /* atom_reg: opt the preceding enum entry into the DWARF registry */
 
+// ----------------------------------------------------------------------------
+// atom_auto_reg(atom, sym) — per-atom auto-allocated GPR binding.
+//   enum {
+//       atom_auto_reg(cube_g4_face, R_Fwdx),                // expands to: R_Fwdx = R_Fwdx_Code /* atom_auto_reg: cube_g4_face */,
+//       atom_auto_reg(cube_g4_face, R_Eye_z) atom_type(S4), // atom_type chains after
+//   };
+// (The macro IS the entire enum entry — no separate LHS=RHS. The `atom` scope is
+//  preserved in a trailing C-comment on the RHS so the Lua scanner can recover
+//  it after preprocessing strips the macro form. R_<Sym>_Code is resolved from gen/auto_reg.h which the .c file #include's before the enum declaration.)
+#define atom_auto_reg(atom, sym) sym = sym ## _Code /* atom_auto_reg: atom */
+
+// ----------------------------------------------------------------------------
+// phase_auto_reg(phase, sym) — per-phase auto-allocated GPR binding.
+//   enum {
+//       phase_auto_reg(cube_g4, R_Temp0),     // expands to: R_Temp0 = R_Temp0_Code /* phase_auto_reg: cube_g4 */,
+//       phase_auto_reg(cube_g4, R_Temp1),
+//   };
+// (Same macro-as-enum-entry form as atom_auto_reg above; the `phase` scope is preserved in a trailing C-comment on the RHS for the Lua scanner to recover.)
+#define phase_auto_reg(phase, sym) sym = sym ## _Code /* phase_auto_reg: phase */
+
 /* ============================================================================
  *   atom_info :
  *      MipsAtom_(cube_tri) atom_info(

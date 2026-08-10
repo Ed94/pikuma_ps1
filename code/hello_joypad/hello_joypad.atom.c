@@ -24,8 +24,8 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(hello_joypad_atom_c);
 
 #pragma region MACs (Mips Atom components)
 
-FI_ Slice_MipsCode ac_put_disp_env(U4 reg_transfer, U4 reg_base, U2 port)
-MipsAtomComp_Proc_(ac_put_disp_env, {
+FI_ Slice_MipsCode ac_put_disp_env(MipsAtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
+MipsAtomComp_Proc_(ac_put_disp_env, ab, {
 	// Emits 5 GP0 commands for buffer 0 (display_area = (0,0,320,240)).
 	// Sequence per libpsyx PutDispEnv: DrawArea TL → DrawArea BR → Mask → DrawArea TL → DrawArea BR
 	mac_gcmd_push(gp0_word_draw_area_top_left_origin,      reg_transfer, reg_base, port),
@@ -35,8 +35,8 @@ MipsAtomComp_Proc_(ac_put_disp_env, {
 	mac_gcmd_push(gp0_word_draw_area_bottom_right_320x240, reg_transfer, reg_base, port),
 })
 
-FI_ Slice_MipsCode ac_put_draw_env(U4 reg_transfer, U4 reg_base, U2 port)
-MipsAtomComp_Proc_(ac_put_draw_env, {
+FI_ Slice_MipsCode ac_put_draw_env(MipsAtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
+MipsAtomComp_Proc_(ac_put_draw_env, ab, {
 	/*
 	* ORIGIN: each code word corresponds to the EXACT value libpsyx's PutDrawEnv function would compute for the same DrawEnv settings.
 	* References:
@@ -116,7 +116,7 @@ internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
 	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace) + OA_(DoubleBuffer,display,1)),
 
 	mac_store_rects2(R_0, R_ScreenY, R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area)         + OA_(DoubleBuffer,draw,0)), /* draw[0].clip_area = (0, 240, 320, 240). C11's SetDefDrawEnv writes clip.y = y_arg. */
-	mac_store_v2s2(  R_0, R_ScreenY,                       R_ScreenBuf, O_(DrawEnv,drawing_offset[0]) + OA_(DoubleBuffer,draw,0)), /* draw[0].drawing_offset[0] = (0, 240); C11 passes y_arg as ofs. */
+	mac_store_v2s2(R_0, R_ScreenY,                       R_ScreenBuf, O_(DrawEnv,drawing_offset[0]) + OA_(DoubleBuffer,draw,0)), /* draw[0].drawing_offset[0] = (0, 240); C11 passes y_arg as ofs. */
 
 	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area.width) + OA_(DoubleBuffer,draw,1)),
 
@@ -129,7 +129,7 @@ internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
 	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.width) + OA_(DoubleBuffer,draw,1)),
 
 	/* draw[0].texture_page = 10 (gp0_tpage_default). C11 SetDefDrawEnv at C11_only.elf:0x8001273C writes the same 0x0A. . */
-	add_ui(R_T0, R_0, gp0_tpage_default), 
+	add_ui(R_T0, R_0, gp0_tpage_default),
 	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + OA_(DoubleBuffer,draw,0)),
 	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + OA_(DoubleBuffer,draw,1)),
 
@@ -144,7 +144,7 @@ internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
 	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,enable_auto_clear)    + OA_(DoubleBuffer,draw,1)),
 
 	/* draw[0].initial_bg_color = (r=7, g=7, b=7). */
-	add_ui(R_T0, R_0, 7), 
+	add_ui(R_T0, R_0, 7),
 	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + OA_(DoubleBuffer,draw,0)),
 	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + OA_(DoubleBuffer,draw,1)),
 
@@ -228,7 +228,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	gte_mv_from_data_r(R_T0, C2_MAC0), nop,
 	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
 		/* BD-slot: write the prim tag (R_0=0; overwrites the legacy tag word in the prim_buffer).
-		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded — 
+		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded —
 		 * harmless because the OT entry that points to this prim is created later, only on the body path. */
 		store_word(R_0, R_PrimCursor, O_(Poly_G4, tag)),
 		shift_lleft(R_AT, R_T3, v3s2_byteoff), add_u(R_AT, R_AT, R_VertBase),
@@ -286,14 +286,14 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	, atom_reads( R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase)
 	, atom_writes(R_PrimCursor, R_FaceCursor)
 ) {
-	mac_load_tri_indices(  R_FaceCursor, R_T0, R_T1, R_T2),
+	mac_load_tri_indices(R_FaceCursor, R_T0, R_T1, R_T2),
 	mac_gte_load_tri_verts(R_VertBase,   R_T0, R_T1, R_T2),
 	nop2, gte_cmdw_rotate_translate_perspective_triple, // 2 nops retire the final cpu -> gte writes before RTPT
 	gte_cmdw_nclip,
 
 	/* Culling (Branch forward if Backface) */
 	gte_mv_from_data_r(R_T0, C2_MAC0),
-	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot. 
+	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot.
 		/* Format Primitive */
 		mac_gte_store_f3(R_PrimCursor),
 
