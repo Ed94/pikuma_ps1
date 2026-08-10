@@ -86,7 +86,7 @@ WORD_COUNT(mac_resolve_look_at__input_and_sub, 34)
 ,	load_word(r_a, r_g, O_(V3_S4,x)) \
 ,	load_word(r_b, r_g, O_(V3_S4,y)) \
 ,	load_word(r_c, r_g, O_(V3_S4,z)) \
-,	nop	/* Load b (up_in).x/y/z into r_d + R_AT/R_V0 (hardcoded; reusing the
+,	nop	/* Load b (up_in).x/y/z into r_d + R_AT/R_V0 (hardcoded; reusing the 
 	 * body's last two loads is fine because the load-delay slot is the nop
 	 * after the third load, and mtc2 below doesn't read these regs). */ \
 ,	load_word(r_d,  r_h, O_(V3_S4,x)) \

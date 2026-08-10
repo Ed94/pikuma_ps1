@@ -83,6 +83,10 @@ FI_ Slice_MipsCode ac_gte_gpf_scale(MipsAtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r
 	shift_aright_var(r_dz, r_dz, r_shift),
 })
 
+#pragma endregion MACs (Mips Atom Components)
+
+#pragma region Atom Procs
+
 /* ─── Local copy of PSYQ's sqrtbl (1/sqrt lookup table for VectorNormal). ───
  * Source: PSYQ 4.7 libgte sqrtbl at 0x800185B4 in hello_camera.elf.
  *   objdump -s --start-address=0x800185B4 --stop-address=0x800185F4 hello_camera.elf
@@ -188,14 +192,14 @@ typedef Struct_(Binds_NormalizeV3S4) {
  * gte.atom.c is the GENERIC GTE primitives file — it exposes only the parameter-style normalize_v3s4_proc for any future caller. */
 I_ void normalize_v3s4_proc(
 		MipsAtomBuilder_R ab
-	,	U4 r_src              /* GPR code: scratch base carrier (wave-context, e.g., R_T4) */
-	,	U4 r_dst              /* GPR code: scratch dst pointer carrier (wave-context, e.g., R_T5) */
-	,	U4 r_sx, U4 r_sy, U4 r_sz              /* GPR codes: src.x/y/z scratch (atom-local) */
-	,	U4 r_sq_y, U4 r_sq_z                   /* GPR codes: MAC1/2 scratch (atom-local) */
-	,	U4 r_recip_est                         /* GPR code: |v|² sum + shift-input + sqrtbl[index] (atom-local) */
-	,	U4 r_lzcr                              /* GPR code: LZCR value (atom-local) */
-	,	U4 r_shift                             /* GPR code: final srav amount (atom-local) */
-	,	U4 r_tmp                               /* GPR code: scratch (shift count, branch target, lookup addr, table base) */
+	,	U4 r_src                  /* GPR code: scratch base carrier (wave-context, e.g., R_T4) */
+	,	U4 r_dst                  /* GPR code: scratch dst pointer carrier (wave-context, e.g., R_T5) */
+	,	U4 r_sx, U4 r_sy, U4 r_sz /* GPR codes: src.x/y/z scratch (atom-local) */
+	,	U4 r_sq_y, U4 r_sq_z      /* GPR codes: MAC1/2 scratch (atom-local) */
+	,	U4 r_recip_est            /* GPR code: |v|² sum + shift-input + sqrtbl[index] (atom-local) */
+	,	U4 r_lzcr                 /* GPR code: LZCR value (atom-local) */
+	,	U4 r_shift                /* GPR code: final srav amount (atom-local) */
+	,	U4 r_tmp                  /* GPR code: scratch (shift count, branch target, lookup addr, table base) */
 )
 /* MipsAtom_Proc_ wrapper: declares the static MipsCode[] body, then calls atombuilder_unroll(ab, ...) to copy the encoded instructions into the caller's MipsAtomBuilder arena.  */
 MipsAtom_Proc_(normalize_v3s4, ab, {
@@ -271,9 +275,9 @@ atom_label(aligned_done)                                /* Both paths converge h
 	mac_yield()
 })
 
-#pragma endregion MACs (Mips Atom Components)
+#pragma endregion Atom Procs
 
-#pragma region Bsked Atoms
+#pragma region Baked Atoms
 
 typedef Struct_(Binds_SetGteMT3S2S4) {
 	MT3_S2S4* transform;

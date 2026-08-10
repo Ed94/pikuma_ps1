@@ -43,6 +43,7 @@
 #pragma region Hello Camera Headers
 #	include "gen/macs.h"
 #	include "gen/offsets.h"
+#	include "gen/auto_reg.h"
 
 #include "hello_camera.h"
 #pragma endregion Hello Camera Headers
@@ -161,15 +162,11 @@ internal void resolve_look_at_init(void) {
 	 * computes fwd = target - eye; binds R_ResolveScratch (R_T4) as the wave-context carrier for atoms 1-6.
 	 * The body hardcodes R_AT and R_V0 as eye.y/eye.z temps (the existing sub_u(eye.x, eye.y, eye.z) chain from the prior Task 12.7 design). */
 	smem.resolve_look_at_atom_addrs[0] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
-	resolve_look_at__input_and_sub_proc(ab,
-		R_T0,             /* r_target_ptr (popped from tape) */
-		R_T1,             /* r_eye_ptr    (popped from tape) */
-		R_T2,             /* r_up_in_ptr  (popped from tape) */
-		R_ResolveScratch, /* r_scratch (wave-context carrier; popped from tape) */
-		R_T3,             /* r_tmp0 */
-		R_T5,             /* r_tmp1 */
-		R_T6,             /* r_tmp2 */
-		R_T7);            /* r_tmp3 */
+	resolve_look_at__input_and_sub_proc(ab, R_ResolveScratch,
+		R_T0,  /* r_target_ptr (popped from tape) */
+		R_T1,  /* r_eye_ptr    (popped from tape) */
+		R_T2,  /* r_up_in_ptr  (popped from tape) */
+		R_T3, R_T5, R_T6,  R_T7); /* r_tmp<0-3> */
 
 	/* Atom 1: resolve_look_at__normalize_fwd_to_uz — src=scratch+0, dst=scratch+16 (HARDCODED in body).
 	 * GPR pool: r_scratch (R_T4 carrier) + 10 body GPRs = 11.
