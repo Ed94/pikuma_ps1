@@ -15,6 +15,8 @@
 #define WORD_COUNT(name, count)  enum { words_##name = (count) };
 
 WORD_COUNT(nop,                              1)
+WORD_COUNT(atom_label,                        0)
+WORD_COUNT(atom_offset,                       0)
 WORD_COUNT(load_upper_i,                     1)
 WORD_COUNT(jump_reg,                         1)
 WORD_COUNT(jump_link,                        1)

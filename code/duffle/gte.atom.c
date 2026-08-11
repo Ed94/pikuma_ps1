@@ -225,20 +225,22 @@ MipsAtom_Proc_(normalize_v3s4, aa, {
 
 	/* Stage 3: compute srav amount (r_lzcr) + align |v|² to bit 24.
 	 * IMPORTANT: the sllv/srav below writes the aligned |v|² to r_mac1_scratch (NOT r_lzcr),
-	 * so r_lzcr retains the shift count all the way to the start of stage 4. */
+	 * so r_lzcr retains the shift count all the way to the start of stage 4.
+	 */
 	and_i(   r_shift, r_shift, -2),
+	or_u(r_mac1_scratch, r_lzcr, 0),                            /* FIX B: save sum before clobbering r_lzcr with shift count */
 	li_s(    r_lzcr,           31),
 	sub_s(   r_lzcr, r_lzcr, r_shift),
 	shift_aright(r_lzcr, r_lzcr, 1),
 	/* r_branch_tmp = LZCR - 24 (overwrites r_branch_tmp; src.z no longer needed after SQR) */
 	add_si(  r_branch_tmp, r_shift, -24),
-	branch_lt_zero(r_branch_tmp, atom_offset(srav_path, aligned_done)), nop,
-	jump_rel(atom_offset(aligned_done, srav_path)),
-	shift_lleft_var(r_mac1_scratch, r_lzcr, r_branch_tmp),     /* sllv path: aligned = r_lzcr sll (LZCR-24) — dst=r_mac1_scratch to PRESERVE r_lzcr=shift count */
+	branch_lt_zero(r_branch_tmp, atom_offset(aligned_done, srav_path)), nop,    /* FIX A: bltz → srav_path (LZCR<24 path) */
+	jump_rel(atom_offset(srav_path, aligned_done)),                              /* FIX A: b → aligned_done (LZCR>=24 path) */
+	shift_lleft_var(r_mac1_scratch, r_mac1_scratch, r_branch_tmp),              /* FIX B: src=sum (r_mac1_scratch), dst=same */
 	atom_label(srav_path)
 	li_s(    r_branch_tmp, 24),
 	sub_s(   r_branch_tmp, r_branch_tmp, r_shift),
-	shift_aright_var(r_mac1_scratch, r_lzcr, r_branch_tmp),    /* srav path: aligned = r_lzcr sra (24-LZCR) — dst=r_mac1_scratch to PRESERVE r_lzcr=shift count */
+	shift_aright_var(r_mac1_scratch, r_mac1_scratch, r_branch_tmp),             /* FIX B: src=sum (r_mac1_scratch), dst=same */
 	atom_label(aligned_done)
 	/* Save the shift count to r_shift before the next 5 instructions overwrite r_lzcr
 	 * (the sqrtbl lookup loads 1/|v| into r_lzcr, which becomes IR0 in stage 4). */
@@ -251,11 +253,14 @@ MipsAtom_Proc_(normalize_v3s4, aa, {
 	add_u(r_branch_tmp, r_branch_tmp, r_mac1_scratch),
 	load_half(r_lzcr,   r_branch_tmp, 0), nop,                  /* r_lzcr = sqrtbl[aligned-64] = 1/|v| (IR0 in stage 4) */
 
+	/* FIX bug C: r_branch_tmp held the sqrtbl base+index, NOT src.z. Reload src.z from scratch now that r_branch_tmp is free. */
+	load_word(r_branch_tmp, r_src_ptr, O_(V3_S4,z)), nop,        /* r_branch_tmp = src.z (for IR3 in stage 4) */
+
 	/* Stage 4: GPF + srav finalize (r_shift = shift count, r_lzcr = 1/|v|). */
 	gte_mv_to_data_r(r_lzcr,         C2_IR0),
 	gte_mv_to_data_r(r_tmp,          C2_IR1),                    /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */
 	gte_mv_to_data_r(r_recip_est,    C2_IR2),
-	gte_mv_to_data_r(r_branch_tmp,   C2_IR3),
+	gte_mv_to_data_r(r_branch_tmp,   C2_IR3),                    /* IR3 = src.z (reloaded) */
 	nop2, gte_cmdw_gpf,
 	gte_mv_from_data_r(r_mac2_scratch, C2_MAC1),
 	gte_mv_from_data_r(r_recip_est,    C2_MAC2),

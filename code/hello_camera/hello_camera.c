@@ -276,8 +276,7 @@ I_ void resolve_look_at(
 		tb_data(tb, u4_(smem.scratchpad));     /* Binds_ResolveLookAtScratch.scratch_base */
 	}
 
-	/* Atoms 1-5:
-	Context carrier R_ResolveScratch (R_T4) is preserved across atoms. */
+	/* Atoms 1-5: disabled (atom 1 verification below) */
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[1]); { }
 	// tb_emit(tb, smem.resolve_look_at_atom_addrs[2]); { }
 	// tb_emit(tb, smem.resolve_look_at_atom_addrs[3]); { }
@@ -356,12 +355,12 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		ResolveLookAtScratch_V scratch = C_scratch(ResolveLookAtScratch_V);
 
-		// Atom 0: Works
-		forward = scratch->fwd; 
-		
-		// Atom 1:
+		// Atom 0: Works (tape emits fwd to scratch+0; C-side reads it back)
+		forward = scratch->fwd;
+
+		// C-side normalize fallback (atom 1 disabled)
 		// normalize_v3s4(& forward, & uz);
-		uz = scratch->uz;
+		uz = scratch->uz;  /* tape-side: enable after verifying atom 1 fix */
 
 		cross_v3s4(& uz,   & v3s4(0, -fp_one, 0), & right); normalize_v3s4(& right, & ux);
 		cross_v3s4(& uz, & ux,    & up);                    normalize_v3s4(& up,    & uy);
@@ -526,3 +525,4 @@ int main(void)
 	return 0;
 }
 GCC_OPTIMIZATION_ENABLE
+

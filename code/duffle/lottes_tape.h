@@ -238,8 +238,6 @@ typedef Struct_(FMipsAtom512) { U4 data[512]; U4 used; };
 
 // FArena Related
 typedef Relative_(FArena) Struct_(AtomBuilder) { U4 start; U4 capacity; U4 used; };
-// Whatever the builder is writting to should most likely coresspond
-// to something that can fit within instruction cache?
 
 // Usual way to resolve an atom after the bulder is done.
 #define atom_from_atombuilder(ab) C_(MipsAtom*, (ab).start)
@@ -255,9 +253,6 @@ FI_ void atombuilder_push(AtomBuilder_R ab, Slice_MipsCode code) {
 // When done authoring, utilize this to cap-off the atom (if not utilizing a MipsAtom_Proc).
 FI_ void atombuilder_end(AtomBuilder_R ab) { atombuilder_push(ab, slice_from_array(MipsCode, ac_yield)); }
 
-// tb_emit_builder(tb, ab) — emit the builder's atom into the tape and advance tb->used.
-// Thin wrapper around tb_emit(tb, mipsatom_from_builder(ab[0])).
-// Equivalent to tb_emit(tb, code_<name>) for runtime-built atoms.
 FI_ void tb_emit_atombuilder(TapeBuilder_R tb, AtomBuilder_R ab) { tb_emit(tb, atom_from_atombuilder(ab[0])); }
 #pragma endregion Mips Atom Builder
 
