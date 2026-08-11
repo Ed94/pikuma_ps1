@@ -357,6 +357,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		camera_look_at_c11(& smem.cam, & smem.cube.pos, & v3s4(0, -fp_one, 0));
 	}
 	// Camera look at (Tape)
+	if (0)
 	{
 		tb.used = 0; tb_scope_run(& tb) {
 			resolve_look_at(& tb, & smem.cam.look_at, & smem.cam.pos, & smem.cube.pos, & v3s4(0, -fp_one, 0));
@@ -491,7 +492,8 @@ int main(void)
 		pad_bios_init_start(& smem.pad_raw[0], & smem.pad_raw[1]);
 
 		/* Pre-build the resolve_look_at bundle atoms into the static arena. */
-		resolve_look_at_init();
+		// TODO(Ed): Investigate this, its causing a crash!
+		// resolve__look_at_init();
 
 		/* Pinned registers for the GPU init atom. */
 		register U4*           io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
