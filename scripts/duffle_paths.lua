@@ -47,15 +47,14 @@ local function find_repo_root()
 	return root
 end
 
---- Set `package.path` (for `require("duffle")` + `require("passes.X")`) and
---- `package.cpath` (for `lpeg.dll`).
+--- Set `package.path` (for `require("duffle")` + `require("passes.X")`) and `package.cpath` (for `lpeg.dll`).
 ---
 --- This script does NOT touch the OS environment: no `os.setenv`, no `os.putenv`, no `$PATH` mods. 
 --- It just sets `package.path` and `package.cpath` (the standard Lua way to register module search dirs). 
 --- lpeg is built by `update_deps.ps1` to `toolchain/lpeg/`, 
 --- which we wire into `package.cpath` here (so `require("lpeg")` from `duffle.lua` resolves without any global state).
 function M.setup()
-	local repo_root = find_repo_root()
+	local  repo_root = find_repo_root()
 	if not repo_root then
 		-- Unreachable in practice: find_repo_root() derives the repo root from this script's
 		-- own source path via debug.getinfo(1, "S").source (no subprocess, no git CLI, <1ms).

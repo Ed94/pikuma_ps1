@@ -4,8 +4,16 @@
 --- for `MipsAtom_(name)` and `MipsCode code_<name>` declarations, computes the word offset
 --- from each `atom_offset(F, T)` marker to its target `atom_label(T)` declaration, and emits
 --- `gen/offsets.h` with one `#define _atom_offset_F_T = N` per branch.
+---
 --- Per-directory aggregation: every source in the same directory contributes to the same `gen/offsets.h`.
 --- The directory itself is the namespace; the filename does not repeat the module name.
+---
+--- (Task 12.16 note: atom-namespaced enum names — e.g., `atom_offset__normalize_v3s4__srav_path__aligned_done` —
+--- were considered to prevent cross-atom label collisions, but the C-side `atom_offset(F, T)` macro in
+--- `code/duffle/dsl.atom.h` doesn't know the current atom_name at expansion time, so any namespacing
+--- on the metaprogram side breaks the C build. Reverted. The C-side would need a per-atom
+--- `CURRENT_ATOM` #define (set by `MipsAtom_`/`MipsAtom_Proc_` macros) plus an updated `atom_offset`
+--- macro that uses it. That's a coordinated refactor — deferred to a future track.)
 ---
 --- The offset is `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding: branch_offset = relative_pc_in_words - 1).
 

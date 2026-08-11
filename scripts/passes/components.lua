@@ -3,8 +3,11 @@
 --- Ownership: `corpus.word_counts`, `corpus.components`, and `corpus.component_body_index`.
 --- Scanner owns `declaration_comment` and `debug_skip` on each declaration record; this pass projects both forward.
 ---
---- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)`, `MipsAtomComp_Proc_(ac_X, { body })`, and `MipsAtom_Proc_(X, ab, { body })` declarations,
+--- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations (kind="comp_bare" / "comp_proc"),
 --- then resolves the function-args string from the preceding `FI_ Slice_MipsCode ac_X(...)` declaration via a backward walk.
+---
+--- `MipsAtom_Proc_(X, ab, { body })` declarations (kind="atom_proc") are ATOMS, not components, and are deliberately excluded —
+--- atoms get emitted via `tb_emit(tb, code_<name>)` linker symbols, not inlined as `mac_*` macros.
 ---
 --- Emits one `gen/macs.h` per *immediate source directory* with `#define mac_X(sig) \` macros plus `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
 --- All sources inside the same directory contribute to the same file (per-directory aggregation).
@@ -76,7 +79,7 @@ local MACS_FILENAME   = "macs.h"
 --- @field args       string|nil -- Function-args string (function form only)
 --- @field line       integer    -- Source line of the declaration
 --- @field comment    string|nil -- Scanner-owned `declaration_comment`; the components pass reads it from the scanner record
---- @field kind       string     -- "comp_bare" | "comp_proc" | "atom_proc"
+--- @field kind       string     -- "comp_bare" | "comp_proc"  (atom_proc is NOT a component — see `project_components`)
 --- @field debug_skip boolean    -- Mirror of `a.debug_skip` (scanner-owned); true iff a bare `atom_dbg_skip` marker immediately preceded the declaration
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -200,16 +203,17 @@ end
 local function project_components(source, scan)
 	local out = {}
 	for _, a in ipairs(scan.atoms) do
-		if a.kind == "comp_bare" or a.kind == "comp_proc" or a.kind == "atom_proc" then
-			-- `MipsAtom_Proc_` atoms have no `FI_ Slice_MipsCode ac_X(...)` function-decl prelude
-			-- (the macro sits inside a wrapping `I_ void <proc_name>(...)` body), so the function-args
-			-- lookup is meaningless; signature defaults to `...` (variadic-ignored).
-			-- The `mac_<name>` alias expansion discards the `ab` (atom-builder) arg the same way
-			-- `MipsAtomComp_Proc_` components do.
-			local args = nil
-			if a.kind ~= "atom_proc" then
-				args = find_function_args_for(source, a.raw_name, a.ident_pos)
-			end
+		-- Only `MipsAtomComp_(ac_X)` (kind="comp_bare") and `MipsAtomComp_Proc_(ac_X, ...)` (kind="comp_proc")
+		-- are COMPONENTS — they get inlined via `mac_<name>` aliases inside atom bodies.
+		-- `MipsAtom_Proc_` (kind="atom_proc") is an ATOM (ends with `mac_yield()`); it gets emitted via
+		-- `tb_emit(tb, code_<name>)` (linker symbol), NOT inlined as a macro. Including `atom_proc` here
+		-- would incorrectly emit `mac_<name>` aliases for atoms, polluting `gen/macs.h`.
+		-- See `docs/duffle_dsl_primer.md` §"mac_* aliases" for the contract.
+		if a.kind == "comp_bare" or a.kind == "comp_proc" then
+			-- Function-args lookup is meaningful for `MipsAtomComp_Proc_` components
+			-- (the macro sits inside `FI_ Slice_MipsCode ac_X(...)`); the alias expansion
+			-- discards the `ab` (atom-builder) arg the same way both forms do.
+			local args = find_function_args_for(source, a.raw_name, a.ident_pos)
 			-- Comment ownership: scan_source.lua stamps `declaration_comment` on the record by walking backward past any associated bare marker.
 			-- The pass reads `declaration_comment` directly.
 			local comment = a.declaration_comment or ""
@@ -221,7 +225,7 @@ local function project_components(source, scan)
 				body_tokens = a.body_tokens,
 				args        = args,
 				comment     = comment,
-				kind        = a.kind,  -- "comp_bare" | "comp_proc" | "atom_proc"; provenance emitter reads this.
+				kind        = a.kind,  -- "comp_bare" | "comp_proc"; provenance emitter reads this.
 				debug_skip  = a.debug_skip == true,
 			}
 		end
@@ -400,8 +404,7 @@ local function cycle_cost_rec(name, comp_by_name, latency, cache)
 end
 
 --- (internal) Recursive GP0 prim-buffer contribution. Count `store_word` / `store_half` / `store_byte` 
---- calls in the component body that target `R_PrimCursor` (these are the
---- RAM-side prim-buffer words the macro contributes), recursing through nested `mac_*` calls.
+--- calls in the component body that target `R_PrimCursor` (these are the RAM-side prim-buffer words the macro contributes), recursing through nested `mac_*` calls.
 --- Only `R_PrimCursor`-targeting stores count. Stores targeting other registers (e.g. `R_OtBase`, heap pointers) are not prim-buffer contributions.
 --- @param name         string
 --- @param comp_by_name table<string, Component>
@@ -484,10 +487,9 @@ end
 
 --- Determine the macro signature: function-args list (function form) or variadic-ignored (bare form).
 --- For `MipsAtomComp_Proc_` components, the leading `ab` (atom-builder) arg is dropped:
---- the generated `mac_<name>` macros are inline-expansion aliases for baked atoms; their bodies
---- don't reference `ab` (the builder is only consumed by the procedural `atombuilder_unroll` line
---- that `MipsAtomComp_Proc_` appends after the body). Inline callers therefore don't need to thread
---- a builder context.
+--- the generated `mac_<name>` macros are inline-expansion aliases for baked atoms; their bodies don't reference `ab`
+--- (the builder is only consumed by the procedural `atombuilder_unroll` line that `MipsAtomComp_Proc_` appends after the body).
+--- Inline callers therefore don't need to thread a builder context.
 --- @param args_str string|nil
 --- @return string
 local function signature_from_args(args_str)
@@ -544,7 +546,7 @@ local function build_component_lines(c, counts)
 
 	-- Marker comment: emitted once for every skipped component.
 	-- The marker is scanner-owned (declared by `atom_dbg_skip` immediately before the declaration in the source);
-	-- the components pass projects `c.debug_skip` and emits the marker as a generated comment.
+	-- This pass projects `c.debug_skip` and emits the marker as a generated comment.
 	if c.debug_skip then
 		lines[#lines + 1] = "/* atom_dbg_skip */"
 	end
@@ -578,8 +580,8 @@ end
 
 --- Build the boilerplate header lines (the `#ifdef INTELLISENSE_DIRECTIVES` block,
 --- the `// Auto-generated` comment, the `// Source:` line, and the self-contained `WORD_COUNT` macro definition).
---- @param dir     string       -- the absolute source directory
---- @param sources SourceFile[] -- sources contributing to this directory (for the header comment)
+--- @param dir     string       -- Absolute source directory
+--- @param sources SourceFile[] -- Sources contributing to this directory (for the header comment)
 --- @return string[]
 local function header_boilerplate(dir, sources)
 	local source_lines = { "// Directory: " .. duffle.to_absolute_path(dir) .. "/" }
@@ -610,9 +612,9 @@ end
 --- Compute the per-directory output path for `.macs.h`.
 ---  e.g. any source in `code/duffle/` produces `code/duffle/gen/macs.h` regardless of source filename.
 --- The directory name is the namespace; the filename does not repeat it.
---- @param dir string  -- the absolute source directory
---- @return string  -- the output directory
---- @return string  -- the full output path
+--- @param dir string  -- Absolute source directory
+--- @return string  -- Output directory
+--- @return string  -- Full output path
 local function compute_macs_h_path(dir)
 	local  out_dir  = dir .. "/" .. GEN_SUBDIR
 	local  out_path = out_dir .. "/" .. MACS_FILENAME
@@ -622,11 +624,11 @@ end
 --- Emit a per-directory `.macs.h` header with the aggregated `mac_X` macros + `WORD_COUNT` entries.
 --- Writes in BINARY mode so LF line endings are preserved (the git blob is LF; Windows text-mode would emit CRLF and break the byte-identical diff).
 --- @param ctx        PassCtx
---- @param dir        string                  -- the absolute source directory
---- @param sources    SourceFile[]            -- sources contributing to this directory (for the header comment)
---- @param components Component[]             -- aggregated components from all sources in this directory
---- @param counts     table<string, integer>  -- precomputed word counts (from count_all_components)
---- @return string|nil  -- path to the written file (nil if no components)
+--- @param dir        string                  -- Absolute source directory
+--- @param sources    SourceFile[]            -- Sources contributing to this directory (for the header comment)
+--- @param components Component[]             -- Aggregated components from all sources in this directory
+--- @param counts     table<string, integer>  -- Precomputed word counts (from count_all_components)
+--- @return string|nil -- Path to the written file (nil if no components)
 local function emit_component_macros_h(ctx, dir, sources, components, counts)
 	if #components == 0 then return nil end
 	local out_dir, out_path = compute_macs_h_path(dir)
@@ -665,11 +667,11 @@ local function update_canonical_word_counts(corpus, components, counts)
 end
 
 --- @class ComponentDef
---- @field name       string  -- bare name (without ac_/mac_ prefix)
---- @field line       integer -- definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
---- @field path       string  -- absolute source path of the definition
---- @field kind       string  -- "comp_bare" | "comp_proc" | "atom_proc"
---- @field debug_skip boolean -- mirror of the scanner-owned `a.debug_skip`; consumers read this directly
+--- @field name       string  -- Bare name (without ac_/mac_ prefix)
+--- @field line       integer -- Definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
+--- @field path       string  -- Absolute source path of the definition
+--- @field kind       string  -- "comp_bare" | "comp_proc"  (atom_proc is NOT a component)
+--- @field debug_skip boolean -- Mirror of the scanner-owned `a.debug_skip`; consumers read this directly
 
 --- (internal) Populate `corpus.components` with this source's components-by-name map.
 --- First declaration wins; later declarations of the same bare name are dropped and recorded as a collision via `corpus.collisions` (kind = "component").

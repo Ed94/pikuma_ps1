@@ -217,7 +217,7 @@ local function parse_path_root(input)
 		if not server_end or server_end == server_start then
 			error("UNC path requires //server/share: " .. input, 3)
 		end
-		local server = input:sub(server_start, server_end - 1)
+		local server      = input:sub(server_start, server_end - 1)
 		local share_start = server_end + 1
 		while input:sub(share_start, share_start) == "/" do
 			share_start = share_start + 1
@@ -515,8 +515,7 @@ local function splice_c_lines(source)
 		local splice_len = nil
 		if byte == BYTE_BACKSLASH and source:byte(pos + 1) == BYTE_NEWLINE then
 			splice_len = 2
-		elseif byte == BYTE_BACKSLASH and source:byte(pos + 1) == BYTE_CR
-			and source:byte(pos + 2) == BYTE_NEWLINE then
+		elseif byte == BYTE_BACKSLASH and source:byte(pos + 1) == BYTE_CR and source:byte(pos + 2) == BYTE_NEWLINE then
 			splice_len = 3
 		end
 
@@ -2095,7 +2094,8 @@ local E_MAC_PREFIX_LEN = 4
 ---   * Unknown `mac_X` (not in `component_index`): fall back to `word_counts[ident]` if present; otherwise emit one opaque event so the cycle budget accounts for the word.
 ---   * Marker Tokens (`atom_label(...)` / `atom_offset(...)`): Zero events (they are pure metaprogram hints).
 ---
---- Cycle protection: a per-expansion `visiting` set tracks components currently on the expansion stack; a re-entry produces a deterministic `{kind = "cycle", ...}` error and aborts that branch (does NOT hang, does NOT recurse).
+--- Cycle protection: a per-expansion `visiting` set tracks components currently on the expansion stack;
+--- a re-entry produces a deterministic `{kind = "cycle", ...}` error and aborts that branch (does NOT hang, does NOT recurse).
 ---
 --- Pure: reads `body_entry` / `component_index` / `word_counts`. Memoization is the caller's responsibility.
 --- Callers wanting `word_events` / `word_event_errors` precomputed for many atoms should memoize them per atom.

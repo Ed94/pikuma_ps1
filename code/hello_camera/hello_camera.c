@@ -133,20 +133,27 @@ resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4* up_in) 
 }
 
 /* Pre-build all 7 chain atoms of the resolve_look_at bundle into the static arena.
- * Called ONCE from main() before the frame loop. 
- * After this returns, the smem.resolve_look_at_atom_addrs[] array contains valid MIPS atom pointers 
+ * Called ONCE from main() before the frame loop.
+ * After this returns, the smem.resolve_look_at_atom_addrs[] array contains valid MIPS atom pointers
  * for the frame-time bundle helper to emit via tb_emit(tb, captured_addr).
  *
- * 7 atoms are within hello_camera.atom.c:
+ * 4 unique procs in hello_camera.atom.c (chain atoms 0, 2, 4, 6); atoms 1, 3, 5
+ * share the GENERIC normalize_v3s4_proc from gte.atom.c (called 3x with different
+ * O_(ResolveLookAtScratch,...) offsets):
  * 	0: resolve_look_at__input_and_sub_proc
- * 	1: resolve_look_at__normalize_fwd_to_uz_proc
+ * 	1: normalize_v3s4_proc                  (fwd → uz; offsets 0, 16)
  * 	2: resolve_look_at__cross_uz_up_in_to_right_proc
- * 	3: resolve_look_at__normalize_right_to_ux_proc
+ * 	3: normalize_v3s4_proc                  (right → ux; offsets 32, 48)
  * 	4: resolve_look_at__cross_uz_ux_to_up_proc
- * 	5: resolve_look_at__normalize_up_to_uy_proc
+ * 	5: normalize_v3s4_proc                  (up → uy; offsets 64, 80)
  * 	6: resolve_look_at__populate_and_translate_proc
  *
- * (gte.atom.c contains only normalize_v3s4_proc — bundle-specific scratch layout is no longer exposed to the GTE primitives file.)
+ * Task 12.16 promotion: the bundle-specific resolve_look_at__chain_normalize_proc
+ * has been promoted to the generic normalize_v3s4_proc (gte.atom.c), which now
+ * takes r_scratch + r_src_offset + r_dst_offset as U4 parameters. The 3 callers
+ * pass O_(ResolveLookAtScratch,...) macros as offset args. The metaprogram emits
+ * one set of `atom_offset__normalize_v3s4__srav_path__aligned_done` defs
+ * (namespaced by atom name) in duffle/gen/offsets.h, shared by all 3 callers.
  *
  * GPR pool per atom: 10 free GPRs (R_T0..R_T3 + R_T5..R_T7 + R_V0 + R_V1 + R_AT).
  * R_T4 is reserved as the wave-context carrier (R_ResolveScratch).
@@ -168,65 +175,76 @@ internal void resolve_look_at_init(void) {
 		R_T2,  /* r_up_in_ptr  (popped from tape) */
 		R_T3, R_T5, R_T6,  R_T7); /* r_tmp<0-3> */
 
-	/* Atom 1: resolve_look_at__normalize_fwd_to_uz — src=scratch+0, dst=scratch+16 (HARDCODED in body).
-	 * GPR pool: r_scratch (R_T4 carrier) + 10 body GPRs = 11.
-	 *   r_a/r_b (R_T0/R_T1) : src/dst pointers (r_a overlaps r_recip_est after the loads)
-	 *   r_e/r_f/r_i (R_T2/R_T3/R_T5) : src.x/y/z → result.x/y/z
-	 *   r_d/r_g (R_T6/R_T7) : MAC1/2 scratch (dead after stage 2)
-	 *   r_h (R_V0) : LZCR
-	 *   r_recip_est (R_V1), r_shift (R_AT) : saved throughout */
+	/* Atom 1: normalize_v3s4_proc (generic, from gte.atom.c) — src=scratch+0=fwd, dst=scratch+16=uz.
+	 * The proc takes r_src_offset + r_dst_offset as U4 PARAMETERS — we pass the O_(...) macros here (evaluating to numeric literals 0 and 16).
+	 * The 4-stage body is identical across the 3 call sites (atoms 1, 3, 5); only the offset args differ.
+	 * GPR pool: r_scratch (R_T4 carrier) + 9 body GPRs = 10.
+	 *   r_src_ptr      (R_T0) : src ptr
+	 *   r_dst_ptr      (R_T1) : dst ptr
+	 *   r_tmp          (R_T2) : unused (reserved for symmetry)
+	 *   r_mac1_scratch (R_T3) : MAC1 scratch
+	 *   r_mac2_scratch (R_T5) : src.x → result.x (carries through stages 1-2)
+	 *   r_recip_est    (R_T6) : src.y → result.y
+	 *   r_lzcr         (R_T7) : |v|² accumulator + srav amount (single reg)
+	 *   r_shift        (R_V0) : LZCR (saved across stages 3-4)
+	 *   r_branch_tmp   (R_V1) : src.z → result.z (reused after stage 1)
+	 */
 	smem.resolve_look_at_atom_addrs[1] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
-	resolve_look_at__normalize_fwd_to_uz_proc(ab,
-		R_ResolveScratch, /* r_scratch (wave-context carrier; src/dst base) */
-		R_T0, R_T1,       /* r_a, r_b (src/dst ptrs) */
-		R_T2, R_T3, R_T5, /* r_e, r_f, r_i (src components) */
-		R_T6, R_T7,       /* r_d, r_g (MAC scratch) */
-		R_V0,             /* r_h (LZCR) */
-		R_V1,             /* r_recip_est */
-		R_AT);            /* r_shift */
+	normalize_v3s4_proc(ab, R_ResolveScratch, /* r_scratch (wave-context carrier) */
+		O_(ResolveLookAtScratch, fwd),          /* r_src_offset = 0 */
+		O_(ResolveLookAtScratch, uz),           /* r_dst_offset = 16 */
+		R_T0, R_T1, R_T2,                       /* r_src_ptr, r_dst_ptr, r_tmp */
+		R_T3,                                   /* r_mac1_scratch */
+		R_T5,                                   /* r_mac2_scratch */
+		R_T6,                                   /* r_recip_est */
+		R_T7,                                   /* r_lzcr */
+		R_V0,                                   /* r_shift */
+		R_V1);                                  /* r_branch_tmp */
 
 	/* Atom 2: resolve_look_at__cross_uz_up_in_to_right — a=scratch+16, b=scratch+128,
 	 * out=scratch+32 (HARDCODED in body). GPR pool: r_scratch + 7 body + R_AT + R_V0 = 10. */
 	smem.resolve_look_at_atom_addrs[2] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
-	resolve_look_at__cross_uz_up_in_to_right_proc(ab,
-		R_ResolveScratch,   /* r_scratch (wave-context carrier; src/dst base) */
-		R_T0, R_T1, R_T2,   /* r_a, r_b, r_c (a.x/y/z → out.x/y/z) */
-		R_T3,               /* r_d (b.x) */
-		R_T5,               /* r_f (out ptr = scratch+32) */
-		R_T6,               /* r_g (a ptr = scratch+16) */
-		R_T7);              /* r_h (b ptr = scratch+128) */
+	resolve_look_at__cross_uz_up_in_to_right_proc(ab, R_ResolveScratch, /* r_scratch (wave-context carrier; src/dst base) */
+		R_T0, R_T1, R_T2, /* r_a, r_b, r_c (a.x/y/z → out.x/y/z) */
+		R_T3,             /* r_d (b.x) */
+		R_T5,             /* r_f (out ptr = scratch+32) */
+		R_T6,             /* r_g (a ptr = scratch+16) */
+		R_T7);            /* r_h (b ptr = scratch+128) */
 
-	/* Atom 3: resolve_look_at__normalize_right_to_ux — src=scratch+32, dst=scratch+48 (HARDCODED). */
+	/* Atom 3: normalize_v3s4_proc (generic, from gte.atom.c) — src=scratch+32=right, dst=scratch+48=ux. */
 	smem.resolve_look_at_atom_addrs[3] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
-	resolve_look_at__normalize_right_to_ux_proc(ab,
-		R_ResolveScratch,
-		R_T0, R_T1,
-		R_T2, R_T3, R_T5,
-		R_T6, R_T7,
+	normalize_v3s4_proc(ab, R_ResolveScratch,
+		O_(ResolveLookAtScratch, right), /* r_src_offset = 32 */
+		O_(ResolveLookAtScratch, ux),    /* r_dst_offset = 48 */
+		R_T0, R_T1, R_T2,
+		R_T3,
+		R_T5,
+		R_T6,
+		R_T7,
 		R_V0,
-		R_V1,
-		R_AT);
+		R_V1);
 
 	/* Atom 4: resolve_look_at__cross_uz_ux_to_up — a=scratch+16, b=scratch+48, out=scratch+64 (HARDCODED). */
 	smem.resolve_look_at_atom_addrs[4] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
-	resolve_look_at__cross_uz_ux_to_up_proc(ab,
-		R_ResolveScratch,
+	resolve_look_at__cross_uz_ux_to_up_proc(ab, R_ResolveScratch,
 		R_T0, R_T1, R_T2,
 		R_T3,
 		R_T5,  /* r_f (out ptr = scratch+64) */
 		R_T6,  /* r_g (a ptr = scratch+16) */
 		R_T7); /* r_h (b ptr = scratch+48) */
 
-	/* Atom 5: resolve_look_at__normalize_up_to_uy — src=scratch+64, dst=scratch+80 (HARDCODED). */
+	/* Atom 5: normalize_v3s4_proc (generic, from gte.atom.c) — src=scratch+64=up, dst=scratch+80=uy. */
 	smem.resolve_look_at_atom_addrs[5] = (MipsAtom*)u4_v(ab->start + ab->used * sizeof(U4));
-	resolve_look_at__normalize_up_to_uy_proc(ab,
-		R_ResolveScratch,
-		R_T0, R_T1,
-		R_T2, R_T3, R_T5,
-		R_T6, R_T7,
+	normalize_v3s4_proc(ab, R_ResolveScratch,
+		O_(ResolveLookAtScratch, up), /* r_src_offset = 64 */
+		O_(ResolveLookAtScratch, uy), /* r_dst_offset = 80 */
+		R_T0, R_T1, R_T2,
+		R_T3,
+		R_T5,
+		R_T6,
+		R_T7,
 		R_V0,
-		R_V1,
-		R_AT);
+		R_V1);
 
 	/* Atom 6: resolve_look_at__populate_and_translate — write look_at->m[][] from ux/uy/uz (computed from r_scratch+offset internally),
 	then compute translation column t[] = R * (-eye). GPR pool: r_look_at + r_scratch + 4 ptr regs + 3 tmp regs = 9. */
@@ -340,10 +358,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	}
 	// Camera look at (Tape)
 	{
-		MT3_S2S4* look_at = & smem.cam.look_at;
-		P3_S4*    eye     = & smem.cam.pos;
-		V3_S4*    up_in   = & v3s4(0, -fp_one, 0);
-
 		tb.used = 0; tb_scope_run(& tb) {
 			resolve_look_at(& tb, & smem.cam.look_at, & smem.cam.pos, & smem.cube.pos, & v3s4(0, -fp_one, 0));
 		}

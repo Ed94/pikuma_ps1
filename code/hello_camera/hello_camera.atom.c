@@ -173,24 +173,22 @@ typedef Struct_(ResolveLookAtScratch) {
 };
 
 /* ─── resolve_look_at bundle chain atoms ────────────────────────────
- * 7 unique atom procs in the resolve_look_at bundle (4 chain atoms + 3 normalize variants).
- * All 7 are runtime-built MipsAtom_Proc_ atoms: each function declares a static MipsCode[] body,
- * then calls atombuilder_unroll() to append it to the caller's MipsAtomBuilder arena.
- * resolve_look_at_init() uses this pattern to pre-build the bundle into the static arena (smem.resolve_look_at_arena).
+ * 4 unique atom procs in the resolve_look_at bundle (4 chain atoms + 3 calls to generic normalize_v3s4_proc).
+ * All 4 chain atoms are runtime-built MipsAtom_Proc_ atoms: each function declares a static MipsCode[] body, 
+ * then calls atombuilder_unroll() to append it to the caller's MipsAtomBuilder arena. resolve_look_at_init() 
+ * uses this pattern to pre-build the bundle into the static arena (smem.resolve_look_at_arena).
  *
  * Atom roster:
- *	0: resolve_look_at__input_and_sub           (chain atom)
- *	1: resolve_look_at__normalize_fwd_to_uz     (normalize wrapper)
- *	2: resolve_look_at__cross_uz_up_in_to_right (chain atom)
- *	3: resolve_look_at__normalize_right_to_ux   (normalize wrapper)
- *	4: resolve_look_at__cross_uz_ux_to_up       (chain atom)
- *	5: resolve_look_at__normalize_up_to_uy      (normalize wrapper)
- *	6: resolve_look_at__populate_and_translate  (chain atom)
+ *	0: resolve_look_at__input_and_sub              (chain atom)
+ *	1: normalize_v3s4_proc (gte.atom.c)            (generic normalize; called for fwd→uz)
+ *	2: resolve_look_at__cross_uz_up_in_to_right    (chain atom)
+ *	3: normalize_v3s4_proc (gte.atom.c)            (generic normalize; called for right→ux)
+ *	4: resolve_look_at__cross_uz_ux_to_up          (chain atom)
+ *	5: normalize_v3s4_proc (gte.atom.c)            (generic normalize; called for up→uy)
+ *	6: resolve_look_at__populate_and_translate     (chain atom)
  *
- * The 3 normalize wrappers are CHAIN-SPECIFIC — they hardcode src/dst scratch offsets in the body
- * (computed via r_scratch + O_(ResolveLookAtScratch, fld)). 
- * The generic normalize_v3s4_proc (in gte.atom.c) takes src/dst as GPR parameters and is NOT used by this bundle.
- * (Layering rule: gte.atom.c contains only generic GTE primitives; bundle-specific code are within this file.)
+ * The generic normalize_v3s4_proc is a parameterized 4-stage GTE normalize (SQR → mfc2 → LZCS → GPF → srav);
+ * it accepts scratch base + offset args so any caller (with a scratch base + struct schema) can use it.
  */
 
 typedef Struct_(Binds_ResolveLookAtSub) {
@@ -389,248 +387,6 @@ I_ void resolve_look_at__cross_uz_ux_to_up_proc(MipsAtomBuilder_R ab,	U4 r_scrat
 	store_word(r_b, r_f, O_(V3_S4,y)),
 	store_word(r_c, r_f, O_(V3_S4,z)),
 
-	mac_yield()
-})
-
-/* Atoms 1, 3, 5 in the bundle: chain-specific normalize wrappers around the generic normalize_v3s4_proc (gte.atom.c).
- * The generic proc takes src/dst as GPR parameters; these wrappers HARDCODE src/dst via r_scratch + O_(ResolveLookAtScratch, fld)
- * so the C-side bundle helper doesn't need to push scratchpad addresses via tb_data between atoms.
- * 
- * The 4-stage normalize body (SQR → mfc2 → LZCS → GPF → srav) is identical to the generic version (GPR-renamed); cycle counts match.
- * The only difference is the (src, dst) scratch offsets and the per-proc atom_label suffixes
- * (srav_path_fwd_to_uz, srav_path_right_to_ux, srav_path_up_to_uy) so the per-proc-instance offsets are emitted disjointly in gen/offsets.h.
- *
- * GPR pool (10 free regs: R_T0..R_T3, R_T5..R_T7, R_V0, R_V1, R_AT; R_T4 reserved for R_ResolveScratch):
- *   r_a         : src ptr (overlaps with r_recip_est carrier after the 3 src-loads)
- *   r_b         : dst ptr (saved throughout)
- *   r_e/r_f/r_i : src.x/y/z → result.x/y/z (preserved across stages 1-2 via r_d/r_g/r_recip_est scratch)
- *   r_d/r_g     : MAC1/2 scratch (dead after stage 2)
- *   r_h         : LZCR (saved across stages 3-4)
- *   r_recip_est : |v|² accumulator + sqrtbl[index] + 1/|v| (saved throughout)
- *   r_shift     : final srav amount (saved across stages 3-4)
- *
- * The Lua metaprogram (Task 12.10) auto-emits:
- *   - `mac_resolve_look_at__normalize_<from>_to_<to>` alias in gen/macs.h
- *   - `atom_offset__srav_path_<from>_to_<to>__aligned_done_<from>_to_<to>` defs in gen/offsets.h
- */
-
-/* Atom 1: normalize fwd (scratch+0) → uz (scratch+16). */
-I_ void resolve_look_at__normalize_fwd_to_uz_proc(MipsAtomBuilder_R ab,	U4 r_scratch
-	,	U4 r_a, U4 r_b         /* src/dst scratch pointers */
-	,	U4 r_e, U4 r_f, U4 r_i /* src.x/y/z → result.x/y/z */
-	,	U4 r_d, U4 r_g         /* MAC1/2 scratch (dead after stage 2) */
-	,	U4 r_h                 /* LZCR */
-	,	U4 r_recip_est
-	,	U4 r_shift
-) MipsAtom_Proc_(resolve_look_at__normalize_fwd_to_uz, ab, {
-	/* Compute src/dst pointers from r_scratch. */
-	add_si(r_a, r_scratch, O_(ResolveLookAtScratch,fwd)),     /* r_a = &fwd */
-	add_si(r_b, r_scratch, O_(ResolveLookAtScratch,uz)),      /* r_b = &uz  */
-	nop,
-
-	/* Load src.x/y/z from r_a into r_e/r_f/r_i. */
-	load_word(r_e, r_a, O_(V3_S4,x)),
-	load_word(r_f, r_a, O_(V3_S4,y)),
-	load_word(r_i, r_a, O_(V3_S4,z)),
-	nop, /* load-delay */
-
-	/* Stage 1: mtc2 src → IR1/2/3, SQR fires. */
-	gte_mv_to_data_r(r_e, C2_IR1),
-	gte_mv_to_data_r(r_f, C2_IR2),
-	gte_mv_to_data_r(r_i, C2_IR3),
-	nop, gte_cmdw_sqr,
-
-	/* Stage 2: mfc2 MAC1/2/3, sum, mtc2 LZCS. */
-	gte_mv_from_data_r(r_d,         C2_MAC1),
-	gte_mv_from_data_r(r_g,         C2_MAC2),
-	gte_mv_from_data_r(r_recip_est, C2_MAC3),
-	nop,
-	add_u(r_recip_est, r_recip_est, r_g),
-	add_u(r_recip_est, r_recip_est, r_d),
-	gte_mv_to_data_r(r_recip_est, C2_LZCS),
-	nop2,
-	gte_mv_from_data_r(r_h, C2_LZCR),
-	nop,
-
-	/* Stage 3: compute shift amount, align |v|² to bit 24. */
-	and_i(   r_h, r_h, -2),
-	li_s(    r_shift, 31),
-	sub_s(   r_shift, r_shift, r_h),
-	shift_aright(r_shift, r_shift, 1),
-	add_si(  r_a, r_h, -24),                 /* r_a = LZCR - 24 (overlapping with r_recip_est; src ptr no longer needed) */
-	branch_lt_zero(r_a, atom_offset(srav_path_fwd_to_uz, aligned_done_fwd_to_uz)), nop,
-	jump_rel(atom_offset(aligned_done_fwd_to_uz, srav_path_fwd_to_uz)),
-	shift_lleft_var(r_recip_est, r_recip_est, r_a),
-	atom_label(srav_path_fwd_to_uz)
-	li_s(    r_a, 24),
-	sub_s(   r_a, r_a, r_h),
-	shift_aright_var(r_recip_est, r_recip_est, r_a),
-	atom_label(aligned_done_fwd_to_uz)
-	/* r_recip_est holds |v|² aligned to bit 24. */
-	add_si(  r_recip_est, r_recip_est, -64),
-	shift_lleft(r_recip_est, r_recip_est, 1),
-	load_upper_i(r_a, u4_hi(& gte_normalize_sqr_tbl)),
-	or_i_self(r_a, u4_lo(& gte_normalize_sqr_tbl)),
-	add_u(r_a, r_a, r_recip_est),
-	load_half(r_recip_est, r_a, 0),
-	nop,
-
-	/* Stage 4: GPF + srav finalize. */
-	gte_mv_to_data_r(r_recip_est, C2_IR0),
-	gte_mv_to_data_r(r_e, C2_IR1),
-	gte_mv_to_data_r(r_f, C2_IR2),
-	gte_mv_to_data_r(r_i, C2_IR3),
-	nop2,
-	gte_cmdw_gpf,
-	gte_mv_from_data_r(r_e, C2_MAC1),
-	gte_mv_from_data_r(r_f, C2_MAC2),
-	gte_mv_from_data_r(r_i, C2_MAC3),
-	shift_aright_var(r_e, r_e, r_shift),
-	shift_aright_var(r_f, r_f, r_shift),
-	shift_aright_var(r_i, r_i, r_shift),
-
-	/* Store result.x/y/z to r_b (dst ptr = scratch+16). */
-	store_word(r_e, r_b, O_(V3_S4,x)),
-	store_word(r_f, r_b, O_(V3_S4,y)),
-	store_word(r_i, r_b, O_(V3_S4,z)),
-
-	mac_yield()
-})
-
-/* Atom 3: normalize right (scratch+32) → ux (scratch+48). */
-I_ void resolve_look_at__normalize_right_to_ux_proc(MipsAtomBuilder_R ab, U4 r_scratch
-	,	U4 r_a, U4 r_b
-	,	U4 r_e, U4 r_f, U4 r_i
-	,	U4 r_d, U4 r_g
-	,	U4 r_h
-	,	U4 r_recip_est
-	,	U4 r_shift
-) MipsAtom_Proc_(resolve_look_at__normalize_right_to_ux, ab, {
-	add_si(r_a, r_scratch, O_(ResolveLookAtScratch,right)),    /* r_a = &right */
-	add_si(r_b, r_scratch, O_(ResolveLookAtScratch,ux)),       /* r_b = &ux    */
-	nop,
-	load_word(r_e, r_a, O_(V3_S4,x)),
-	load_word(r_f, r_a, O_(V3_S4,y)),
-	load_word(r_i, r_a, O_(V3_S4,z)),
-	nop,
-	gte_mv_to_data_r(r_e, C2_IR1),
-	gte_mv_to_data_r(r_f, C2_IR2),
-	gte_mv_to_data_r(r_i, C2_IR3),
-	nop, gte_cmdw_sqr,
-	gte_mv_from_data_r(r_d,         C2_MAC1),
-	gte_mv_from_data_r(r_g,         C2_MAC2),
-	gte_mv_from_data_r(r_recip_est, C2_MAC3),
-	nop,
-	add_u(r_recip_est, r_recip_est, r_g),
-	add_u(r_recip_est, r_recip_est, r_d),
-	gte_mv_to_data_r(r_recip_est, C2_LZCS),
-	nop2,
-	gte_mv_from_data_r(r_h, C2_LZCR),
-	nop,
-	and_i(   r_h, r_h, -2),
-	li_s(    r_shift, 31),
-	sub_s(   r_shift, r_shift, r_h),
-	shift_aright(r_shift, r_shift, 1),
-	add_si(  r_a, r_h, -24),
-	branch_lt_zero(r_a, atom_offset(srav_path_right_to_ux, aligned_done_right_to_ux)), nop,
-	jump_rel(atom_offset(aligned_done_right_to_ux, srav_path_right_to_ux)),
-	shift_lleft_var(r_recip_est, r_recip_est, r_a),
-	atom_label(srav_path_right_to_ux)
-	li_s(    r_a, 24),
-	sub_s(   r_a, r_a, r_h),
-	shift_aright_var(r_recip_est, r_recip_est, r_a),
-	atom_label(aligned_done_right_to_ux)
-	add_si(  r_recip_est, r_recip_est, -64),
-	shift_lleft(r_recip_est, r_recip_est, 1),
-	load_upper_i(r_a, u4_hi(& gte_normalize_sqr_tbl)),
-	or_i_self(r_a, u4_lo(& gte_normalize_sqr_tbl)),
-	add_u(r_a, r_a, r_recip_est),
-	load_half(r_recip_est, r_a, 0),
-	nop,
-	gte_mv_to_data_r(r_recip_est, C2_IR0),
-	gte_mv_to_data_r(r_e, C2_IR1),
-	gte_mv_to_data_r(r_f, C2_IR2),
-	gte_mv_to_data_r(r_i, C2_IR3),
-	nop2,
-	gte_cmdw_gpf,
-	gte_mv_from_data_r(r_e, C2_MAC1),
-	gte_mv_from_data_r(r_f, C2_MAC2),
-	gte_mv_from_data_r(r_i, C2_MAC3),
-	shift_aright_var(r_e, r_e, r_shift),
-	shift_aright_var(r_f, r_f, r_shift),
-	shift_aright_var(r_i, r_i, r_shift),
-	store_word(r_e, r_b, O_(V3_S4,x)),
-	store_word(r_f, r_b, O_(V3_S4,y)),
-	store_word(r_i, r_b, O_(V3_S4,z)),
-	mac_yield()
-})
-
-/* Atom 5: normalize up (scratch+64) → uy (scratch+80). */
-I_ void resolve_look_at__normalize_up_to_uy_proc(MipsAtomBuilder_R ab
-	,	U4 r_scratch
-	,	U4 r_a, U4 r_b
-	,	U4 r_e, U4 r_f, U4 r_i
-	,	U4 r_d, U4 r_g
-	,	U4 r_h
-	,	U4 r_recip_est
-	,	U4 r_shift
-) MipsAtom_Proc_(resolve_look_at__normalize_up_to_uy, ab, {
-	add_si(r_a, r_scratch, O_(ResolveLookAtScratch,up)),       /* r_a = &up */
-	add_si(r_b, r_scratch, O_(ResolveLookAtScratch,uy)),       /* r_b = &uy */
-	nop,
-	load_word(r_e, r_a, O_(V3_S4,x)),
-	load_word(r_f, r_a, O_(V3_S4,y)),
-	load_word(r_i, r_a, O_(V3_S4,z)),
-	nop,
-	gte_mv_to_data_r(r_e, C2_IR1),
-	gte_mv_to_data_r(r_f, C2_IR2),
-	gte_mv_to_data_r(r_i, C2_IR3),
-	nop, gte_cmdw_sqr,
-	gte_mv_from_data_r(r_d,         C2_MAC1),
-	gte_mv_from_data_r(r_g,         C2_MAC2),
-	gte_mv_from_data_r(r_recip_est, C2_MAC3),
-	nop,
-	add_u(r_recip_est, r_recip_est, r_g),
-	add_u(r_recip_est, r_recip_est, r_d),
-	gte_mv_to_data_r(r_recip_est, C2_LZCS),
-	nop2,
-	gte_mv_from_data_r(r_h, C2_LZCR),
-	nop,
-	and_i(   r_h, r_h, -2),
-	li_s(    r_shift, 31),
-	sub_s(   r_shift, r_shift, r_h),
-	shift_aright(r_shift, r_shift, 1),
-	add_si(  r_a, r_h, -24),
-	branch_lt_zero(r_a, atom_offset(srav_path_up_to_uy, aligned_done_up_to_uy)), nop,
-	jump_rel(atom_offset(aligned_done_up_to_uy, srav_path_up_to_uy)),
-	shift_lleft_var(r_recip_est, r_recip_est, r_a),
-	atom_label(srav_path_up_to_uy)
-	li_s(    r_a, 24),
-	sub_s(   r_a, r_a, r_h),
-	shift_aright_var(r_recip_est, r_recip_est, r_a),
-	atom_label(aligned_done_up_to_uy)
-	add_si(  r_recip_est, r_recip_est, -64),
-	shift_lleft(r_recip_est, r_recip_est, 1),
-	load_upper_i(r_a, u4_hi(& gte_normalize_sqr_tbl)),
-	or_i_self(r_a, u4_lo(& gte_normalize_sqr_tbl)),
-	add_u(r_a, r_a, r_recip_est),
-	load_half(r_recip_est, r_a, 0),
-	nop,
-	gte_mv_to_data_r(r_recip_est, C2_IR0),
-	gte_mv_to_data_r(r_e, C2_IR1),
-	gte_mv_to_data_r(r_f, C2_IR2),
-	gte_mv_to_data_r(r_i, C2_IR3),
-	nop2,
-	gte_cmdw_gpf,
-	gte_mv_from_data_r(r_e, C2_MAC1),
-	gte_mv_from_data_r(r_f, C2_MAC2),
-	gte_mv_from_data_r(r_i, C2_MAC3),
-	shift_aright_var(r_e, r_e, r_shift),
-	shift_aright_var(r_f, r_f, r_shift),
-	shift_aright_var(r_i, r_i, r_shift),
-	store_word(r_e, r_b, O_(V3_S4,x)),
-	store_word(r_f, r_b, O_(V3_S4,y)),
-	store_word(r_i, r_b, O_(V3_S4,z)),
 	mac_yield()
 })
 

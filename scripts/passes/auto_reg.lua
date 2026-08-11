@@ -144,10 +144,10 @@ local function build_user_pins(corpus)
 end
 
 -- Find every physical GPR referenced in the atom body, via EITHER:
---   (a) a hardcoded physical GPR ident (R_T\d+|R_V\d+|R_A\d+|R_S\d+) — the existing regex;
---   (b) an alias ident (R_<Alias>) resolved via alias_to_gpr back to its physical GPR ident.
--- Returns { [physical_gpr_ident] = count }. The clash-detection and source-pool-exclusion logic
--- only needs the presence of each GPR (boolean test), but keeping the count preserves the
+--   (a) A hardcoded physical GPR ident (R_T\d+|R_V\d+|R_A\d+|R_S\d+) — the existing regex;
+--   (b) An alias ident (R_<Alias>) resolved via alias_to_gpr back to its physical GPR ident.
+-- Returns { [physical_gpr_ident] = count }. Clash-detection and source-pool-exclusion logic
+-- only needs the presence of each GPR (boolean test), but keeping count preserves the
 -- original find_hardcoded_rn shape so callers can switch without churn.
 -- The alias pattern is sorted lexicographically to keep the regex deterministic.
 local function find_used_gprs(body_text, alias_to_gpr)

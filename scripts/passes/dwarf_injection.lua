@@ -703,9 +703,9 @@ end
 ---     `{comp_name, call_file, call_line, comp_file, comp_line, start_pos, end_pos, body_lines, debug_skip}`. `body_lines[k]`
 ---     is the k-th word's source line within the component body.
 ---
---- @param corpus table -- the corpus from `ctx.shared.corpus`
+--- @param corpus table -- From `ctx.shared.corpus`
 --- @param addrs  table -- ELF symbols keyed by atom name from `elf_dwarf.read_nm`
---- @return table[]  -- list of {name, addr, size_bytes, words, entries, invocations, debug_skip?}
+--- @return table[]  -- List of {name, addr, size_bytes, words, entries, invocations, debug_skip?}
 local function build_atom_table(corpus, addrs)
 	-- Cross-ref: keep only atoms present in BOTH the nm symbol table AND `corpus.atoms_by_name`. Output is sorted by ascending addr.
 	local atoms_by_name = corpus.atoms_by_name or {}
@@ -834,10 +834,10 @@ end
 --- This is intentional: silently falling back to a hardcoded GPR would mask the missing opt-in.
 ---
 --- Pre-tokenized: `body_tokens` is the scan-source pass's pre-split list of top-level statements (each entry is a single `load_*` call or other statement).
---- @param body_tokens table[]  -- the atom's pre-tokenized body statements (from atom.body_tokens)
---- @param binds_name  string   -- expected Binds_X name (skip pairs with mismatching binds)
---- @param registries  table    -- merged registries from collect_per_source_registries
---- @return table[]             -- list of {reg = <MIPS index>, field = <field name>}
+--- @param body_tokens table[]  -- The atom's pre-tokenized body statements (from atom.body_tokens)
+--- @param binds_name  string   -- Expected Binds_X name (skip pairs with mismatching binds)
+--- @param registries  table    -- Merged registries from collect_per_source_registries
+--- @return table[]             -- List of {reg = <MIPS index>, field = <field name>}
 local function parse_body_load_pairs(body_tokens, binds_name, registries)
 	local pairs = {}
 	local reg_index_by_name = (registries and registries.register_alias_registry) or {}
@@ -880,9 +880,9 @@ end
 --- The piece chain uses (DW_OP_regN, DW_OP_piece, ULEB128(field_size)).
 ---
 --- Binds fields come from `scan.binds`; the per-source `scan.binds[i].fields` already carries the typed-field record after the scan-source generalization.
---- @param corpus     table   -- the corpus from `ctx.shared.corpus`
---- @param atom_table table[] -- the cross-ref'd atom table from build_atom_table
---- @param registries table   -- merged registries from collect_per_source_registries
+--- @param corpus     table   -- From `ctx.shared.corpus`
+--- @param atom_table table[] -- Cross-ref'd atom table from build_atom_table
+--- @param registries table   -- Merged registries from collect_per_source_registries
 --- @return table, table      -- (rbind_atoms, rbind_structs)
 local function parse_rbind_atoms(corpus, atom_table, registries)
 	registries = registries or {}
@@ -944,7 +944,7 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 						binds     = ai.binds,
 						fields    = struct.fields, -- {name, offset} from scan.binds
 						bytes     = struct.bytes,
-						regs      = pairs,         -- ordered list of {reg, field}
+						regs      = pairs,         -- Ordered list of {reg, field}
 						info_line = ai.info_line,
 					}
 					table.insert(struct.atom_names, atom_name)
@@ -1036,13 +1036,13 @@ local function build_dwarf_aranges_section(existing, atom_table)
 	-- We bump the unit's length field accordingly.
 	--
 	-- Unit structure (DWARF4 §7.21):
-	--   unit_length (4)
-	--   version (2)
+	--   unit_length       (4)
+	--   version           (2)
 	--   debug_info_offset (4)  -- CU DIE offset in .debug_info
-	--   address_size (1)
-	--   segment_size (1)
-	--   entries... (4-byte addr + 4-byte length)
-	--   terminator (8 bytes: addr=0, length=0)
+	--   address_size      (1)
+	--   segment_size      (1)
+	--   entries...        (4-byte addr + 4-byte length)
+	--   terminator        (8 bytes: addr=0, length=0)
 
 	-- Walk all units and emit each one (preserving existing structure).
 	-- For the LAST unit, replace the terminator with my entries + new term.
@@ -1780,7 +1780,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	emit(uleb128(ABBREV_TYPED_VIEW_POINTER))  -- DW_TAG_pointer_type (abbrev 110; NOT 9; void chain target)
 	emit(elf_dwarf.write_u32_le(ref4_of(void_chain_offset)))  -- 4-byte ref4: points at the void base_type's tag byte
 	-- type_chain_offsets["void|1"] is what step (f) of the per-RR_<R_Name> chain looks up.
-	type_chain_offsets["void|1"] = void_chain_offset  -- both the base_type offset and the pointer_type are emitted consecutively; the OUTERMOST is the pointer_type. The variable's DW_AT_type must reference the pointer_type, not the base_type. Patch below.
+	type_chain_offsets["void|1"] = void_chain_offset  -- both the base_type offset and the pointer_type are emitted consecutively; the OUTERMOST is the pointer_type.
+	-- The variable's DW_AT_type must reference the pointer_type, not the base_type. Patch below.
 	-- Capture the pointer_type's offset (the last-thing-emitted DIE start) and overwrite the lookup.
 	-- The pointer_type was emitted as: uleb(9) (1 byte) + 4-byte ref4 = 5 bytes. Its tag byte is at void_chain_offset + 8 (the base_type's 8 bytes: 1 tag + 5 name + 1 byte_size + 1 encoding).
 	local ptr_void_offset = void_chain_offset + 8

@@ -39,8 +39,8 @@
 --- `── Info` section renders finding-level info between `── Warnings` and the per-atom cycle counts.
 ---
 --- The structural handshake checks (`mac_yield_uniformity`, `hazard_nop_use`, `control_transfer_delay_slot_use`) skip atoms/components with `debug_skip == true`.
---- The `atom_dbg_skip` marker designates runtime-helper declarations whose structure is fixed by the tape runtime (e.g. `tape_exit`, `ac_yield`).
---- Flagging them as "missing mac_yield" or "BD slot is redundant" is signal noise, not a logic failure. 
+--- `atom_dbg_skip` marker designates runtime-helper declarations whose structure is fixed by the tape runtime (e.g. `tape_exit`, `ac_yield`).
+--- Flagging them as "missing mac_yield" or "BD slot is redundant".
 --- Other checks (transfer_hazards, gpu_portstore_shape, abi_handoff, enum_alias_membership, …) still apply to debug_skip declarations because real hazards / typos can still surface in them.
 ---
 --- The orchestrator (`ps1_meta.lua`) wires this module in via the PASSES table:
@@ -452,7 +452,7 @@ local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
 end
 
 -- True iff `consumer_event` reads the GPR operand at any position the destination register occupies.
--- The read-position lookup consults `duffle.OPERAND_READ_POSITIONS` for the consumer's encoder and walks each `args[pos]` to find an operand-equal match.
+-- read_pos lookup consults `duffle.OPERAND_READ_POSITIONS` for the consumer's encoder and walks each `args[pos]` to find an operand-equal match.
 local function is_gpr_consumer_of(consumer_event, destination)
 	local consumer_token = consumer_event.encoder or consumer_event.ident
 	local read_pos       = duffle.OPERAND_READ_POSITIONS or {}

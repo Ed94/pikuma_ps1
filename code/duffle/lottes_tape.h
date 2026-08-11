@@ -27,9 +27,9 @@
  * to author and compose programs with. From here various conventions can be further applied. 
  * To make things easier  to understand it may be better to focus on what this ABI does not have. 
  * It does not have have any branching within the tape but relative branches within atoms or between atoms.
- * Branching nearly is always downstream. Stack usage is non-existent.
+ * Branching nearly is always downstream. Atuomatic stack usage is non-existent.
  * Push/Pop, FIFO, or Arena/Bump data structures are used by atoms explicitly.
- * In it's current form with the C11 macro dsl, the user also has fullfill manual register allocation per atom.
+ * In it's current form with the C11 macro DSL, the user also has fullfill manual register allocation per atom.
  * 
  * One of the remarkable things about utilizing this ABI is its essentially interopable with CPUs, GPUs, FPGA, 
  * or, basically anything from the 5th generation consoles and onward.
