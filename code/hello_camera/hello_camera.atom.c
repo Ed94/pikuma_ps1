@@ -25,7 +25,7 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(hello_joypad_atom_c);
 
 #pragma region MACs (Mips Atom components)
 
-FI_ Slice_MipsCode ac_put_disp_env(MipsAtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
+FI_ Slice_MipsCode ac_put_disp_env(AtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
 MipsAtomComp_Proc_(ac_put_disp_env, ab, {
 	// Emits 5 GP0 commands for buffer 0 (display_area = (0,0,320,240)).
 	// Sequence per libpsyx PutDispEnv: DrawArea TL → DrawArea BR → Mask → DrawArea TL → DrawArea BR
@@ -36,7 +36,7 @@ MipsAtomComp_Proc_(ac_put_disp_env, ab, {
 	mac_gcmd_push(gp0_word_draw_area_bottom_right_320x240, reg_transfer, reg_base, port),
 })
 
-FI_ Slice_MipsCode ac_put_draw_env(MipsAtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
+FI_ Slice_MipsCode ac_put_draw_env(AtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
 MipsAtomComp_Proc_(ac_put_draw_env, ab, {
 	/*
 	* ORIGIN: each code word corresponds to the EXACT value libpsyx's PutDrawEnv function would compute for the same DrawEnv settings.
@@ -131,11 +131,6 @@ typedef Struct_(Binds_ResolveLookAt) {
 	V3_S4*    up_in;
 };
 
-/* Per-atom bind-pop structs for the resolve_look_at bundle. */
-typedef Struct_(Binds_ResolveLookAtScratch) {
-	U4 scratch_base;  /* U4 (scratch base address — populated by helper with u4_(smem.scratchpad)) */
-};
-
 /* ─── ResolveLookAtScratch — offset schema for the resolve_look_at bundle's
  * scratchpad slots (PS1 hardware scratchpad at 0x1F800000).
  *
@@ -195,6 +190,7 @@ typedef Struct_(Binds_ResolveLookAtSub) {
 	U4 target;  /* U4 (C-side P3_S4* — read by atom 0 directly; NOT a scratchpad address) */
 	U4 eye;     /* U4 (C-side P3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
 	U4 up_in;   /* U4 (C-side V3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
+	U4 scratchpad;
 };
 
 /* Atom 0 in the bundle: input_and_sub. Stages C-side inputs into the scratchpad and computes fwd = target - eye.
@@ -202,15 +198,13 @@ typedef Struct_(Binds_ResolveLookAtSub) {
  *   r_target_ptr : P3_S4* (C-side struct; atom 0 reads target.x/y/z directly)
  *   r_eye_ptr    : P3_S4* (C-side struct; staged into scratchpad at +96/+100/+104)
  *   r_up_in_ptr  : V3_S4* (C-side struct; staged into scratchpad at +128/+132/+136)
- * Wave-context output:
  *   r_scratch    : R_ResolveScratch (R_T4) — scratch base, read by atoms 1-6
  * 
  * Bind-pop layout:
- *   Binds_ResolveLookAtSub     = 12 bytes (target + eye + up_in ptrs)
- *   Binds_ResolveLookAtScratch =  4 bytes (scratch_base)
+ *   Binds_ResolveLookAtSub
  * Staging work:
- *   * Stage eye.x/y/z   → scratch+96/+100/+104 (for atom 6's translation column)
- *   * Stage up_in.x/y/z → scratch+128/+132/+136 (for atom 2's outer-product operand)
+ *   * Stage eye.x/y/z   → scratch (for atom 6's translation column)
+ *   * Stage up_in.x/y/z → scratch (for atom 2's outer-product operand)
  *   * Compute fwd = target - eye, store fwd.x/y/z → scratch+0/+4/+8 (for atom 1)
  *
  * GPR codes (assigned by resolve_look_at_init):
@@ -227,17 +221,16 @@ typedef Struct_(Binds_ResolveLookAtSub) {
  *
  * Pool cost: 8 GPRs + R_T4 (carrier) + R_AT + R_V0 (hardcoded) = 11 GPRs.
  */
-I_ void resolve_look_at__input_and_sub_proc(MipsAtomBuilder_R ab,	U4 r_scratch
+I_ MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,	U4 r_scratch
 	,	U4 r_target_ptr,U4 r_eye_ptr, U4 r_up_in_ptr
 	,	U4 r_tmp0,      U4 r_tmp1,    U4 r_tmp2, U4 r_tmp3
-) MipsAtom_Proc_(resolve_look_at__input_and_sub, ab, {
+) MipsAtom_Proc_(resolve_look_at__input_and_sub, aa, {
 	/* Pop the 3 C-side pointers + scratch_base from the tape. */
 	load_word(r_target_ptr, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
 	load_word(r_eye_ptr,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
 	load_word(r_up_in_ptr,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
+	load_word(r_scratch,    R_TapePtr, O_(Binds_ResolveLookAtSub,scratchpad)),
 	add_ui_self(            R_TapePtr, S_(Binds_ResolveLookAtSub)),
-	load_word(r_scratch,    R_TapePtr, O_(Binds_ResolveLookAtScratch,scratch_base)),
-	add_ui_self(            R_TapePtr, S_(Binds_ResolveLookAtScratch)),
 
 	/* Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation
 	 * column). Reuse r_tmp0/r_tmp1/r_tmp2. Offsets via O_(ResolveLookAtScratch,*). */
@@ -295,11 +288,11 @@ I_ void resolve_look_at__input_and_sub_proc(MipsAtomBuilder_R ab,	U4 r_scratch
  */
 
 /* Atom 2: cross uz × up_in → right. */
-I_ void resolve_look_at__cross_uz_up_in_to_right_proc(MipsAtomBuilder_R ab, U4 r_scratch
+I_ MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_scratch
 	,	U4 r_a, U4 r_b, U4 r_c /* load a.x/y/z; result out.x/y/z */
 	,	U4 r_d                 /* load b.x */
 	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &right (out ptr), r_g = &uz, r_h = &up_in */
-) MipsAtom_Proc_(resolve_look_at__cross_uz_up_in_to_right, ab, {
+) MipsAtom_Proc_(resolve_look_at__cross_uz_up_in_to_right, aa, {
 	/* Compute the three scratch pointers from r_scratch. */
 	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)),    /* r_g = &uz */
 	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,up_in)), /* r_h = &up_in */
@@ -346,11 +339,11 @@ I_ void resolve_look_at__cross_uz_up_in_to_right_proc(MipsAtomBuilder_R ab, U4 r
 })
 
 /* Atom 4: cross uz × ux → up. */
-I_ void resolve_look_at__cross_uz_ux_to_up_proc(MipsAtomBuilder_R ab,	U4 r_scratch
+I_ MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_scratch
 	,	U4 r_a, U4 r_b, U4 r_c                  /* load a.x/y/z; result out.x/y/z */
 	,	U4 r_d                                  /* load b.x */
 	,	U4 r_f, U4 r_g, U4 r_h                  /* r_f = &up (out ptr), r_g = &uz, r_h = &ux */
-) MipsAtom_Proc_(resolve_look_at__cross_uz_ux_to_up, ab, {
+) MipsAtom_Proc_(resolve_look_at__cross_uz_ux_to_up, aa, {
 	/* Compute the three scratch pointers from r_scratch. */
 	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)),       /* r_g = &uz */
 	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,ux)),       /* r_h = &ux */
@@ -415,12 +408,12 @@ typedef Struct_(Binds_ResolveLookAtPopAndTrans) {
  * MVMVA computes R * pos (with cv=0/mx=0/sf=0/v=0); MAC1/2/3 = R * (-eye).
  * Pool cost: r_look_at (1) + r_scratch (R_T4 carrier) + 4 ptr regs + 3 tmp regs = 9 GPRs.
  */
-I_ void resolve_look_at__populate_and_translate_proc(MipsAtomBuilder_R ab
+I_ MipsAtom* resolve_look_at__populate_and_translate_proc(AtomArena_R aa
 	,	U4 r_look_at
 	,	U4 r_scratch
 	,	U4 r_pux, U4 r_puy, U4 r_puz, U4 r_peye    /* 4 dedicated pointer regs */
 	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2             /* 3 atom-local scratch regs */
-) MipsAtom_Proc_(resolve_look_at__populate_and_translate, ab, {
+) MipsAtom_Proc_(resolve_look_at__populate_and_translate, aa, {
 	/* Pop look_at* (the matrix output) — advance R_TapePtr by 4 bytes. */
 	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
 	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),

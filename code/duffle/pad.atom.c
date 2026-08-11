@@ -11,18 +11,18 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(pad_atom_c);
 
 #pragma region MACs (Mips Atom Components)
 
-FI_ Slice_MipsCode ac_pad_set_centered_axes(MipsAtomBuilder_R ab, U4 r_state, U4 r_scratch) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_centered_axes, ab, {
+FI_ Slice_MipsCode ac_pad_set_centered_axes(AtomBuilder_R ab, U4 r_state, U4 r_scratch) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_centered_axes, ab, {
     load_upper_i(r_scratch, (PadAxis_Centered_Word >> 16) & 0xFFFF),
     or_i_self(   r_scratch,  PadAxis_Centered_Word        & 0xFFFF),
     store_word(  r_scratch, r_state, O_(PadState,axes)),
 })
 
-FI_ Slice_MipsCode ac_pad_set_id_byte(MipsAtomBuilder_R ab, U1 r_state, U1 r_id, U1 id_value) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_id_byte, ab, {
+FI_ Slice_MipsCode ac_pad_set_id_byte(AtomBuilder_R ab, U1 r_state, U1 r_id, U1 id_value) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_id_byte, ab, {
     add_ui(    r_id, R_0, id_value),
     store_byte(r_id, r_state, O_(PadState,id)),
 })
 
-FI_ Slice_MipsCode ac_pad_set_status(MipsAtomBuilder_R ab, U4 r_tmp, U1 r_state, U4 pad_status) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_status, ab, {
+FI_ Slice_MipsCode ac_pad_set_status(AtomBuilder_R ab, U4 r_tmp, U1 r_state, U4 pad_status) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_set_status, ab, {
     add_ui(    r_tmp, R_0, pad_status),
     store_word(r_tmp, r_state, O_(PadState,status)),
 })
@@ -30,7 +30,7 @@ FI_ Slice_MipsCode ac_pad_set_status(MipsAtomBuilder_R ab, U4 r_tmp, U1 r_state,
 /* Invert r_buttons (active-low → active-high) and store to PadState.buttons.
  * r_buttons must already be loaded (the caller is responsible for filling the load-delay slot of
  * the preceding load_half_u with an instruction that doesn't read r_buttons). */
-FI_ Slice_MipsCode ac_pad_store_inverted_buttons(MipsAtomBuilder_R ab, U1 r_buttons, U1 r_pad_state) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_store_inverted_buttons, ab, {
+FI_ Slice_MipsCode ac_pad_store_inverted_buttons(AtomBuilder_R ab, U1 r_buttons, U1 r_pad_state) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_store_inverted_buttons, ab, {
     nor_u(       r_buttons, r_buttons, R_0),
     store_half(  r_buttons, r_pad_state, O_(PadState,   buttons)),
 })

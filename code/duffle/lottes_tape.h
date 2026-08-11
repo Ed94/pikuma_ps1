@@ -110,7 +110,7 @@ typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that
 //   FI_ void ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
 // expands to:
 //   FI_ void ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return ac_X; }
-#define MipsAtom_Proc_(sym, abuilder, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_unroll(abuilder, slice_from_array(MipsCode, sym)); }
+#define MipsAtom_Proc_(sym, aa, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return atomarena_push(aa, slice_from_array(MipsCode, sym)); }
 
 // Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
 //   MipsAtomComp_(ac_X) { body }
@@ -128,7 +128,7 @@ typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that
 // The body must NOT include mac_yield() (the parent atom yields).
 // Inline-only callers (the generated `mac_<name>` aliases) skip this arg via metaprogram filtering;
 // escape callers (ac_<name> invoked as a function) pass a long-lived builder.
-#define MipsAtomComp_Proc_(sym, ab, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_unroll(ab, slice_from_array(MipsCode, sym)); }
+#define MipsAtomComp_Proc_(sym, ab, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_push(ab, slice_from_array(MipsCode, sym)); }
 
 /* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.
 	Files containing only atoms and atom components.
@@ -231,43 +231,55 @@ atom_dbg_skip MipsAtomComp_(ac_yield_tail) {
 };
 #pragma endregion Macro Atom Components
 
-#pragma region Mips Atom Builder
+#pragma region Atom Builder
 // This helps with runtime procedural authoring of mips atoms.
 
 typedef Struct_(FMipsAtom512) { U4 data[512]; U4 used; };
 
 // FArena Related
-typedef Relative_(FArena) Struct_(MipsAtomBuilder) { U4 start; U4 capacity; U4 used; };
+typedef Relative_(FArena) Struct_(AtomBuilder) { U4 start; U4 capacity; U4 used; };
 // Whatever the builder is writting to should most likely coresspond
 // to something that can fit within instruction cache?
 
-FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode code) {
-	/* code.len is in ELEMENTS (per slice_from_array convention); ab->used is also in elements
-	 * (the init uses `ab->used * sizeof(U4)` for byte offset arithmetic — sizeof(U4)==4==sizeof(MipsCode)).
-	 * mem_copy needs BYTES, so we use S_slice(code) for the length. */
+// Usual way to resolve an atom after the bulder is done.
+#define atom_from_atombuilder(ab) C_(MipsAtom*, (ab).start)
+
+FI_ void atombuilder_push(AtomBuilder_R ab, Slice_MipsCode code) {
 	assert(ab->capacity - ab->used - code.len);
-	U4* dest = (U4*)ab->start + ab->used;  /* write at next-available slot (arena accumulation) */
-	mem_copy(u4_(dest), u4_(code.ptr), S_slice(code));
+	U4 dest = ab->start + ab->used * S_(MipsCode);
+	mem_copy(dest, u4_(code.ptr), S_slice(code));
 	mem_bump(ab->start, ab->capacity, & ab->used, code.len);
 }
-#define atombuilder_unroll_mac(ab, mac) atombuilder_unroll(ab, slice_arg_from_array(Slice_MipsCode, mac))
+#define atombuilder_push_mac(ab, mac) atombuilder_push(ab, slice_arg_from_array(Slice_MipsCode, mac))
 
 // When done authoring, utilize this to cap-off the atom (if not utilizing a MipsAtom_Proc).
-FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
-	/* ac_yield is a MipsCode[] of 4 elements; S_(ac_yield)=bytes, array_len(ac_yield)=elements.
-	 * ab->used is in elements, so mem_bump needs element count. */
-	U4* dest = (U4*)ab->start + ab->used;  /* write at next-available slot */
-	mem_copy(u4_(dest), u4_(ac_yield), S_(ac_yield));
-	mem_bump(ab->start, ab->capacity, & ab->used, array_len(ac_yield));
-}
-
-#define mipsatom_from_builder(ab) C_(MipsAtom*, (ab).start)
+FI_ void atombuilder_end(AtomBuilder_R ab) { atombuilder_push(ab, slice_from_array(MipsCode, ac_yield)); }
 
 // tb_emit_builder(tb, ab) — emit the builder's atom into the tape and advance tb->used.
 // Thin wrapper around tb_emit(tb, mipsatom_from_builder(ab[0])).
 // Equivalent to tb_emit(tb, code_<name>) for runtime-built atoms.
-FI_ void tb_emit_builder(TapeBuilder_R tb, MipsAtomBuilder_R ab) { tb_emit(tb, mipsatom_from_builder(ab[0])); }
+FI_ void tb_emit_atombuilder(TapeBuilder_R tb, AtomBuilder_R ab) { tb_emit(tb, atom_from_atombuilder(ab[0])); }
 #pragma endregion Mips Atom Builder
+
+#pragma region Atom Arena
+typedef Relative_(FArena) Struct_(AtomArena) { U4 start; U4 capacity; U4 used; };
+
+#define atomarena_unused_start(ab) ((ab).start + (ab).used * S_(MipsCode))
+FI_ void atomarena_init(AtomArena_R arena, Slice mem) {  assert(arena != nullptr);
+	arena->start    = u4_(mem.ptr);
+	arena->capacity = mem.len;
+	arena->used     = 0;
+}
+FI_ AtomArena atomarena_make(Slice mem) { AtomArena a; atomarena_init(& a, mem); return a; }
+FI_ MipsAtom* atomarena_push(AtomArena_R aa, Slice_MipsCode code) {
+	assert(aa->capacity - aa->used - code.len);
+	U4 dest = atomarena_unused_start(aa[0]);
+	mem_copy(dest, u4_(code.ptr), S_slice(code));
+	mem_bump(aa->start, aa->capacity, & aa->used, code.len);
+	return C_(MipsAtom*, dest);
+}
+FI_ void atomarena_reset(AtomArena_R aa) { aa->used = 0; }
+#pragma region Atom Arena
 
 #pragma region Mips Atom Procs
 

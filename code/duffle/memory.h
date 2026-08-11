@@ -73,9 +73,9 @@ typedef Slice_(B1);
 
 #define slice_iter(container, iter)     (T_((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter)
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = array_decl(type,__VA_ARGS__), .len = array_len( array_decl(type,__VA_ARGS__)) }
-#define slice_from_array(type, array)     (tmpl(Slice,type)) { .ptr = array, .len = S_(array) / S_(type) }  /* .len in elements (matches S_slice/slice_arg_from_array convention) */
+#define slice_from_array(type, array)     (tmpl(Slice,type)) { .ptr = array, .len = S_(array) / S_(type) }
 
-FI_ void slice_zero_(Slice s) { slice_assert(s); mem_zero(u4_(s.ptr), S_slice(s)); }
+FI_ void slice_zero_(Slice s) { slice_assert(s); mem_zero(u4_(s.ptr), s.len); }
 #define  slice_zero(s)        slice_zero_(slice_to_ut(s))
 
 FI_ void slice_copy_(Slice dest, Slice src) {
@@ -89,6 +89,7 @@ FI_ void slice_copy_(Slice dest, Slice src) {
 	slice_copy_(slice_to_ut(dest), slice_to_ut(src)); \
 } while(0)
 
+typedef Slice_(U1);
 typedef Slice_(U4);
 
 #pragma endregion Slice
@@ -99,7 +100,7 @@ typedef Opt_(farena)    { U4 alignment, type_width; };
 typedef Struct_(FArena) { U4 start, capacity, used; };
 FI_ void farena_init(FArena_R arena, Slice mem) {  assert(arena != nullptr);
 	arena->start    = u4_(mem.ptr);
-	arena->capacity = S_slice(mem);  /* FArena.used is in BYTES; capacity must be bytes too */
+	arena->capacity = mem.len;
 	arena->used     = 0;
 }
 FI_ FArena farena_make(Slice mem) { FArena a; farena_init(& a, mem); return a; }
@@ -116,7 +117,8 @@ FI_ void farena_rewind(FArena_R arena, U4 save_point) {
 	U4 end       = arena->start + arena->used; assert_bounds(save_point, arena->start, end);
 	arena->used -= save_point - arena->start;
 }
-FI_ U4 farena_save(FArena arena) { return arena.used; }
+FI_ U4 farena_save(FArena arena)  { return arena.used; }
+FI_ U4 farena_unused_start(FArena arena) { return arena.start + arena.used; }
 #define farena_push_(arena, amount, ...)                                          farena_push((arena), (amount), opt_(farena, __VA_ARGS__))
 #define farena_push_type(arena, type, ...)                              C_(type*, farena_push((arena), 1,        opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr)
 #define farena_push_array(arena, type, amount, ...) (tmpl(Slice,type)){ C_(type*, farena_push((arena), (amount), opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr), (amount) }
