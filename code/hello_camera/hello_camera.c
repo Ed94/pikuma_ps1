@@ -366,8 +366,18 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		V3_S4 ux, uy, uz;
 		V3_S4 pos, off;
 
-		forward = smem.cube.pos; sub_v3s4(& forward, smem.cam.pos); // RGA(Lengyel): Affine point - point = zero-weight direction.
-		normalize_v3s4(& forward, & uz);                  // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.
+		// forward = smem.cube.pos; sub_v3s4(& forward, smem.cam.pos); // RGA(Lengyel): Affine point - point = zero-weight direction.  (now done by bundle atom 0)
+		// Read fwd from scratchpad[+0] (atom 0's output)
+		forward.x = u4_v(0x1F800000)[0];
+		forward.y = u4_v(0x1F800000)[1];
+		forward.z = u4_v(0x1F800000)[2];
+		forward.pad = u4_v(0x1F800000)[3];
+		// normalize_v3s4(& forward, & uz);                  // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.  (now done by bundle atom 1)
+		// Read uz from scratchpad[+16] (atom 1's output)
+		uz.x = u4_v(0x1F800010)[0];
+		uz.y = u4_v(0x1F800010)[1];
+		uz.z = u4_v(0x1F800010)[2];
+		uz.pad = u4_v(0x1F800010)[3];
 
 		cross_v3s4(& uz,   & v3s4(0, -fp_one, 0), & right); normalize_v3s4(& right, & ux); // RGA(Lengyel): Complement(Wedge(forward, up_in)) -> right axis.
 		cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy); // RGA(Lengyel): Complement(Wedge(forward, right)) -> up axis.
