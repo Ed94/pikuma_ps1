@@ -186,14 +186,14 @@ FI_ void tape_run_a02_s07(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
 FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->used = 0; }
 FI_ TapeBuilder tb_make_old(             FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
-FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ mem.ptr, mem.len, 0 }; }
+FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ u4_(mem.ptr), mem.len, 0 }; }  /* capacity in elements (matches used units) */
 
 FI_ void tb_emit(TapeBuilder* tb, MipsAtom* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
 FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 #define tb_emit_(atom)        tb_emit(& tb, atom)
 #define tb_data_(field, data) tb_data(& tb, u4_(data))
 
-FI_ void tb_emit_bundle(TapeBuilder_R tb, Slice_MipsAtom atoms) { mem_copy(u4_(tb->ptr), u4_(atoms.ptr), tb->used); tb->used += atoms.len; }
+FI_ void tb_emit_bundle(TapeBuilder_R tb, Slice_MipsAtom atoms) { mem_copy(u4_(tb->ptr), u4_(atoms.ptr), S_slice(atoms)); tb->used += atoms.len; }
 
 FI_ Tape tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Tape){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4*,tb.ptr),  tb.used }; }
@@ -242,18 +242,23 @@ typedef Relative_(FArena) Struct_(MipsAtomBuilder) { U4 start; U4 capacity; U4 u
 // to something that can fit within instruction cache?
 
 FI_ void atombuilder_unroll(MipsAtomBuilder_R ab, Slice_MipsCode code) {
+	/* code.len is in ELEMENTS (per slice_from_array convention); ab->used is also in elements
+	 * (the init uses `ab->used * sizeof(U4)` for byte offset arithmetic — sizeof(U4)==4==sizeof(MipsCode)).
+	 * mem_copy needs BYTES, so we use S_slice(code) for the length. */
 	assert(ab->capacity - ab->used - code.len);
 	U4* dest = (U4*)ab->start + ab->used;  /* write at next-available slot (arena accumulation) */
-	mem_copy(u4_(dest), u4_(code.ptr), code.len);
+	mem_copy(u4_(dest), u4_(code.ptr), S_slice(code));
 	mem_bump(ab->start, ab->capacity, & ab->used, code.len);
 }
 #define atombuilder_unroll_mac(ab, mac) atombuilder_unroll(ab, slice_arg_from_array(Slice_MipsCode, mac))
 
 // When done authoring, utilize this to cap-off the atom (if not utilizing a MipsAtom_Proc).
 FI_ void atombuilder_end(MipsAtomBuilder_R ab) {
+	/* ac_yield is a MipsCode[] of 4 elements; S_(ac_yield)=bytes, array_len(ac_yield)=elements.
+	 * ab->used is in elements, so mem_bump needs element count. */
 	U4* dest = (U4*)ab->start + ab->used;  /* write at next-available slot */
 	mem_copy(u4_(dest), u4_(ac_yield), S_(ac_yield));
-	mem_bump(ab->start, ab->capacity, & ab->used, S_(ac_yield));
+	mem_bump(ab->start, ab->capacity, & ab->used, array_len(ac_yield));
 }
 
 #define mipsatom_from_builder(ab) C_(MipsAtom*, (ab).start)

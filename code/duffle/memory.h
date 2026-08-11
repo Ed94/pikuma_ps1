@@ -58,13 +58,13 @@ typedef Struct_(Str8)        { UTF8* ptr; U4 len; };
 typedef Struct_(Slice_Str8)  { Str8* ptr; U4 len; };
 #define slit(string_literal) (Str8){ (UTF8*) string_literal, S_(string_literal) - 1 }
 
-typedef Struct_(Slice) { U4 ptr, len; }; // Untyped Slice
-FI_ Slice slice_ut_(U4 ptr, U4 len) { return (Slice){ptr, len}; }
+typedef Struct_(Slice) { B1* ptr; U4 len; }; // Untyped Slice (byte-addressable; .len in elements)
+FI_ Slice slice_ut_(U4 ptr, U4 len) { return (Slice){(B1*)ptr, len}; }
 
 #define Slice_(type)       Struct_(tmpl(Slice,type)) { type* ptr; U4 len; }
 typedef Slice_(B1);
 #define slice_assert(s)    do { assert((s).ptr != 0); assert((s).len > 0); } while(0)
-#define slice_end(slice)   ((slice).ptr + (slice).len)
+#define slice_end(slice)   ((slice).ptr + S_slice(slice) / S_(B1))  /* byte-ptr arithmetic; .len is in elements per slice convention */
 #define S_slice(s)         ((s).len * S_((s).ptr[0]))
 
 #define slice_ut(ptr,len)  slice_ut_(u4_(ptr),     u4_(len))
@@ -73,16 +73,16 @@ typedef Slice_(B1);
 
 #define slice_iter(container, iter)     (T_((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter)
 #define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = array_decl(type,__VA_ARGS__), .len = array_len( array_decl(type,__VA_ARGS__)) }
-#define slice_from_array(type, array)     (tmpl(Slice,type)) { .ptr = array, .len = S_(array) }
+#define slice_from_array(type, array)     (tmpl(Slice,type)) { .ptr = array, .len = S_(array) / S_(type) }  /* .len in elements (matches S_slice/slice_arg_from_array convention) */
 
-FI_ void slice_zero_(Slice s) { slice_assert(s); mem_zero(s.ptr, s.len); }
+FI_ void slice_zero_(Slice s) { slice_assert(s); mem_zero(u4_(s.ptr), S_slice(s)); }
 #define  slice_zero(s)        slice_zero_(slice_to_ut(s))
 
 FI_ void slice_copy_(Slice dest, Slice src) {
-	assert(dest.len >= src.len);
+	assert(S_slice(dest) >= S_slice(src));
 	slice_assert(dest);
 	slice_assert(src);
-	mem_copy(dest.ptr, src.ptr, src.len);
+	mem_copy(u4_(dest.ptr), u4_(src.ptr), S_slice(src));
 }
 #define slice_copy(dest, src) do {  \
 	static_assert(T_same(dest, src)); \
@@ -98,8 +98,8 @@ typedef Slice_(U4);
 typedef Opt_(farena)    { U4 alignment, type_width; };
 typedef Struct_(FArena) { U4 start, capacity, used; };
 FI_ void farena_init(FArena_R arena, Slice mem) {  assert(arena != nullptr);
-	arena->start    = mem.ptr;
-	arena->capacity = mem.len;
+	arena->start    = u4_(mem.ptr);
+	arena->capacity = S_slice(mem);  /* FArena.used is in BYTES; capacity must be bytes too */
 	arena->used     = 0;
 }
 FI_ FArena farena_make(Slice mem) { FArena a; farena_init(& a, mem); return a; }
@@ -109,7 +109,7 @@ I_  Slice  farena_push(FArena_R arena, U4 amount, Opt_farena o) {
 	U4 to_commit = align_pow2(desired, o.alignment ?  o.alignment : MEM_ALIGNMENT_DEFAULT);
 	U4 ptr       = arena->start + arena->used;
 	mem_bump(arena->start, arena->capacity, & arena->used, to_commit);
-	return (Slice){ ptr, to_commit };
+	return (Slice){ (B1*)ptr, to_commit };
 }
 FI_ void farena_reset (FArena_R arena) { arena->used = 0; }
 FI_ void farena_rewind(FArena_R arena, U4 save_point) {
