@@ -176,8 +176,8 @@ WORD_COUNT(mac_gte_sqr_v3, 8)
 WORD_COUNT(mac_gte_gpf_scale, 13)
 
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
-	load_upper_i(reg_transfer, cmd >> 16) \
-,	or_i_self(   reg_transfer, cmd & 0xFFFF) \
+	load_upper_i(reg_transfer, u4_hi(cmd)) \
+,	or_i_self(   reg_transfer, u4_lo(cmd))	/* load_upper_i(reg_transfer, cmd >> 16),	// or_i_self(   reg_transfer, cmd & 0xFFFF), */ \
 ,	store_word(  reg_transfer, reg_base, port)
 WORD_COUNT(mac_gcmd_push, 3)
 

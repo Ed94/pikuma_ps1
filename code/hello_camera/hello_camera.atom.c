@@ -293,7 +293,7 @@ I_ MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_
 	,	U4 r_d                 /* load b.x */
 	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &right (out ptr), r_g = &uz, r_h = &up_in */
 ) MipsAtom_Proc_(resolve_look_at__cross_uz_up_in_to_right, aa, {
-	/* Compute the three scratch pointers from r_scratch. */
+	/* FIX: build packed RT22+RT33 with proper sign extension. */
 	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)),    /* r_g = &uz */
 	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,up_in)), /* r_h = &up_in */
 	add_si(r_f, r_scratch, O_(ResolveLookAtScratch,right)), /* r_f = &right (out) */
@@ -305,30 +305,63 @@ I_ MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_
 	load_word(r_c, r_g, O_(V3_S4,z)),
 	nop,
 
-	/* Load b (up_in).x/y/z into r_d + R_AT/R_V0 
-	(hardcoded; reusing the body's last two loads is fine because the load-delay slot is the nop after the third load, 
-	and mtc2 below doesn't read these regs). */
+	/* Load b (up_in).x/y/z into r_d + R_AT/R_V0 (R_AT/R_V0 are hardcoded scratch). */
 	load_word(r_d,  r_h, O_(V3_S4,x)),
 	load_word(R_AT, r_h, O_(V3_S4,y)),
 	load_word(R_V0, r_h, O_(V3_S4,z)),
 	nop,
 
-	/* mtc2 a → IR1/2/3, b → D1/2/3 (VXY0/VZ0/VXY1). */
-	gte_mv_to_data_r(r_a,  C2_IR1),
-	gte_mv_to_data_r(r_b,  C2_IR2),
-	gte_mv_to_data_r(r_c,  C2_IR3),
-	gte_mv_to_data_r(r_d,  C2_VXY0),   /* D1 = b.x */
-	gte_mv_to_data_r(R_AT, C2_VZ0),    /* D2 = b.y */
-	gte_mv_to_data_r(R_V0, C2_VXY1),   /* D3 = b.z */
-	nop2,  /* MTC2 retirement (CPU→COP2 2-slot delay) */
+	/* Save the two RT control-register slots OP will clobber. We reuse
+	 * r_g/r_h (scratch pointers, no longer needed) as the save targets. */
+	gte_mv_from_ctrl_r(r_g, gte_cr_RT11),    /* r_g = C2 r0 (RT11|RT12) */
+	gte_mv_from_ctrl_r(r_h, gte_cr_RT22),    /* r_h = C2 r4 (RT22|RT33) */
 
-	gte_cmdw_outer_product,  /* OP fires; MAC1/2/3 = a × b */
+	/* Load uz.x/uz.y/uz.z into COP2 control registers.
+	 * OP reads D1 = RT11 from $0.low, D2 = RT22 from $2.high, D3 = RT33 from $4.high.
+	 * RT22 is in BOTH $2.high AND $4.low (shared bit position). OP reads from $2.high.
+	 * So set RT22 via ctc2 r_b, $2 (sets $2.high = a.y.high = RT22, $2.low = a.y.low = RT13).
+	 * Then set RT33 via ctc2 r_c, $4 (sets $4.high = a.z.high = RT33, $4.low = a.z.low).
+	 * The $2 and $4 writes don't clobber each other (separate registers).
+	 * The 2nd ctc2 DOES clobber $4.low (becomes a.z.low, NOT a.y.high), but since OP
+	 * reads RT22 from $2.high (which the 2nd ctc2 doesn't touch), D2 is still a.y.high.
+	 * This is libpsyx's OuterProduct12 convention EXACTLY. */
+	gte_mv_to_ctrl_r(r_b, gte_cr_RT13),    /* $2 = r_b = a.y. RT13=a.y.low, RT22=a.y.high. */
+	gte_mv_to_ctrl_r(r_c, gte_cr_RT22),    /* $4 = r_c = a.z. RT22=a.z.low, RT33=a.z.high. */
+
+	/* Load uz into the RT diagonal. */
+	gte_mv_to_ctrl_r(r_a, gte_cr_RT11),   /* D1 = RT11 = uz.x (low 16 of $0, sign-extended by OP). */
+	nop2,                                 /* CTC2 retirement (CPU→COP2 2-slot delay) */
+
+	/* Load up_in into IR (the second operand for OP). */
+	gte_mv_to_data_r(r_d,  C2_IR1),       /* IR1 = up_in.x */
+	gte_mv_to_data_r(R_AT, C2_IR2),       /* IR2 = up_in.y */
+	gte_mv_to_data_r(R_V0, C2_IR3),       /* IR3 = up_in.z */
+	nop2,                                 /* MTC2 retirement (CPU→COP2 2-slot delay) */
+
+	gte_cmdw_outer_product, /* OP: MAC1/2/3 = uz × up_in
+		*   MAC1 = IR3*D2 - IR2*D3 = up_in.z*uz.y.high - up_in.y*uz.z.high
+		*   MAC2 = IR1*D3 - IR3*D1 = up_in.x*uz.z.high - up_in.z*uz.x
+		*   MAC3 = IR2*D1 - IR1*D2 = up_in.y*uz.x - up_in.x*uz.y.high
+		* For up_in = (0, -fp_one, 0):
+		*   MAC1 = 0 - (-fp_one)*uz.z.high = fp_one*uz.z.high
+		*   MAC2 = 0 - 0 = 0
+		*   MAC3 = (-fp_one)*uz.x - 0 = -fp_one*uz.x */
+
+	/* Restore the RT slots we clobbered. */
+	gte_mv_to_ctrl_r(r_g, gte_cr_RT11),   /* restore C2 r0 (RT11|RT12) */
+	gte_mv_to_ctrl_r(r_h, gte_cr_RT22),   /* restore C2 r4 (RT22|RT33) */
 
 	/* mfc2 MAC1/2/3 → r_a/r_b/r_c (out.x/y/z). */
 	gte_mv_from_data_r(r_a, C2_MAC1),
 	gte_mv_from_data_r(r_b, C2_MAC2),
 	gte_mv_from_data_r(r_c, C2_MAC3),
 	nop,  /* MFC2 retirement */
+
+	/* Right-shift MAC by 12 to convert from GTE's S12.20 fixed-point scale back to libpsyx OuterProduct12 convention (S12.0, fp_one=4096=1<<12).
+	 * Without this, MAC values (~16M for unit-vector cross products) overflow the GTE's 16-bit IR registers when atom 3 normalizes via mtc2. */
+	shift_aright(r_a, r_a, 12),
+	shift_aright(r_b, r_b, 12),
+	shift_aright(r_c, r_c, 12),
 
 	/* Store out.x/y/z to r_f (out ptr = scratch+32). */
 	store_word(r_a, r_f, O_(V3_S4,x)),
@@ -340,14 +373,14 @@ I_ MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_
 
 /* Atom 4: cross uz × ux → up. */
 I_ MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_scratch
-	,	U4 r_a, U4 r_b, U4 r_c                  /* load a.x/y/z; result out.x/y/z */
-	,	U4 r_d                                  /* load b.x */
-	,	U4 r_f, U4 r_g, U4 r_h                  /* r_f = &up (out ptr), r_g = &uz, r_h = &ux */
+	,	U4 r_a, U4 r_b, U4 r_c /* load a.x/y/z; result out.x/y/z */
+	,	U4 r_d                 /* load b.x */
+	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &up (out ptr), r_g = &uz, r_h = &ux */
 ) MipsAtom_Proc_(resolve_look_at__cross_uz_ux_to_up, aa, {
 	/* Compute the three scratch pointers from r_scratch. */
-	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)),       /* r_g = &uz */
-	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,ux)),       /* r_h = &ux */
-	add_si(r_f, r_scratch, O_(ResolveLookAtScratch,up)),       /* r_f = &up (out) */
+	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)), /* r_g = &uz */
+	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,ux)), /* r_h = &ux */
+	add_si(r_f, r_scratch, O_(ResolveLookAtScratch,up)), /* r_f = &up (out) */
 	nop,
 
 	/* Load a (uz).x/y/z into r_a/r_b/r_c. */
@@ -376,6 +409,11 @@ I_ MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_scratc
 	gte_mv_from_data_r(r_b, C2_MAC2),
 	gte_mv_from_data_r(r_c, C2_MAC3),
 	nop,
+	/* Right-shift MAC by 12 to convert from GTE's S12.20 scale back to libpsyx
+	 * OuterProduct12 convention (S12.0, fp_one=4096). See atom 1 for rationale. */
+	shift_aright(r_a, r_a, 12),
+	shift_aright(r_b, r_b, 12),
+	shift_aright(r_c, r_c, 12),
 	store_word(r_a, r_f, O_(V3_S4,x)),
 	store_word(r_b, r_f, O_(V3_S4,y)),
 	store_word(r_c, r_f, O_(V3_S4,z)),
@@ -505,47 +543,47 @@ internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
 	/* display[0] = (0, 0, 320, 240); rest of struct zeroed. */
 	add_ui(R_ScreenX, R_0, ScreenRes_X), add_ui(R_ScreenY, R_0, ScreenRes_Y),
 	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DisplayEnv,display_area.width) + OA_(DoubleBuffer,display,0)),
-	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,display_area) + OA_(DoubleBuffer,display,0)),
-	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,screen)       + OA_(DoubleBuffer,display,0)),
-	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace)   + OA_(DoubleBuffer,display,0)),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,display_area) + O_(DoubleBuffer,display[0])),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,screen)       + O_(DoubleBuffer,display[0])),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace)   + O_(DoubleBuffer,display[0])),
 
 	/* display[1] = (0, 240, 320, 240); rest of struct zeroed. */
-	mac_store_rects2(R_0, R_ScreenY, R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DisplayEnv,display_area) + OA_(DoubleBuffer,display,1)),
-	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,screen)     + OA_(DoubleBuffer,display,1)),
-	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace) + OA_(DoubleBuffer,display,1)),
+	mac_store_rects2(R_0, R_ScreenY, R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DisplayEnv,display_area) + O_(DoubleBuffer,display[1])),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,screen)     + O_(DoubleBuffer,display[1])),
+	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace) + O_(DoubleBuffer,display[1])),
 
-	mac_store_rects2(R_0, R_ScreenY, R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area)         + OA_(DoubleBuffer,draw,0)), /* draw[0].clip_area = (0, 240, 320, 240). C11's SetDefDrawEnv writes clip.y = y_arg. */
-	mac_store_v2s2(  R_0, R_ScreenY,                       R_ScreenBuf, O_(DrawEnv,drawing_offset[0]) + OA_(DoubleBuffer,draw,0)), /* draw[0].drawing_offset[0] = (0, 240); C11 passes y_arg as ofs. */
+	mac_store_rects2(R_0, R_ScreenY, R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area)         + O_(DoubleBuffer,draw[0])), /* draw[0].clip_area = (0, 240, 320, 240). C11's SetDefDrawEnv writes clip.y = y_arg. */
+	mac_store_v2s2(  R_0, R_ScreenY,                       R_ScreenBuf, O_(DrawEnv,drawing_offset[0]) + O_(DoubleBuffer,draw[0])), /* draw[0].drawing_offset[0] = (0, 240); C11 passes y_arg as ofs. */
 
-	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area.width) + OA_(DoubleBuffer,draw,1)),
+	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DrawEnv,clip_area.width) + O_(DoubleBuffer,draw[1])),
 
 	/* draw[0].texture_window = (0, 0, 0, 0); two word-zeroes cover the full 8-byte tw field. */
-	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.x)     + OA_(DoubleBuffer,draw,0)),
-	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.width) + OA_(DoubleBuffer,draw,0)),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.x)     + O_(DoubleBuffer,draw[0])),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.width) + O_(DoubleBuffer,draw[0])),
 
-	store_word(R_0, R_ScreenBuf, O_(DrawEnv,drawing_offset[0].x)  + OA_(DoubleBuffer,draw,1)),
-	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.x)     + OA_(DoubleBuffer,draw,1)),
-	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.width) + OA_(DoubleBuffer,draw,1)),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,drawing_offset[0].x)  + O_(DoubleBuffer,draw[1])),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.x)     + O_(DoubleBuffer,draw[1])),
+	store_word(R_0, R_ScreenBuf, O_(DrawEnv,texture_window.width) + O_(DoubleBuffer,draw[1])),
 
 	/* draw[0].texture_page = 10 (gp0_tpage_default). C11 SetDefDrawEnv at C11_only.elf:0x8001273C writes the same 0x0A. . */
 	add_ui(R_T0, R_0, gp0_tpage_default),
-	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + OA_(DoubleBuffer,draw,0)),
-	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + OA_(DoubleBuffer,draw,1)),
+	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + O_(DoubleBuffer,draw[0])),
+	store_half(R_T0, R_ScreenBuf, O_(DrawEnv,texture_page) + O_(DoubleBuffer,draw[1])),
 
 	/* draw[0] control bytes: flag_dither=1, flag_draw_on_display=1 (the dfe bit per psx-spx; libpsyx sets it via `SetDefDrawEnv`'s conditional at C11_only.elf:0x80012728), enable_auto_clear=1. Each byte is named;
 	 * the previous `store_word(R_0, ..., +20)` overwrote all four with zero. */
 	add_ui(R_T0, R_0, 1),
-	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_dither)          + OA_(DoubleBuffer,draw,0)),
-	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_draw_on_display) + OA_(DoubleBuffer,draw,0)),
-	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,enable_auto_clear)    + OA_(DoubleBuffer,draw,0)),
-	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_dither)          + OA_(DoubleBuffer,draw,1)),
-	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_draw_on_display) + OA_(DoubleBuffer,draw,1)),
-	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,enable_auto_clear)    + OA_(DoubleBuffer,draw,1)),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_dither)          + O_(DoubleBuffer,draw[0])),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_draw_on_display) + O_(DoubleBuffer,draw[0])),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,enable_auto_clear)    + O_(DoubleBuffer,draw[0])),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_dither)          + O_(DoubleBuffer,draw[1])),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,flag_draw_on_display) + O_(DoubleBuffer,draw[1])),
+	store_byte(R_T0, R_ScreenBuf, O_(DrawEnv,enable_auto_clear)    + O_(DoubleBuffer,draw[1])),
 
 	/* draw[0].initial_bg_color = (r=7, g=7, b=7). */
 	add_ui(R_T0, R_0, 7),
-	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + OA_(DoubleBuffer,draw,0)),
-	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + OA_(DoubleBuffer,draw,1)),
+	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + O_(DoubleBuffer,draw[0])),
+	mac_store_rgb8(R_T0,R_T0,R_T0, R_ScreenBuf, O_(DrawEnv,initial_bg_color) + O_(DoubleBuffer,draw[1])),
 
 	mac_yield(),
 };

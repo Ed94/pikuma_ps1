@@ -25,14 +25,14 @@
 #pragma region duffle
 
 
-// --- atom: normalize_v3s4 (63 words) ---
+// --- atom: normalize_v3s4 (66 words) ---
 
-#define _atom_offset_srav_path_aligned_done           6
-#define _atom_offset_aligned_done_srav_path           1
+#define _atom_offset_aligned_done_srav_path           3
+#define _atom_offset_srav_path_aligned_done           4
 
 enum {
-    atom_offset_srav_path_aligned_done = _atom_offset_srav_path_aligned_done,
     atom_offset_aligned_done_srav_path = _atom_offset_aligned_done_srav_path,
+    atom_offset_srav_path_aligned_done = _atom_offset_srav_path_aligned_done,
 };
 
 // --- atom: pad_bios_snapshot (84 words) ---

@@ -27,7 +27,7 @@
  * to author and compose programs with. From here various conventions can be further applied. 
  * To make things easier  to understand it may be better to focus on what this ABI does not have. 
  * It does not have have any branching within the tape but relative branches within atoms or between atoms.
- * Branching nearly is always downstream. Atuomatic stack usage is non-existent.
+ * Branching nearly is always downstream. Automatic stack usage is non-existent.
  * Push/Pop, FIFO, or Arena/Bump data structures are used by atoms explicitly.
  * In it's current form with the C11 macro DSL, the user also has fullfill manual register allocation per atom.
  * 
@@ -39,7 +39,7 @@
  * but, we can set the foundation for legoing whats required for eventually expanding this ABI's paradigm 
  * and core atoms to take those newer hardware features into account. For example, you can easily expand 
  * this to support wave-based execution model on a PS2 or PS3. Not having a stack or 
- * automatic register allocation means the user cannott ignore excessive argument shuffle across workload or
+ * automatic register allocation means the user cannot ignore excessive argument shuffle across workload or
  * waves and thier phases. Crossing ABI boundaries to other runtimes that do has obviouss penalties.
  * 
  * Learning data-oreinted code becomes a natural progression. Your not fighting a stack-based procedural 

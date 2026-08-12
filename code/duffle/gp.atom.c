@@ -10,8 +10,10 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(gp_atom_c);
 
 FI_ Slice_MipsCode ac_gcmd_push(AtomBuilder_R ab, U4 cmd, U4 reg_transfer, U4 reg_base, U2 port)
 MipsAtomComp_Proc_(ac_gcmd_push, ab, {
-	load_upper_i(reg_transfer, cmd >> 16),
-	or_i_self(   reg_transfer, cmd & 0xFFFF),
+	load_upper_i(reg_transfer, u4_hi(cmd)),
+	or_i_self(   reg_transfer, u4_lo(cmd)),
+	// load_upper_i(reg_transfer, cmd >> 16),
+	// or_i_self(   reg_transfer, cmd & 0xFFFF),
 	store_word(  reg_transfer, reg_base, port),
 })
 

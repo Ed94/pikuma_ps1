@@ -276,10 +276,10 @@ I_ void resolve_look_at(
 		tb_data(tb, u4_(smem.scratchpad));     /* Binds_ResolveLookAtScratch.scratch_base */
 	}
 
-	/* Atoms 1-5: disabled (atom 1 verification below) */
+	/* Atoms 1 + 2: enabled. */
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[1]); { }
-	// tb_emit(tb, smem.resolve_look_at_atom_addrs[2]); { }
-	// tb_emit(tb, smem.resolve_look_at_atom_addrs[3]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[2]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[3]); { }
 	// tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
 	// tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
 
@@ -357,13 +357,11 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		// Atom 0: Works (tape emits fwd to scratch+0; C-side reads it back)
 		forward = scratch->fwd;
+		uz      = scratch->uz;
+		right   = scratch->right;
+		ux      = scratch->ux;
 
-		// C-side normalize fallback (atom 1 disabled)
-		// normalize_v3s4(& forward, & uz);
-		uz = scratch->uz;  /* tape-side: enable after verifying atom 1 fix */
-
-		cross_v3s4(& uz,   & v3s4(0, -fp_one, 0), & right); normalize_v3s4(& right, & ux);
-		cross_v3s4(& uz, & ux,    & up);                    normalize_v3s4(& up,    & uy);
+		cross_v3s4(& uz, & ux, & up); normalize_v3s4(& up, & uy);
 
 		smem.cam.look_at.m[0][0] = ux.x; smem.cam.look_at.m[0][1] = ux.y; smem.cam.look_at.m[0][2] = ux.z;
 		smem.cam.look_at.m[1][0] = uy.x; smem.cam.look_at.m[1][1] = uy.y; smem.cam.look_at.m[1][2] = uy.z;
