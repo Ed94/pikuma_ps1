@@ -360,9 +360,12 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		uz      = scratch->uz;
 		right   = scratch->right;
 		ux      = scratch->ux;
+		up      = scratch->up;     // ← atom 4's output (replaces C-side cross_v3s4)
+		uy      = scratch->uy;     // ← atom 5's output (replaces C-side normalize_v3s4)
 
 		// cross_v3s4(& uz, & ux, & up); normalize_v3s4(& up, & uy);
-
+		
+		// Atom 6 not yet enabled: populate look_at.m[][] from ux/uy/uz here.
 		smem.cam.look_at.m[0][0] = ux.x; smem.cam.look_at.m[0][1] = ux.y; smem.cam.look_at.m[0][2] = ux.z;
 		smem.cam.look_at.m[1][0] = uy.x; smem.cam.look_at.m[1][1] = uy.y; smem.cam.look_at.m[1][2] = uy.z;
 		smem.cam.look_at.m[2][0] = uz.x; smem.cam.look_at.m[2][1] = uz.y; smem.cam.look_at.m[2][2] = uz.z;

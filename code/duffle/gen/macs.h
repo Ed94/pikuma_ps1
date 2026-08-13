@@ -199,11 +199,14 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	gte_lw(C2_VXY0, r_vec, 0) \
 ,	load_word(r_t0, r_vec, 4) \
 ,	nop \
-,	gte_lw(C2_VZ0, r_vec, 4)	/* RTPS cv=1 (no translation accumulation; BK is zero-initialized), sf=0, v=0, mx=0.
+,	gte_lw(C2_VZ0, r_vec, 4)	/* RTPS cv=3 (no translation contribution: TRX/TRY/TRZ are zeroed, BK is zero-initialized),
+	 * sf=1 (integer, no shift = full 32-bit R*pos product), v=0 (uses V0 input), mx=0 (rotation matrix).
 	 * MAC1 = RT11*V0.x + RT12*V0.y + RT13*V0.z + 0
 	 * MAC2 = RT21*V0.x + RT22*V0.y + RT23*V0.z + 0
 	 * MAC3 = RT31*V0.x + RT32*V0.y + RT33*V0.z + 0
-	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored. */	/* gte_cmdw_rtps_no_tr,	/* Read MAC1/2/3 → out. */ */ \
+	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored.
+	 * Note: gte_cmdw_rtps_no_tr (the cv=3 alias) was removed from gte.h. Use gte_cmdw_rtps_sf1. */ \
+,	gte_cmdw_rtps_sf1	/* Read MAC1/2/3 → out. */ \
 ,	gte_mv_from_data_r(r_t0, C2_MAC1) \
 ,	gte_mv_from_data_r(r_t1, C2_MAC2) \
 ,	gte_mv_from_data_r(r_t2, C2_MAC3) \
@@ -211,22 +214,16 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	store_word(r_t0, r_out, 0) \
 ,	store_word(r_t1, r_out, 4) \
 ,	store_word(r_t2, r_out, 8)
-WORD_COUNT(mac_apply_matrix_lv, 30)
+WORD_COUNT(mac_apply_matrix_lv, 31)
 
-#define mac_trans_matrix(r_mtx, r_off, r_t0, r_t1) \
-	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[0])) \
-,	load_word(r_t1, r_off, O_(V3_S4,x)) \
-,	add_u(r_t0, r_t0, r_t1) \
-,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])) \
-,	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[1])) \
+#define mac_trans_matrix(r_mtx, r_off, r_t1) \
+	load_word(r_t1, r_off, O_(V3_S4,x)) \
+,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[0])) \
 ,	load_word(r_t1, r_off, O_(V3_S4,y)) \
-,	add_u(r_t0, r_t0, r_t1) \
-,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[1])) \
-,	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[2])) \
+,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])) \
 ,	load_word(r_t1, r_off, O_(V3_S4,z)) \
-,	add_u(r_t0, r_t0, r_t1) \
-,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[2]))
-WORD_COUNT(mac_trans_matrix, 12)
+,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[2]))
+WORD_COUNT(mac_trans_matrix, 6)
 
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	load_upper_i(reg_transfer, u4_hi(cmd)) \

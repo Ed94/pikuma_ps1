@@ -126,12 +126,14 @@ FI_ Slice_MipsCode ac_apply_matrix_lv(AtomBuilder_R ab
 	load_word(r_t0, r_vec, 4), nop,
 	gte_lw(C2_VZ0, r_vec, 4),
 
-	/* RTPS cv=1 (no translation accumulation; BK is zero-initialized), sf=0, v=0, mx=0.
+	/* RTPS cv=3 (no translation contribution: TRX/TRY/TRZ are zeroed, BK is zero-initialized),
+	 * sf=1 (integer, no shift = full 32-bit R*pos product), v=0 (uses V0 input), mx=0 (rotation matrix).
 	 * MAC1 = RT11*V0.x + RT12*V0.y + RT13*V0.z + 0
 	 * MAC2 = RT21*V0.x + RT22*V0.y + RT23*V0.z + 0
 	 * MAC3 = RT31*V0.x + RT32*V0.y + RT33*V0.z + 0
-	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored. */
-	// gte_cmdw_rtps_no_tr,
+	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored.
+	 * Note: gte_cmdw_rtps_no_tr (the cv=3 alias) was removed from gte.h. Use gte_cmdw_rtps_sf1. */
+	gte_cmdw_rtps_sf1,
 
 	/* Read MAC1/2/3 → out. */
 	gte_mv_from_data_r(r_t0, C2_MAC1),
@@ -145,26 +147,21 @@ FI_ Slice_MipsCode ac_apply_matrix_lv(AtomBuilder_R ab
 
 /* ─── TRANS MATRIX (libgte TransMatrix port) ───
  * Atom component — auto-generates mac_trans_matrix Mac composer macro.
- * m->t += off.  Uses 2 GPRs via per-axis load-delay-slot pattern.
- * Words: 12.  Clobbers: r_t0, r_t1. */
+ * m->t = v (struct copy; libgte's TransMatrix at 0x8001a540 is just 3 store_words, no GTE, no add).
+ * Uses 1 GPR (r_t1 = off value) per axis; per-axis load-delay-slot pattern.
+ * Words: 9.  Clobbers: r_t1. */
 FI_ Slice_MipsCode ac_trans_matrix(AtomBuilder_R ab
 	,	U4 r_mtx, U4 r_off
-	,	U4 r_t0,  U4 r_t1
+	,	U4 r_t1
 ) MipsAtomComp_Proc_(ac_trans_matrix, ab, {
-	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[0])),
 	load_word(r_t1, r_off, O_(V3_S4,x)),
-	add_u(r_t0, r_t0, r_t1),
-	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])),
+	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[0])),
 
-	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[1])),
 	load_word(r_t1, r_off, O_(V3_S4,y)),
-	add_u(r_t0, r_t0, r_t1),
-	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[1])),
+	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])),
 
-	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[2])),
 	load_word(r_t1, r_off, O_(V3_S4,z)),
-	add_u(r_t0, r_t0, r_t1),
-	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[2])),
+	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[2])),
 })
 
 #pragma endregion MACs (Mips Atom Components)
