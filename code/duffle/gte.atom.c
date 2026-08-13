@@ -131,7 +131,7 @@ FI_ Slice_MipsCode ac_apply_matrix_lv(AtomBuilder_R ab
 	 * MAC2 = RT21*V0.x + RT22*V0.y + RT23*V0.z + 0
 	 * MAC3 = RT31*V0.x + RT32*V0.y + RT33*V0.z + 0
 	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored. */
-	gte_cmdw_rtps_no_tr,
+	// gte_cmdw_rtps_no_tr,
 
 	/* Read MAC1/2/3 → out. */
 	gte_mv_from_data_r(r_t0, C2_MAC1),

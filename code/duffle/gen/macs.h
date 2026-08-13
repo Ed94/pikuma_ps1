@@ -203,8 +203,7 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 	 * MAC1 = RT11*V0.x + RT12*V0.y + RT13*V0.z + 0
 	 * MAC2 = RT21*V0.x + RT22*V0.y + RT23*V0.z + 0
 	 * MAC3 = RT31*V0.x + RT32*V0.y + RT33*V0.z + 0
-	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored. */ \
-,	gte_cmdw_rtps_no_tr	/* Read MAC1/2/3 → out. */ \
+	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored. */	/* gte_cmdw_rtps_no_tr,	/* Read MAC1/2/3 → out. */ */ \
 ,	gte_mv_from_data_r(r_t0, C2_MAC1) \
 ,	gte_mv_from_data_r(r_t1, C2_MAC2) \
 ,	gte_mv_from_data_r(r_t2, C2_MAC3) \
@@ -212,7 +211,7 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	store_word(r_t0, r_out, 0) \
 ,	store_word(r_t1, r_out, 4) \
 ,	store_word(r_t2, r_out, 8)
-WORD_COUNT(mac_apply_matrix_lv, 31)
+WORD_COUNT(mac_apply_matrix_lv, 30)
 
 #define mac_trans_matrix(r_mtx, r_off, r_t0, r_t1) \
 	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[0])) \

@@ -395,16 +395,42 @@ I_ MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_scratc
 	load_word(R_V0, r_h, O_(V3_S4,z)),
 	nop,
 
-	/* mtc2 a → IR1/2/3, b → D1/2/3 (VXY0/VZ0/VXY1). */
-	gte_mv_to_data_r(r_a,  C2_IR1),
-	gte_mv_to_data_r(r_b,  C2_IR2),
-	gte_mv_to_data_r(r_c,  C2_IR3),
-	gte_mv_to_data_r(r_d,  C2_VXY0),
-	gte_mv_to_data_r(R_AT, C2_VZ0),
-	gte_mv_to_data_r(R_V0, C2_VXY1),
-	nop2,
+	/* FIX 2026-08-11: OP reads D1/D2/D3 from RT11/RT22/RT33 control registers
+	 * ($0/$2/$4), NOT from V0/V1/V2 input data registers. The previous body
+	 * wrote ux to C2_VXY0/VZ0/VXY1 — D1/D2/D3 were whatever stale RT values
+	 * the previous atom left, so the GTE computed garbage MAC values. Fix:
+	 * mirror atom 1's pattern (cfc2 RT11/RT22 save + ctc2 RT13/RT22/RT11
+	 * load uz diagonal + mtc2 IR1/2/3 load ux + ctc2 RT restore).
+	 * See SESSION_2026-08-11b §5.2 for the empirical verification. */
+
+	/* Save the two RT control-register slots OP will clobber (reusing
+	 * r_g/r_h — they're no longer needed as scratch pointers). */
+	gte_mv_from_ctrl_r(r_g, gte_cr_RT11),    /* r_g = C2 $0 (RT11|RT12) */
+	gte_mv_from_ctrl_r(r_h, gte_cr_RT22),    /* r_h = C2 $4 (RT22|RT33) */
+
+	/* Load uz into the RT diagonal — same packing as atom 1.
+	 * OP reads D1 = RT11 from $0.low, D2 = RT22 from $2.high, D3 = RT33 from $4.high.
+	 * RT22 is shared between $2.high and $4.low — the ctc2 sequence to $2 then $4
+	 * sets RT22 to uz.y.high (via $2), then to uz.z.low (via $4). OP reads
+	 * RT22 from $2.high which the second ctc2 doesn't touch, so D2 stays uz.y.high.
+	 * (This is libpsyx OuterProduct12 convention EXACTLY.) */
+	gte_mv_to_ctrl_r(r_b, gte_cr_RT13),    /* $2 = uz.y. RT13=uz.y.low, RT22=uz.y.high. */
+	gte_mv_to_ctrl_r(r_c, gte_cr_RT22),    /* $4 = uz.z. RT22=uz.z.low, RT33=uz.z.high. */
+	gte_mv_to_ctrl_r(r_a, gte_cr_RT11),   /* $0 = uz.x. RT11=uz.x. */
+	nop2,                                 /* CTC2 retirement (CPU→COP2 2-slot delay) */
+
+	/* Load ux into the IR registers (the second operand for OP). */
+	gte_mv_to_data_r(r_d,  C2_IR1),       /* IR1 = ux.x */
+	gte_mv_to_data_r(R_AT, C2_IR2),       /* IR2 = ux.y */
+	gte_mv_to_data_r(R_V0, C2_IR3),       /* IR3 = ux.z */
+	nop2,                                 /* MTC2 retirement (CPU→COP2 2-slot delay) */
 
 	gte_cmdw_outer_product,
+
+	/* Restore the RT slots we clobbered. */
+	gte_mv_to_ctrl_r(r_g, gte_cr_RT11),   /* restore C2 $0 (RT11|RT12) */
+	gte_mv_to_ctrl_r(r_h, gte_cr_RT22),   /* restore C2 $4 (RT22|RT33) */
+
 	gte_mv_from_data_r(r_a, C2_MAC1),
 	gte_mv_from_data_r(r_b, C2_MAC2),
 	gte_mv_from_data_r(r_c, C2_MAC3),

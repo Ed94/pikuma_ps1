@@ -280,8 +280,8 @@ I_ void resolve_look_at(
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[1]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[2]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[3]); { }
-	// tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
-	// tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
 
 	// /* Atom 6: populate_and_translate — only output pointer is the matrix destination. */
 	// tb_emit(tb, smem.resolve_look_at_atom_addrs[6]); {
@@ -361,7 +361,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		right   = scratch->right;
 		ux      = scratch->ux;
 
-		cross_v3s4(& uz, & ux, & up); normalize_v3s4(& up, & uy);
+		// cross_v3s4(& uz, & ux, & up); normalize_v3s4(& up, & uy);
 
 		smem.cam.look_at.m[0][0] = ux.x; smem.cam.look_at.m[0][1] = ux.y; smem.cam.look_at.m[0][2] = ux.z;
 		smem.cam.look_at.m[1][0] = uy.x; smem.cam.look_at.m[1][1] = uy.y; smem.cam.look_at.m[1][2] = uy.z;
@@ -369,7 +369,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		pos = smem.cam.pos; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
 
-		mul_m3s2_v3s4(& smem.cam.look_at, & pos, & off); trans_m3s2(   & smem.cam.look_at,        & off);
+		mul_m3s2_v3s4(& smem.cam.look_at, & pos, & off);
+		trans_m3s2(   & smem.cam.look_at,        & off);
 	}
 
 	// Draw cube
