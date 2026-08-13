@@ -401,7 +401,40 @@ enum { _C2_TX_SUBS_ = 0
  * Per PSX-SPX: SAR (sf*12) with sf=1 = SAR 12 = arithmetic right-shift by 12.
  * This matches the libgte C-side ApplyMatrixLV output (R*pos >> 12). */
 #define gte_cmdw_mvmva_ir    (gte_cmd_base | enc_gte_sf(1) | enc_gte_cv(3) | enc_gte_v(3) | enc_gte_cmd(gte_cmd_mvmva))
+
+/* MVMVA: sf=0, mx=3 (Light matrix), v=3 (IR), cv=3 (no TR).
+ * For pass1 of the C11 two-pass decomposition. Reads L matrix.
+ * Since L matrix is typically zero, pass1 contributes 0 to the combine. */
+#define gte_cmdw_mvmva_sf0_mx3_v3_cv3  (gte_cmd_base | enc_gte_sf(0) | enc_gte_cv(3) | enc_gte_v(3) | enc_gte_mx(3) | enc_gte_cmd(gte_cmd_mvmva))
+
+/* MVMVA: sf=1 (>>12), mx=3 (Light matrix), v=2 (V0), cv=0 (with TR).
+ * Matches the C11 ApplyMatrixLV pass 2 command word (0x49E012) exactly.
+ * The combine is (pass1 << 3) + pass2. */
+#define gte_cmdw_mvmva_pass2_c11  (gte_cmd_base | enc_gte_sf(1) | enc_gte_v(2) | enc_gte_mx(3) | enc_gte_cmd(gte_cmd_mvmva))
+
+/* MVMVA: sf=0, mx=3, v=2, cv=0. Matches the C11 pass 1 command. */
+#define gte_cmdw_mvmva_pass1_c11  (gte_cmd_base | enc_gte_v(2) | enc_gte_mx(3) | enc_gte_cmd(gte_cmd_mvmva))
 #define gte_cmdw_mvmva_no_tr gte_cmdw_mvmva_ir
+
+/* MVMVA pass 2 — EXACT C11 ApplyMatrixLV command.
+ * Command word: 0x4A49E012.
+ * bits 31-26: 010010 = COP2
+ * bit 25: 1 (CO set)
+ * bits 24-20: 01001 = 9 (fake_cmd)
+ * bit 19: 1 (sf=1)
+ * bits 18-17: 00 (mx=0, RT matrix)
+ * bits 16-15: 11 (v=3, IR)
+ * bits 14-13: 11 (cv=3, no translation)
+ * bits 5-0: 010010 = MVMVA
+ * sf=1, mx=0, v=3, cv=3. Pass 2 reads RT matrix, IR input, >>12. */
+#define gte_cmdw_mvmva_c11_pass2_exact  0x4A49E012
+
+/* MVMVA pass 1 — C11's exact command: 0x4A41E012.
+ * bit 25: 1, sf=0, mx=0, v=3, cv=3. Pass 1 reads RT matrix, IR input, no shift. */
+#define gte_cmdw_mvmva_c11_pass1_exact  0x4A41E012
+
+/* MVMVA: sf=1 (>>12), mx=0 (RT matrix), v=0 (V0), cv=3 (no TR). */
+#define gte_cmdw_mvmva_sf1_mx0_v0_cv3  (gte_cmd_base | enc_gte_sf(1) | enc_gte_cv(3) | enc_gte_v(0) | enc_gte_mx(0) | enc_gte_cmd(gte_cmd_mvmva))
 
 /* RTPS with sf=1 (12-bit shift, no translation): matches the output of libgte's
  * ApplyMatrixLV when the GTE pipeline expects R*pos >> 12. The shift produces

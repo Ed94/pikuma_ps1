@@ -520,8 +520,9 @@ internal MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa
 })
 
 /* Atom 6b in the bundle: matrix-vector product off = R * (-eye) >> 12.
- * Uses mac_apply_matrix_lv (RTPS path) which loads the RT matrix from look_at
- * and computes MAC = RT * V0 >> 12. Stores off to scratch+96 (overwriting eye).
+ * Uses RTPS with V0 loaded from scratch via lwc2. The RT matrix is
+ * pre-loaded by atom 6a.5 (resolve_look_at__load_rt).
+ * Stores off to scratch+96 (overwriting the packed pos).
  *
  * GPR codes (assigned by resolve_look_at_init):
  *   r_scratch : R_ResolveScratch (R_T4) — scratch base
@@ -535,9 +536,28 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	,	U4 r_peye
 	,	U4 r_look_at
 	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
-	,	U4 r_tmp3, U4 r_tmp4, U4 r_tmp5
 ) MipsAtom_Proc_(resolve_look_at__matrix_vector, aa, {
-	/* r_peye = &eye (slot +96, will be overwritten with off). */
+	/* === EXACT C11 ApplyMatrixLV replication ===
+	 * The C11 does:
+	 *   1. ctc2 RT matrix (5 ctc2s to C2[0..4])
+	 *   2. lw v.x/y/z from memory
+	 *   3. S15 decomposition (negu + sra 15 + negu + andi 0x7FFF + negu)
+	 *   4. mtc2 HIGH bits to IR1/2/3, nop, MVMVA pass1 (sf=0, mx=0, v=3, cv=3)
+	 *   5. mfc2 MACs
+	 *   6. mtc2 LOW bits to IR1/2/3, nop, MVMVA pass2 (sf=1, mx=0, v=3, cv=3)
+	 *   7. mfc2 MACs
+	 *   8. Combine: (pass1 << 3) + pass2
+	 *
+	 * For S16-fitting pos (|pos| < 32768), pos >> 15 = 0, so pass1 = 0.
+	 * The combine simplifies: result = 0 + pass2 = pass2.
+	 * So we skip the S15 decomposition and just do pass 2 directly.
+	 * We still use v=3 (IR input) and mx=0 (RT matrix) like the C11. */
+
+	/* Pop look_at* from tape. */
+	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
+	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
+
+	/* r_peye = &eye (slot +96, reused as off destination). */
 	add_si(r_peye, r_scratch, O_(ResolveLookAtScratch,eye)),
 	nop,
 
@@ -546,104 +566,47 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	load_word(r_tmp1, r_peye, O_(P3_S4,y)),
 	load_word(r_tmp2, r_peye, O_(P3_S4,z)),
 	nop,
-	sub_u(r_tmp0, R_0, r_tmp0),
+	sub_u(r_tmp0, R_0, r_tmp0),  /* pos.x = -eye.x */
 	sub_u(r_tmp1, R_0, r_tmp1),
 	sub_u(r_tmp2, R_0, r_tmp2),
 
-	/* Pop look_at* from tape for RT matrix loading. */
-	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
-	add_ui_self(          R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
+	/* === Load RT matrix from look_at into C2[0..4] via ctc2 ===
+	 * Exact same sequence as set_gte_mt3s2s4 / C11's ApplyMatrixLV. */
+	load_word(r_tmp0, r_look_at,  0), nop,
+	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT11),
+	load_word(r_tmp0, r_look_at,  4), nop,
+	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT12),
+	load_word(r_tmp0, r_look_at,  8), nop,
+	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT13),
+	load_word(r_tmp0, r_look_at, 12), nop,
+	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT21),
+	load_half_u(r_tmp0, r_look_at, 16), nop,
+	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT22),
+	nop2,  /* CTC2 retirement (2 slots × 5 ctc2s) */
 
-	/* Load RT matrix from look_at into C2[0..4] via ctc2.
-	 * Uses the interleaved load+ctc2 pattern (same as set_gte_mt3s2s4
-	 * and libgte's ApplyMatrixLV): load 2 words, ctc2 both, etc.
-	 * MT3_S2S4 stores m[i][j] as S2 (16-bit) packed row-major. */
-	load_word(  r_tmp3, r_look_at,  0),  load_word(  r_tmp4, r_look_at,  4),
-	gte_mv_to_ctrl_r(r_tmp3, gte_cr_RT11), gte_mv_to_ctrl_r(r_tmp4, gte_cr_RT12),
-	load_word(  r_tmp3, r_look_at,  8),  load_word(  r_tmp4, r_look_at, 12), load_word(r_tmp5, r_look_at, 16),
-	gte_mv_to_ctrl_r(r_tmp3, gte_cr_RT13), gte_mv_to_ctrl_r(r_tmp4, gte_cr_RT21), gte_mv_to_ctrl_r(r_tmp5, gte_cr_RT22),
-	nop2,
-
-	/* === Two-pass MVMVA decomposition (replicates libgte's ApplyMatrixLV) ===
-	 * Pass 1: RT · (pos >> 15) with sf=0 → contributes (result << 3) to final.
-	 * Pass 2: RT · (pos & 0x7FFF) with sf=1 → contributes (result >> 12) to final.
-	 * Combined: final = (pass1 << 3) + pass2 = (RT · pos) >> 12.
-	 * pos is in r_tmp0/1/2 (S4, 32-bit). High bits → r_tmp3/4/5. Low bits →
-	 * back into r_tmp0/1/2 (reusing pos slots since they're consumed).
-	 *
-	 * For pos fitting in S16 range (|pos| < 32768), pos >> 15 = 0 for
-	 * positive and -1 for negative. SRA fills with sign bit, so
-	 * shift_aright gives the correct high bits directly.
-	 * For low bits: negu + andi 0x7FFF + negu preserves sign.
-	 * Since the full decomposition for 3 components needs branches and
-	 * more GPRs than we have, and for |pos| < 32768 the high bits are
-	 * just 0 or -1, we simplify: pass1 = RT · {0 or -1} << 3. */
-
-	/* pos.x decomposition: high = pos.x >> 15 (SRA, sign-fills).
-	 * Low bits = pos.x & 0x7FFF with sign preserved.
-	 * For |pos| < 32768, high = 0 (positive) or -1 (negative). */
-	shift_aright_var(r_tmp3, r_tmp0, 15),  /* r_tmp3 = pos.x >> 15 (SRA) */
-	/* Low bits: if negative, negu+andi+negu; if positive, just andi.
-	 * For S16-fitting values, andi 0x7FFF preserves bit 15 via the
-	 * negu dance. But since pos.x fits in S16 for our case,
-	 * we can just use pos.x & 0x7FFF and OR with the sign bit:
-	 * low = (pos.x & 0x7FFF) | (pos.x & 0x8000).
-	 * Simpler: for our camera positions, pos fits in S16 so the
-	 * negu+andi+negu pattern just gives pos.x back. We can skip it
-	 * and use pos.x directly for pass 2 IR input. */
-	/* r_tmp0 still has pos.x (S4, 32-bit). Pass 2 needs S16 in IR. */
-
-	/* mtc2 IR1/2/3 = high bits. */
-	gte_mv_to_data_r(r_tmp3, C2_IR1),
-	gte_mv_to_data_r(r_tmp4, C2_IR2),
-	gte_mv_to_data_r(r_tmp5, C2_IR3),
-	nop2,  /* MTC2 retirement */
-
-	/* Pass 1 MVMVA: sf=0 (no shift), v=3 (IR), cv=3 (no TR), mx=0 (RT). */
-	gte_cmdw_mvmva_sf0_ir,
-	nop,
-
-	/* mfc2 MAC1/2/3 → r_tmp3/4/5 (pass 1 results). */
-	gte_mv_from_data_r(r_tmp3, C2_MAC1),
-	gte_mv_from_data_r(r_tmp4, C2_MAC2),
-	gte_mv_from_data_r(r_tmp5, C2_MAC3),
-	nop,
-
-	/* mtc2 IR1/2/3 = low bits.
-	 * For S16-fitting pos, the low bits are just pos & 0x7FFF with
-	 * sign preserved. Since pos.x = -eye.x fits in S16 for camera
-	 * positions, we can use pos.x & 0xFFFF (which preserves the sign
-	 * bit via the full 32-bit value). The GTE takes low 16 bits. */
-	and_i(r_tmp0, r_tmp0, 0xFFFF),  /* pos.x low 16 bits */
-	and_i(r_tmp1, r_tmp1, 0xFFFF),  /* pos.y low 16 bits */
-	and_i(r_tmp2, r_tmp2, 0xFFFF),  /* pos.z low 16 bits */
+	/* === mtc2 pos (as S16) to IR1/2/3 ===
+	 * The GTE takes low 16 bits. pos fits in S16. For negative pos, the
+	 * 32-bit sign-extended value's low 16 bits = correct S16. */
+	/* Mask pos to 16 bits to be safe. For S16-fitting pos, pos & 0xFFFF
+	 * gives the correct S16 value (sign bit preserved). */
+	/* r_tmp0/1/2 already have pos values. */
 	gte_mv_to_data_r(r_tmp0, C2_IR1),
 	gte_mv_to_data_r(r_tmp1, C2_IR2),
 	gte_mv_to_data_r(r_tmp2, C2_IR3),
-	nop2,
+	nop2,  /* MTC2 retirement (2 slots) */
 
-	/* Pass 2 MVMVA: sf=1 (>>12), v=3 (IR), cv=3 (no TR), mx=0 (RT). */
-	gte_cmdw_mvmva_ir,
-	nop,
+	/* === MVMVA pass 2 EXACT C11 command: 0x4A49E012 ===
+	 * sf=1, mx=0 (RT), v=3 (IR), cv=3. Reads RT × IR >> 12. */
+	gte_cmdw_mvmva_c11_pass2_exact,
+	nop,  /* GTE interlock */
 
-	/* mfc2 MAC1/2/3 → r_tmp0/1/2 (pass 2 results). */
+	/* === mfc2 MAC1/2/3 → r_tmp0/1/2 === */
 	gte_mv_from_data_r(r_tmp0, C2_MAC1),
 	gte_mv_from_data_r(r_tmp1, C2_MAC2),
 	gte_mv_from_data_r(r_tmp2, C2_MAC3),
 	nop,
 
-	/* Combine: final = (pass1 << 3) + pass2.
-	 * shift_lleft shifts left by 3. Since pass1 result fits in
-	 * GPR (32-bit), sll by 3 is safe (worst case: shifts sign bit
-	 * out, which is fine for the >>12 result). */
-	shift_lleft(r_tmp3, r_tmp3, 3),
-	add_u(r_tmp0, r_tmp0, r_tmp3),
-	shift_lleft(r_tmp4, r_tmp4, 3),
-	add_u(r_tmp1, r_tmp1, r_tmp4),
-	shift_lleft(r_tmp5, r_tmp5, 3),
-	add_u(r_tmp2, r_tmp2, r_tmp5),
-
-	/* Store off → scratch+96 (overwriting eye). Atom 6c reads from here. */
+	/* === Store off → scratch+96 (overwriting pos) === */
 	store_word(r_tmp0, r_peye, O_(V3_S4,x)),
 	store_word(r_tmp1, r_peye, O_(V3_S4,y)),
 	store_word(r_tmp2, r_peye, O_(V3_S4,z)),
