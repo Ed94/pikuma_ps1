@@ -391,11 +391,15 @@ enum { _C2_TX_SUBS_ = 0
 	* The wedge alias is the 3D complement interpretation of the same 3 scalars (MAC1..MAC3). */
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
 
-/* MVMVA with sf=1 (12-bit shift), cv=3 (no translation), v=3 (IR): for ApplyMatrixLV.
+/* MVMVA with sf=0 (no shift, full-integer), cv=3 (no translation), v=3 (IR vector input).
+ * Reads input from IR1/2/3 (loaded via mtc2 rt, C2_IRx). MAC1/2/3 = RT row · IR (full product, no >>12).
+ * Per PSX-SPX: SAR (sf*12) with sf=0 = SAR 0 = no shift. */
+#define gte_cmdw_mvmva_sf0_ir  (gte_cmd_base | enc_gte_cv(3) | enc_gte_v(3) | enc_gte_cmd(gte_cmd_mvmva))
+
+/* MVMVA with sf=1 (>>12 shift, 4.12 fixed-point), cv=3 (no translation), v=3 (IR): for ApplyMatrixLV.
  * Reads input from IR1/2/3 (loaded via mtc2 rt, C2_IRx). MAC1/2/3 = (RT row · IR) >> 12.
- * The 12-bit shift produces values like R*pos >> 12, matching the libgte C-side ApplyMatrixLV output.
- * Note: PCSX-Redux's MVMVA interpretation differs from the spec on some matrix layouts.
- */
+ * Per PSX-SPX: SAR (sf*12) with sf=1 = SAR 12 = arithmetic right-shift by 12.
+ * This matches the libgte C-side ApplyMatrixLV output (R*pos >> 12). */
 #define gte_cmdw_mvmva_ir    (gte_cmd_base | enc_gte_sf(1) | enc_gte_cv(3) | enc_gte_v(3) | enc_gte_cmd(gte_cmd_mvmva))
 #define gte_cmdw_mvmva_no_tr gte_cmdw_mvmva_ir
 

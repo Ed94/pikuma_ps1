@@ -91,8 +91,8 @@
 #define PtrSet_(type)  TypeR_(type); typedef TypeV_(type)
 #define TSet_(type)    type; typedef PtrSet_(type)
 
-#define array_len(a)                   (U4)(sizeof(a) / sizeof(typeof((a)[0])))
-#define array_decl(type, ...)          (type[]){__VA_ARGS__}
+#define Array_len(a)                   (U4)(sizeof(a) / sizeof(typeof((a)[0])))
+#define Array_decl(type, ...)          (type[]){__VA_ARGS__}
 #define Array_sym(type,len)            A ## len ## _ ## type
 #define Array_expand(type,len)         type Array_sym(type, len)[len]; typedef PtrSet_(Array_sym(type, len))
 #define Array_(type,len)               Array_expand(type,len)

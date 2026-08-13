@@ -203,7 +203,7 @@ FI_ Slice_MipsCode ac_trans_matrix(AtomBuilder_R ab
  * The later 64 entries (octaves 2-3) are the `srav` branch when the magnitude's top bit is well above bit 24.
  *
  * 192-entry table is reproduced verbatim from libgte (verified against libpsn00b/psxgte/vector.s:100-123 — 24 rows × 8 halfwords, last entry 0x0804). */
-internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
+internal RO_ S2  gte_normalize_sqr_tbl[192] align_(2) = {
 	0x1000, 0x0fe0, 0x0fc1, 0x0fa3, 0x0f85, 0x0f68, 0x0f4c, 0x0f30,
 	0x0f15, 0x0efb, 0x0ee1, 0x0ec7, 0x0eae, 0x0e96, 0x0e7e, 0x0e66,
 	0x0e4f, 0x0e38, 0x0e22, 0x0e0c, 0x0df7, 0x0de2, 0x0dcd, 0x0db9,

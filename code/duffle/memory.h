@@ -18,7 +18,7 @@ I_ U4 align_pow2(U4 x, U4 b) {
 
 #define align_struct(type_width) ((U4)(((type_width) + 3) & ~3))
 
-FI_ void mem_bump(U4 start, U4 cap, U4*R_ used, U4 amount) {
+FI_ void mem_bump(U4 cap, U4*R_ used, U4 amount) {
 	assert(amount <= (cap - used[0])); 
 	used[0] += amount; 
 }
@@ -72,7 +72,7 @@ typedef Slice_(B1);
 #define slice_to_ut(s)     slice_ut_(u4_((s).ptr), S_slice(s))
 
 #define slice_iter(container, iter)     (T_((container).ptr) iter = (container).ptr; iter != slice_end(container); ++ iter)
-#define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = array_decl(type,__VA_ARGS__), .len = array_len( array_decl(type,__VA_ARGS__)) }
+#define slice_arg_from_array(type, ...) & (tmpl(Slice,type)) { .ptr = Array_decl(type,__VA_ARGS__), .len = Array_len( Array_decl(type,__VA_ARGS__)) }
 #define slice_from_array(type, array)     (tmpl(Slice,type)) { .ptr = array, .len = S_(array) / S_(type) }
 
 FI_ void slice_zero_(Slice s) { slice_assert(s); mem_zero(u4_(s.ptr), s.len); }
@@ -89,6 +89,12 @@ FI_ void slice_copy_(Slice dest, Slice src) {
 	slice_copy_(slice_to_ut(dest), slice_to_ut(src)); \
 } while(0)
 
+FI_ Slice slice_bump(U4_R used, U4 start, U4 len, U4 amount) {
+	assert(len - used[0] - amount);
+	U4 ptr = start + used[0]; used[0] += amount;
+	return slice_ut(ptr, amount);
+}
+
 typedef Slice_(U1);
 typedef Slice_(U4);
 
@@ -104,12 +110,13 @@ FI_ void farena_init(FArena_R arena, Slice mem) {  assert(arena != nullptr);
 	arena->used     = 0;
 }
 FI_ FArena farena_make(Slice mem) { FArena a; farena_init(& a, mem); return a; }
-I_  Slice  farena_push(FArena_R arena, U4 amount, Opt_farena o) {
+FI_ Slice farena_bump(FArena_R a, U4 amount) { return slice_bump(& a->used, a->start, a->capacity, amount); }
+I_  Slice farena_push(FArena_R arena, U4 amount, Opt_farena o) {
 	if (amount == 0) { return (Slice){}; }
 	U4 desired   = amount * (o.type_width == 0 ? 1 : o.type_width);
 	U4 to_commit = align_pow2(desired, o.alignment ?  o.alignment : MEM_ALIGNMENT_DEFAULT);
 	U4 ptr       = arena->start + arena->used;
-	mem_bump(arena->start, arena->capacity, & arena->used, to_commit);
+	mem_bump(arena->capacity, & arena->used, to_commit);
 	return (Slice){ (B1*)ptr, to_commit };
 }
 FI_ void farena_reset (FArena_R arena) { arena->used = 0; }
@@ -117,7 +124,7 @@ FI_ void farena_rewind(FArena_R arena, U4 save_point) {
 	U4 end       = arena->start + arena->used; assert_bounds(save_point, arena->start, end);
 	arena->used -= save_point - arena->start;
 }
-FI_ U4 farena_save(FArena arena)  { return arena.used; }
+FI_ U4 farena_save(FArena arena) { return arena.used; }
 FI_ U4 farena_unused_start(FArena arena) { return arena.start + arena.used; }
 #define farena_push_(arena, amount, ...)                                          farena_push((arena), (amount), opt_(farena, __VA_ARGS__))
 #define farena_push_type(arena, type, ...)                              C_(type*, farena_push((arena), 1,        opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr)

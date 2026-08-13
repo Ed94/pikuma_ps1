@@ -244,9 +244,8 @@ typedef Relative_(FArena) Struct_(AtomBuilder) { U4 start; U4 capacity; U4 used;
 
 FI_ void atombuilder_push(AtomBuilder_R ab, Slice_MipsCode code) {
 	assert(ab->capacity - ab->used - code.len);
-	U4 dest = ab->start + ab->used * S_(MipsCode);
-	mem_copy(dest, u4_(code.ptr), S_slice(code));
-	mem_bump(ab->start, ab->capacity, & ab->used, code.len);
+	U4 dest = ab->start + ab->used * S_(MipsCode); U4 size = S_slice(code);
+	mem_copy(dest, u4_(code.ptr), size); ab->used += size;
 }
 #define atombuilder_push_mac(ab, mac) atombuilder_push(ab, slice_arg_from_array(Slice_MipsCode, mac))
 
@@ -257,9 +256,11 @@ FI_ void tb_emit_atombuilder(TapeBuilder_R tb, AtomBuilder_R ab) { tb_emit(tb, a
 #pragma endregion Mips Atom Builder
 
 #pragma region Atom Arena
+// Just a dedicated FArena that is meant to mem_copy and return atom definitions made with MipsAtom_Proc_
+
 typedef Relative_(FArena) Struct_(AtomArena) { U4 start; U4 capacity; U4 used; };
 
-#define atomarena_unused_start(ab) ((ab).start + (ab).used * S_(MipsCode))
+#define atomarena_unused_start(ab) ((ab).start + (ab).used)
 FI_ void atomarena_init(AtomArena_R arena, Slice mem) {  assert(arena != nullptr);
 	arena->start    = u4_(mem.ptr);
 	arena->capacity = mem.len;
@@ -268,9 +269,8 @@ FI_ void atomarena_init(AtomArena_R arena, Slice mem) {  assert(arena != nullptr
 FI_ AtomArena atomarena_make(Slice mem) { AtomArena a; atomarena_init(& a, mem); return a; }
 FI_ MipsAtom* atomarena_push(AtomArena_R aa, Slice_MipsCode code) {
 	assert(aa->capacity - aa->used - code.len);
-	U4 dest = atomarena_unused_start(aa[0]);
-	mem_copy(dest, u4_(code.ptr), S_slice(code));
-	mem_bump(aa->start, aa->capacity, & aa->used, code.len);
+	U4 dest = atomarena_unused_start(aa[0]); U4 size = S_slice(code);
+	mem_copy(dest, u4_(code.ptr), size); aa->used += size;
 	return C_(MipsAtom*, dest);
 }
 FI_ void atomarena_reset(AtomArena_R aa) { aa->used = 0; }
