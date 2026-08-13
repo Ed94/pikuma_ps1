@@ -151,12 +151,15 @@ FI_ Slice_MipsCode ac_trans_matrix(AtomBuilder_R ab
 	,	U4 r_t1
 ) MipsAtomComp_Proc_(ac_trans_matrix, ab, {
 	load_word(r_t1, r_off, O_(V3_S4,x)),
+	nop,
 	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[0])),
 
 	load_word(r_t1, r_off, O_(V3_S4,y)),
+	nop,
 	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])),
 
 	load_word(r_t1, r_off, O_(V3_S4,z)),
+	nop,
 	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[2])),
 })
 

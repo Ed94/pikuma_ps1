@@ -214,12 +214,15 @@ WORD_COUNT(mac_apply_matrix_lv, 31)
 
 #define mac_trans_matrix(r_mtx, r_off, r_t1) \
 	load_word(r_t1, r_off, O_(V3_S4,x)) \
+,	nop \
 ,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[0])) \
 ,	load_word(r_t1, r_off, O_(V3_S4,y)) \
+,	nop \
 ,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])) \
 ,	load_word(r_t1, r_off, O_(V3_S4,z)) \
+,	nop \
 ,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[2]))
-WORD_COUNT(mac_trans_matrix, 6)
+WORD_COUNT(mac_trans_matrix, 9)
 
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	load_upper_i(reg_transfer, u4_hi(cmd)) \

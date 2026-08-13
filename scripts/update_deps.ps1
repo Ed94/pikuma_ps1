@@ -61,6 +61,119 @@ if (-not $msbuild_exe) {
 }
 
 $path_pcsx_sln = join-path $path_pcsx_redux 'vsprojects\pcsx-redux.sln'
+
+# ════════════════════════════════════════════════════════════════════════════
+# NuGet restore — required before MSBuild.
+# pcsx-redux's .vcxproj files use the legacy packages.config style with
+# hardcoded `<Import Project="..\packages\{id}.{ver}\...">` directives.
+# MSBuild's `/t:Restore` won't fetch missing packages here (the local
+# packages\ dir is checked but no package-source lookup happens), and
+# `dotnet restore` errors on packages.config projects, so we walk every
+# packages.config, parse out the <package id version/> entries, and pull
+# any missing .nupkg directly from api.nuget.org's flat container.
+# ════════════════════════════════════════════════════════════════════════════
+$path_pcsx_packages = join-path $path_pcsx_redux 'vsprojects\packages'
+$nuget_flat_container = 'https://api.nuget.org/v3-flatcontainer'
+
+# Collect required (id, version) pairs from every packages.config.
+$required_packages = @{}
+Get-ChildItem -Path (join-path $path_pcsx_redux 'vsprojects') -Filter 'packages.config' -Recurse -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        [xml]$xml = Get-Content -LiteralPath $_.FullName -Raw
+        foreach ($pkg in $xml.packages.package) {
+            $key = '{0}|{1}' -f $pkg.id, $pkg.version
+            $required_packages[$key] = @{ id = $pkg.id; version = $pkg.version }
+        }
+    }
+
+# Ensure the packages root exists.
+if (-not (Test-Path -LiteralPath $path_pcsx_packages)) {
+    New-Item -ItemType Directory -Path $path_pcsx_packages -Force | Out-Null
+}
+
+# Download anything missing. Skip the package entirely if its dir already has
+# any contents (the legacy packages.config style means the targets file
+# location varies per package — `luajit.native` puts it at build/native/,
+# `glfw` puts it elsewhere — so we can't probe a specific path; just check
+# whether the dir is non-empty).
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+foreach ($pkg in $required_packages.Values) {
+    $pkgDir = Join-Path $path_pcsx_packages ('{0}.{1}' -f $pkg.id, $pkg.version)
+    if ((Test-Path -LiteralPath $pkgDir) -and `
+        (@(Get-ChildItem -LiteralPath $pkgDir -Recurse -ErrorAction SilentlyContinue).Count -gt 0)) {
+        continue
+    }
+    $url = '{0}/{1}/{2}/{1}.{2}.nupkg' -f $nuget_flat_container, $pkg.id, $pkg.version
+    $nupkg = Join-Path $pkgDir ('{0}.{1}.nupkg' -f $pkg.id, $pkg.version)
+    New-Item -ItemType Directory -Path $pkgDir -Force | Out-Null
+    Write-Host "Fetching NuGet package: $($pkg.id) $($pkg.version)"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $nupkg -UseBasicParsing -ErrorAction Stop
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($nupkg, $pkgDir)
+        Remove-Item -LiteralPath $nupkg -Force
+    } catch {
+        $msg = $_.Exception.Message
+        if ($msg -match '404') {
+            Write-Host "  Not on nuget.org (vendored?) — skipping $url"
+        } else {
+            Write-Warning "Failed to fetch $url — $msg"
+        }
+        if (Test-Path -LiteralPath $nupkg) { Remove-Item -LiteralPath $nupkg -Force }
+    }
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# isoffi.lua size guard — `core.vcxproj` #includes src/core/isoffi.lua into
+# luaiso.cc via the `-- lualoader, R"EOF(...)EOF"` trick. The raw string
+# literal between R"EOF(-- and -- )EOF" must stay under ~16,379 bytes or
+# MSVC (19.44) fails with C2026 (its actual raw-string limit is 16,384,
+# minus 5 bytes for the `-- lualoader, ` prefix). If the upstream file
+# grows past that, trim it: remove license header, trailing whitespace,
+# blank separators, inline comments, and shrink 4-space indent to 2-space.
+# Idempotent — only writes when the raw string exceeds the limit.
+# ════════════════════════════════════════════════════════════════════════════
+$path_isoffi = join-path $path_pcsx_redux 'src\core\isoffi.lua'
+if (Test-Path -LiteralPath $path_isoffi) {
+    $content = Get-Content -LiteralPath $path_isoffi -Raw -Encoding utf8
+    $startMarker = $content.IndexOf('R"EOF(--')
+    $endMarker   = $content.IndexOf('-- )EOF"')
+    $literalLen  = if ($startMarker -ge 0 -and $endMarker -gt $startMarker) {
+        $endMarker - ($startMarker + 8)
+    } else { -1 }
+    # Effective MSVC raw-string limit for the lualoader prefix is 16379 bytes.
+    if ($literalLen -gt 16379) {
+        Write-Host "isoffi.lua raw string is $literalLen bytes (>16379); trimming for MSVC C2026 limit."
+        $lines     = $content -split "`n"
+        $markerIdx = -1
+        for ($i = 0; $i -lt $lines.Length; $i++) {
+            if ($lines[$i] -match '^-- \)EOF"') { $markerIdx = $i; break }
+        }
+        $newLines = @()
+        for ($i = 0; $i -lt $lines.Length; $i++) {
+            $lineNum = $i + 1
+            $line    = $lines[$i]
+            # Keep the first line and the EOF-marker line untouched.
+            if ($i -eq 0 -or $i -eq $markerIdx) { $newLines += $line; continue }
+            # Drop the GPL license header (lines 2-17).
+            if ($lineNum -ge 2 -and $lineNum -le 17) { continue }
+            # Drop blank separator lines.
+            if ($line -match '^\s*$') { continue }
+            # Drop trailing whitespace.
+            $line = $line -replace '\s+$', ''
+            # Drop inline comments (anything from `--` to end of line).
+            $line = $line -replace '\s*--.*$', ''
+            # Shrink 4-space indent to 2-space.
+            $line = $line -replace '^(    )', '  '
+            if ($line -match '^\s*$') { continue }
+            $newLines += $line
+        }
+        ($newLines -join "`n") | Out-File -LiteralPath $path_isoffi -Encoding utf8 -NoNewline
+        $newLen = ((Get-Content -LiteralPath $path_isoffi -Raw -Encoding utf8) `
+            -replace '.*R"EOF\(--', '' -replace '-- \)EOF".*', '').Length
+        Write-Host "isoffi.lua trimmed: $literalLen -> $newLen bytes of raw string content."
+    }
+}
+
 & $msbuild_exe $path_pcsx_sln /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /m /v:minimal
 
 # Locate luajit via scoop. `luajit.exe` is on PATH via scoop's shim;
@@ -117,6 +230,17 @@ $lfs_dll_import = join-path $luajit_lib_dir 'libluajit-5.1.dll.a'
 # ════════════════════════════════════════════════════════════════════════════
 
 $path_openbios = join-path $path_pcsx_redux 'src\mips\openbios'
+
+# Wipe stale *.dep files across src\mips. These cache absolute paths to the
+# GCC headers directory; if the toolchain was upgraded (e.g. v14.2.0 → v16.1.0)
+# Make reads the stale paths and aborts with "no rule to make target .../stddef.h".
+# `make clean` in openbios only clears its own dir — subdirs like
+# common/crt0/, modplayer/, and shell/ keep their stale .dep files. Easier to
+# just delete the lot before each build than to teach every Makefile about
+# deepclean recursion.
+Get-ChildItem -Path (join-path $path_pcsx_redux 'src\mips') -Recurse -Filter '*.dep' -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+
 push-location $path_openbios
 &	make clean
 &	make

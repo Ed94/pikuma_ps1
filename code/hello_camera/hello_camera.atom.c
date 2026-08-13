@@ -123,6 +123,7 @@ enum {
 	/* Wave-context GPR carrier for the resolve_look_at bundle: the scratch base.
 	* Set by atom 0 (popped from tape), read by atoms 1-6 (used as pointer base). */
 	R_ResolveScratch = R_T4 atom_reg atom_type(U4*),
+#define R_ResolveScratch_Code R_T4_Code
 };
 typedef Struct_(Binds_ResolveLookAt) {
 	MT3_S2S4* look_at;
@@ -561,15 +562,6 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	add_si(r_peye, r_scratch, O_(ResolveLookAtScratch,eye)),
 	nop,
 
-	/* Load pos = -eye from scratch. */
-	load_word(r_tmp0, r_peye, O_(P3_S4,x)),
-	load_word(r_tmp1, r_peye, O_(P3_S4,y)),
-	load_word(r_tmp2, r_peye, O_(P3_S4,z)),
-	nop,
-	sub_u(r_tmp0, R_0, r_tmp0),  /* pos.x = -eye.x */
-	sub_u(r_tmp1, R_0, r_tmp1),
-	sub_u(r_tmp2, R_0, r_tmp2),
-
 	/* === Load RT matrix from look_at into C2[0..4] via ctc2 ===
 	 * Exact same sequence as set_gte_mt3s2s4 / C11's ApplyMatrixLV. */
 	load_word(r_tmp0, r_look_at,  0), nop,
@@ -583,6 +575,15 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	load_half_u(r_tmp0, r_look_at, 16), nop,
 	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT22),
 	nop2,  /* CTC2 retirement (2 slots × 5 ctc2s) */
+
+	/* Load pos = -eye after the matrix load releases r_tmp0. */
+	load_word(r_tmp0, r_peye, O_(P3_S4,x)),
+	load_word(r_tmp1, r_peye, O_(P3_S4,y)),
+	load_word(r_tmp2, r_peye, O_(P3_S4,z)),
+	nop,
+	sub_u(r_tmp0, R_0, r_tmp0),  /* pos.x = -eye.x */
+	sub_u(r_tmp1, R_0, r_tmp1),
+	sub_u(r_tmp2, R_0, r_tmp2),
 
 	/* === mtc2 pos (as S16) to IR1/2/3 ===
 	 * The GTE takes low 16 bits. pos fits in S16. For negative pos, the

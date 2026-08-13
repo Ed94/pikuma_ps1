@@ -241,7 +241,6 @@ internal void resolve_look_at_init(void) {
 		r_tmp0_0, r_tmp1_0, r_tmp2_0, r_tmp3_0);
 
 	/* === ATOM 1: normalize fwd→uz === */
-	ab.start = ab.start + ab.used;
 	U4 const r_src_offset_1  = O_(ResolveLookAtScratch, fwd);
 	U4 const r_dst_offset_1  = O_(ResolveLookAtScratch, uz);
 	U4 const r_src_ptr_1     = R_T0;
