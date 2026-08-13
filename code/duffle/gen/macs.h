@@ -175,6 +175,60 @@ WORD_COUNT(mac_gte_sqr_v3, 8)
 ,	shift_aright_var(r_dz, r_dz, r_shift)
 WORD_COUNT(mac_gte_gpf_scale, 13)
 
+#define mac_apply_matrix_lv(r_mtx, r_vec, r_out, r_t0, r_t1, r_t2) \
+	load_word(r_t0, r_mtx,  0) \
+,	nop \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT11_Code) \
+,	load_word(r_t0, r_mtx,  4) \
+,	nop \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT12_Code) \
+,	load_word(r_t0, r_mtx,  8) \
+,	nop \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT13_Code) \
+,	load_word(r_t0, r_mtx, 12) \
+,	nop \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT21_Code) \
+,	load_half_u(r_t0, r_mtx, 16) \
+,	nop \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT22_Code) \
+,	nop2	/* Load PACKED pos into V0 (libgte SVECTOR layout).
+	 * r_vec points to atom-0-staged packed data ((pos.y << 16) | pos.x at +0, pos.z at +4).
+	 * LWC2 base register MUST be the pointer r_vec, NOT the loaded value r_t0. */ \
+,	load_word(r_t0, r_vec, 0) \
+,	nop \
+,	gte_lw(C2_VXY0, r_vec, 0) \
+,	load_word(r_t0, r_vec, 4) \
+,	nop \
+,	gte_lw(C2_VZ0, r_vec, 4)	/* RTPS cv=1 (no translation accumulation; BK is zero-initialized), sf=0, v=0, mx=0.
+	 * MAC1 = RT11*V0.x + RT12*V0.y + RT13*V0.z + 0
+	 * MAC2 = RT21*V0.x + RT22*V0.y + RT23*V0.z + 0
+	 * MAC3 = RT31*V0.x + RT32*V0.y + RT33*V0.z + 0
+	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored. */ \
+,	gte_cmdw_rtps_no_tr	/* Read MAC1/2/3 → out. */ \
+,	gte_mv_from_data_r(r_t0, C2_MAC1) \
+,	gte_mv_from_data_r(r_t1, C2_MAC2) \
+,	gte_mv_from_data_r(r_t2, C2_MAC3) \
+,	nop \
+,	store_word(r_t0, r_out, 0) \
+,	store_word(r_t1, r_out, 4) \
+,	store_word(r_t2, r_out, 8)
+WORD_COUNT(mac_apply_matrix_lv, 31)
+
+#define mac_trans_matrix(r_mtx, r_off, r_t0, r_t1) \
+	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[0])) \
+,	load_word(r_t1, r_off, O_(V3_S4,x)) \
+,	add_u(r_t0, r_t0, r_t1) \
+,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])) \
+,	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[1])) \
+,	load_word(r_t1, r_off, O_(V3_S4,y)) \
+,	add_u(r_t0, r_t0, r_t1) \
+,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[1])) \
+,	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[2])) \
+,	load_word(r_t1, r_off, O_(V3_S4,z)) \
+,	add_u(r_t0, r_t0, r_t1) \
+,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[2]))
+WORD_COUNT(mac_trans_matrix, 12)
+
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	load_upper_i(reg_transfer, u4_hi(cmd)) \
 ,	or_i_self(   reg_transfer, u4_lo(cmd))	/* load_upper_i(reg_transfer, cmd >> 16),	// or_i_self(   reg_transfer, cmd & 0xFFFF), */ \

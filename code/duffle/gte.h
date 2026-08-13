@@ -391,6 +391,19 @@ enum { _C2_TX_SUBS_ = 0
 	* The wedge alias is the 3D complement interpretation of the same 3 scalars (MAC1..MAC3). */
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
 
+/* MVMVA with sf=1 (12-bit shift), cv=3 (no translation), v=3 (IR): for ApplyMatrixLV.
+ * Reads input from IR1/2/3 (loaded via mtc2 rt, C2_IRx). MAC1/2/3 = (RT row · IR) >> 12.
+ * The 12-bit shift produces values like R*pos >> 12, matching the libgte C-side ApplyMatrixLV output.
+ * Note: PCSX-Redux's MVMVA interpretation differs from the spec on some matrix layouts.
+ */
+#define gte_cmdw_mvmva_ir    (gte_cmd_base | enc_gte_sf(1) | enc_gte_cv(3) | enc_gte_v(3) | enc_gte_cmd(gte_cmd_mvmva))
+#define gte_cmdw_mvmva_no_tr gte_cmdw_mvmva_ir
+
+/* RTPS with sf=1 (12-bit shift, no translation): matches the output of libgte's
+ * ApplyMatrixLV when the GTE pipeline expects R*pos >> 12. The shift produces
+ * values like (-270, 710, 1713) which match the C11 reference path. */
+#define gte_cmdw_rtps_sf1   (gte_cmd_base | enc_gte_sf(1) | enc_gte_cv(3) | enc_gte_cmd(gte_cmd_rtps))
+
 /* SQR / GPF cosmetic-bits compat helpers.
  * Each command's `_compat` macro ORs in the `fake_cmd` field value libgte happens to emit.
  * The hardware ignores these bits (per PSX-SPX line 48). */

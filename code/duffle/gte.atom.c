@@ -83,6 +83,90 @@ FI_ Slice_MipsCode ac_gte_gpf_scale(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz,
 	shift_aright_var(r_dz, r_dz, r_shift),
 })
 
+/* ─── APPLY MATRIX LV (libgte ApplyMatrixLV port) ───
+ * Atom component — auto-generates mac_apply_matrix_lv Mac composer macro.
+ * Uses GTE RTPS (cv=1, sf=1, v=0) with lwc2-loaded V0/VZ0 inputs.
+ * Per PSX-SPX `geometrytransformationenginegte.md` lines 416-418:
+ *   IR1 = MAC1 = (TRX*1000h + RT11*VX0 + RT12*VY0 + RT13*VZ0) SAR (sf*12)
+ *   IR2 = MAC2 = (TRY*1000h + RT21*VX0 + RT22*VY0 + RT23*VZ0) SAR (sf*12)
+ *   IR3 = MAC3 = (TRZ*1000h + RT31*VX0 + RT32*VY0 + RT33*VZ0) SAR (sf*12)
+ * RTPS uses the FULL row of the rotation matrix (not just diagonal like MVMVA with mx=0).
+ * libgte's `gte_ApplyMatrix` calls `gte_rtv0()` = RTPS cv=1 v=0 mx=0.
+ * Per `gte.h` line 405 the body sets cv=3 (BK, zero-initialized) so no TR contribution.
+ *
+ * Operands:
+ *   r_mtx  : MT3_S2S4* (matrix pointer)
+ *   r_vec  : U4 (pointer to PACKED V0 data — (pos.y << 16) | pos.x at +0, pos.z at +4)
+ *   r_out  : V3_S4* (output pointer; MAC1/2/3 stored here)
+ *   r_t0/1/2 : 3 GPR codes for matrix load + intermediate state
+ * Words: ~26.  Clobbers: r_t0, r_t1, r_t2 (C2 $0..$4, VXY0/VZ0, MAC1/2/3, SXY0/1/2). */
+FI_ Slice_MipsCode ac_apply_matrix_lv(AtomBuilder_R ab
+	,	U4 r_mtx, U4 r_vec, U4 r_out
+	,	U4 r_t0,  U4 r_t1,  U4 r_t2
+) MipsAtomComp_Proc_(ac_apply_matrix_lv, ab, {
+	/* Load MATRIX rows into GTE RT11..RT33 (libgte convention: ctc2 to C2 $0..$4 in order).
+	 * load_half_u zero-extends the last word so RT33 = m[2][2] and TRX = 0. */
+	load_word(r_t0, r_mtx,  0), nop,
+	gte_mv_to_ctrl_r(r_t0, gte_cr_RT11_Code),
+	load_word(r_t0, r_mtx,  4), nop,
+	gte_mv_to_ctrl_r(r_t0, gte_cr_RT12_Code),
+	load_word(r_t0, r_mtx,  8), nop,
+	gte_mv_to_ctrl_r(r_t0, gte_cr_RT13_Code),
+	load_word(r_t0, r_mtx, 12), nop,
+	gte_mv_to_ctrl_r(r_t0, gte_cr_RT21_Code),
+	load_half_u(r_t0, r_mtx, 16), nop,
+	gte_mv_to_ctrl_r(r_t0, gte_cr_RT22_Code),
+	nop2,
+
+	/* Load PACKED pos into V0 (libgte SVECTOR layout).
+	 * r_vec points to atom-0-staged packed data ((pos.y << 16) | pos.x at +0, pos.z at +4).
+	 * LWC2 base register MUST be the pointer r_vec, NOT the loaded value r_t0. */
+	load_word(r_t0, r_vec, 0), nop,
+	gte_lw(C2_VXY0, r_vec, 0),
+	load_word(r_t0, r_vec, 4), nop,
+	gte_lw(C2_VZ0, r_vec, 4),
+
+	/* RTPS cv=1 (no translation accumulation; BK is zero-initialized), sf=0, v=0, mx=0.
+	 * MAC1 = RT11*V0.x + RT12*V0.y + RT13*V0.z + 0
+	 * MAC2 = RT21*V0.x + RT22*V0.y + RT23*V0.z + 0
+	 * MAC3 = RT31*V0.x + RT32*V0.y + RT33*V0.z + 0
+	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored. */
+	gte_cmdw_rtps_no_tr,
+
+	/* Read MAC1/2/3 → out. */
+	gte_mv_from_data_r(r_t0, C2_MAC1),
+	gte_mv_from_data_r(r_t1, C2_MAC2),
+	gte_mv_from_data_r(r_t2, C2_MAC3),
+	nop,
+	store_word(r_t0, r_out, 0),
+	store_word(r_t1, r_out, 4),
+	store_word(r_t2, r_out, 8),
+})
+
+/* ─── TRANS MATRIX (libgte TransMatrix port) ───
+ * Atom component — auto-generates mac_trans_matrix Mac composer macro.
+ * m->t += off.  Uses 2 GPRs via per-axis load-delay-slot pattern.
+ * Words: 12.  Clobbers: r_t0, r_t1. */
+FI_ Slice_MipsCode ac_trans_matrix(AtomBuilder_R ab
+	,	U4 r_mtx, U4 r_off
+	,	U4 r_t0,  U4 r_t1
+) MipsAtomComp_Proc_(ac_trans_matrix, ab, {
+	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[0])),
+	load_word(r_t1, r_off, O_(V3_S4,x)),
+	add_u(r_t0, r_t0, r_t1),
+	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])),
+
+	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[1])),
+	load_word(r_t1, r_off, O_(V3_S4,y)),
+	add_u(r_t0, r_t0, r_t1),
+	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[1])),
+
+	load_word(r_t0, r_mtx,  O_(MT3_S2S4,t[2])),
+	load_word(r_t1, r_off, O_(V3_S4,z)),
+	add_u(r_t0, r_t0, r_t1),
+	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[2])),
+})
+
 #pragma endregion MACs (Mips Atom Components)
 
 #pragma region Atom Procs

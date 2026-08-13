@@ -369,8 +369,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		pos = smem.cam.pos; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
 
-		mul_m3s2_v3s4(& smem.cam.look_at, & pos, & off);
-		trans_m3s2(   & smem.cam.look_at,        & off);
+		mul_m3s2_v3s4(& smem.cam.look_at, & pos, & off); trans_m3s2(   & smem.cam.look_at,        & off);
 	}
 
 	// Draw cube
