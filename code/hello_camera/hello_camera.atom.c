@@ -188,26 +188,17 @@ typedef Struct_(ResolveLookAtScratch) {
  */
 
 typedef Struct_(Binds_ResolveLookAtSub) {
-	U4 target;  /* U4 (C-side P3_S4* — read by atom 0 directly; NOT a scratchpad address) */
-	U4 eye;     /* U4 (C-side P3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
-	U4 up_in;   /* U4 (C-side V3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
-	U4 scratchpad;
+	P3_S4* target;  /* U4 (C-side P3_S4* — read by atom 0 directly; NOT a scratchpad address) */
+	P3_S4* eye;     /* U4 (C-side P3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
+	V3_S4* up_in;   /* U4 (C-side V3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
+	ResolveLookAtScratch* scratchpad;
 };
 
 /* Atom 0 in the bundle: input_and_sub. Stages C-side inputs into the scratchpad and computes fwd = target - eye.
- * Inputs (C-side pointers popped from the tape):
- *   r_target_ptr : P3_S4* (C-side struct; atom 0 reads target.x/y/z directly)
- *   r_eye_ptr    : P3_S4* (C-side struct; staged into scratchpad at +96/+100/+104)
- *   r_up_in_ptr  : V3_S4* (C-side struct; staged into scratchpad at +128/+132/+136)
- *   r_scratch    : R_ResolveScratch (R_T4) — scratch base, read by atoms 1-6
- * 
- * Bind-pop layout:
- *   Binds_ResolveLookAtSub
  * Staging work:
  *   * Stage eye.x/y/z   → scratch (for atom 6's translation column)
  *   * Stage up_in.x/y/z → scratch (for atom 2's outer-product operand)
  *   * Compute fwd = target - eye, store fwd.x/y/z → scratch+0/+4/+8 (for atom 1)
- *
  * GPR codes (assigned by resolve_look_at_init):
  *   r_target_ptr : R_T0
  *   r_eye_ptr    : R_T1
@@ -219,56 +210,35 @@ typedef Struct_(Binds_ResolveLookAtSub) {
  *   r_tmp3       : R_T7 (stage eye/up_in + load target.y)
  *   R_AT         : hardcoded (load eye.y / eye.z / target.z)
  *   R_V0         : hardcoded (load eye.z / target.z)
- *
  * Pool cost: 8 GPRs + R_T4 (carrier) + R_AT + R_V0 (hardcoded) = 11 GPRs.
  */
-internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,	U4 r_scratch
+internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,	
+			// TODO(Ed): We can resolve scratch at anytime its fixed to a specific address.
+			U4 r_scratch
 	,	U4 r_target_ptr,U4 r_eye_ptr, U4 r_up_in_ptr
 	,	U4 r_tmp0,      U4 r_tmp1,    U4 r_tmp2, U4 r_tmp3
 ) MipsAtom_Proc_(resolve_look_at__input_and_sub, aa, {
-	/* Pop the 3 C-side pointers + scratch_base from the tape. */
 	load_word(r_target_ptr, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
 	load_word(r_eye_ptr,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
 	load_word(r_up_in_ptr,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
 	load_word(r_scratch,    R_TapePtr, O_(Binds_ResolveLookAtSub,scratchpad)),
 	add_ui_self(            R_TapePtr, S_(Binds_ResolveLookAtSub)),
 
-	/* Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation
-	 * column). Reuse r_tmp0/r_tmp1/r_tmp2. Offsets via O_(ResolveLookAtScratch,*). */
-	load_word(r_tmp0, r_eye_ptr, O_(P3_S4,x)),
-	load_word(r_tmp1, r_eye_ptr, O_(P3_S4,y)),
-	load_word(r_tmp2, r_eye_ptr, O_(P3_S4,z)),
-	nop, /* load-delay */
-	store_word(r_tmp0, r_scratch, O_(ResolveLookAtScratch,eye.x)),
-	store_word(r_tmp1, r_scratch, O_(ResolveLookAtScratch,eye.y)),
-	store_word(r_tmp2, r_scratch, O_(ResolveLookAtScratch,eye.z)),
+	// Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation column).
+	mac_load_p3s4( r_tmp0, r_tmp1, r_tmp2, r_eye_ptr, 0),
+	mac_store_p3s4(r_tmp0, r_tmp1, r_tmp2, r_scratch, O_(ResolveLookAtScratch,eye)),
 
-	/* Stage up_in.x/y/z into the scratchpad (atom 2 reads these for the outer
-	 * product with uz). Reuse r_tmp0/r_tmp1/r_tmp2. */
-	load_word(r_tmp0, r_up_in_ptr, O_(V3_S4,x)),
-	load_word(r_tmp1, r_up_in_ptr, O_(V3_S4,y)),
-	load_word(r_tmp2, r_up_in_ptr, O_(V3_S4,z)),
-	nop, /* load-delay */
-	store_word(r_tmp0, r_scratch, O_(ResolveLookAtScratch,up_in.x)),
-	store_word(r_tmp1, r_scratch, O_(ResolveLookAtScratch,up_in.y)),
-	store_word(r_tmp2, r_scratch, O_(ResolveLookAtScratch,up_in.z)),
+	/* Stage up_in.x/y/z into the scratchpad. */
+	mac_load_p3s4( r_tmp0, r_tmp1, r_tmp2, r_up_in_ptr, 0),
+	mac_store_p3s4(r_tmp0, r_tmp1, r_tmp2, r_scratch, O_(ResolveLookAtScratch,up_in)),
 
 	/* Compute fwd = target - eye. */
-	load_word(r_tmp0, r_target_ptr, O_(P3_S4,x)),
-	load_word(r_tmp1, r_target_ptr, O_(P3_S4,y)),
-	load_word(r_tmp2, r_target_ptr, O_(P3_S4,z)),
-	load_word(r_tmp3, r_eye_ptr,    O_(P3_S4,x)),
-	load_word(R_AT,   r_eye_ptr,    O_(P3_S4,y)),
-	load_word(R_V0,   r_eye_ptr,    O_(P3_S4,z)),
-	nop, /* load-delay */
-	sub_u(r_tmp0, r_tmp0, r_tmp3),
-	sub_u(r_tmp1, r_tmp1, R_AT),
-	sub_u(r_tmp2, r_tmp2, R_V0),
-
-	/* Store fwd.x/y/z (atom 1 reads these as the normalize src). */
-	store_word(r_tmp0, r_scratch, O_(ResolveLookAtScratch,fwd.x)),
-	store_word(r_tmp1, r_scratch, O_(ResolveLookAtScratch,fwd.y)),
-	store_word(r_tmp2, r_scratch, O_(ResolveLookAtScratch,fwd.z)),
+	mac_load_p3s4(r_tmp0, r_tmp1, r_tmp2, r_target_ptr, 0),
+	mac_load_p3s4(r_tmp3, R_AT, R_V0, r_eye_ptr, 0),
+	mac_sub_v3s4(
+		r_tmp0, r_tmp1, r_tmp2,
+		r_tmp3, R_AT,   R_V0),
+	mac_store_v3s4(r_tmp0, r_tmp1, r_tmp2, r_scratch, O_(ResolveLookAtScratch,fwd)),
 
 	mac_yield()
 })

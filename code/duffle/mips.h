@@ -136,31 +136,31 @@ enum {
 
 /* Semantic Aliases for MIPS Registers (O32 ABI) */
 
-	, rdiscard      = R_0  /* Hardwired to 0 */
-	, rasm_tmp      = R_AT /* Assembler temporary (destroyed by some assembler pseudoinstructions!) */
-	, rret_0        = R_V0 /* Function return value */
-	, rret_1        = R_V1 /* Second return value (e.g., 64-bit) */
-	, rarg_0        = R_A0 /* First function argument */
-	, rarg_1        = R_A1 /* Second function argument */
-	, rarg_2        = R_A2 /* Third function argument */
-	, rarg_3        = R_A3 /* Fourth function argument */
-	, rtmp_0        = R_T0 /* Temporary (Caller saved) */
-	, rtmp_1        = R_T1 /* Temporary (Caller saved) */
-	, rtmp_2        = R_T2 /* Temporary (Caller saved) */
-	, rtmp_3        = R_T3 /* Temporary (Caller saved) */
-	, rtmp_4        = R_T4 /* Temporary (Caller saved) — common GTE base pointer */
-	, rtmp_9        = R_T9 /* Temporary (Caller saved) — common GTE base pointer */
-	, rstatic_0     = R_S0 /* Static (Callee saved, preserved across calls) */
-	, rstatic_1     = R_S1
-	, rstatic_2     = R_S2
-	, rstatic_3     = R_S3
-	, rstatic_4     = R_S4
-	, rstatic_5     = R_S5
-	, rstatic_6     = R_S6
-	, rstatic_7     = R_S7
-	, rsaved_0      = R_S0 /* Alias for rstatic_0 (alternate vocabulary) */
-	, rstack_ptr    = R_SP /* Stack Pointer */
-	, rret_addr     = R_RA /* Return Address (populated by JAL) */
+	// , rdiscard      = R_0  /* Hardwired to 0 */
+	// , rasm_tmp      = R_AT /* Assembler temporary (destroyed by some assembler pseudoinstructions!) */
+	// , rret_0        = R_V0 /* Function return value */
+	// , rret_1        = R_V1 /* Second return value (e.g., 64-bit) */
+	// , rarg_0        = R_A0 /* First function argument */
+	// , rarg_1        = R_A1 /* Second function argument */
+	// , rarg_2        = R_A2 /* Third function argument */
+	// , rarg_3        = R_A3 /* Fourth function argument */
+	// , rtmp_0        = R_T0 /* Temporary (Caller saved) */
+	// , rtmp_1        = R_T1 /* Temporary (Caller saved) */
+	// , rtmp_2        = R_T2 /* Temporary (Caller saved) */
+	// , rtmp_3        = R_T3 /* Temporary (Caller saved) */
+	// , rtmp_4        = R_T4 /* Temporary (Caller saved) — common GTE base pointer */
+	// , rtmp_9        = R_T9 /* Temporary (Caller saved) — common GTE base pointer */
+	// , rstatic_0     = R_S0 /* Static (Callee saved, preserved across calls) */
+	// , rstatic_1     = R_S1
+	// , rstatic_2     = R_S2
+	// , rstatic_3     = R_S3
+	// , rstatic_4     = R_S4
+	// , rstatic_5     = R_S5
+	// , rstatic_6     = R_S6
+	// , rstatic_7     = R_S7
+	// , rsaved_0      = R_S0 /* Alias for rstatic_0 (alternate vocabulary) */
+	// , rstack_ptr    = R_SP /* Stack Pointer */
+	// , rret_addr     = R_RA /* Return Address (populated by JAL) */
 
 /* --- MIPS CPU Opcodes (Bits 31-26) --- */
 
@@ -453,7 +453,7 @@ enum { _BitOffsets = 0
 #define shift_amount(rd, rt, n)     shift_lleft(rd, rt, n)
 
 /* nop — sll $0, $0, 0 */
-#define nop  shift_lleft(rdiscard, rdiscard, 0)
+#define nop  shift_lleft(R_0, R_0, 0)
 #define nop2 nop, nop
 
 // li_s — load signed 16-bit immediate into GPR (addiu rt, $0, imm — sign-extends).

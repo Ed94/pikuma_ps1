@@ -36,13 +36,13 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 	 *   $t2 = 0xB0 (BIOS B-table address) */
 	asm volatile(
 		asm_words(
-			or_u(    rarg_2, rarg_1, rdiscard),               /* $a2 = $a1 = raw1 */
-			add_ui(  rarg_1, rdiscard, bios_pad_buffer_size), /* $a1 = 0x22 */
-			add_ui(  rarg_3, rdiscard, bios_pad_buffer_size), /* $a3 = 0x22 */
-			add_ui(  rtmp_1, rdiscard, bios_init_pad_2),      /* $t1 = 0x12 */
-			add_ui(  rtmp_2, rdiscard, bios_btable_addr),     /* $t2 = 0xB0 */
-			call_reg(rtmp_2),                                 /* jalr $t2, $ra */
-			nop                                               /* BD slot */
+			or_u(    R_A2, R_A0, R_0),                 /* $a2 = $a1 = raw1 */
+			add_ui(  R_A1, R_0, bios_pad_buffer_size), /* $a1 = 0x22 */
+			add_ui(  R_A3, R_0, bios_pad_buffer_size), /* $a3 = 0x22 */
+			add_ui(  R_T1, R_0, bios_init_pad_2),      /* $t1 = 0x12 */
+			add_ui(  R_T2, R_0, bios_btable_addr),     /* $t2 = 0xB0 */
+			call_reg(R_T2),                            /* jalr $t2, $ra */
+			nop                                        /* BD slot */
 		)
 		asm_rpins, r_use(p0), r_use(p1)
 		asm_clobber: 
@@ -62,9 +62,9 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 	/* B(13h) StartPAD2() — no args. The BIOS preserves $sp. */
 	asm volatile(
 		asm_words(
-			add_ui(  rtmp_1, rdiscard, bios_start_pad_2), /* $t1 = 0x13 */
-			add_ui(  rtmp_2, rdiscard, bios_btable_addr), /* $t2 = 0xB0 (re-load) */
-			call_reg(rtmp_2),                             /* jalr $t2, $ra */
+			add_ui(  R_T1, R_0, bios_start_pad_2), /* $t1 = 0x13 */
+			add_ui(  R_T2, R_0, bios_btable_addr), /* $t2 = 0xB0 (re-load) */
+			call_reg(R_T2),                             /* jalr $t2, $ra */
 			nop                                           /* BD slot */
 		)
 		asm_clobber:

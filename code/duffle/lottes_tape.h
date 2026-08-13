@@ -100,6 +100,8 @@ enum {
 	// S 0-7
 };
 
+typedef U2 Reg; // Register parameter used with atom or atom component procedures
+
 typedef U4 const MipsCode; // Underlying type to mips asm words.
 typedef Slice_(MipsCode);
 
@@ -150,7 +152,7 @@ typedef Slice_(MipsAtom);
 typedef Slice_MipsAtom Tape;
 
 /* The 'Exit' Atom */
-atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
+atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(R_RA), nop };
 
 // TODO(Ed): When we have a substantial workload/throughput, profile each of these to see impact at ABI boundaries.
 

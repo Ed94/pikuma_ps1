@@ -60,8 +60,8 @@ WORD_COUNT(mac_yield_tail, 3)
 
 /* atom_dbg_skip */
 #define mac_load_v2s2(rs_x, rs_y, r_base, offset) \
-	load_half( rs_x, r_base, O_(V3_S2,x)) \
-,	load_half( rs_y, r_base, O_(V3_S2,y))
+	load_half( rs_x, r_base, offset + O_(V3_S2,x)) \
+,	load_half( rs_y, r_base, offset + O_(V3_S2,y))
 WORD_COUNT(mac_load_v2s2, 2)
 
 /* atom_dbg_skip */
@@ -72,9 +72,9 @@ WORD_COUNT(mac_store_v2s2, 2)
 
 /* atom_dbg_skip */
 #define mac_load_v3s4(rs_x, rs_y, rs_z, r_base, offset) \
-	load_word( rs_x, r_base, O_(V3_S4,x)) \
-,	load_word( rs_y, r_base, O_(V3_S4,y)) \
-,	load_word( rs_z, r_base, O_(V3_S4,z))
+	load_word( rs_x, r_base, offset + O_(V3_S4,x)) \
+,	load_word( rs_y, r_base, offset + O_(V3_S4,y)) \
+,	load_word( rs_z, r_base, offset + O_(V3_S4,z))
 WORD_COUNT(mac_load_v3s4, 3)
 
 /* atom_dbg_skip */
