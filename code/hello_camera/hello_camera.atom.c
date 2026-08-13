@@ -36,7 +36,7 @@ MipsAtomComp_Proc_(ac_put_disp_env, ab, {
 	mac_gcmd_push(gp0_word_draw_area_bottom_right_320x240, reg_transfer, reg_base, port),
 })
 
-FI_ Slice_MipsCode ac_put_draw_env(AtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
+I_ Slice_MipsCode ac_put_draw_env(AtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
 MipsAtomComp_Proc_(ac_put_draw_env, ab, {
 	/*
 	* ORIGIN: each code word corresponds to the EXACT value libpsyx's PutDrawEnv function would compute for the same DrawEnv settings.
@@ -221,7 +221,7 @@ typedef Struct_(Binds_ResolveLookAtSub) {
  *
  * Pool cost: 8 GPRs + R_T4 (carrier) + R_AT + R_V0 (hardcoded) = 11 GPRs.
  */
-I_ MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,	U4 r_scratch
+internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,	U4 r_scratch
 	,	U4 r_target_ptr,U4 r_eye_ptr, U4 r_up_in_ptr
 	,	U4 r_tmp0,      U4 r_tmp1,    U4 r_tmp2, U4 r_tmp3
 ) MipsAtom_Proc_(resolve_look_at__input_and_sub, aa, {
@@ -288,7 +288,7 @@ I_ MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,	U4 r_scratch
  */
 
 /* Atom 2: cross uz × up_in → right. */
-I_ MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_scratch
+internal MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_scratch
 	,	U4 r_a, U4 r_b, U4 r_c /* load a.x/y/z; result out.x/y/z */
 	,	U4 r_d                 /* load b.x */
 	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &right (out ptr), r_g = &uz, r_h = &up_in */
@@ -372,7 +372,7 @@ I_ MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_
 })
 
 /* Atom 4: cross uz × ux → up. */
-I_ MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_scratch
+internal MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_scratch
 	,	U4 r_a, U4 r_b, U4 r_c /* load a.x/y/z; result out.x/y/z */
 	,	U4 r_d                 /* load b.x */
 	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &up (out ptr), r_g = &uz, r_h = &ux */
@@ -395,13 +395,9 @@ I_ MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_scratc
 	load_word(R_V0, r_h, O_(V3_S4,z)),
 	nop,
 
-	/* FIX 2026-08-11: OP reads D1/D2/D3 from RT11/RT22/RT33 control registers
-	 * ($0/$2/$4), NOT from V0/V1/V2 input data registers. The previous body
-	 * wrote ux to C2_VXY0/VZ0/VXY1 — D1/D2/D3 were whatever stale RT values
-	 * the previous atom left, so the GTE computed garbage MAC values. Fix:
-	 * mirror atom 1's pattern (cfc2 RT11/RT22 save + ctc2 RT13/RT22/RT11
-	 * load uz diagonal + mtc2 IR1/2/3 load ux + ctc2 RT restore).
-	 * See SESSION_2026-08-11b §5.2 for the empirical verification. */
+	/* OP reads D1/D2/D3 from RT11/RT22/RT33 ($0/$2/$4), not V0/V1/V2.
+	 * Mirror atom 1: cfc2 RT save, ctc2 RT diagonal from uz, mtc2 IR from ux,
+	 * ctc2 RT restore. */
 
 	/* Save the two RT control-register slots OP will clobber (reusing
 	 * r_g/r_h — they're no longer needed as scratch pointers). */
@@ -472,7 +468,7 @@ typedef Struct_(Binds_ResolveLookAtPopAndTrans) {
  * MVMVA computes R * pos (with cv=0/mx=0/sf=0/v=0); MAC1/2/3 = R * (-eye).
  * Pool cost: r_look_at (1) + r_scratch (R_T4 carrier) + 4 ptr regs + 3 tmp regs = 9 GPRs.
  */
-I_ MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa
+internal MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa
 	,	U4 r_look_at
 	,	U4 r_scratch
 	,	U4 r_pux, U4 r_puy, U4 r_puz
@@ -533,7 +529,7 @@ I_ MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa
  *
  * Pool cost: r_scratch (carrier) + 1 ptr reg + 3 tmp regs = 5 GPRs.
  */
-I_ MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
+internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	,	U4 r_scratch
 	,	U4 r_peye
 	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
@@ -557,11 +553,8 @@ I_ MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	gte_mv_to_data_r(r_tmp2, C2_IR3),
 	nop2,
 
-	/* MVMVA sf=1 (no shift = integer), cv=3 (no TR), mx=0 (rotation matrix), v=3 (IR vector).
-	 * The pre-set rotation matrix is the one set by the preceding set_gte_world atom.
-	 * NOTE: For R*pos >> 12 byte-for-byte match with C11's ApplyMatrixLV, would need sf=0
-	 * (4.12 fixed-point shift). Plain gte_cmdw_mvmva defaults to sf=0 — use that for VRAM match.
-	 * Per SESSION_2026-08-12 §6 this is a known gap. */
+	/* MVMVA: sf=1 (integer, no shift), cv=3 (no TR), mx=0 (rotation matrix),
+	 * v=3 (IR vector). Pre-set rotation matrix is the one set by set_gte_world. */
 	gte_cmdw_mvmva_ir,
 	nop,  /* GTE interlock */
 
@@ -604,7 +597,7 @@ I_ MipsAtom* resolve_look_at__trans_matrix_proc(AtomArena_R aa
 	add_si(r_off_ptr, r_scratch, O_(ResolveLookAtScratch,eye)),
 	nop,
 
-	/* mac_trans_matrix(r_look_at, r_off_ptr, r_tmp0) — uses r_tmp0 as the transfer reg. */
+	/* Copy off → look_at.t[] (mac_trans_matrix: m->t = v). */
 	mac_trans_matrix(r_look_at, r_off_ptr, r_tmp0),
 
 	mac_yield()

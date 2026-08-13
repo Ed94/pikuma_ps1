@@ -126,13 +126,9 @@ FI_ Slice_MipsCode ac_apply_matrix_lv(AtomBuilder_R ab
 	load_word(r_t0, r_vec, 4), nop,
 	gte_lw(C2_VZ0, r_vec, 4),
 
-	/* RTPS cv=3 (no translation contribution: TRX/TRY/TRZ are zeroed, BK is zero-initialized),
-	 * sf=1 (integer, no shift = full 32-bit R*pos product), v=0 (uses V0 input), mx=0 (rotation matrix).
-	 * MAC1 = RT11*V0.x + RT12*V0.y + RT13*V0.z + 0
-	 * MAC2 = RT21*V0.x + RT22*V0.y + RT23*V0.z + 0
-	 * MAC3 = RT31*V0.x + RT32*V0.y + RT33*V0.z + 0
-	 * Side effect: RTPS also writes SXY0/1/2 and SZ0..SZ3 (perspective projection). Ignored.
-	 * Note: gte_cmdw_rtps_no_tr (the cv=3 alias) was removed from gte.h. Use gte_cmdw_rtps_sf1. */
+	/* RTPS: cv=3 (no translation), sf=1 (no shift, integer), v=0 (V0 input),
+	 * mx=0 (rotation matrix). MAC = RT row · V0 + 0. RTPS also writes
+	 * SXY0/1/2 + SZ0..SZ3 (perspective division); ignored. */
 	gte_cmdw_rtps_sf1,
 
 	/* Read MAC1/2/3 → out. */
@@ -266,7 +262,7 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
  * Pipeline: clobbers IR0..3, MAC1..3, LZCS, LZCR.
  */
 /* MipsAtom_Proc_ wrapper: declares the static MipsCode[] body, then calls atombuilder_unroll(ab, ...) to copy the encoded instructions into the caller's MipsAtomBuilder arena.  */
-I_ MipsAtom* normalize_v3s4_proc(AtomArena_R aa,	U4 r_scratch /* GPR code: scratch base carrier (e.g., R_T4 = R_ResolveScratch) */
+internal MipsAtom* normalize_v3s4_proc(AtomArena_R aa,	U4 r_scratch /* GPR code: scratch base carrier (e.g., R_T4 = R_ResolveScratch) */
 	,	U4 r_src_offset, U4 r_dst_offset     /* GPR codes: PARAMETERIZED offsets (caller passes O_ macros) */
 	,	U4 r_src_ptr, U4 r_dst_ptr, U4 r_tmp /* GPR codes: 3 scratch regs (src/dst computed + tmp) */
 	,	U4 r_mac1_scratch, U4 r_mac2_scratch /* GPR codes: 2 more: MAC1/MAC2 scratch */

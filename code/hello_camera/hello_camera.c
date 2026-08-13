@@ -103,8 +103,7 @@ I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
 }
 #define prim_alloc(type) (type*)prim__alloc(S_(type), slit( stringify(type)))
 
-void
-resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4* up_in) {
+I_ void resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4* up_in) {
 // RGA(Lengyel): Build matrix expansion of a rigid transformation. Corresponding motor is not constructed; we write the LA form for GTE.
 // Preconditions: eye != target, up_in not collinear with (target - eye).
 	V3_S4 right, up, forward;
@@ -376,20 +375,19 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 
 		ResolveLookAtScratch_V scratch = C_scratch(ResolveLookAtScratch_V);
 
-		// Atom 0: Works (tape emits fwd to scratch+0; C-side reads it back)
-		forward = scratch->fwd;
-		uz      = scratch->uz;
-		right   = scratch->right;
-		ux      = scratch->ux;
-		up      = scratch->up;     // ← atom 4's output (replaces C-side cross_v3s4)
-		uy      = scratch->uy;     // ← atom 5's output (replaces C-side normalize_v3s4)
+		/* Atoms 0-5 emit into scratch; bundle dispatch for atom 6 is still
+	 * commented at the resolve_look_at_init helper. Until atom 6 is
+	 * enabled, populate look_at.m[][] from the wave-context outputs. */
+	forward = scratch->fwd;
+	uz      = scratch->uz;
+	right   = scratch->right;
+	ux      = scratch->ux;
+	up      = scratch->up;
+	uy      = scratch->uy;
 
-		// cross_v3s4(& uz, & ux, & up); normalize_v3s4(& up, & uy);
-		
-		// Atom 6 not yet enabled: populate look_at.m[][] from ux/uy/uz here.
-		// smem.cam.look_at.m[0][0] = ux.x; smem.cam.look_at.m[0][1] = ux.y; smem.cam.look_at.m[0][2] = ux.z;
-		// smem.cam.look_at.m[1][0] = uy.x; smem.cam.look_at.m[1][1] = uy.y; smem.cam.look_at.m[1][2] = uy.z;
-		// smem.cam.look_at.m[2][0] = uz.x; smem.cam.look_at.m[2][1] = uz.y; smem.cam.look_at.m[2][2] = uz.z;
+	smem.cam.look_at.m[0][0] = ux.x; smem.cam.look_at.m[0][1] = ux.y; smem.cam.look_at.m[0][2] = ux.z;
+	smem.cam.look_at.m[1][0] = uy.x; smem.cam.look_at.m[1][1] = uy.y; smem.cam.look_at.m[1][2] = uy.z;
+	smem.cam.look_at.m[2][0] = uz.x; smem.cam.look_at.m[2][1] = uz.y; smem.cam.look_at.m[2][2] = uz.z;
 
 		// pos = smem.cam.pos; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
 

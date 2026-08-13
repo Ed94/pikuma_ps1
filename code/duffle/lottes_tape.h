@@ -23,7 +23,7 @@
  * directly executed chain of assemby arrays (Atoms) that terminate with a yield sequence to the next atom.
  * These eventually lead to a terminal atom for the tape which is defined below as "tape_exit".
  * 
- * This behaves as one of the simplest runtime harnesses ontop of a host-enviornment's execution engine 
+ * It behaves as one of the simplest runtime harnesses ontop of a host-enviornment's execution engine 
  * to author and compose programs with. From here various conventions can be further applied. 
  * To make things easier  to understand it may be better to focus on what this ABI does not have. 
  * It does not have have any branching within the tape but relative branches within atoms or between atoms.
@@ -42,7 +42,7 @@
  * automatic register allocation means the user cannot ignore excessive argument shuffle across workload or
  * waves and thier phases. Crossing ABI boundaries to other runtimes that do has obviouss penalties.
  * 
- * Learning data-oreinted code becomes a natural progression. Your not fighting a stack-based procedural 
+ * Learning data-oriented code becomes a natural progression. Your not fighting a stack-based procedural 
  * paradigm that wants to argument shuffle. There is no ambiguity due to the lack of constraints, for example,
  * on how the user may "call" a procedure in traditional random dispatch runtimes. The user does have to
  * hammer down "rules" or patterns for massaging the compiler to dissolve those call frames; just to get 
