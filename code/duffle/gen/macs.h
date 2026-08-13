@@ -176,21 +176,21 @@ WORD_COUNT(mac_gte_sqr_v3, 8)
 WORD_COUNT(mac_gte_gpf_scale, 13)
 
 #define mac_apply_matrix_lv(r_mtx, r_vec, r_out, r_t0, r_t1, r_t2) \
-	load_word(r_t0, r_mtx,  0) \
+	load_word(  r_t0, r_mtx,  0) \
 ,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT11_Code) \
-,	load_word(r_t0, r_mtx,  4) \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT11) \
+,	load_word(  r_t0, r_mtx,  4) \
 ,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT12_Code) \
-,	load_word(r_t0, r_mtx,  8) \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT12) \
+,	load_word(  r_t0, r_mtx,  8) \
 ,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT13_Code) \
-,	load_word(r_t0, r_mtx, 12) \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT13) \
+,	load_word(  r_t0, r_mtx, 12) \
 ,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT21_Code) \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT21) \
 ,	load_half_u(r_t0, r_mtx, 16) \
 ,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT22_Code) \
+,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT22) \
 ,	nop2	/* Load PACKED pos into V0 (libgte SVECTOR layout).
 	 * r_vec points to atom-0-staged packed data ((pos.y << 16) | pos.x at +0, pos.z at +4).
 	 * LWC2 base register MUST be the pointer r_vec, NOT the loaded value r_t0. */ \

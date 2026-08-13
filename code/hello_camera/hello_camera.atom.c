@@ -94,34 +94,8 @@ MipsAtomComp_Proc_(ac_put_draw_env, ab, {
 #pragma region Atom Procs
 // Modular Atoms
 
-/* Scratchpad layout for the resolve_look_at bundle.
- * The chain atoms communicate entirely via the wave-context GPR carrier R_ResolveScratch (R_T4) + hardcoded offsets into smem.scratchpad
- * (PS1 hardware scratchpad at 0x1F800000).
- *
- * Atom 0 (input_and_sub) STAGES the C-side inputs (eye, up_in) into the scratchpad;
- * AT THE SAME TIME it computes fwd = target - eye and stores it at scratch+0.
- * Atoms 1-6 then read/write specific scratchpad offsets internally using
- * `r_scratch + hardcoded_offset` — no tape-data pointers are passed between atoms.
- *   +0   fwd   (atom 0 writes; atom  1 reads)
- *   +16  uz    (atom 1 writes; atoms 2 + 4 read)
- *   +32  right (atom 2 writes; atom  3 reads)
- *   +48  ux    (atom 3 writes; atoms 4 + 6 read)
- *   +64  up    (atom 4 writes; atom  5 reads)
- *   +80  uy    (atom 5 writes; atom  6 reads)
- *   +96  eye   (atom 0 stages from C-side pointer; atom 6 reads)
- *   +128 up_in (atom 0 stages from C-side pointer; atom 2 reads)
- */
-
-// enum {
-// 	R_LookAt    = R_T0 atom_reg atom_type(MT3_S2S4*),
-// 	R_CamEye    = R_T1 atom_reg atom_type(P3_S4*),
-// 	R_CamTarget = R_T2 atom_reg atom_type(P3_S4*),
-// 	R_WorldUp   = R_T3 atom_reg atom_type(V3_S4*),
-// };
-
 enum {
-	/* Wave-context GPR carrier for the resolve_look_at bundle: the scratch base.
-	* Set by atom 0 (popped from tape), read by atoms 1-6 (used as pointer base). */
+	// TODO(Ed): We can resolve scratch at anytime its fixed to a specific address.
 	R_ResolveScratch = R_T4 atom_reg atom_type(U4*),
 #define R_ResolveScratch_Code R_T4_Code
 };
@@ -132,30 +106,7 @@ typedef Struct_(Binds_ResolveLookAt) {
 	V3_S4*    up_in;
 };
 
-/* ─── ResolveLookAtScratch — offset schema for the resolve_look_at bundle's
- * scratchpad slots (PS1 hardware scratchpad at 0x1F800000).
- *
- * Each slot is 16 bytes: V3_S4 is already 16 bytes (4 × S4 = x/y/z/pad).
- * The struct fields are contiguous — slot i starts at offset i*16.
- * Used by the assembly via O_(ResolveLookAtScratch, fld.x/y/z) which resolves to a compile-time byte offset.
- * NOT a runtime struct — the struct is purely a schema for offsets; the assembly uses `r_scratch + O_(...)` to compute slot addresses at runtime.
- *
- * Slot producers/consumers (referenced by the resolve_look_at chain atoms):
- *   +0    fwd    0 writes (target - eye);     atom  1 (normalize) reads
- *   +16   uz     1 writes (normalize fwd);    atoms 2 + 4 read (cross operands)
- *   +32   right  2 writes (cross uz x up_in); atom  3 (normalize) reads
- *   +48   ux     3 writes (normalize right);  atoms 4 + 6 read
- *   +64   up     4 writes (cross uz x ux);    atom  5 (normalize) reads
- *   +80   uy     5 writes (normalize up);     atom  6 reads
- *   +96   eye    0 stages (C-side input);     atom  6 reads (translation column)
- *   +112  target reserved (currently written nowhere — kept for symmetry w/ eye)
- *   +128  up_in  0 stages (C-side input); atom 2 reads (cross operand)
- *
- * Fields use P3_S4 (point) for eye/target (RGA: affine point, implicit weight 1);
- * V3_S4 (vector) for fwd/uz/right/ux/up/uy/up_in (RGA: Euclidean vector).
- * P3_S4 is a storage alias of V3_S4 (see math.h comment: "Storage alias of V3_S4.
- * Use P3_S4 when the value is a point.") — both are 16 bytes.
- */
+/* ─── ResolveLookAtScratch — offset schema for the resolve_look_at bundle's */
 typedef Struct_(ResolveLookAtScratch) {
 	V3_S4 fwd;       /* offset  +0  (16 bytes — 4 S4 fields incl. internal pad) */
 	V3_S4 uz;        /* offset +16 (16 bytes) */
@@ -168,24 +119,7 @@ typedef Struct_(ResolveLookAtScratch) {
 	V3_S4 up_in;     /* offset +128 (16 bytes) */
 };
 
-/* ─── resolve_look_at bundle chain atoms ────────────────────────────
- * 4 unique atom procs in the resolve_look_at bundle (4 chain atoms + 3 calls to generic normalize_v3s4_proc).
- * All 4 chain atoms are runtime-built MipsAtom_Proc_ atoms: each function declares a static MipsCode[] body, 
- * then calls atombuilder_unroll() to append it to the caller's MipsAtomBuilder arena. resolve_look_at_init() 
- * uses this pattern to pre-build the bundle into the static arena (smem.resolve_look_at_arena).
- *
- * Atom roster:
- *	0: resolve_look_at__input_and_sub              (chain atom)
- *	1: normalize_v3s4_proc (gte.atom.c)            (generic normalize; called for fwd→uz)
- *	2: resolve_look_at__cross_uz_up_in_to_right    (chain atom)
- *	3: normalize_v3s4_proc (gte.atom.c)            (generic normalize; called for right→ux)
- *	4: resolve_look_at__cross_uz_ux_to_up          (chain atom)
- *	5: normalize_v3s4_proc (gte.atom.c)            (generic normalize; called for up→uy)
- *	6: resolve_look_at__populate_and_translate     (chain atom)
- *
- * The generic normalize_v3s4_proc is a parameterized 4-stage GTE normalize (SQR → mfc2 → LZCS → GPF → srav);
- * it accepts scratch base + offset args so any caller (with a scratch base + struct schema) can use it.
- */
+/* ─── resolve_look_at bundle chain atoms ──────────────────────────── */
 
 typedef Struct_(Binds_ResolveLookAtSub) {
 	P3_S4* target;  /* U4 (C-side P3_S4* — read by atom 0 directly; NOT a scratchpad address) */
@@ -242,21 +176,6 @@ internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,
 
 	mac_yield()
 })
-
-/* Atoms 2 + 4 in the bundle: out = a × b (GTE outer product on IR/D vectors).
- * No bind pop — the three operand pointers (a, b, out) are derived in-body from r_scratch + hardcoded_offset.
- * Each atom has its own variant because the offsets are baked into the body and each atom uses unique GPRs.
- *
- * GTE register layout (per PSX-SPX + duffle gte.h):
- *   IR1/2/3  = a.x/y/z    (mtc2)
- *   VXY0     = b.x        (mtc2)
- *   VZ0      = b.y        (mtc2)
- *   VXY1     = b.z        (mtc2)
- *   OP       = outer product
- *   MAC1/2/3 = out.x/y/z  (mfc2)
- *
- * Pool cost: r_scratch (R_T4 carrier) + 7 body GPRs + R_AT + R_V0 (hardcoded) = 10 GPRs.
- */
 
 /* Atom 2: cross uz × up_in → right. */
 internal MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_scratch

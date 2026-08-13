@@ -106,16 +106,11 @@ FI_ Slice_MipsCode ac_apply_matrix_lv(AtomBuilder_R ab
 ) MipsAtomComp_Proc_(ac_apply_matrix_lv, ab, {
 	/* Load MATRIX rows into GTE RT11..RT33 (libgte convention: ctc2 to C2 $0..$4 in order).
 	 * load_half_u zero-extends the last word so RT33 = m[2][2] and TRX = 0. */
-	load_word(r_t0, r_mtx,  0), nop,
-	gte_mv_to_ctrl_r(r_t0, gte_cr_RT11_Code),
-	load_word(r_t0, r_mtx,  4), nop,
-	gte_mv_to_ctrl_r(r_t0, gte_cr_RT12_Code),
-	load_word(r_t0, r_mtx,  8), nop,
-	gte_mv_to_ctrl_r(r_t0, gte_cr_RT13_Code),
-	load_word(r_t0, r_mtx, 12), nop,
-	gte_mv_to_ctrl_r(r_t0, gte_cr_RT21_Code),
-	load_half_u(r_t0, r_mtx, 16), nop,
-	gte_mv_to_ctrl_r(r_t0, gte_cr_RT22_Code),
+	load_word(  r_t0, r_mtx,  0), nop, gte_mv_to_ctrl_r(r_t0, gte_cr_RT11),
+	load_word(  r_t0, r_mtx,  4), nop, gte_mv_to_ctrl_r(r_t0, gte_cr_RT12),
+	load_word(  r_t0, r_mtx,  8), nop, gte_mv_to_ctrl_r(r_t0, gte_cr_RT13),
+	load_word(  r_t0, r_mtx, 12), nop, gte_mv_to_ctrl_r(r_t0, gte_cr_RT21),
+	load_half_u(r_t0, r_mtx, 16), nop, gte_mv_to_ctrl_r(r_t0, gte_cr_RT22),
 	nop2,
 
 	/* Load PACKED pos into V0 (libgte SVECTOR layout).

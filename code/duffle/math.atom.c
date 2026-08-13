@@ -9,6 +9,8 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(math_atom_c);
 
 #pragma region MACs (Mips Atom Component)
 
+// FI_ Slice_MipsCode ac_load_imm
+
 FI_ Slice_MipsCode ac_load_v2s2(AtomBuilder_R ab, U4 rs_x, U4 rs_y, U4 r_base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ac_load_v2s2, ab, {
 	load_half( rs_x, r_base, offset + O_(V3_S2,x)),
 	load_half( rs_y, r_base, offset + O_(V3_S2,y)),
