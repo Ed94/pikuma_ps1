@@ -298,10 +298,10 @@ I_ void resolve_look_at(
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
 
-	// /* Atom 6a: populate — pop look_at* for the matrix destination. */
-	// tb_emit(tb, smem.resolve_look_at_atom_addrs[6]); {
-	// 	tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
-	// }
+	/* Atom 6a: populate — pop look_at* for the matrix destination. */
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[6]); {
+		tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
+	}
 	// /* Atom 6b: matrix_vector — no tape-data (reads eye from scratch, writes off to scratch+96). */
 	// tb_emit(tb, smem.resolve_look_at_atom_addrs[7]); { }
 	// /* Atom 6c: trans_matrix — pop look_at* for the matrix destination. */
@@ -387,11 +387,11 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// cross_v3s4(& uz, & ux, & up); normalize_v3s4(& up, & uy);
 		
 		// Atom 6 not yet enabled: populate look_at.m[][] from ux/uy/uz here.
-		smem.cam.look_at.m[0][0] = ux.x; smem.cam.look_at.m[0][1] = ux.y; smem.cam.look_at.m[0][2] = ux.z;
-		smem.cam.look_at.m[1][0] = uy.x; smem.cam.look_at.m[1][1] = uy.y; smem.cam.look_at.m[1][2] = uy.z;
-		smem.cam.look_at.m[2][0] = uz.x; smem.cam.look_at.m[2][1] = uz.y; smem.cam.look_at.m[2][2] = uz.z;
+		// smem.cam.look_at.m[0][0] = ux.x; smem.cam.look_at.m[0][1] = ux.y; smem.cam.look_at.m[0][2] = ux.z;
+		// smem.cam.look_at.m[1][0] = uy.x; smem.cam.look_at.m[1][1] = uy.y; smem.cam.look_at.m[1][2] = uy.z;
+		// smem.cam.look_at.m[2][0] = uz.x; smem.cam.look_at.m[2][1] = uz.y; smem.cam.look_at.m[2][2] = uz.z;
 
-		pos = smem.cam.pos; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
+		// pos = smem.cam.pos; mul_v3s4(& pos, v3s4(-1,-1,-1)); // RGA(Lengyel): -eye in world coordinates (spatial bulk only; implicit weight is dropped).
 
 		mul_m3s2_v3s4(& smem.cam.look_at, & pos, & off);
 		trans_m3s2(   & smem.cam.look_at,        & off);
@@ -510,7 +510,7 @@ int main(void)
 			Ent_Cube* cube = & smem.cube;
 			cube->rot    = v3s2(0, 0, 0);
 			cube->scale  = v3s4_fp_one();
-			cube->accel  = v3s4(0, 1, 0);
+			cube->accel  = v3s4(0, 0, 0);
 			cube->pos    = v3s4(0, -400, 1800);
 		}
 		ent_floor_init(& smem.floor.verts, & smem.floor.faces); {
