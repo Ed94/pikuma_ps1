@@ -563,17 +563,12 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	nop,
 
 	/* === Load RT matrix from look_at into C2[0..4] via ctc2 ===
-	 * Exact same sequence as set_gte_mt3s2s4 / C11's ApplyMatrixLV. */
-	load_word(r_tmp0, r_look_at,  0), nop,
-	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT11),
-	load_word(r_tmp0, r_look_at,  4), nop,
-	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT12),
-	load_word(r_tmp0, r_look_at,  8), nop,
-	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT13),
-	load_word(r_tmp0, r_look_at, 12), nop,
-	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT21),
-	load_half_u(r_tmp0, r_look_at, 16), nop,
-	gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT22),
+	 * Exact s  ame sequence as set_gte_mt3s2s4 / C11's ApplyMatrixLV. */
+	load_word(  r_tmp0, r_look_at,  0), nop, gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT11),
+	load_word(  r_tmp0, r_look_at,  4), nop, gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT12),
+	load_word(  r_tmp0, r_look_at,  8), nop, gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT13),
+	load_word(  r_tmp0, r_look_at, 12), nop, gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT21),
+	load_half_u(r_tmp0, r_look_at, 16), nop, gte_mv_to_ctrl_r(r_tmp0, gte_cr_RT22),
 	nop2,  /* CTC2 retirement (2 slots × 5 ctc2s) */
 
 	/* Load pos = -eye after the matrix load releases r_tmp0. */

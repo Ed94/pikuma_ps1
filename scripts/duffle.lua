@@ -1313,6 +1313,21 @@ M.GTE_COMMAND_LATCH_WINDOWS = {
 	},
 }
 
+--- GTE control-register alias groups.
+--- Aliases within a group write to the same C2 control-register slot on real silicon
+--- (the silicon double-maps some C2 slots across multiple PSX SDK / libgte conventions).
+--- Aliases across groups write to distinct C2 slots.
+---
+--- Cross-alias writes inside one atom body, or across the wave-context boundary,
+--- silently clobber each other. The `check_gte_cr_alias_writes` check warns about
+--- each pair per source. See `docs/gte_reference.md` §"Control-register alias table"
+--- for the silicon rationale and the libgte outer-product convention.
+M.GTE_CR_ALIAS_GROUPS = {
+	{ 24, { "gte_cr_RBK", "gte_cr_OFX" } },   -- background R vs screen offset X
+	{ 25, { "gte_cr_GBK", "gte_cr_OFY" } },   -- background G vs screen offset Y
+	{ 26, { "gte_cr_BBK", "gte_cr_H"   } },   -- background B vs projection plane distance H
+}
+
 -- Operand-class table for the COP2->GPR load-delay check.
 -- Maps each emitting-token ident to the set of GPR operand positions it reads.
 -- Covers the current encoder vocabulary (`code/duffle/mips.h` + `code/duffle/gte.h`); add rows here as new encoders land.

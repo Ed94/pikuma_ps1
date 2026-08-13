@@ -103,7 +103,15 @@ enum {
 typedef U4 const MipsCode; // Underlying type to mips asm words.
 typedef Slice_(MipsCode);
 
-typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that must terminate with an ac_yield.
+typedef U4 const MipsAtom; 
+typedef Slice_(MipsAtom); 
+// Sometimes a user will define a bundle of atoms that represent a procedure of work as:
+//   MipsAtom* <identifier>[...];
+// Unfortuantely if using slice_from_array it will make the slice's pointer: MipsAtom** so this enforce its defined as MipsAtom*
+// TODO(Ed): Alternatively we can make the MipsAtom an opaque pointer to the atom... so that the blow returns 'MipsAtom'.
+#define atombundle_from_array(array) (Slice_MipsAtom){.ptr=array[0],.len=Array_len(array)}
+
+// Underlying type to an ptr to an array of mips asm words that must terminate with an ac_yield.
 #define MipsAtom_(sym) MipsCode sym [] align_(4) =
 
 // Used for atoms with value-args
@@ -139,7 +147,7 @@ typedef U4 const MipsAtom; // Underlying type to an array of mips asm words that
 	 (the identifier embeds the source line, so duplicates across `#include`d files don't collide). */
 #define ATOM_FILE_DEBUGGER_LINE_MARKER(file_name) internal U4 const tmpl(atom_file_debugger_line_marker,file_name) = 0
 
- typedef Slice_(MipsAtom); typedef Slice_MipsAtom Tape;
+typedef Slice_MipsAtom Tape;
 
 /* The 'Exit' Atom */
 atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(rret_addr), nop };
@@ -275,6 +283,34 @@ FI_ MipsAtom* atomarena_push(AtomArena_R aa, Slice_MipsCode code) {
 }
 FI_ void atomarena_reset(AtomArena_R aa) { aa->used = 0; }
 #pragma region Atom Arena
+
+#pragma region RegFile (Register File Allocator)
+// A specialized allocator utilized to help the user track which registers are bound to values
+// that must be preserved for the arena's bounds.
+
+enum {
+	RegFileArena_Len,
+};
+typedef Enum_(U4, RegFileEntry) {
+	// TODO(Ed): Define RF_Field, each field is maped by index + bit pos.
+	// the index is the upper portion of a U4 and the bit pos in the lower pos.
+
+	regfileentry_todo_,
+	// TODO(Ed): Is there a trick we can do with the current register enums to 
+	// just resolve an entry automatically when doing a pin?
+};
+typedef Struct_(RegFile) {
+	U1 GPR[RegFileArena_Len];
+	U1 GTE[RegFileArena_Len];
+	U1 GP[RegFileArena_Len];
+};
+
+void regfile_pin(U4 register) {
+
+	assert(false);
+}
+
+#pragma endregion RegFileArena (Register File Allocator)
 
 #pragma region Mips Atom Procs
 

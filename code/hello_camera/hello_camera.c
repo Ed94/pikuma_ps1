@@ -340,7 +340,7 @@ internal void resolve_look_at_init(void) {
 	 * the matrix pointer (popped from tape). It does NOT need GPR
 	 * assignment from us — it has its own internal GPR usage.
 	 * We just take its address. */
-	smem.resolve_look_at_atom_addrs[9] = (MipsAtom*) & set_gte_mt3s2s4;
+	smem.resolve_look_at_atom_addrs[7] = (MipsAtom*) & set_gte_mt3s2s4;
 
 	/* === ATOM 6b: matrix_vector (RT * (-eye) >> 12) ===
 	 * Uses mac_apply_matrix_lv component macro which internally uses
@@ -352,7 +352,7 @@ internal void resolve_look_at_init(void) {
 	U4 const r_tmp0_6b    = R_T2;
 	U4 const r_tmp1_6b    = R_T3;
 	U4 const r_tmp2_6b    = R_T5;
-	smem.resolve_look_at_atom_addrs[7] = resolve_look_at__matrix_vector_proc(& ab,
+	smem.resolve_look_at_atom_addrs[8] = resolve_look_at__matrix_vector_proc(& ab,
 		r_scratch_6b, r_peye_6b, r_look_at_6b,
 		r_tmp0_6b, r_tmp1_6b, r_tmp2_6b);
 
@@ -361,7 +361,7 @@ internal void resolve_look_at_init(void) {
 	U4 const r_scratch_6c = R_ResolveScratch;
 	U4 const r_off_ptr_6c = R_T1;  /* &scratch.eye (= off dst) */
 	U4 const r_tmp0_6c    = R_T2;
-	smem.resolve_look_at_atom_addrs[8] = resolve_look_at__trans_matrix_proc(& ab,
+	smem.resolve_look_at_atom_addrs[9] = resolve_look_at__trans_matrix_proc(& ab,
 		r_look_at_6c, r_scratch_6c, r_off_ptr_6c, r_tmp0_6c);
 
 	/* Sanity check: arena didn't overflow. */
@@ -386,43 +386,30 @@ I_ void resolve_look_at(
 	,	P3_S4*    target
 	,	V3_S4*    up_in
 ){
-	// tb_emit_bundle(tb, slice_from_array(MipsAtom, smem.resolve_look_at_atom_addrs));
-
-	/* Atom 0: input_and_sub — stages eye/up_in into scratchpad + computes fwd.  */
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[0]); {
-		tb_data(tb, u4_(target));              /* Binds_ResolveLookAtSub.target  (C-side P3_S4*) */
-		tb_data(tb, u4_(eye));                 /* Binds_ResolveLookAtSub.eye     (C-side P3_S4*) */
-		tb_data(tb, u4_(up_in));               /* Binds_ResolveLookAtSub.up_in   (C-side V3_S4*) */
-		tb_data(tb, u4_(smem.scratchpad));     /* Binds_ResolveLookAtScratch.scratch_base */
+		tb_data(tb, u4_(target));
+		tb_data(tb, u4_(eye));
+		tb_data(tb, u4_(up_in));
+		tb_data(tb, u4_(smem.scratchpad));
 	}
 
-	/* Atoms 1 + 2: enabled. */
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[1]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[2]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[3]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
 
-	/* Atom 6a: populate — pop look_at* for the matrix destination. */
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[6]); {
-		tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
+		tb_data(tb, u4_(look_at));
 	}
-	/* Atom 6a.5: load_rt — pop look_at* again, ctc2 look_at->m[][] into GTE
-	 * C2[0..4]. Pattern identical to set_gte_mt3s2s4 (proven correct for
-	 * cube rendering via RTPT/RTPS). The mac_yield between atoms gives
-	 * the GTE pipeline time to fully retire the ctc2s. */
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[9]); {
-		tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
-	}
-	/* Atom 6b: matrix_vector — pops look_at* for mac_apply_matrix_lv (which loads
-	 * the RT matrix from it). Reads eye from scratch, packs pos as SVECTOR,
-	 * lwc2 into V0, RTPS (sf=1, v=0, cv=3, mx=0), stores MAC1/2/3 → scratch+96. */
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[7]); {
-		tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
+		tb_data(tb, u4_(look_at));
 	}
-	/* Atom 6c: trans_matrix — pop look_at* for the matrix destination. */
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[8]); {
-		tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
+		tb_data(tb, u4_(look_at));
+	}
+	tb_emit(tb, smem.resolve_look_at_atom_addrs[9]); {
+		tb_data(tb, u4_(look_at));
 	}
 }
 
@@ -485,26 +472,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		tb.used = 0; tb_scope_run(& tb) {
 			resolve_look_at(& tb, & smem.cam.look_at, & smem.cam.pos, & smem.cube.pos, & v3s4(0, -fp_one, 0));
 		}
-		V3_S4 right, up, forward;
-		V3_S4 ux, uy, uz;
-		V3_S4 pos, off;
-
-		ResolveLookAtScratch_V scratch = C_scratch(ResolveLookAtScratch_V);
-
-		/* Atoms 0-5 emit into scratch; bundle dispatch for atom 6 is still
-		* commented at the resolve_look_at_init helper. Until atom 6 is
-		* enabled, populate look_at.m[][] from the wave-context outputs. */
-		forward = scratch->fwd;
-		uz      = scratch->uz;
-		right   = scratch->right;
-		ux      = scratch->ux;
-		up      = scratch->up;
-		uy      = scratch->uy;
-
-		// pos = smem.cam.pos; mul_v3s4(& pos, v3s4(-1,-1,-1));
-
-		// mul_m3s2_v3s4(& smem.cam.look_at, & pos, & off);
-		// trans_m3s2(   & smem.cam.look_at,        & off);
 	}
 
 	// Draw cube
@@ -620,7 +587,7 @@ int main(void)
 			Ent_Cube* cube = & smem.cube;
 			cube->rot    = v3s2(0, 0, 0);
 			cube->scale  = v3s4_fp_one();
-			cube->accel  = v3s4(0, 0, 0);
+			cube->accel  = v3s4(0, 1, 0);
 			cube->pos    = v3s4(0, -400, 1800);
 		}
 		ent_floor_init(& smem.floor.verts, & smem.floor.faces); {

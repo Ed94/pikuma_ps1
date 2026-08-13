@@ -2388,6 +2388,184 @@ end
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- ════════════════════════════════════════════════════════════════════════════
+-- GTE control-register alias + RT-diagonal + TR-naming helpers and checks
+-- ════════════════════════════════════════════════════════════════════════════
+
+--- Resolve a `gte_cr_<Alias>` ident to its alias-group entry, or nil if the alias
+--- is in a distinct-slot group (or the alias name is not a known C2 control-register alias).
+--- Reads `M.GTE_CR_ALIAS_GROUPS` from `duffle.lua`.
+local function find_alias_pair_for(alias_name, duffle)
+	local groups = (duffle and duffle.GTE_CR_ALIAS_GROUPS) or {}
+	for _, group in ipairs(groups) do
+		for _, name in ipairs(group[2] or {}) do
+			if name == alias_name then return group end
+		end
+	end
+	return nil
+end
+
+-- True iff `c` (a TokClass entry) is a CPU→COP2 control-register transfer
+-- (`gte_mv_to_ctrl_r` / `gte_mv_from_ctrl_r`).
+local function is_ctrl_r_transfer(c)
+	if c == nil then return false end
+	return c.ident == "gte_mv_to_ctrl_r" or c.ident == "gte_mv_from_ctrl_r"
+end
+
+-- Resolve a token's source line. The per-token `line` is the body-relative
+-- line; `atom.line` is the source line of the atom declaration; `line_in_body`
+-- (atom.paths) maps a body-relative line to its source line. The arithmetic
+-- `atom.line + line_in_body[tok.rel] - 1` matches the convention used by
+-- check_abi_handoff and check_control_transfer_delay_slot_use elsewhere.
+local function atom_body_token_source_line(atom, token, line_in_body)
+	if line_in_body == nil or token == nil or token.rel == nil then
+		return atom.line or 0
+	end
+	local body_line = line_in_body[token.rel]
+	if body_line == nil then return atom.line or 0 end
+	return (atom.line or 0) + body_line - 1
+end
+
+-- Check #N: gte_cr_alias_writes
+-- Fires one warning per atom per alias-group when the atom body touches two
+-- distinct aliases from the same group. Aliases within a group write to the
+-- same C2 control-register slot on real silicon; cross-alias writes inside
+-- one atom body silently clobber each other.
+--
+-- Severity: warning. Build continues. The libgte outer-product convention
+-- uses only RT-row aliases (which are NOT in `M.GTE_CR_ALIAS_GROUPS`), so
+-- the canonical convention does not trigger this check.
+local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
+	local groups = pipe_ctx.gte_cr_alias_groups or {}
+	if not next(groups) then return end
+
+	local tokens = atom.paths and atom.paths.tokens or {}
+	local tc     = atom.paths and atom.paths.tok_class or {}
+	local line_in_body = atom.paths and atom.paths.line_in_body
+	if not next(tokens) then return end
+
+	-- Build a per-group set of (alias, source_line) pairs touched in this atom body.
+	-- Walks every token; when the token is a ctrl-r transfer, the alias is at
+	-- position tok_idx + 2 (rt, alias, [imm-or-arg]). The pre-classified
+	-- `tc` table tells us whether the token is a ctrl-r transfer and what its
+	-- source line is.
+	local touched = {}
+	for tok_idx, token in ipairs(tokens) do
+		local c = tc[tok_idx]
+		if is_ctrl_r_transfer(c) and tokens[tok_idx + 2] then
+			local alias = tokens[tok_idx + 2].tok
+			local group = find_alias_pair_for(alias, pipe_ctx.duffle)
+			if group then
+				touched[group[1]] = touched[group[1]] or {}
+				touched[group[1]][#touched[group[1]] + 1] = {
+					alias = alias,
+					line  = atom_body_token_source_line(atom, token, line_in_body),
+				}
+			end
+		end
+	end
+
+	-- Fire one warning per group touched with 2+ distinct aliases.
+	for slot, hits in pairs(touched) do
+		local seen = {}
+		local distinct = {}
+		for _, h in ipairs(hits) do
+			if not seen[h.alias] then
+				seen[h.alias] = true
+				distinct[#distinct + 1] = h
+			end
+		end
+		if #distinct >= 2 then
+			local aliases = {}
+			for _, d in ipairs(distinct) do aliases[#aliases + 1] = d.alias end
+			findings[#findings + 1] = {
+				atom  = atom.name or "",
+				line  = distinct[1].line,
+				check = "gte_cr_alias_writes",
+				kind  = "warning",
+				msg   = string.format(
+					"atom '%s' touches %d aliases that share C2[%d]: %s; verify the intent"
+					, atom.name or "", #distinct, slot, table.concat(aliases, ", ")),
+			}
+		end
+	end
+end
+
+-- Check #N+1: rtdiagonal_completeness
+-- Fires one info per atom body when the bare `gte_cmdw_mvmva` macro is used.
+-- The bare macro encodes only the cmd field; the canonical libgte-2-pass
+-- shape uses `gte_cmdw_mvmva_c11_pass2_exact = 0x4A49E012` (gte.h:430).
+--
+-- Severity: info by default. Escalates to warning when
+-- `GTE_RT_DIAGONAL_STRICT=1` env var is set (CI / production builds).
+--
+-- The bare macro IS the right call for the canonical libgte outer-product
+-- convention, so this is an opt-out hint rather than a hard warning.
+local function check_rtdiagonal_completeness(atom, _pipe_ctx, findings)
+	local tokens = atom.paths and atom.paths.tokens or {}
+	local tc     = atom.paths and atom.paths.tok_class or {}
+	local line_in_body = atom.paths and atom.paths.line_in_body
+	if not next(tokens) then return end
+	local strict = os.getenv("GTE_RT_DIAGONAL_STRICT") == "1"
+	for tok_idx, token in ipairs(tokens) do
+		local c = tc[tok_idx]
+		if c and c.ident == "gte_cmdw_mvmva" then
+			findings[#findings + 1] = {
+				atom  = atom.name or "",
+				line  = atom_body_token_source_line(atom, token, line_in_body),
+				check = "rtdiagonal_completeness",
+				kind  = strict and "warning" or "info",
+				msg   = string.format(
+					"atom '%s' uses the bare gte_cmdw_mvmva macro; "
+					.. "the canonical libgte-2-pass shape is gte_cmdw_mvmva_c11_pass2_exact = 0x4A49E012 "
+					.. "(gte.h:430). The bare macro does not encode RT23/RT31/RT32/RT33; "
+					.. "for a full 3x3 matrix, use the dedicated literal or hand-build via enc_gte_*()."
+					, atom.name or ""),
+			}
+		end
+	end
+end
+
+-- Check #N+2: gte_cr_TR_naming
+-- Fires one info per atom body when a `gte_cr_TR[XYZ]` alias is used.
+-- Translation-vector registers are the only 3-letter-suffix C2 aliases
+-- (`TRX/TRY/TRZ`); an agent who reads `TRX` might typo it as `RT_X` or
+-- `RTX0` and either get a compile error (best case) or a build that
+-- links but routes the `ctc2` write to the wrong C2 slot.
+--
+-- Severity: info. The convention is correct; this is a documentation-pointer check.
+local function check_gte_cr_TR_naming(atom, _pipe_ctx, findings)
+	local tokens = atom.paths and atom.paths.tokens or {}
+	local tc     = atom.paths and atom.paths.tok_class or {}
+	local line_in_body = atom.paths and atom.paths.line_in_body
+	if not next(tokens) then return end
+	local touched = false
+	local first_line = 0
+	for tok_idx, token in ipairs(tokens) do
+		local c = tc[tok_idx]
+		if c and c.ident and c.ident:match("^gte_cr_TR[XYZ]$") then
+			touched = true
+			if first_line == 0 then
+				first_line = atom_body_token_source_line(atom, token, line_in_body)
+			end
+		end
+	end
+	if touched then
+		findings[#findings + 1] = {
+			atom  = atom.name or "",
+			line  = first_line,
+			check = "gte_cr_TR_naming",
+			kind  = "info",
+			msg   = string.format(
+				"atom '%s' uses gte_cr_TR[XYZ]; translation-vector registers are the only "
+				.. "3-letter-suffix C2 aliases (TRX/TRY/TRZ). See docs/gte_reference.md §"
+				.. "\"The `gte_cmdw_mvmva_c11_pass2_exact` literal\" for the libgte outer-product "
+				.. "convention that uses these names."
+				, atom.name or ""),
+		}
+	end
+end
+
 -- CHECK_RULES — data-driven check dispatch (Muratori: data over control flow)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -2414,6 +2592,9 @@ local CHECK_RULES = {
 	{ name = "abi_handoff",                     per_atom   = check_abi_handoff                     },
 	{ name = "gpu_portstore_shape",             per_atom   = check_gpu_portstore_shape             },
 	{ name = "per_atom_cycle_budget",           per_atom   = check_per_atom_cycle_budget           },
+	{ name = "gte_cr_alias_writes",             per_atom   = check_gte_cr_alias_writes             },
+	{ name = "rtdiagonal_completeness",         per_atom   = check_rtdiagonal_completeness         },
+	{ name = "gte_cr_TR_naming",                per_atom   = check_gte_cr_TR_naming                },
 	{ name = "enum_alias_membership",           per_source = check_enum_alias_membership           },
 	{ name = "atom_type_consistency",           per_source = check_atom_type_consistency           },
 	{ name = "binds_no_substruct_deref",        per_source = check_binds_no_substruct_deref        },
@@ -2451,12 +2632,17 @@ local function build_corpus_pipe_ctx(ctx)
 		atoms_by_name           = corpus.atoms_by_name           or {},
 		-- Per-component metadata (cycle_cost + gp0_contrib) auto-derived from the original
 		-- `MipsAtomComp_` body by `passes/components.lua::compute_components_metadata`.
-		-- Keyed by bare name (e.g. `format_f3_color`, `gte_store_f3`); the `mac_` prefix at call sites is stripped before lookup. 
+		-- Keyed by bare name (e.g. `format_f3_color`, `gte_store_f3`); the `mac_` prefix at call sites is stripped before lookup.
 		components_by_name      = corpus.components              or {},
 		-- Corpus-wide ordered list of atom_info records (source-order + duplicates).
 		atom_infos_list         = corpus.atom_infos              or {},
 		-- Corpus-wide collisions (recorded by scan_source.merge_corpus_registries).
 		collisions              = corpus.collisions              or {},
+		-- GTE control-register alias groups (from `duffle.GTE_CR_ALIAS_GROUPS`).
+		-- The three new per_atom checks (gte_cr_alias_writes, rtdiagonal_completeness,
+		-- gte_cr_TR_naming) read from this view. `duffle` is exposed alongside so
+		-- `find_alias_pair_for` can resolve alias → group without a separate registry.
+		gte_cr_alias_groups     = duffle.GTE_CR_ALIAS_GROUPS or {},
 	}
 end
 

@@ -191,6 +191,30 @@ enum {
 	gte_mask_fake_cmd  = 0x1F,
 };
 
+/* --- GTE Control Register Aliases (Pitfall 1) ---
+ * Three pairs of aliases map to the SAME C2 control-register slot on real silicon:
+ *   C2[24] = gte_cr_RBK (background R)         | gte_cr_OFX (screen offset X)
+ *   C2[25] = gte_cr_GBK (background G)         | gte_cr_OFY (screen offset Y)
+ *   C2[26] = gte_cr_BBK (background B)         | gte_cr_H   (projection plane distance H)
+ * Cross-alias writes inside one atom body, or across the wave-context boundary,
+ * silently clobber each other. The metaprogram's check_gte_cr_alias_writes
+ * (CHECK_RULES row) warns about each pair per source. See
+ * docs/gte_reference.md §"Control-register alias table" for the silicon
+ * rationale and the libgte outer-product convention.
+ */
+
+/* --- RT-matrix packed-slot convention (Pitfall 4) ---
+ * The silicon packs two 16-bit RT elements per 32-bit C2 slot:
+ *   C2[2] = (RT22 << 16) | RT13       (gte_cr_RT13 writes the low  half, gte_cr_RT22 writes the high half)
+ *   C2[4] = (RT33 << 16) | RT22       (gte_cr_RT22 writes the low  half — clobbers prior RT22 value if RT13 was also written)
+ * OP and MVMVA read D1/D2/D3 from these packed slots. The libgte outer-product
+ * convention (see ac_apply_matrix_lv at gte.atom.c:108-122) writes C2[2] then
+ * C2[4] in sequence; the SECOND write's low half is RT22, not RT13. An agent
+ * who writes gte_cr_RT13 then gte_cr_RT22 to the SAME source GPR clobbers the
+ * RT13 value. See docs/gte_reference.md §"RT-matrix packed-slot convention"
+ * for the canonical write pattern.
+ */
+
 /* --- GTE Control Register Indices (for ctc2/cfc2) ---
  * Preprocessor-visible integer ids for the COP2 control register file.
  * Each enum value is bound to a parallel `_Code` `#define` so the preprocessor can stringify the integer (for `reg_str`/`rgcc` paths).
