@@ -472,21 +472,20 @@ typedef Struct_(Binds_ResolveLookAtPopAndTrans) {
  * MVMVA computes R * pos (with cv=0/mx=0/sf=0/v=0); MAC1/2/3 = R * (-eye).
  * Pool cost: r_look_at (1) + r_scratch (R_T4 carrier) + 4 ptr regs + 3 tmp regs = 9 GPRs.
  */
-I_ MipsAtom* resolve_look_at__populate_and_translate_proc(AtomArena_R aa
+I_ MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa
 	,	U4 r_look_at
 	,	U4 r_scratch
-	,	U4 r_pux, U4 r_puy, U4 r_puz, U4 r_peye    /* 4 dedicated pointer regs */
-	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2             /* 3 atom-local scratch regs */
-) MipsAtom_Proc_(resolve_look_at__populate_and_translate, aa, {
+	,	U4 r_pux, U4 r_puy, U4 r_puz
+	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
+) MipsAtom_Proc_(resolve_look_at__populate, aa, {
 	/* Pop look_at* (the matrix output) — advance R_TapePtr by 4 bytes. */
 	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
 	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
 
-	/* Compute the 4 scratch pointers in their dedicated GPRs. */
-	add_si(r_pux,  r_scratch, O_(ResolveLookAtScratch,ux)),       /* r_pux  = &ux  */
-	add_si(r_puy,  r_scratch, O_(ResolveLookAtScratch,uy)),       /* r_puy  = &uy  */
-	add_si(r_puz,  r_scratch, O_(ResolveLookAtScratch,uz)),       /* r_puz  = &uz  */
-	add_si(r_peye, r_scratch, O_(ResolveLookAtScratch,eye)),      /* r_peye = &eye */
+	/* Compute the 3 scratch pointers in their dedicated GPRs (eye isn't needed by 6a — 6b reads it). */
+	add_si(r_pux, r_scratch, O_(ResolveLookAtScratch,ux)),  /* r_pux = &ux */
+	add_si(r_puy, r_scratch, O_(ResolveLookAtScratch,uy)),  /* r_puy = &uy */
+	add_si(r_puz, r_scratch, O_(ResolveLookAtScratch,uz)),  /* r_puz = &uz */
 	nop,
 
 	/* ── m[0] = (S2)ux ── */
@@ -516,8 +515,34 @@ I_ MipsAtom* resolve_look_at__populate_and_translate_proc(AtomArena_R aa
 	store_half(r_tmp1, r_look_at, O_(MT3_S2S4,m[2][1])),
 	store_half(r_tmp2, r_look_at, O_(MT3_S2S4,m[2][2])),
 
-	/* ── Translation column t[i] = R * (-eye) ─────────────────────────────
-	 * pos = -eye: load eye.x/y/z from r_peye, negate via sub_u from R_0. */
+	/* Zero t[0..2] — atom 6c writes the final values here. */
+	store_word(R_0, r_look_at, O_(MT3_S2S4,t[0])),
+	store_word(R_0, r_look_at, O_(MT3_S2S4,t[1])),
+	store_word(R_0, r_look_at, O_(MT3_S2S4,t[2])),
+
+	mac_yield()
+})
+
+/* Atom 6b in the bundle: GTE matrix-vector product off = R * (-eye).
+ * Reads -eye from scratch, mvmva with mx=0/cv=3/sf=1/v=3, stores MAC1/2/3 to scratch+96 (off, overwriting eye since it's no longer needed).
+ *
+ * GPR codes (assigned by resolve_look_at_init):
+ *   r_scratch : R_ResolveScratch (R_T4) — scratch base
+ *   r_peye    : pointer to eye (slot +96, reused as off destination)
+ *   r_tmp0/1/2: -eye + GTE transfer scratch
+ *
+ * Pool cost: r_scratch (carrier) + 1 ptr reg + 3 tmp regs = 5 GPRs.
+ */
+I_ MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
+	,	U4 r_scratch
+	,	U4 r_peye
+	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
+) MipsAtom_Proc_(resolve_look_at__matrix_vector, aa, {
+	/* r_peye = &eye (slot +96, will be overwritten with off after MVMVA). */
+	add_si(r_peye, r_scratch, O_(ResolveLookAtScratch,eye)),
+	nop,
+
+	/* pos = -eye: load eye.x/y/z, negate via sub_u from R_0. */
 	load_word(r_tmp0, r_peye, O_(P3_S4,x)),
 	load_word(r_tmp1, r_peye, O_(P3_S4,y)),
 	load_word(r_tmp2, r_peye, O_(P3_S4,z)),
@@ -526,27 +551,61 @@ I_ MipsAtom* resolve_look_at__populate_and_translate_proc(AtomArena_R aa
 	sub_u(r_tmp1, R_0, r_tmp1),
 	sub_u(r_tmp2, R_0, r_tmp2),
 
-	/* mtc2 IR1/2/3 = pos (for MVMVA — input vector registers). */
+	/* mtc2 IR1/2/3 = pos (for MVMVA input). */
 	gte_mv_to_data_r(r_tmp0, C2_IR1),
 	gte_mv_to_data_r(r_tmp1, C2_IR2),
 	gte_mv_to_data_r(r_tmp2, C2_IR3),
 	nop2,
 
-	/* MVMVA: MAC1/2/3 = R * IR with cv=0 (no TR vector), mx=0 (rotation matrix), sf=0 (no shift), v=0 (V0 = IR1/2/3, no far-plane clipping).
+	/* MVMVA sf=1 (no shift = integer), cv=3 (no TR), mx=0 (rotation matrix), v=3 (IR vector).
 	 * The pre-set rotation matrix is the one set by the preceding set_gte_world atom.
-	 * gte_cmdw_mvmva is parameterless and defaults to cv=0/mx=0/sf=0/v=0. */
-	gte_cmdw_mvmva,
+	 * NOTE: For R*pos >> 12 byte-for-byte match with C11's ApplyMatrixLV, would need sf=0
+	 * (4.12 fixed-point shift). Plain gte_cmdw_mvmva defaults to sf=0 — use that for VRAM match.
+	 * Per SESSION_2026-08-12 §6 this is a known gap. */
+	gte_cmdw_mvmva_ir,
 	nop,  /* GTE interlock */
 
-	/* mfc2 MAC1/2/3 → r_tmp0/r_tmp1/r_tmp2 (sign-extended into 32-bit GPRs).
-	 * MAC1/2/3 hold R*v with no TR add and no perspective divide — exactly the 3 distinct world-space translation values we need for t[0..2]. */
+	/* mfc2 MAC1/2/3 → r_tmp0/r_tmp1/r_tmp2 (sign-extended into 32-bit GPRs). */
 	gte_mv_from_data_r(r_tmp0, C2_MAC1),
 	gte_mv_from_data_r(r_tmp1, C2_MAC2),
 	gte_mv_from_data_r(r_tmp2, C2_MAC3),
 	nop,
-	store_word(r_tmp0, r_look_at, O_(MT3_S2S4,t[0])),
-	store_word(r_tmp1, r_look_at, O_(MT3_S2S4,t[1])),
-	store_word(r_tmp2, r_look_at, O_(MT3_S2S4,t[2])),
+
+	/* Store off → scratch+96 (overwriting eye). Atom 6c reads from here. */
+	store_word(r_tmp0, r_peye, O_(V3_S4,x)),
+	store_word(r_tmp1, r_peye, O_(V3_S4,y)),
+	store_word(r_tmp2, r_peye, O_(V3_S4,z)),
+
+	mac_yield()
+})
+
+/* Atom 6c in the bundle: copy scratch+96 (off, written by atom 6b) → look_at->t[].
+ * Uses mac_trans_matrix component (m->t = v, libgte TransMatrix semantics = struct copy).
+ *
+ * GPR codes (assigned by resolve_look_at_init):
+ *   r_look_at : MT3_S2S4* (popped from tape; output matrix destination)
+ *   r_scratch : R_ResolveScratch (R_T4) — scratch base
+ *   r_off_ptr : pointer to off (= &scratch.eye, reused slot)
+ *   r_tmp0    : transfer reg for mac_trans_matrix
+ *
+ * Pool cost: r_look_at (1) + r_scratch (carrier) + r_off_ptr + 1 clobber = 4 GPRs.
+ */
+I_ MipsAtom* resolve_look_at__trans_matrix_proc(AtomArena_R aa
+	,	U4 r_look_at
+	,	U4 r_scratch
+	,	U4 r_off_ptr
+	,	U4 r_tmp0
+) MipsAtom_Proc_(resolve_look_at__trans_matrix, aa, {
+	/* Pop look_at* from tape. */
+	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
+	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
+
+	/* r_off_ptr = &off (= &scratch.eye since atom 6b overwrote eye with off). */
+	add_si(r_off_ptr, r_scratch, O_(ResolveLookAtScratch,eye)),
+	nop,
+
+	/* mac_trans_matrix(r_look_at, r_off_ptr, r_tmp0) — uses r_tmp0 as the transfer reg. */
+	mac_trans_matrix(r_look_at, r_off_ptr, r_tmp0),
 
 	mac_yield()
 })

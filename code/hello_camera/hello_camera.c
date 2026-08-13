@@ -85,7 +85,7 @@ typedef Struct_(SMemory) {
 	U4_V scratchpad; // d-cache
 
 	U4        resolve_look_at_mem[ResolveLookAtArena_Words];
-	MipsAtom* resolve_look_at_atom_addrs[7];
+	MipsAtom* resolve_look_at_atom_addrs[9];
 };
 global SMemory smem;
 extern SMemory smem;
@@ -238,11 +238,26 @@ internal void resolve_look_at_init(void) {
 
 	/* Atom 6: resolve_look_at__populate_and_translate — write look_at->m[][] from ux/uy/uz (computed from r_scratch+offset internally),
 	then compute translation column t[] = R * (-eye). GPR pool: r_look_at + r_scratch + 4 ptr regs + 3 tmp regs = 9. */
-	smem.resolve_look_at_atom_addrs[6] = resolve_look_at__populate_and_translate_proc(& ab,
+	smem.resolve_look_at_atom_addrs[6] = resolve_look_at__populate_proc(& ab,
 		R_T0,                    /* r_look_at (popped from tape; MT3_S2S4*) */
 		R_ResolveScratch,        /* r_scratch (wave-context carrier) */
-		R_T1, R_T3, R_T5, R_T7,  /* r_pux, r_puy, r_puz, r_peye */
+		R_T1, R_T3, R_T5,        /* r_pux, r_puy, r_puz (no r_peye — 6a doesn't read eye) */
 		R_T2, R_T6, R_V0);       /* r_tmp0, r_tmp1, r_tmp2 */
+	ab.start = ab.start + ab.used;
+
+	/* Atom 6b: resolve_look_at__matrix_vector - GTE MVMVA off = R * (-eye). Stores off to scratch+96. */
+	smem.resolve_look_at_atom_addrs[7] = resolve_look_at__matrix_vector_proc(& ab,
+		R_ResolveScratch,        /* r_scratch (wave-context carrier) */
+		R_T1,                    /* r_peye (reused as off destination) */
+		R_T0, R_T2, R_T3);       /* r_tmp0, r_tmp1, r_tmp2 */
+	ab.start = ab.start + ab.used;
+
+	/* Atom 6c: resolve_look_at__trans_matrix - copy scratch+96 (off) → look_at->t[]. */
+	smem.resolve_look_at_atom_addrs[8] = resolve_look_at__trans_matrix_proc(& ab,
+		R_T0,                    /* r_look_at (popped from tape; MT3_S2S4*) */
+		R_ResolveScratch,        /* r_scratch (wave-context carrier) */
+		R_T1,                    /* r_off_ptr = &scratch.eye */
+		R_T2);                   /* r_tmp0 (transfer reg) */
 
 	/* Sanity check: arena didn't overflow. */
 	assert(ab.used <= ResolveLookAtArena_Words);
@@ -283,8 +298,14 @@ I_ void resolve_look_at(
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
 
-	// /* Atom 6: populate_and_translate — only output pointer is the matrix destination. */
+	// /* Atom 6a: populate — pop look_at* for the matrix destination. */
 	// tb_emit(tb, smem.resolve_look_at_atom_addrs[6]); {
+	// 	tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
+	// }
+	// /* Atom 6b: matrix_vector — no tape-data (reads eye from scratch, writes off to scratch+96). */
+	// tb_emit(tb, smem.resolve_look_at_atom_addrs[7]); { }
+	// /* Atom 6c: trans_matrix — pop look_at* for the matrix destination. */
+	// tb_emit(tb, smem.resolve_look_at_atom_addrs[8]); {
 	// 	tb_data(tb, u4_(look_at)); /* Binds_ResolveLookAtPopAndTrans.look_at (MT3_S2S4*) */
 	// }
 }
