@@ -1962,6 +1962,52 @@ M.INSTRUCTION_GPR_EFFECTS = {
 	shift_aright_var        = { reads = {2, 3}, writes = {1} },
 }
 
+-------------------------------------------------------------------------------
+-- IMMEDIATE_FIELD_WIDTHS — maps instruction names to their immediate-argument
+-- positions (1-based) and field widths (in bits). Consumed by the
+-- `immediate_field_width` static-analysis check. Parallel to
+-- INSTRUCTION_GPR_EFFECTS.
+--
+-- `signed = true` means the field is sign-extended (the value must fit in
+-- the signed range). `signed = false` (default) means zero-extended.
+-------------------------------------------------------------------------------
+M.IMMEDIATE_FIELD_WIDTHS = {
+    -- CPU I-type immediates: 16-bit signed (addiu/addi/slti sign-extend)
+    add_ui      = { { arg = 3, width = 16, signed = true } },
+    add_si      = { { arg = 3, width = 16, signed = true } },
+    add_ui_self = { { arg = 2, width = 16, signed = true } },
+    slt_si      = { { arg = 3, width = 16, signed = true } },
+    slt_ui      = { { arg = 3, width = 16, signed = true } },
+    -- CPU I-type immediates: 16-bit unsigned (andi/ori/xori zero-extend)
+    and_i       = { { arg = 3, width = 16 } },
+    or_i        = { { arg = 3, width = 16 } },
+    or_i_self   = { { arg = 2, width = 16 } },
+    xor_i       = { { arg = 3, width = 16 } },
+    load_upper_i = { { arg = 2, width = 16 } },
+    -- Load/store offsets: 16-bit signed
+    load_word    = { { arg = 3, width = 16, signed = true } },
+    load_half    = { { arg = 3, width = 16, signed = true } },
+    load_half_u  = { { arg = 3, width = 16, signed = true } },
+    load_byte    = { { arg = 3, width = 16, signed = true } },
+    load_byte_u  = { { arg = 3, width = 16, signed = true } },
+    store_word   = { { arg = 3, width = 16, signed = true } },
+    store_half   = { { arg = 3, width = 16, signed = true } },
+    store_byte   = { { arg = 3, width = 16, signed = true } },
+    -- Shift amount: 5-bit unsigned
+    shift_lleft      = { { arg = 3, width = 5 } },
+    shift_lleft_self = { { arg = 2, width = 5 } },
+    shift_lright     = { { arg = 3, width = 5 } },
+    shift_aright     = { { arg = 3, width = 5 } },
+    shift_aright_var = { { arg = 3, width = 5 } },
+    -- Branch offsets: 16-bit signed
+    branch_equal   = { { arg = 3, width = 16, signed = true } },
+    branch_ne      = { { arg = 3, width = 16, signed = true } },
+    branch_le_zero = { { arg = 2, width = 16, signed = true } },
+    branch_lt_zero = { { arg = 2, width = 16, signed = true } },
+    branch_ge_zero = { { arg = 2, width = 16, signed = true } },
+    branch_gt_zero = { { arg = 2, width = 16, signed = true } },
+}
+
 -- Bounded GPR-value rules consumed by the same forward event walk as `INSTRUCTION_GPR_EFFECTS`.
 -- A rule describes a literal/constant-producing transform; if its required inputs are not constant, the destination is invalidated rather than carrying a stale value.
 -- The lattice is deliberately closed to `{kind = "unknown"}` and `{kind = "constant", value = <U4>}`.

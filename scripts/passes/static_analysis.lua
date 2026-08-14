@@ -2566,6 +2566,96 @@ local function check_gte_cr_TR_naming(atom, _pipe_ctx, findings)
 	end
 end
 
+-- check_immediate_field_width — flags integer literals passed to instruction
+-- macros that exceed the immediate field width. Reads `IMMEDIATE_FIELD_WIDTHS`
+-- from duffle.lua. Only fires on parseable integer literals; register names,
+-- O_(...) offsets, atom_offset(...) markers, and enum tokens are skipped.
+local function check_immediate_field_width(atom, pipe_ctx, findings)
+	local widths = duffle.IMMEDIATE_FIELD_WIDTHS or {}
+	local events = atom.paths and atom.paths.word_events or {}
+	local line_for_word_event = pipe_ctx.line_for_word_event
+	for _, ev in ipairs(events) do
+		local ev_ident = ev.encoder or ev.ident or "?"
+		local rules = widths[ev_ident]
+		if rules then
+			local ev_args = ev.args or {}
+			local ev_line = line_for_word_event and line_for_word_event(ev) or atom.line
+			for _, rule in ipairs(rules) do
+				local arg_str = ev_args[rule.arg]
+				if arg_str then
+					local value = parse_integer_literal(arg_str)
+					if value then
+						local width = rule.width
+						local is_signed = rule.signed == true
+						-- parse_integer_literal returns a U4-wrapped value in [0, 2^32).
+						-- For signed fields, re-interpret the high bit as the sign.
+						local signed_value = value
+						if is_signed and value >= 0x80000000 then
+							signed_value = value - 0x100000000
+						end
+						local lo, hi
+						if is_signed then
+							lo = -(bit.lshift(1, width - 1))
+							hi =  bit.lshift(1, width - 1) - 1
+						else
+							lo = 0
+							hi = bit.lshift(1, width) - 1
+						end
+						-- For unsigned fields, a negative C literal (high bit set in U4)
+						-- is valid if the low `width` bits fit — IMM_MASK truncates it.
+						-- Flag as a warning (code smell), not an error.
+						local check_value = is_signed and signed_value or value
+						local field_max = bit.lshift(1, width) - 1
+						local low_bits_fit = (value % (bit.lshift(1, width))) == value or (is_signed and signed_value >= lo and signed_value <= hi)
+						if is_signed then
+							if signed_value < lo or signed_value > hi then
+								findings[#findings + 1] = {
+									check = "immediate_field_width",
+									kind  = "error",
+									atom  = atom.name,
+									line  = ev_line,
+									msg   = string.format(
+										"%s: immediate %d at arg %d overflows %d-bit %s field (valid %d..%d)",
+										ev_ident, signed_value, rule.arg, width,
+										"signed", lo, hi),
+								}
+							end
+						else
+							-- Unsigned field: check if the low `width` bits exceed the field.
+							-- A negative C literal (U4 >= 0x80000000) whose low bits fit is
+							-- valid but a code smell — warn, don't error.
+							local low_bits = value % (bit.lshift(1, width))
+							if value > field_max then
+								if value >= 0x80000000 and low_bits <= field_max then
+									findings[#findings + 1] = {
+										check = "immediate_field_width",
+										kind  = "warning",
+										atom  = atom.name,
+										line  = ev_line,
+										msg   = string.format(
+											"%s: negative immediate %d at arg %d on unsigned %d-bit field (truncated to %d by IMM_MASK)",
+											ev_ident, signed_value, rule.arg, width, low_bits),
+									}
+								else
+									findings[#findings + 1] = {
+										check = "immediate_field_width",
+										kind  = "error",
+										atom  = atom.name,
+										line  = ev_line,
+										msg   = string.format(
+											"%s: immediate %d at arg %d overflows %d-bit unsigned field (valid 0..%d)",
+											ev_ident, value, rule.arg, width, field_max),
+									}
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 -- CHECK_RULES — data-driven check dispatch (Muratori: data over control flow)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -2595,6 +2685,7 @@ local CHECK_RULES = {
 	{ name = "gte_cr_alias_writes",             per_atom   = check_gte_cr_alias_writes             },
 	{ name = "rtdiagonal_completeness",         per_atom   = check_rtdiagonal_completeness         },
 	{ name = "gte_cr_TR_naming",                per_atom   = check_gte_cr_TR_naming                },
+	{ name = "immediate_field_width",           per_atom   = check_immediate_field_width           },
 	{ name = "enum_alias_membership",           per_source = check_enum_alias_membership           },
 	{ name = "atom_type_consistency",           per_source = check_atom_type_consistency           },
 	{ name = "binds_no_substruct_deref",        per_source = check_binds_no_substruct_deref        },
