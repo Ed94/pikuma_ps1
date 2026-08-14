@@ -36,7 +36,7 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 	 *   $t2 = 0xB0 (BIOS B-table address) */
 	asm volatile(
 		asm_words(
-			or_u(    R_A2, R_A0, R_0),                 /* $a2 = $a1 = raw1 */
+			or_u(    R_A2, R_A1, R_0),                 /* $a2 = $a1 = raw1 */
 			add_ui(  R_A1, R_0, bios_pad_buffer_size), /* $a1 = 0x22 */
 			add_ui(  R_A3, R_0, bios_pad_buffer_size), /* $a3 = 0x22 */
 			add_ui(  R_T1, R_0, bios_init_pad_2),      /* $t1 = 0x12 */

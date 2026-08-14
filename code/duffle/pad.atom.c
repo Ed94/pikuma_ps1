@@ -32,7 +32,7 @@ FI_ Slice_MipsCode ac_pad_set_status(AtomBuilder_R ab, U4 r_tmp, U1 r_state, U4 
  * the preceding load_half_u with an instruction that doesn't read r_buttons). */
 FI_ Slice_MipsCode ac_pad_store_inverted_buttons(AtomBuilder_R ab, U1 r_buttons, U1 r_pad_state) atom_dbg_skip MipsAtomComp_Proc_(ac_pad_store_inverted_buttons, ab, {
     nor_u(       r_buttons, r_buttons, R_0),
-    store_half(  r_buttons, r_pad_state, O_(PadState,   buttons)),
+    store_half(  r_buttons, r_pad_state, O_(PadState,buttons)),
 })
 
 #pragma endregion MACs (Mips Atom Components)

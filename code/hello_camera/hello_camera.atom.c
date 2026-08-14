@@ -480,9 +480,9 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	gte_mv_to_data_r(r_tmp2, C2_IR3),
 	nop2,  /* MTC2 retirement (2 slots) */
 
-	/* === MVMVA pass 2 EXACT C11 command: 0x4A49E012 ===
+	/* === MVMVA pass 2 — C11 ApplyMatrixLV command ===
 	 * sf=1, mx=0 (RT), v=3 (IR), cv=3. Reads RT × IR >> 12. */
-	gte_cmdw_mvmva_c11_pass2_exact,
+	gte_cmdw_mvmva_c11_pass2,
 	nop,  /* GTE interlock */
 
 	/* === mfc2 MAC1/2/3 → r_tmp0/1/2 === */
@@ -515,17 +515,19 @@ I_ MipsAtom* resolve_look_at__trans_matrix_proc(AtomArena_R aa
 	,	U4 r_scratch
 	,	U4 r_off_ptr
 	,	U4 r_tmp0
+	, U4 r_tmp1
+	, U4 r_tmp2
 ) MipsAtom_Proc_(resolve_look_at__trans_matrix, aa, {
 	/* Pop look_at* from tape. */
-	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
-	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
+	// load_word(r_Vlook_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
+	// add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
 
 	/* r_off_ptr = &off (= &scratch.eye since atom 6b overwrote eye with off). */
 	add_si(r_off_ptr, r_scratch, O_(ResolveLookAtScratch,eye)),
 	nop,
 
 	/* Copy off → look_at.t[] (mac_trans_matrix: m->t = v). */
-	mac_trans_matrix(r_look_at, r_off_ptr, r_tmp0),
+	mac_trans_mt3s3s4(r_look_at, r_off_ptr, r_tmp0, r_tmp1, r_tmp2),
 
 	mac_yield()
 })

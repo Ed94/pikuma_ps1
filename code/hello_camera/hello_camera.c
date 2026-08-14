@@ -362,7 +362,7 @@ internal void resolve_look_at_init(void) {
 	U4 const r_off_ptr_6c = R_T1;  /* &scratch.eye (= off dst) */
 	U4 const r_tmp0_6c    = R_T2;
 	smem.resolve_look_at_atom_addrs[9] = resolve_look_at__trans_matrix_proc(& ab,
-		r_look_at_6c, r_scratch_6c, r_off_ptr_6c, r_tmp0_6c);
+		r_look_at_6c, r_scratch_6c, r_off_ptr_6c, r_tmp0_6c, R_T3, R_T4);
 
 	/* Sanity check: arena didn't overflow. */
 	assert(ab.used <= ResolveLookAtArena_Size);
@@ -409,7 +409,7 @@ I_ void resolve_look_at(
 		tb_data(tb, u4_(look_at));
 	}
 	tb_emit(tb, smem.resolve_look_at_atom_addrs[9]); {
-		tb_data(tb, u4_(look_at));
+		// tb_data(tb, u4_(look_at));
 	}
 }
 
@@ -425,9 +425,9 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 			tb_emit_(pad_bios_snapshot);
 				tb_data_(raw,   & smem.pad_raw[0]);
 				tb_data_(state, & smem.pad[0]);
-			tb_emit_(pad_bios_snapshot);
-				tb_data_(raw,   & smem.pad_raw[1]);
-				tb_data_(state, & smem.pad[1]);
+			// tb_emit_(pad_bios_snapshot);
+			// 	tb_data_(raw,   & smem.pad_raw[1]);
+			// 	tb_data_(state, & smem.pad[1]);
 
 			tb_emit_(pad_input_cam);
 				tb_data_(state, & smem.pad[0]);
