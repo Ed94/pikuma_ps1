@@ -307,11 +307,7 @@ typedef Struct_(RegFile) {
 	A2_U2 GPR;
 	A2_U2 GTE;
 };
-typedef Struct_(RegFile_RInfo) {
-	U2_R section;
-	U2   mask;
-	B2   occupied;
-};
+#define regfile(pin_mask) {.GPR={u4_lo(pin_mask), u4_hi(pin_mask)} }
 FI_ void regfile_init(RegFile_R rf) {
 	/* pack the 32-bit ABI mask into the two U2s */
 	rf->GPR[0] = u4_lo(regfile_abi_mask);
@@ -320,11 +316,16 @@ FI_ void regfile_init(RegFile_R rf) {
 }
 FI_ RegFile regfile_make(void) { RegFile rf; regfile_init(& rf); return rf; }
 
+typedef Struct_(RegFile_RInfo) {
+	U2_R section;
+	U2   mask;
+	B2   occupied;
+};
 FI_ RegFile_RInfo regfile_rinfo(A2_U2 file, Reg r_id) {
 	U2   s_id     = r_id >> 4;
 	U2_R section  = & file[s_id];
-	U2   mask     = (1u << (r_id & 15));
-	B2   occupied = section[0] & mask != 0;
+	U2   mask     = u2_(1u << (r_id & 15));
+	B2   occupied = (section[0] & mask) != 0;
 	return (RegFile_RInfo){section, mask, occupied};
 }
 FI_ Reg regfile__alloc_helper(A2_U2 file, Reg r_id) {
@@ -337,12 +338,12 @@ FI_ Reg regfile__alloc_helper(A2_U2 file, Reg r_id) {
 }
 I_ Reg regfile_alloc(RegFile_R rf) {
 	U2 allocated = 0;
-	for range_iter(r_id, <=, r1u2(R_T0, R_T7)) {
+	for index_iter(Reg, r_id, R_T0, <=, R_T7) {
 		allocated = regfile__alloc_helper(rf->GPR, r_id); Jmp_nZero_(allocated,resolved);
 	}
-	for range_iter(r_id, <=, r1u2(R_V0, R_V1)) {
-		allocated = regfile__alloc_helper(rf->GPR, r_id); Jmp_nZero_(allocated,resolved);
-	}
+	allocated = regfile__alloc_helper(rf->GPR, R_V0); Jmp_nZero_(allocated,resolved);
+	allocated = regfile__alloc_helper(rf->GPR, R_V1);
+	assert(allocated != 0);
 resolved: return allocated;
 }
 FI_ Reg regfile_pin(RegFile_R rf, Reg r_id) {
@@ -351,9 +352,14 @@ FI_ Reg regfile_pin(RegFile_R rf, Reg r_id) {
 	info.section[0] |= info.mask;
 	return r_id;
 }
+FI_ void regfile_pin_mask(RegFile_R rf, U4 mask) {
+	B4 occupied = u4_r(rf->GPR)[0] & mask;
+	assert(occupied == false);
+	u4_r(rf->GPR)[0] |= mask;
+}
 FI_ void regfile_free_mask(RegFile_R rf, U4 mask) {
 	if (regfile_abi_mask & mask) return;
-	u4_r(rf->GPR)[0] &= mask;
+	u4_r(rf->GPR)[0] &= ~mask;
 }
 FI_ void regfile_free_reg(RegFile_R rf, Reg r_id) {
 	/* never free the ABI set */
@@ -364,6 +370,10 @@ FI_ void regfile_free_reg(RegFile_R rf, Reg r_id) {
 FI_ void regfile_reset(RegFile_R rf) {
 	rf->GPR[0] = u4_lo(regfile_abi_mask);
 	rf->GPR[1] = u4_hi(regfile_abi_mask);
+}
+FI_ void regfile_reset_mask(RegFile_R rf, U4 mask) {
+	rf->GPR[0] = u4_lo(mask);
+	rf->GPR[1] = u4_hi(mask);
 }
 #pragma endregion RegFileArena (Register File Allocator)
 

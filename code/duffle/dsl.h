@@ -218,16 +218,16 @@ def_signed_ops(le, <=)
 typedef Span_(S4);
 typedef Span_(U4);
 
-#if 0
 #pragma region Debug
-#define debug_trap() __builtin_debugtrap()
+#define debug_trap() __builtin_trap()
 #if BUILD_DEBUG
-IA_ void assert(U8 cond) { if(cond){return;} else{debug_trap(); ms_exit_process(1);} }
+	#define assert(cond) if(cond == false){debug_trap();}
 #else
-#define assert(cond)
+#	ifndef assert
+#		include <assert.h>
+#	endif
 #endif
 #pragma endregion Debug
-#endif
 
 #define GCC_OPTIMIZATION_DISABLE _Pragma("GCC push_options") _Pragma("GCC optimize(\"O0\")")
 #define GCC_OPTIMIZATION_ENABLE  _Pragma("GCC pop_options")

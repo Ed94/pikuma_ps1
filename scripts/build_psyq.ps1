@@ -532,6 +532,7 @@ function build-hello_camera {
 
 	$compile_args = @()
 	$compile_args += $f_debug
+	$compile_args += ($f_define + 'BUILD_DEBUG')
 	$compile_args += $f_optimize_none
 	# $compile_args += $f_optimize_intrinsics
 	# $compile_args += $f_optimize_size
