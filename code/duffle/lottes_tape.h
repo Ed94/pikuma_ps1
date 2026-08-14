@@ -287,7 +287,7 @@ FI_ MipsAtom* atomarena_push(AtomArena_R aa, Slice_MipsCode code) {
 	return C_(MipsAtom*, dest);
 }
 FI_ void atomarena_reset(AtomArena_R aa) { aa->used = 0; }
-#pragma region Atom Arena
+#pragma endregion Atom Arena
 
 #pragma region RegFile (Register File Allocator)
 // A specialized allocator utilized to help the user track which registers are bound to values
