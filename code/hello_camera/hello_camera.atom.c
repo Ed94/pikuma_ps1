@@ -549,7 +549,7 @@ internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
 ) {
 	/* display[0] = (0, 0, 320, 240); rest of struct zeroed. */
 	add_ui(R_ScreenX, R_0, ScreenRes_X), add_ui(R_ScreenY, R_0, ScreenRes_Y),
-	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DisplayEnv,display_area.width) + OA_(DoubleBuffer,display,0)),
+	mac_store_v2s2(R_ScreenX, R_ScreenY, R_ScreenBuf, O_(DisplayEnv,display_area.width) + O_(DoubleBuffer,display[0])),
 	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,display_area) + O_(DoubleBuffer,display[0])),
 	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,screen)       + O_(DoubleBuffer,display[0])),
 	store_word(R_0, R_ScreenBuf, O_(DisplayEnv,vinterlace)   + O_(DoubleBuffer,display[0])),

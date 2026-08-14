@@ -70,8 +70,8 @@
 /* ----------------------------------------------------------------------------
  * atom_reg (per-enum opt-in marker for the DWARF register-alias registry)
  *
- * The bare `atom_reg` token adjacent to an enum entry in mips.h / lottes_tape.h flags that alias as debug-visible for scan_source's register_alias_registry.
- * The C preprocessor strips it to a comment so no runtime symbol is created; the Lua scanner reads the bare token.
+ * Bare `atom_reg` token adjacent to an enum entry that alias as debug-visible for scan_source's register_alias_registry.
+ * Lua scanner reads the bare token.
  * ----------------------------------------------------------------------------*/
 #define atom_reg /* atom_reg: opt the preceding enum entry into the DWARF registry */
 

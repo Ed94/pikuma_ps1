@@ -1,11 +1,29 @@
 #ifdef INTELLISENSE_DIRECTIVES
-#	include "gen/macs.h"
-#	include "gen/offsets.h"
+#		include "gen/macs.h"
+#		include "gen/offsets.h"
 #	include "bios.h"
+#	include "mips.h"
 #	include "lottes_tape.h"
 #endif
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(mips_atom_c);
+
+#pragma region MACs (Mips Atom Components)
+
+// Tired of this signature:
+FI_ Slice_MipsCode ac_load_word_imm(AtomBuilder_R ab, Reg dst, U4 imm) 
+atom_dbg_skip MipsAtomComp_Proc_(ac_load_word_imm, ab, {
+	load_upper_i(dst, u4_hi(imm)),
+	or_i_self(   dst, u4_lo(imm)),
+})
+// Can I get away with this instead?
+// atom_dbg_skip FI_ Slice_MipsCode 
+// ac_load_word_imm(AtomBuilder_R ab, Reg dst, U4 imm) MipsAtomComp_Proc_(ab, {
+// 	load_upper_i(dst, u4_hi(imm)),
+// 	or_i_self(   dst, u4_lo(imm)),
+// })
+
+#pragma endregion MACs (Mips Atom Components)
 
 #pragma region Baked Atoms
 

@@ -100,6 +100,12 @@ WORD_COUNT(mac_sub_v3s4, 3)
 WORD_COUNT(mac_store_rects2, 4)
 
 /* atom_dbg_skip */
+#define mac_load_word_imm(dst, imm) \
+	load_upper_i(dst, u4_hi(imm)) \
+,	or_i_self(   dst, u4_lo(imm))
+WORD_COUNT(mac_load_word_imm, 2)
+
+/* atom_dbg_skip */
 #define mac_load_tri_indices(r_face_cusor, r_i0, r_i1, r_i2) \
 	load_half_u(r_i0, r_face_cusor, 0 * S_(S2)) \
 ,	load_half_u(r_i1, r_face_cusor, 1 * S_(S2)) \
@@ -175,58 +181,17 @@ WORD_COUNT(mac_gte_sqr_v3, 8)
 ,	shift_aright_var(r_dz, r_dz, r_shift)
 WORD_COUNT(mac_gte_gpf_scale, 13)
 
-#define mac_apply_matrix_lv(r_mtx, r_vec, r_out, r_t0, r_t1, r_t2) \
-	load_word(  r_t0, r_mtx,  0) \
-,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT11) \
-,	load_word(  r_t0, r_mtx,  4) \
-,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT12) \
-,	load_word(  r_t0, r_mtx,  8) \
-,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT13) \
-,	load_word(  r_t0, r_mtx, 12) \
-,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT21) \
-,	load_half_u(r_t0, r_mtx, 16) \
-,	nop \
-,	gte_mv_to_ctrl_r(r_t0, gte_cr_RT22) \
-,	nop2	/* Load PACKED pos into V0 (libgte SVECTOR layout).
-	 * r_vec points to atom-0-staged packed data ((pos.y << 16) | pos.x at +0, pos.z at +4).
-	 * LWC2 base register MUST be the pointer r_vec, NOT the loaded value r_t0. */ \
-,	load_word(r_t0, r_vec, 0) \
-,	nop \
-,	gte_lw(C2_VXY0, r_vec, 0) \
-,	load_word(r_t0, r_vec, 4) \
-,	nop \
-,	gte_lw(C2_VZ0, r_vec, 4)	/* RTPS: cv=3 (no translation), sf=1 (no shift, integer), v=0 (V0 input),
-	 * mx=0 (rotation matrix). MAC = RT row · V0 + 0. RTPS also writes
-	 * SXY0/1/2 + SZ0..SZ3 (perspective division); ignored. */ \
-,	gte_cmdw_rtps_sf1	/* Read MAC1/2/3 → out. */ \
-,	gte_mv_from_data_r(r_t0, C2_MAC1) \
-,	gte_mv_from_data_r(r_t1, C2_MAC2) \
-,	gte_mv_from_data_r(r_t2, C2_MAC3) \
-,	nop \
-,	store_word(r_t0, r_out, 0) \
-,	store_word(r_t1, r_out, 4) \
-,	store_word(r_t2, r_out, 8)
-WORD_COUNT(mac_apply_matrix_lv, 31)
-
-#define mac_trans_matrix(r_mtx, r_off, r_t1) \
-	load_word(r_t1, r_off, O_(V3_S4,x)) \
-,	nop \
-,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[0])) \
+#define mac_trans_mt3s3s4(r_mtx, r_off, r_t0, r_t1, r_t2) \
+	load_word(r_t0, r_off, O_(V3_S4,x)) \
 ,	load_word(r_t1, r_off, O_(V3_S4,y)) \
-,	nop \
+,	load_word(r_t2, r_off, O_(V3_S4,z)) \
+,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])) \
 ,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])) \
-,	load_word(r_t1, r_off, O_(V3_S4,z)) \
-,	nop \
-,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[2]))
-WORD_COUNT(mac_trans_matrix, 9)
+,	store_word(r_t2, r_mtx, O_(MT3_S2S4,t[2]))
+WORD_COUNT(mac_trans_mt3s3s4, 6)
 
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
-	load_upper_i(reg_transfer, u4_hi(cmd)) \
-,	or_i_self(   reg_transfer, u4_lo(cmd))	/* load_upper_i(reg_transfer, cmd >> 16),	// or_i_self(   reg_transfer, cmd & 0xFFFF), */ \
+	mac_load_word_imm(reg_transfer, cmd) \
 ,	store_word(  reg_transfer, reg_base, port)
 WORD_COUNT(mac_gcmd_push, 3)
 
@@ -291,6 +256,6 @@ WORD_COUNT(mac_pad_set_status, 2)
 /* atom_dbg_skip */
 #define mac_pad_store_inverted_buttons(r_buttons, r_pad_state) \
 	nor_u(       r_buttons, r_buttons, R_0) \
-,	store_half(  r_buttons, r_pad_state, O_(PadState,   buttons))
+,	store_half(  r_buttons, r_pad_state, O_(PadState,buttons))
 WORD_COUNT(mac_pad_store_inverted_buttons, 2)
 

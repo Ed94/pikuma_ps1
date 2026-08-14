@@ -106,10 +106,10 @@ FI_ void mul_a3s4(A3_S4_R out_a, A3_S4 b) {
 	(out_a[0])[2] *= b[2];
 }
 
-FI_ void add_v3s4   (V3_S4_R out_a, V3_S4 b) {  add_a3s4   (pcast(A3_S4_R, out_a), pcast(A3_S4, b));  }
-FI_ void add_v3s4_fp(V3_S4_R out_a, V3_S4 b) {  add_a3s4_fp(pcast(A3_S4_R, out_a), pcast(A3_S4, b));  }
+FI_ void add_v3s4   (V3_S4_R out_a, V3_S4 b) {  add_a3s4   (C_ptr(A3_S4_R, out_a), C_ptr(A3_S4, b));  }
+FI_ void add_v3s4_fp(V3_S4_R out_a, V3_S4 b) {  add_a3s4_fp(C_ptr(A3_S4_R, out_a), C_ptr(A3_S4, b));  }
 
-FI_ void sub_v3s4   (V3_S4_R out_a, V3_S4 b) {  sub_a3s4   (pcast(A3_S4_R, out_a), pcast(A3_S4, b));  }
-FI_ void sub_v3s4_fp(V3_S4_R out_a, V3_S4 b) {  sub_a3s4_fp(pcast(A3_S4_R, out_a), pcast(A3_S4, b));  }
+FI_ void sub_v3s4   (V3_S4_R out_a, V3_S4 b) {  sub_a3s4   (C_ptr(A3_S4_R, out_a), C_ptr(A3_S4, b));  }
+FI_ void sub_v3s4_fp(V3_S4_R out_a, V3_S4 b) {  sub_a3s4_fp(C_ptr(A3_S4_R, out_a), C_ptr(A3_S4, b));  }
 
-FI_ void mul_v3s4   (V3_S4_R out_a, V3_S4 b) {  mul_a3s4   (pcast(A3_S4_R, out_a), pcast(A3_S4, b));  }
+FI_ void mul_v3s4   (V3_S4_R out_a, V3_S4 b) {  mul_a3s4   (C_ptr(A3_S4_R, out_a), C_ptr(A3_S4, b));  }
