@@ -1,0 +1,81 @@
+{
+	"name": "tape-atom-syntax",
+	"displayName": "Tape Atom DSL",
+	"description": "Source-derived semantic highlighting for the Tape/Atom MIPS macro DSL",
+	"publisher": "local",
+	"version": "0.2.0",
+	"engines": { "vscode": "^1.80.0" },
+	"categories": ["Programming Languages"],
+	"activationEvents": ["onLanguage:c", "onLanguage:cpp"],
+	"main": "./extension.js",
+	"files": [
+		"classifier.js",
+		"extension.js",
+		"lexer.js",
+		"source-index.js",
+		"syntaxes/tape_atom.tmLanguage.json"
+	],
+	"scripts": {
+		"test": "node --test test/*.test.js",
+		"package": "npx --yes @vscode/vsce@3.6.1 package --allow-missing-repository --skip-license --out tape-atom-syntax-0.2.0.vsix"
+	},
+	"contributes": {
+		"semanticTokenTypes": [
+			{ "id": "tapeAtomKeyword", "description": "Tape atom declaration keyword" },
+			{ "id": "tapeAtomName", "description": "Tape atom name" },
+			{ "id": "tapeComponentKeyword", "description": "Tape atom component declaration keyword" },
+			{ "id": "tapeComponentName", "description": "Tape atom component name" },
+			{ "id": "tapeAnnotation", "description": "Tape atom annotation" },
+			{ "id": "tapeBindType", "description": "Tape bind structure type" },
+			{ "id": "tapePhase", "description": "Tape atom phase" },
+			{ "id": "tapeLabel", "description": "Tape atom branch label" },
+			{ "id": "tapeCpuInstruction", "description": "MIPS CPU instruction emitter" },
+			{ "id": "tapeControlFlow", "description": "MIPS branch or jump instruction" },
+			{ "id": "tapeGteInstruction", "description": "GTE instruction emitter" },
+			{ "id": "tapeGpuInstruction", "description": "GPU command emitter" },
+			{ "id": "tapeComponentInstruction", "description": "Tape atom component invocation" },
+			{ "id": "tapeDelaySlot", "description": "Load or branch delay slot annotation" },
+			{ "id": "tapeGprRegister", "description": "MIPS GPR alias" },
+			{ "id": "tapeCop2Register", "description": "COP2 data or control register alias" },
+			{ "id": "tapeDuffleType", "description": "Duffle type or type constructor" },
+			{ "id": "tapeAttribute", "description": "Duffle linkage or storage attribute" }
+		],
+		"semanticTokenModifiers": [
+			{ "id": "tapeRead", "description": "Register declared in atom_reads" },
+			{ "id": "tapeWrite", "description": "Register declared in atom_writes" },
+			{ "id": "tapeAuto", "description": "Auto-allocated register" }
+		],
+		"semanticTokenScopes": [
+			{
+				"language": "c",
+				"scopes": {
+					"tapeAtomKeyword": ["keyword.control.duffle.atom"],
+					"tapeAtomName": ["entity.name.function.duffle.atom"],
+					"tapeComponentKeyword": ["keyword.control.duffle.component"],
+					"tapeComponentName": ["entity.name.function.duffle.component"],
+					"tapeAnnotation": ["support.function.duffle.annotation"],
+					"tapeBindType": ["entity.name.type.duffle.bind"],
+					"tapePhase": ["entity.name.tag.duffle.phase"],
+					"tapeLabel": ["entity.name.label.duffle.atom"],
+					"tapeCpuInstruction": ["support.function.duffle.cpu"],
+					"tapeControlFlow": ["keyword.control.duffle.branch"],
+					"tapeGteInstruction": ["support.function.duffle.gte"],
+					"tapeGpuInstruction": ["support.function.duffle.gpu"],
+					"tapeComponentInstruction": ["support.function.duffle.component"],
+					"tapeDelaySlot": ["keyword.operator.duffle.delayslot"],
+					"tapeGprRegister": ["variable.other.constant.duffle.gpr"],
+					"tapeCop2Register": ["variable.other.constant.duffle.cop2"],
+					"tapeDuffleType": ["storage.type.duffle.type"],
+					"tapeAttribute": ["storage.modifier.duffle.attr"]
+				}
+			}
+		],
+		"grammars": [
+			{
+				"scopeName": "tape_atom.injection",
+				"path": "./syntaxes/tape_atom.tmLanguage.json",
+				"injectTo": ["source.c", "source.cpp"]
+			}
+		]
+	}
+}
