@@ -137,6 +137,16 @@ local QUALIFIER_KEYWORDS = {
 local AC_PREFIX     = "ac_"
 local AC_PREFIX_LEN = 3
 
+-- The function-decl keyword that precedes a MipsAtomComp_Proc_ call.
+-- Used by the backward walk in duffle.find_function_decl_for.
+local SLICE_MIPS_CODE    = "Slice_MipsCode"
+local SLICE_MIPS_CODE_LEN = #SLICE_MIPS_CODE
+
+-- The return type that precedes a MipsAtom_Proc_ function declaration.
+-- Used by the backward walk in duffle.find_atom_proc_decl_for.
+local MIPS_ATOM_PTR    = "MipsAtom*"
+local MIPS_ATOM_PTR_LEN = #MIPS_ATOM_PTR
+
 --- Strip the "ac_" prefix from a component name.
 --- Returns the input unchanged if it doesn't start with the prefix.
 --- @param raw_name string
@@ -1357,7 +1367,11 @@ local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
 	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
 	if close_pos > #inner + 1 then return after_paren end
 
-	local raw_name = inner:match("^%s*([%w_]+)") or "?"
+	-- The component name is derived from the preceding function declaration
+	-- (`FI_ Slice_MipsCode ac_X(...)`), not from the first macro arg (which
+	-- is now `ab`). The backward walk finds the function decl before open_paren.
+	local raw_name = duffle.find_function_decl_for(source, open_paren, SLICE_MIPS_CODE_LEN)
+	if not raw_name then raw_name = "?" end
 	local name     = strip_ac_prefix(raw_name)
 	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
 	local body_off = open_paren + 2 + last_brace_pos
@@ -1398,9 +1412,12 @@ local function parse_mips_atom_proc(source, pos, ident_end, line_of, out)
 	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
 	if close_pos > #inner + 1 then return after_paren end
 
-	-- The atom name is the FIRST ident of the args (matches MipsAtomComp_Proc_'s "first ident" rule).
-	-- MipsAtom_Proc_ has no `ac_` prefix; `strip_ac_prefix` is a no-op for unprefixed names.
-	local raw_name = inner:match("^%s*([%w_]+)") or "?"
+	-- The atom name is derived from the preceding function declaration
+	-- (`internal MipsAtom* X_proc(...)`), not from the first macro arg (which
+	-- is now `aa`). The backward walk finds the function decl before open_paren
+	-- and strips the `_proc` suffix.
+	local raw_name = duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
+	if not raw_name then raw_name = "?" end
 	local name     = strip_ac_prefix(raw_name)
 	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
 	local body_off = open_paren + 2 + last_brace_pos

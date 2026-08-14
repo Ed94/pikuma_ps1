@@ -96,48 +96,21 @@ local M = {}
 -- so this file reads it forward rather than re-walking the source.
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Find the args of the function declaration that immediately precedes a `MipsAtomComp_Proc_` invocation of the given name.
+--- Find the args of the function declaration that immediately precedes a `MipsAtomComp_Proc_` invocation.
 --- Returns the args string (e.g., `"U4 off, U4 code, U1 r, U1 g, U1 b"`) or nil if no function declaration is found.
 ---
---- Convention: function form is
----   `FI_ Slice_MipsCode ac_X(args) MipsAtomComp_Proc_(ac_X, { body })`
---- We find the LAST occurrence of `"ac_X("` before `before_pos` and extract the args from inside the parens.
---- We then verify the preceding context ends with `Slice_MipsCode`
---- (the function-decl keyword with possible qualifiers between).
+--- After the `sym` arg was dropped from MipsAtomComp_Proc_, the component name
+--- and the args both come from the preceding `FI_ Slice_MipsCode ac_X(args)`
+--- declaration. The shared `duffle.find_function_decl_for` helper does the
+--- backward walk; this function returns just the args.
 ---
 --- @param source     string
---- @param name       string
+--- @param name       string  (retained for signature stability; unused — the walk derives the name)
 --- @param before_pos integer
 --- @return string|nil
 local function find_function_args_for(source, name, before_pos)
-	-- Find the LAST occurrence of `name + "("` in `source[1..before_pos]`.
-	local name_open  = name .. "("
-	local last_idx   = nil
-	local scan_pos   = 1
-	while true do
-		-- Pass `before_pos + 1` so string.find only returns positions < before_pos + 1
-		-- (string.find's 4th arg `plain` is true; we use the 3rd arg `init` for the upper bound).
-		local found = source:find(name_open, scan_pos, true)
-		if not found or found >= before_pos then break end
-		last_idx = found
-		scan_pos = found + #name_open
-	end
-	if not last_idx then return nil end
-
-	-- Verify the preceding context ends with "MipsAtom" (with possible qualifiers between).
-	local before   = source:sub(1, last_idx - 1)
-	local trimmed  = duffle.trim(before)
-	if trimmed:sub(-#MIPS_ATOM) ~= MIPS_ATOM then
-		-- Preceding context is not a function declaration.
-		return nil
-	end
-
-	local open_paren = last_idx + #name  -- position of "("
-	-- scan: MipsAtom ac_X(
-	local inner      = duffle.read_parens(source, open_paren)
-	-- scan: MipsAtom ac_X(<args>)
-	if not inner then return nil end
-	return inner
+	local _, args_inner = duffle.find_function_decl_for(source, before_pos, #MIPS_ATOM)
+	return args_inner
 end
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -190,6 +190,7 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	store_word(r_t2, r_mtx, O_(MT3_S2S4,t[2]))
 WORD_COUNT(mac_trans_mt3s3s4, 6)
 
+/* atom_dbg_skip */
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	mac_load_word_imm(reg_transfer, cmd) \
 ,	store_word(  reg_transfer, reg_base, port)
@@ -214,6 +215,7 @@ WORD_COUNT(mac_pack_color_word, 3)
 	mac_pack_color_word(r_base, O_(Poly_F3,color), gp0_cmd_poly_f3, r, g, b)
 WORD_COUNT(mac_format_f3_color, 3)
 
+/* atom_dbg_skip */
 #define mac_format_g4_color(r_prim_cursor, r0, g0, b0, r1, g1, b1, r2, g2, b2, r3, g3, b3) \
 	mac_pack_color_word(r_prim_cursor, O_(Poly_G4,c0), gp0_cmd_poly_g4, r0,g0,b0) \
 ,	mac_pack_color_word(r_prim_cursor, O_(Poly_G4,c1), 0,               r1,g1,b1) \

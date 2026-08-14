@@ -25,7 +25,7 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(hello_joypad_atom_c);
 #pragma region MACs (Mips Atom components)
 
 FI_ Slice_MipsCode ac_put_disp_env(MipsAtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
-MipsAtomComp_Proc_(ac_put_disp_env, ab, {
+MipsAtomComp_Proc_(ab, {
 	// Emits 5 GP0 commands for buffer 0 (display_area = (0,0,320,240)).
 	// Sequence per libpsyx PutDispEnv: DrawArea TL → DrawArea BR → Mask → DrawArea TL → DrawArea BR
 	mac_gcmd_push(gp0_word_draw_area_top_left_origin,      reg_transfer, reg_base, port),
@@ -36,7 +36,7 @@ MipsAtomComp_Proc_(ac_put_disp_env, ab, {
 })
 
 FI_ Slice_MipsCode ac_put_draw_env(MipsAtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
-MipsAtomComp_Proc_(ac_put_draw_env, ab, {
+MipsAtomComp_Proc_(ab, {
 	/*
 	* ORIGIN: each code word corresponds to the EXACT value libpsyx's PutDrawEnv function would compute for the same DrawEnv settings.
 	* References:

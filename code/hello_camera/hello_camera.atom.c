@@ -26,7 +26,7 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(hello_joypad_atom_c);
 #pragma region MACs (Mips Atom components)
 
 FI_ Slice_MipsCode ac_put_disp_env(AtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
-MipsAtomComp_Proc_(ac_put_disp_env, ab, {
+MipsAtomComp_Proc_(ab, {
 	// Emits 5 GP0 commands for buffer 0 (display_area = (0,0,320,240)).
 	// Sequence per libpsyx PutDispEnv: DrawArea TL → DrawArea BR → Mask → DrawArea TL → DrawArea BR
 	mac_gcmd_push(gp0_word_draw_area_top_left_origin,      reg_transfer, reg_base, port),
@@ -37,7 +37,7 @@ MipsAtomComp_Proc_(ac_put_disp_env, ab, {
 })
 
 I_ Slice_MipsCode ac_put_draw_env(AtomBuilder_R ab, U4 reg_transfer, U4 reg_base, U2 port)
-MipsAtomComp_Proc_(ac_put_draw_env, ab, {
+MipsAtomComp_Proc_(ab, {
 	/*
 	* ORIGIN: each code word corresponds to the EXACT value libpsyx's PutDrawEnv function would compute for the same DrawEnv settings.
 	* References:
@@ -151,7 +151,7 @@ internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,
 			U4 r_scratch
 	,	U4 r_target_ptr,U4 r_eye_ptr, U4 r_up_in_ptr
 	,	U4 r_tmp0,      U4 r_tmp1,    U4 r_tmp2, U4 r_tmp3
-) MipsAtom_Proc_(resolve_look_at__input_and_sub, aa, {
+) MipsAtom_Proc_(aa, {
 	load_word(r_target_ptr, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
 	load_word(r_eye_ptr,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
 	load_word(r_up_in_ptr,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
@@ -182,7 +182,7 @@ internal MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa,
 	,	U4 r_a, U4 r_b, U4 r_c /* load a.x/y/z; result out.x/y/z */
 	,	U4 r_d                 /* load b.x */
 	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &right (out ptr), r_g = &uz, r_h = &up_in */
-) MipsAtom_Proc_(resolve_look_at__cross_uz_up_in_to_right, aa, {
+) MipsAtom_Proc_(aa, {
 	/* FIX: build packed RT22+RT33 with proper sign extension. */
 	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)),    /* r_g = &uz */
 	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,up_in)), /* r_h = &up_in */
@@ -266,7 +266,7 @@ internal MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,	U4 r_
 	,	U4 r_a, U4 r_b, U4 r_c /* load a.x/y/z; result out.x/y/z */
 	,	U4 r_d                 /* load b.x */
 	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &up (out ptr), r_g = &uz, r_h = &ux */
-) MipsAtom_Proc_(resolve_look_at__cross_uz_ux_to_up, aa, {
+) MipsAtom_Proc_(aa, {
 	/* Compute the three scratch pointers from r_scratch. */
 	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)), /* r_g = &uz */
 	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,ux)), /* r_h = &ux */
@@ -363,7 +363,7 @@ internal MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa
 	,	U4 r_scratch
 	,	U4 r_pux, U4 r_puy, U4 r_puz
 	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
-) MipsAtom_Proc_(resolve_look_at__populate, aa, {
+) MipsAtom_Proc_(aa, {
 	/* Pop look_at* (the matrix output) — advance R_TapePtr by 4 bytes. */
 	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
 	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
@@ -426,7 +426,7 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
 	,	U4 r_peye
 	,	U4 r_look_at
 	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
-) MipsAtom_Proc_(resolve_look_at__matrix_vector, aa, {
+) MipsAtom_Proc_(aa, {
 	/* === EXACT C11 ApplyMatrixLV replication ===
 	 * The C11 does:
 	 *   1. ctc2 RT matrix (5 ctc2s to C2[0..4])
@@ -517,7 +517,7 @@ I_ MipsAtom* resolve_look_at__trans_matrix_proc(AtomArena_R aa
 	,	U4 r_tmp0
 	, U4 r_tmp1
 	, U4 r_tmp2
-) MipsAtom_Proc_(resolve_look_at__trans_matrix, aa, {
+) MipsAtom_Proc_(aa, {
 	/* Pop look_at* from tape. */
 	// load_word(r_Vlook_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
 	// add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),

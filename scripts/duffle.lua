@@ -2681,4 +2681,151 @@ function M.project_emission(body_text, component_index, word_counts, components)
 	})
 end
 
-return M
+-------------------------------------------------------------------------------
+-- find_function_decl_for — backward walk for MipsAtomComp_Proc_ name extraction.
+--
+-- After the `sym` arg was dropped from MipsAtomComp_Proc_, the component name
+-- is derived from the preceding `FI_ Slice_MipsCode ac_X(args)` function
+-- declaration. This function walks backward from `before_pos` to find it.
+--
+-- Returns (raw_name, args_inner) or (nil, nil).
+--   raw_name   — e.g. "ac_load_word_imm"
+--   args_inner — e.g. "AtomBuilder_R ab, Reg dst, U4 imm"
+--
+-- The walk finds the LAST "Slice_MipsCode" before before_pos, then skips
+-- whitespace + qualifiers (FI_, atom_dbg_skip, comments) until it finds an
+-- ident followed by "(". That ident is the function name; the parens contents
+-- are the args.
+-------------------------------------------------------------------------------
+function M.find_function_decl_for(source, before_pos, slice_mips_code_len)
+	local search_pos = 1
+	local last_match = nil
+	while true do
+		local found = source:find("Slice_MipsCode", search_pos, true)
+		if not found or found >= before_pos then break end
+		last_match = found
+		search_pos = found + slice_mips_code_len
+	end
+	if not last_match then return nil, nil end
+
+	local pos = last_match + slice_mips_code_len
+	while pos < before_pos do
+		-- skip whitespace
+		while pos <= #source do
+			local c = source:sub(pos, pos)
+			if c == " " or c == "\t" or c == "\n" or c == "\r" then
+				pos = pos + 1
+			else
+				break
+			end
+		end
+		if pos > #source then break end
+		-- skip line comments
+		if source:sub(pos, pos + 1) == "//" then
+			while pos <= #source and source:sub(pos, pos) ~= "\n" do pos = pos + 1 end
+			pos = pos + 1
+			goto continue
+		end
+		-- skip block comments
+		if source:sub(pos, pos + 1) == "/*" then
+			local close = source:find("*/", pos + 2, true)
+			if not close then break end
+			pos = close + 2
+			goto continue
+		end
+		-- try to read an ident
+		local ident, ident_end = M.read_ident(source, pos)
+		if not ident then break end
+		-- check if the next non-ws char after ident is "("
+		local next_pos = M.skip_ws_and_cmt(source, ident_end)
+		if source:sub(next_pos, next_pos) == "(" then
+			local inner = M.read_parens(source, next_pos)
+			if inner then
+				return ident, inner
+			end
+		end
+		-- ident not followed by "(" — it's a qualifier (FI_, atom_dbg_skip, etc); skip it
+		pos = ident_end
+		::continue::
+	end
+	return nil, nil
+end
+
+-------------------------------------------------------------------------------
+-- find_atom_proc_decl_for — backward walk for MipsAtom_Proc_ name extraction.
+--
+-- After the `sym` arg was dropped from MipsAtom_Proc_, the atom name is
+-- derived from the preceding `MipsAtom* X_proc(args)` function declaration.
+-- This function walks backward from `before_pos` to find it.
+--
+-- Returns (raw_name, args_inner) or (nil, nil).
+--   raw_name   — e.g. "normalize_v3s4" (the _proc suffix is stripped)
+--   args_inner — e.g. "AtomArena_R aa, U4 r_scratch, ..."
+--
+-- The walk finds the LAST "MipsAtom*" before before_pos, then skips
+-- whitespace + qualifiers (internal, I_, FI_, comments) until it finds an
+-- ident followed by "(". That ident is the function name (with _proc suffix);
+-- the suffix is stripped to get raw_name. The parens contents are the args.
+-------------------------------------------------------------------------------
+function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
+	local search_pos = 1
+	local last_match = nil
+	while true do
+		-- plain=true: "*" is literal, no escaping needed
+		local found = source:find("MipsAtom*", search_pos, true)
+		if not found or found >= before_pos then break end
+		last_match = found
+		search_pos = found + mips_atom_ptr_len
+	end
+	if not last_match then return nil, nil end
+
+	local pos = last_match + mips_atom_ptr_len
+	while pos < before_pos do
+		-- skip whitespace
+		while pos <= #source do
+			local c = source:sub(pos, pos)
+			if c == " " or c == "\t" or c == "\n" or c == "\r" then
+				pos = pos + 1
+			else
+				break
+			end
+		end
+		if pos > #source then break end
+		-- skip line comments
+		if source:sub(pos, pos + 1) == "//" then
+			while pos <= #source and source:sub(pos, pos) ~= "\n" do pos = pos + 1 end
+			pos = pos + 1
+			goto continue
+		end
+		-- skip block comments
+		if source:sub(pos, pos + 1) == "/*" then
+			local close = source:find("*/", pos + 2, true)
+			if not close then break end
+			pos = close + 2
+			goto continue
+		end
+		-- try to read an ident
+		local ident, ident_end = M.read_ident(source, pos)
+		if not ident then break end
+		-- check if the next non-ws char after ident is "("
+		local next_pos = M.skip_ws_and_cmt(source, ident_end)
+		if source:sub(next_pos, next_pos) == "(" then
+			local inner = M.read_parens(source, next_pos)
+			if inner then
+				-- strip the _proc suffix to get the atom name
+				local proc_suffix = "_proc"
+				if #ident > #proc_suffix and ident:sub(-#proc_suffix) == proc_suffix then
+					return ident:sub(1, #ident - #proc_suffix), inner
+				end
+				-- no _proc suffix — return as-is
+				return ident, inner
+			end
+		end
+		-- ident not followed by "(" — it's a qualifier; skip it
+		pos = ident_end
+		::continue::
+	end
+	return nil, nil
+end
+
+	return M

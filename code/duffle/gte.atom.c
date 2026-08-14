@@ -11,7 +11,7 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(gte_atom_c);
 #pragma region MACs (Mips Atom Components)
 
 /* Words: 3; Loads 3 S2 indices from the face array */
-FI_ Slice_MipsCode ac_load_tri_indices(AtomBuilder_R ab, U4 r_face_cusor, U4 r_i0, U4 r_i1, U4 r_i2) atom_dbg_skip MipsAtomComp_Proc_(ac_load_tri_indices, ab, {
+FI_ Slice_MipsCode ac_load_tri_indices(AtomBuilder_R ab, U4 r_face_cusor, U4 r_i0, U4 r_i1, U4 r_i2) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	load_half_u(r_i0, r_face_cusor, 0 * S_(S2)),
 	load_half_u(r_i1, r_face_cusor, 1 * S_(S2)),
 	load_half_u(r_i2, r_face_cusor, 2 * S_(S2)),
@@ -19,14 +19,14 @@ FI_ Slice_MipsCode ac_load_tri_indices(AtomBuilder_R ab, U4 r_face_cusor, U4 r_i
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
-FI_ Slice_MipsCode ac_gte_store_f3(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ac_gte_store_f3, ab, {
+FI_ Slice_MipsCode ac_gte_store_f3(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_sw(C2_SXY0, r_primitive_cursor, O_(Poly_F3,p0)),
 	gte_sw(C2_SXY1, r_primitive_cursor, O_(Poly_F3,p1)),
 	gte_sw(C2_SXY2, r_primitive_cursor, O_(Poly_F3,p2)),
 })
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
-I_ Slice_MipsCode ac_gte_load_tri_verts(AtomBuilder_R ab, U4 r_vert_base, U4 r_v0, U4 r_v1, U4 r_v2) atom_dbg_skip MipsAtomComp_Proc_(ac_gte_load_tri_verts, ab, {
+I_ Slice_MipsCode ac_gte_load_tri_verts(AtomBuilder_R ab, U4 r_vert_base, U4 r_v0, U4 r_v1, U4 r_v2) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	shift_lleft(R_AT, r_v0, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
 	shift_lleft(R_AT, r_v1, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
 	shift_lleft(R_AT, r_v2, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
@@ -37,7 +37,7 @@ I_ Slice_MipsCode ac_gte_load_tri_verts(AtomBuilder_R ab, U4 r_vert_base, U4 r_v
  * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen).
  * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2 get overwritten with v3
  * (RTPS writes only to SXY2, but to keep the three registers aligned with v0/v1/v2 you must store before RTPS). */
-FI_ Slice_MipsCode ac_gte_store_g4_p012(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ac_gte_store_g4_p012, ab, {
+FI_ Slice_MipsCode ac_gte_store_g4_p012(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_sw(C2_SXY0, r_primitive_cursor, O_(Poly_G4,p0)),
 	gte_sw(C2_SXY1, r_primitive_cursor, O_(Poly_G4,p1)),
 	gte_sw(C2_SXY2, r_primitive_cursor, O_(Poly_G4,p2)),
@@ -47,13 +47,13 @@ FI_ Slice_MipsCode ac_gte_store_g4_p012(AtomBuilder_R ab, U4 r_primitive_cursor)
  * PIPELINE: post-RTPS (SXY2 holds v3.screen because RTPS writes its single-vertex result to SXY2;
  * SXY0 still holds v0.screen from the earlier RTPT.
  */
-FI_ Slice_MipsCode ac_gte_store_g4_p3(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ac_gte_store_g4_p3, ab, { gte_sw(C2_SXY2, r_primitive_cursor, O_(Poly_G4,p3)) })
+FI_ Slice_MipsCode ac_gte_store_g4_p3(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, { gte_sw(C2_SXY2, r_primitive_cursor, O_(Poly_G4,p3)) })
 
 /* ─── STAGE 1 of normalize: SQR + mfc2 MAC1/2/3 ───
  * Emits squared magnitude per component (in MAC1/2/3) into caller-provided scratch regs.
  * Stage 2 of normalize consumes these directly.
  * Words: 8.  Clobbers: IR1/2/3, MAC1/2/3.  Uses gte_cmdw_sqr (sf=0, lm=1). */
-FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4 r_sq_x, U4 r_sq_y, U4 r_sq_z) atom_dbg_skip MipsAtomComp_Proc_(ac_gte_sqr_v3, ab, {
+FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4 r_sq_x, U4 r_sq_y, U4 r_sq_z) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_mv_to_data_r(r_sx, C2_IR1),
 	gte_mv_to_data_r(r_sy, C2_IR2),
 	gte_mv_to_data_r(r_sz, C2_IR3),
@@ -68,7 +68,7 @@ FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4
  * (typically (31 - LZCR)/2), multiplies IR0*IR[i] via GPF and shifts right to produce the normalized output.
  * Used standalone for "scale vector by scalar".
  * Words: 11.  Clobbers: IR0..3, MAC1..3.  Uses gte_cmdw_gpf (sf=0, lm=0). */
-FI_ Slice_MipsCode ac_gte_gpf_scale(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4 r_recip_est, U4 r_shift, U4 r_dx, U4 r_dy, U4 r_dz) atom_dbg_skip MipsAtomComp_Proc_(ac_gte_gpf_scale, ab, {
+FI_ Slice_MipsCode ac_gte_gpf_scale(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4 r_recip_est, U4 r_shift, U4 r_dx, U4 r_dy, U4 r_dz) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_mv_to_data_r(r_recip_est, C2_IR0),
 	gte_mv_to_data_r(r_sx,        C2_IR1),
 	gte_mv_to_data_r(r_sy,        C2_IR2),
@@ -91,7 +91,7 @@ FI_ Slice_MipsCode ac_gte_gpf_scale(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz,
 FI_ Slice_MipsCode ac_trans_mt3s3s4(AtomBuilder_R ab
 	,	U4 r_mtx, U4 r_off
 	,	U4 r_t0, U4 r_t1, U4 r_t2
-) MipsAtomComp_Proc_(ac_trans_mt3s3s4, ab, {
+) MipsAtomComp_Proc_(ab, {
 	load_word(r_t0, r_off, O_(V3_S4,x)),
 	load_word(r_t1, r_off, O_(V3_S4,y)),
 	load_word(r_t2, r_off, O_(V3_S4,z)),
@@ -210,7 +210,7 @@ internal MipsAtom* normalize_v3s4_proc(AtomArena_R aa,	U4 r_scratch /* GPR code:
 	,	U4 r_lzcr, U4 r_shift                /* GPR codes: lzcr + final srav amount */
 	,	U4 r_branch_tmp                      /* GPR code: scratch (shift count, branch target, lookup addr) */
 )
-MipsAtom_Proc_(normalize_v3s4, aa, {
+MipsAtom_Proc_(aa, {
 	add_si(r_src_ptr, r_scratch, r_src_offset),     /* r_src_ptr = &src */
 	add_si(r_dst_ptr, r_scratch, r_dst_offset),     /* r_dst_ptr = &dst */
 	nop,

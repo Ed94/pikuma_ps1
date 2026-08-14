@@ -117,10 +117,13 @@ typedef Slice_(MipsAtom);
 #define MipsAtom_(sym) MipsCode sym [] align_(4) =
 
 // Used for atoms with value-args
-//   FI_ void ac_X(args) MipsAtomComp_Proc_(ac_X, { body })
+//   internal MipsAtom* X_proc(AtomArena_R aa, args) MipsAtom_Proc_(X, aa, { body })
 // expands to:
-//   FI_ void ac_X(args) { MipsCode ac_X[] align_(4) = { body }; return ac_X; }
-#define MipsAtom_Proc_(sym, aa, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; return atomarena_push(aa, slice_from_array(MipsCode, sym)); }
+//   internal MipsAtom* X_proc(AtomArena_R aa, args) { MipsCode atom_comp_code[] align_(4) = { body }; return atomarena_push(aa, slice_from_array(MipsCode, atom_comp_code)); }
+// The atom name is derived by the Lua metaprogram from the preceding
+// `MipsAtom* X_proc(...)` declaration (backward walk from the macro site,
+// strips the `_proc` suffix).
+#define MipsAtom_Proc_(aa, ...) { MipsCode atom_comp_code[] align_(4) = __VA_ARGS__; return atomarena_push(aa, slice_from_array(MipsCode, atom_comp_code)); }
 
 // Used for components with no args (e.g., ac_load_tri_indices) or identifier-args (hardcoded register names).
 //   MipsAtomComp_(ac_X) { body }
@@ -129,16 +132,18 @@ typedef Slice_(MipsAtom);
 #define MipsAtomComp_(sym) MipsCode sym [] align_(4) =
 
 // Used for components with value-args (mandatory `ab` (atom-builder) arg).
-//   FI_ void ac_X(MipsAtomBuilder_R ab, args) MipsAtomComp_Proc_(ac_X, ab, { body })
+//   FI_ void ac_X(MipsAtomBuilder_R ab, args) MipsAtomComp_Proc_(ab, { body })
 // expands to:
 //   FI_ void ac_X(MipsAtomBuilder_R ab, args) {
-//       MipsCode ac_X[] align_(4) = { body };
-//       atombuilder_unroll(ab, slice_from_array(MipsCode, ac_X));
+//       MipsCode atom_comp_code[] align_(4) = { body };
+//       atombuilder_push(ab, slice_from_array(MipsCode, atom_comp_code));
 //   }
 // The body must NOT include mac_yield() (the parent atom yields).
-// Inline-only callers (the generated `mac_<name>` aliases) skip this arg via metaprogram filtering;
+// The component name is derived by the Lua metaprogram from the preceding
+// `FI_ Slice_MipsCode ac_X(...)` declaration (backward walk from the macro site).
+// Inline-only callers (the generated `mac_<name>` aliases) skip the `ab` arg via metaprogram filtering;
 // escape callers (ac_<name> invoked as a function) pass a long-lived builder.
-#define MipsAtomComp_Proc_(sym, ab, ...) { MipsCode sym [] align_(4) = __VA_ARGS__; atombuilder_push(ab, slice_from_array(MipsCode, sym)); }
+#define MipsAtomComp_Proc_(ab, ...) { MipsCode atom_comp_code[] align_(4) = __VA_ARGS__; atombuilder_push(ab, slice_from_array(MipsCode, atom_comp_code)); }
 
 /* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.
 	Files containing only atoms and atom components.
