@@ -24,6 +24,7 @@ enum {
 };
 
 typedef Array_(U1, 2);
+typedef Array_(U2, 2);
 typedef Array_(U4, 2);
 typedef Array_(S2, 2);
 typedef Array_(S2, 3);
@@ -46,6 +47,9 @@ typedef Struct_(V4_S4)      { S4 x; S4 y; S4 z; S4 w; };
 // typedef Struct_(P3_S4)      { S4 x; S4 y; S4 z; S4 w1; }; // RGA(Lengyel): Affine point with implicit weight one. Storage alias of V3_S4. Use P3_S4 when the value is a point.
 typedef V3_S4 P3_S4;
 
+typedef Struct_(R1_U2) { U2 p0; U2 p1; };
+typedef Struct_(R1_S2) { S2 p0; S2 p1; };
+
 typedef Struct_(R2_S2)      { V2_S2 p0; V2_S2 p1; }; // Range-2 Signed 2-Byte (16-bit)
 typedef Struct_(R2_S4)      { V2_S4 p0; V2_S4 p1; }; // Range-2 Signed 4-Byte (32-bit)
 
@@ -63,6 +67,8 @@ typedef Array_(V2_U1, 2);
 typedef Array_(V2_S2, 2);
 typedef Array_(V2_S2, 3);
 typedef Array_(V2_S2, 4);
+
+#define r1u2(p0,p1) (R1_U2){p0,p1}
 
 enum {
 	fp_one = (1 << 12),

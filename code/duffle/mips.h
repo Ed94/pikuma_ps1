@@ -259,22 +259,22 @@ enum { _BitOffsets = 0
 	, SHAMT_SHIFT  = 6  /* Shift Amount */
 	, FC_SHIFT     = 0
 
-/* Bit Masks to prevent overflow into adjacent fields */
+/* IMM_MASK is the 16-bit two's-complement truncation for the immediate field.
+ * It is NOT a range guard — it is load-bearing for negative branch offsets
+ * (the metaprogram emits raw signed offsets; the mask truncates them to the
+ * 16-bit representation the hardware expects). The static analysis
+ * `immediate_field_width` check validates ranges at build time. */
 
-	, OPCODE_MASK  = 0x3F
-	, REG_MASK     = 0x1F
-	, SHAMT_MASK   = 0x1F /* Shift Amount */
-	, FC_MASK      = 0x3F
 	, IMM_MASK     = 0xFFFF
 };
 
-#define enc_op(op)       (((op)    & OPCODE_MASK) << OPCODE_SHIFT)
-#define enc_rs(rs)       (((rs)    & REG_MASK)    << RS_SHIFT)
-#define enc_rt(rt)       (((rt)    & REG_MASK)    << RT_SHIFT)
-#define enc_rd(rd)       (((rd)    & REG_MASK)    << RD_SHIFT)
-#define enc_shamt(shamt) (((shamt) & SHAMT_MASK)  << SHAMT_SHIFT)
-#define enc_fc(fc)       (((fc)    & FC_MASK)     << FC_SHIFT)
-#define enc_imm(imm)     (((imm)   & IMM_MASK))
+#define enc_op(op)       ((op)    << OPCODE_SHIFT)
+#define enc_rs(rs)       ((rs)    << RS_SHIFT)
+#define enc_rt(rt)       ((rt)    << RT_SHIFT)
+#define enc_rd(rd)       ((rd)    << RD_SHIFT)
+#define enc_shamt(shamt) ((shamt) << SHAMT_SHIFT)
+#define enc_fc(fc)       ((fc)    << FC_SHIFT)
+#define enc_imm(imm)     ((imm) & IMM_MASK)
 
 /* MIPS R-Type Instruction Format (Register-to-Register) */
 #define enc_r(op, rs, rt, rd, shamt, fc) (enc_op(op) | enc_rs(rs) | enc_rt(rt) | enc_rd(rd) | enc_shamt(shamt) | enc_fc(fc))
