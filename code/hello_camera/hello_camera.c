@@ -184,7 +184,7 @@ internal void resolve_look_at_init(void) {
 	U4 r_mac1        = R_T3;
 	U4 r_mac2        = R_T5;
 	U4 r_recip       = R_T6;
-	U4 r_lzcr        = R_T7;
+	U4 r_norm        = R_T7;
 	U4 r_shift       = R_V0;
 	U4 r_branch      = R_V1;
 	// tb_emit_(
@@ -192,7 +192,7 @@ internal void resolve_look_at_init(void) {
 		R_ResolveScratch,
 		r_src_offset, r_dst_offset,
 		r_src_ptr, r_dst_ptr, r_tmp,
-		r_mac1, r_mac2, r_recip, r_lzcr,
+		r_mac1, r_mac2, r_recip, r_norm,
 		r_shift, r_branch);
 	// );
 
@@ -217,14 +217,14 @@ internal void resolve_look_at_init(void) {
 	U4 r_mac1_3        = R_T3;
 	U4 r_mac2_3        = R_T5;
 	U4 r_recip_3       = R_T6;
-	U4 r_lzcr_3        = R_T7;
+	U4 r_norm_3        = R_T7;
 	U4 r_shift_3       = R_V0;
 	U4 r_branch_3      = R_V1;
 	smem.resolve_look_at_atom_addrs[3] = normalize_v3s4_proc(& ab,
 		R_ResolveScratch,
 		r_src_offset_3, r_dst_offset_3,
 		r_src_ptr_3, r_dst_ptr_3, r_tmp_3,
-		r_mac1_3, r_mac2_3, r_recip_3, r_lzcr_3,
+		r_mac1_3, r_mac2_3, r_recip_3, r_norm_3,
 		r_shift_3, r_branch_3);
 
 	/* === ATOM 4: cross uz×ux→up === */
@@ -248,14 +248,14 @@ internal void resolve_look_at_init(void) {
 	U4 r_mac1_5        = R_T3;
 	U4 r_mac2_5        = R_T5;
 	U4 r_recip_5       = R_T6;
-	U4 r_lzcr_5        = R_T7;
+	U4 r_norm_5        = R_T7;
 	U4 r_shift_5       = R_V0;
 	U4 r_branch_5      = R_V1;
 	smem.resolve_look_at_atom_addrs[5] = normalize_v3s4_proc(& ab,
 		R_ResolveScratch,
 		r_src_offset_5, r_dst_offset_5,
 		r_src_ptr_5, r_dst_ptr_5, r_tmp_5,
-		r_mac1_5, r_mac2_5, r_recip_5, r_lzcr_5,
+		r_mac1_5, r_mac2_5, r_recip_5, r_norm_5,
 		r_shift_5, r_branch_5);
 
 	/* === ATOM 6a: populate (m[][] from ux/uy/uz, t[]=0) === */
@@ -370,10 +370,10 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data_(state, & smem.pad[0]);
 				tb_data_(cam, & smem.cam);
 
-			tb_emit_(pad_input_cube_rotation);
-				tb_data_(state,     & smem.pad[0]);
-				tb_data_(cube_rot,  & smem.cube.rot);
-				tb_data_(floor_rot, & smem.floor.rot);
+			// tb_emit_(pad_input_cube_rotation);
+			// 	tb_data_(state,     & smem.pad[0]);
+			// 	tb_data_(cube_rot,  & smem.cube.rot);
+			// 	tb_data_(floor_rot, & smem.floor.rot);
 		}
 	}
 

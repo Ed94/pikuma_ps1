@@ -473,15 +473,23 @@ enum { _C2_TX_SUBS_ = 0
 
 /* GPF — General-purpose Interpolation.
  * PSX-SPX `geometrytransformationenginegte.md` §"GPF":
- *   [MAC1,MAC2,MAC3] = (([IR1,IR2,IR3] * IR0) + [MAC1,MAC2,MAC3]) SAR (sf*12)
+ *   [MAC1,MAC2,MAC3] = (([IR1,IR2,IR3] * IR0) + [MAC1,MAC2,MAC3]) SAR (sf * 12)
  *   [IR1,IR2,IR3]    = [MAC1,MAC2,MAC3]
  * Sourced verbatim from libgte msc02 VectorNormal disassembly at 0x8001613c:
  *   0x4B90003D = gte_cmd_base | gte_cmdw_gpf_compat | enc_gte_cmd(0x3D)
- *   bit 19     sf=0
- *   bit 10     lm=0
- *   bits 5-0   cmd=0x3D=GPF
+ *   bit 19     sf = 0
+ *   bit 10     lm = 0
+ *   bits 5-0   cmd = 0x3D = GPF
  *   bits 24-20 = 0x19 (libgte "nonsense SDK command number" signature) */
 #define gte_cmdw_gpf   (gte_cmd_base | enc_gte_cmd(gte_cmd_gpf) | gte_cmdw_gpf_fake_sig)
+
+/* Mask to round LZCR (leading-zero/ones count, range 1..32 per PSX-SPX cop2r31)
+ * down to even. The normalize_v3s4 half-shift logic computes (31 - LZCR) >> 1;
+ * clearing bit 0 ensures the subtraction result is always odd,
+ * so the >> 1 division is consistent (no 0.5 loss). */
+enum {
+	gte_lzcr_even_mask = 0xFFFE, /* all bits except bit 0 */
+};
 
 #define gte_cmdw_rotate_translate_perspective_single gte_cmdw_rtps
 #define gte_cmdw_rotate_translate_perspective_triple gte_cmdw_rtpt

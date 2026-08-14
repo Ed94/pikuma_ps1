@@ -155,15 +155,20 @@ WORD_COUNT(mac_gte_store_g4_p3, 1)
 
 /* atom_dbg_skip */
 #define mac_gte_sqr_v3(r_sx, r_sy, r_sz, r_sq_x, r_sq_y, r_sq_z) \
-	gte_mv_to_data_r(r_sx, C2_IR1) \
-,	gte_mv_to_data_r(r_sy, C2_IR2) \
-,	gte_mv_to_data_r(r_sz, C2_IR3) \
-,	nop \
-,	gte_cmdw_sqr \
+	mac_gte_sqr_v3s4(r_sx, r_sy, r_sz, nop) \
 ,	gte_mv_from_data_r(r_sq_x, C2_MAC1) \
 ,	gte_mv_from_data_r(r_sq_y, C2_MAC2) \
 ,	gte_mv_from_data_r(r_sq_z, C2_MAC3)
 WORD_COUNT(mac_gte_sqr_v3, 8)
+
+/* atom_dbg_skip */
+#define mac_gte_sqr_v3s4(r_sx, r_sy, r_sz, nop_slot) \
+	gte_mv_to_data_r(r_sx, C2_IR1) \
+,	gte_mv_to_data_r(r_sy, C2_IR2) \
+,	gte_mv_to_data_r(r_sz, C2_IR3) \
+,	nop_slot \
+,	gte_cmdw_sqr
+WORD_COUNT(mac_gte_sqr_v3s4, 5)
 
 /* atom_dbg_skip */
 #define mac_gte_gpf_scale(r_sx, r_sy, r_sz, r_recip_est, r_shift, r_dx, r_dy, r_dz) \
@@ -189,6 +194,46 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 ,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])) \
 ,	store_word(r_t2, r_mtx, O_(MT3_S2S4,t[2]))
 WORD_COUNT(mac_trans_mt3s3s4, 6)
+
+/* atom_dbg_skip */
+#define mac_lzcr_round_even_half_shift(r_shift, r_mag_sq, r_mag_sq_copy) \
+	and_i(r_shift, r_shift, gte_lzcr_even_mask) \
+,	or_u(r_mag_sq_copy, r_mag_sq, 0) \
+,	li_s(r_mag_sq, 31) \
+,	sub_s(r_mag_sq, r_mag_sq, r_shift) \
+,	shift_aright(r_mag_sq, r_mag_sq, 1)
+WORD_COUNT(mac_lzcr_round_even_half_shift, 5)
+
+#define mac_shift_aright_var_v3(rd_v0, rd_v1, rd_v2, rs_v0, rs_v1, rs_v2, r_shift) \
+	shift_aright_var(rd_v0, rs_v0, r_shift) \
+,	shift_aright_var(rd_v1, rs_v1, r_shift) \
+,	shift_aright_var(rd_v2, rs_v2, r_shift)
+WORD_COUNT(mac_shift_aright_var_v3, 3)
+
+#define mac_shift_aright_var_v3_self(rds_v0, rds_v1, rds_v2, r_shift) \
+	shift_aright_var(rds_v0, rds_v0, r_shift) \
+,	shift_aright_var(rds_v1, rds_v1, r_shift) \
+,	shift_aright_var(rds_v2, rds_v2, r_shift)
+WORD_COUNT(mac_shift_aright_var_v3_self, 3)
+
+#define mac_gte_general_purpose_interopolation(to_ir0, to_ir1, to_ir2, to_ir3, fr_mac1, fr_mac2, fr_mac3, nop_slot1, nop_slot2) \
+	gte_mv_to_data_r(to_ir0, C2_IR0) \
+,	gte_mv_to_data_r(to_ir1, C2_IR1) /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */ \
+,	gte_mv_to_data_r(to_ir2, C2_IR2) \
+,	gte_mv_to_data_r(to_ir3, C2_IR3) /* IR3 = src.z (reloaded) */ \
+,	LdSlot_ nop_slot1 \
+,	LdSlot_ nop_slot2 \
+,	gte_cmdw_gpf \
+,	gte_mv_from_data_r(fr_mac1, C2_MAC1) \
+,	gte_mv_from_data_r(fr_mac2, C2_MAC2) \
+,	gte_mv_from_data_r(fr_mac3, C2_MAC3)
+WORD_COUNT(mac_gte_general_purpose_interopolation, 10)
+
+#define mac_gte_mv_from_data_r_mac123(fr_mac1, fr_mac2, fr_mac3) \
+	gte_mv_from_data_r(fr_mac1, C2_MAC1) \
+,	gte_mv_from_data_r(fr_mac2, C2_MAC2) \
+,	gte_mv_from_data_r(fr_mac3, C2_MAC3)
+WORD_COUNT(mac_gte_mv_from_data_r_mac123, 3)
 
 /* atom_dbg_skip */
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \

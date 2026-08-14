@@ -1589,6 +1589,8 @@ M.INSTRUCTION_LATENCY = {
 	["atom_bind"]           = 0,
 	["atom_reads"]          = 0,
 	["atom_writes"]         = 0,
+	["BdSlot_"]             = 0,
+	["LdSlot_"]             = 0,
 }
 
 -- Default cycle cost for unknown macros.

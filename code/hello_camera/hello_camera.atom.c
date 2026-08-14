@@ -511,12 +511,8 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa
  * Pool cost: r_look_at (1) + r_scratch (carrier) + r_off_ptr + 1 clobber = 4 GPRs.
  */
 I_ MipsAtom* resolve_look_at__trans_matrix_proc(AtomArena_R aa
-	,	U4 r_look_at
-	,	U4 r_scratch
-	,	U4 r_off_ptr
-	,	U4 r_tmp0
-	, U4 r_tmp1
-	, U4 r_tmp2
+	,	U4 r_look_at,	U4 r_scratch,	U4 r_off_ptr
+	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
 ) MipsAtom_Proc_(aa, {
 	/* Pop look_at* from tape. */
 	// load_word(r_Vlook_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),

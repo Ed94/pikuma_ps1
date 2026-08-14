@@ -11,7 +11,8 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(gte_atom_c);
 #pragma region MACs (Mips Atom Components)
 
 /* Words: 3; Loads 3 S2 indices from the face array */
-FI_ Slice_MipsCode ac_load_tri_indices(AtomBuilder_R ab, U4 r_face_cusor, U4 r_i0, U4 r_i1, U4 r_i2) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+FI_ Slice_MipsCode ac_load_tri_indices(AtomBuilder_R ab, U4 r_face_cusor, U4 r_i0, U4 r_i1, U4 r_i2)
+atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	load_half_u(r_i0, r_face_cusor, 0 * S_(S2)),
 	load_half_u(r_i1, r_face_cusor, 1 * S_(S2)),
 	load_half_u(r_i2, r_face_cusor, 2 * S_(S2)),
@@ -54,13 +55,22 @@ FI_ Slice_MipsCode ac_gte_store_g4_p3(AtomBuilder_R ab, U4 r_primitive_cursor) a
  * Stage 2 of normalize consumes these directly.
  * Words: 8.  Clobbers: IR1/2/3, MAC1/2/3.  Uses gte_cmdw_sqr (sf=0, lm=1). */
 FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4 r_sq_x, U4 r_sq_y, U4 r_sq_z) atom_dbg_skip MipsAtomComp_Proc_(ab, {
-	gte_mv_to_data_r(r_sx, C2_IR1),
-	gte_mv_to_data_r(r_sy, C2_IR2),
-	gte_mv_to_data_r(r_sz, C2_IR3),
-	nop, gte_cmdw_sqr,
+	mac_gte_sqr_v3s4(r_sx, r_sy, r_sz, nop),
 	gte_mv_from_data_r(r_sq_x, C2_MAC1),
 	gte_mv_from_data_r(r_sq_y, C2_MAC2),
 	gte_mv_from_data_r(r_sq_z, C2_MAC3),
+})
+
+/* ─── SQR FIRE — mtc2 3 GPRs into IR1/IR2/IR3, then fire SQR. ───
+ * The SQR command always squares IR1/IR2/IR3 — those C2 registers are fixed.
+ * The GPRs holding the source vector are caller-determined.
+ * Words: 5 (3 mtc2 + 1 nop hazard + 1 cmd). */
+FI_ Slice_MipsCode ac_gte_sqr_v3s4(AtomBuilder_R ab, Reg r_sx, Reg r_sy, Reg r_sz, MipsCode nop_slot)
+atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	gte_mv_to_data_r(r_sx, C2_IR1),
+	gte_mv_to_data_r(r_sy, C2_IR2),
+	gte_mv_to_data_r(r_sz, C2_IR3),
+	nop_slot, gte_cmdw_sqr,
 })
 
 /* ─── STAGE 4 of normalize: mtc2 IR0..3 + GPF + mfc2 MAC + srav finalize ───
@@ -68,7 +78,11 @@ FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4
  * (typically (31 - LZCR)/2), multiplies IR0*IR[i] via GPF and shifts right to produce the normalized output.
  * Used standalone for "scale vector by scalar".
  * Words: 11.  Clobbers: IR0..3, MAC1..3.  Uses gte_cmdw_gpf (sf=0, lm=0). */
-FI_ Slice_MipsCode ac_gte_gpf_scale(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4 r_recip_est, U4 r_shift, U4 r_dx, U4 r_dy, U4 r_dz) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+FI_ Slice_MipsCode ac_gte_gpf_scale(AtomBuilder_R ab, 
+	U4 r_sx, U4 r_sy, U4 r_sz, 
+	U4 r_recip_est, U4 r_shift, 
+	U4 r_dx, U4 r_dy, U4 r_dz)
+atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_mv_to_data_r(r_recip_est, C2_IR0),
 	gte_mv_to_data_r(r_sx,        C2_IR1),
 	gte_mv_to_data_r(r_sy,        C2_IR2),
@@ -98,6 +112,79 @@ FI_ Slice_MipsCode ac_trans_mt3s3s4(AtomBuilder_R ab
 	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])),
 	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])),
 	store_word(r_t2, r_mtx, O_(MT3_S2S4,t[2])),
+})
+
+/* ─── LZCR ROUND EVEN + HALF-SHIFT ───
+ * Takes the raw LZCR leading-zero/ones count (from mfc2 C2_LZCR, range 1..32
+ * per PSX-SPX cop2r31) and the |v|² sum (in r_mag_sq from the MAC1+MAC2+MAC3
+ * add). Produces:
+ *   r_shift        ← LZCR rounded down to even (clear bit 0)
+ *   r_mag_sq_copy  ← |v|² sum (moved out of r_mag_sq before it's overwritten)
+ *   r_mag_sq       ← (31 - even_LZCR) / 2 = the final srav/GPF shift amount
+ *
+ * Rounding to even ensures (31 - LZCR) is always odd, so the >> 1 division
+ * is consistent — no 0.5 loss. The caller branches on LZCR < 24 to decide
+ * left-shift vs right-shift of r_mag_sq_copy, then saves the shift count.
+ *
+ * Note: C2_LZCR (cop2r31) is a fixed read-only C2 data register — the caller
+ * must read it via mfc2 from C2_LZCR; there is no register choice at the
+ * hardware level. Only the GPR that holds the result is caller-determined. */
+FI_ Slice_MipsCode ac_lzcr_round_even_half_shift(AtomBuilder_R ab,
+	U4 r_shift,
+	U4 r_mag_sq,
+	U4 r_mag_sq_copy
+)
+atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	and_i(r_shift, r_shift, gte_lzcr_even_mask),
+	or_u(r_mag_sq_copy, r_mag_sq, 0),
+	li_s(r_mag_sq, 31),
+	sub_s(r_mag_sq, r_mag_sq, r_shift),
+	shift_aright(r_mag_sq, r_mag_sq, 1),
+})
+
+FI_ Slice_MipsCode ac_shift_aright_var_v3(AtomBuilder_R ab
+	, Reg rd_v0, Reg rd_v1, Reg rd_v2
+	, Reg rs_v0, Reg rs_v1, Reg rs_v2
+	, Reg r_shift)
+MipsAtomComp_Proc_(ab, {
+	shift_aright_var(rd_v0, rs_v0, r_shift),
+	shift_aright_var(rd_v1, rs_v1, r_shift),
+	shift_aright_var(rd_v2, rs_v2, r_shift),
+})
+
+FI_ Slice_MipsCode ac_shift_aright_var_v3_self(AtomBuilder_R ab
+	, Reg rds_v0, Reg rds_v1, Reg rds_v2
+	, Reg r_shift)
+MipsAtomComp_Proc_(ab, {
+	shift_aright_var(rds_v0, rds_v0, r_shift),
+	shift_aright_var(rds_v1, rds_v1, r_shift),
+	shift_aright_var(rds_v2, rds_v2, r_shift),
+})
+
+FI_ Slice_MipsCode ac_gte_general_purpose_interopolation(AtomBuilder_R ab
+	, Reg to_ir0,  Reg to_ir1,  Reg to_ir2, Reg to_ir3
+	, Reg fr_mac1, Reg fr_mac2, Reg fr_mac3
+	, MipsCode nop_slot1, MipsCode nop_slot2)
+MipsAtomComp_Proc_(ab, {
+	gte_mv_to_data_r(to_ir0, C2_IR0),
+	gte_mv_to_data_r(to_ir1, C2_IR1), /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */
+	gte_mv_to_data_r(to_ir2, C2_IR2),
+	gte_mv_to_data_r(to_ir3, C2_IR3), /* IR3 = src.z (reloaded) */
+	LdSlot_ nop_slot1,
+	LdSlot_ nop_slot2,
+	gte_cmdw_gpf,
+	gte_mv_from_data_r(fr_mac1, C2_MAC1),
+	gte_mv_from_data_r(fr_mac2, C2_MAC2),
+	gte_mv_from_data_r(fr_mac3, C2_MAC3),
+})
+
+FI_ Slice_MipsCode gte_mv_from_data_r_mac123(AtomBuilder_R ab
+	, Reg fr_mac1, Reg fr_mac2, Reg fr_mac3
+)
+MipsAtomComp_Proc_(ab, {
+	gte_mv_from_data_r(fr_mac1, C2_MAC1),
+	gte_mv_from_data_r(fr_mac2, C2_MAC2),
+	gte_mv_from_data_r(fr_mac3, C2_MAC3),
 })
 
 #pragma endregion MACs (Mips Atom Components)
@@ -186,7 +273,7 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
  *   r_mac1_scratch       : MAC1 result scratch (also holds aligned |v|² in stage 3)
  *   r_mac2_scratch       : MAC2 result scratch → result.x after stage 4 sra
  *   r_recip_est          : src.y PRESERVED across stages 1-2 → fed to IR2 in stage 4 → result.y
- *   r_lzcr               : |v|² sum (stage 2) → shift count (stage 3) → 1/|v| (stage 4 IR0)
+ *   r_norm               : |v|² sum (stage 2) → half-shift (stage 3) → 1/|v| (stage 4 IR0)
  *   r_shift              : shift count SAVED in stage 3 → consumed by stage 4 srav
  *   r_branch_tmp         : src.z PRESERVED across stages 1-2 → fed to IR3 in stage 4 → result.z (also sqrtbl base addr)
  *
@@ -203,93 +290,70 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
  */
 /* MipsAtom_Proc_ wrapper: declares the static MipsCode[] body, then calls atombuilder_unroll(ab, ...) to copy the encoded instructions into the caller's MipsAtomBuilder arena.  */
 internal MipsAtom* normalize_v3s4_proc(AtomArena_R aa,	U4 r_scratch /* GPR code: scratch base carrier (e.g., R_T4 = R_ResolveScratch) */
-	,	U4 r_src_offset, U4 r_dst_offset     /* GPR codes: PARAMETERIZED offsets (caller passes O_ macros) */
-	,	U4 r_src_ptr, U4 r_dst_ptr, U4 r_tmp /* GPR codes: 3 scratch regs (src/dst computed + tmp) */
-	,	U4 r_mac1_scratch, U4 r_mac2_scratch /* GPR codes: 2 more: MAC1/MAC2 scratch */
-	,	U4 r_recip_est                       /* GPR code: |v|² sum + shift-input + sqrtbl[index] */
-	,	U4 r_lzcr, U4 r_shift                /* GPR codes: lzcr + final srav amount */
-	,	U4 r_branch_tmp                      /* GPR code: scratch (shift count, branch target, lookup addr) */
+	,	U4 src_offset, U4 dst_offset            /* GPR codes: PARAMETERIZED offsets (caller passes O_ macros) */
+	,	Reg r_src_ptr, Reg r_dst_ptr, Reg r_tmp /* GPR codes: 3 scratch regs (src/dst computed + tmp) */
+	,	Reg r_mac1_scratch, Reg r_mac2_scratch  /* GPR codes: 2 more: MAC1/MAC2 scratch */
+	,	Reg r_recip_est                         /* GPR code: |v|² sum + shift-input + sqrtbl[index] */
+	,	Reg r_norm, Reg r_shift                 /* GPR codes: normalize working reg + final srav amount */
+	,	Reg r_branch_tmp                        /* GPR code: scratch (shift count, branch target, lookup addr) */
 )
 MipsAtom_Proc_(aa, {
-	add_si(r_src_ptr, r_scratch, r_src_offset),     /* r_src_ptr = &src */
-	add_si(r_dst_ptr, r_scratch, r_dst_offset),     /* r_dst_ptr = &dst */
-	nop,
+	add_si(r_src_ptr, r_scratch, src_offset),     /* r_src_ptr = &src */
+	// add_si(r_dst_ptr, r_scratch, r_dst_offset),     /* r_dst_ptr = &dst */
 
 	/* Load src.x/y/z from r_src_ptr (caller-determined address) into r_tmp/r_recip_est/r_branch_tmp.
 	 * r_tmp holds src.x throughout stages 1-2 — r_mac2_scratch is clobbered to MAC2 in stage 1.5 (line below). */
-	load_word(r_tmp,          r_src_ptr, O_(V3_S4,x)),
-	load_word(r_recip_est,    r_src_ptr, O_(V3_S4,y)),
-	load_word(r_branch_tmp,   r_src_ptr, O_(V3_S4,z)),
-	nop, /* load-delay */
+	mac_load_v3s4(r_tmp, r_recip_est, r_branch_tmp, r_src_ptr, 0),
 
 	/* Stage 1: mtc2 src → IR1/2/3, SQR fires. */
-	gte_mv_to_data_r(r_tmp,        C2_IR1),
-	gte_mv_to_data_r(r_recip_est,  C2_IR2),
-	gte_mv_to_data_r(r_branch_tmp, C2_IR3),
-	nop, gte_cmdw_sqr,
+	LdSlot_ mac_gte_sqr_v3s4(r_tmp, r_recip_est, r_branch_tmp, LdSlot_ nop),
 
 	/* Stage 2: mfc2 MAC1/2/3, sum, mtc2 LZCS. */
-	gte_mv_from_data_r(r_mac1_scratch, C2_MAC1),
-	gte_mv_from_data_r(r_mac2_scratch, C2_MAC2),
-	gte_mv_from_data_r(r_lzcr,         C2_MAC3),
-	nop,
-	add_u(r_lzcr, r_lzcr, r_mac2_scratch),
-	add_u(r_lzcr, r_lzcr, r_mac1_scratch),
-	gte_mv_to_data_r(r_lzcr, C2_LZCS),
-	nop2,
-	gte_mv_from_data_r(r_shift, C2_LZCR),
-	nop,
+	mac_gte_mv_from_data_r_mac123(r_mac1_scratch, r_mac2_scratch, r_norm), LdSlot_ nop,
+	add_u_self(        r_norm, r_mac1_scratch),
+	add_u_self(        r_norm, r_mac2_scratch),
+	gte_mv_to_data_r(  r_norm,  C2_LZCS), LdSlot_ nop2,
+	gte_mv_from_data_r(r_shift, C2_LZCR), LdSlot_ nop,
 
-	/* Stage 3: compute srav amount (r_lzcr) + align |v|² to bit 24.
-	 * IMPORTANT: the sllv/srav below writes the aligned |v|² to r_mac1_scratch (NOT r_lzcr),
-	 * so r_lzcr retains the shift count all the way to the start of stage 4.
-	 */
-	and_i(   r_shift, r_shift, -2),
-	or_u(r_mac1_scratch, r_lzcr, 0),                            /* FIX B: save sum before clobbering r_lzcr with shift count */
-	li_s(    r_lzcr,           31),
-	sub_s(   r_lzcr, r_lzcr, r_shift),
-	shift_aright(r_lzcr, r_lzcr, 1),
+	/* Stage 3: round LZCR to even, compute half-shift, align |v|² to bit 24.
+	 * r_norm holds |v|² sum; r_shift holds the LZCR count from mfc2.
+	 * After the component: r_shift = even(LZCR), r_norm = half-shift, r_mac1_scratch = |v|². */
+	mac_lzcr_round_even_half_shift(r_shift, r_norm, r_mac1_scratch),
 	/* r_branch_tmp = LZCR - 24 (overwrites r_branch_tmp; src.z no longer needed after SQR) */
-	add_si(  r_branch_tmp, r_shift, -24),
-	branch_lt_zero(r_branch_tmp, atom_offset(aligned_done, srav_path)), nop,    /* FIX A: bltz → srav_path (LZCR<24 path) */
-	jump_rel(atom_offset(srav_path, aligned_done)),                              /* FIX A: b → aligned_done (LZCR>=24 path) */
-	shift_lleft_var(r_mac1_scratch, r_mac1_scratch, r_branch_tmp),              /* FIX B: src=sum (r_mac1_scratch), dst=same */
+	add_si(        r_branch_tmp, r_shift, -24),
+	branch_lt_zero(r_branch_tmp, atom_offset(aligned_done, srav_path)), BdSlot_ nop, /* bltz → srav_path (LZCR <  24 path) */
+		jump_rel(atom_offset(srav_path, aligned_done)),                                /* b → aligned_done (LZCR >= 24 path) */
+		BdSlot_ shift_lleft_var(r_mac1_scratch, r_mac1_scratch, r_branch_tmp),         /* src=sum (r_mac1_scratch), dst=same */
 	atom_label(srav_path)
-	li_s(    r_branch_tmp, 24),
-	sub_s(   r_branch_tmp, r_branch_tmp, r_shift),
-	shift_aright_var(r_mac1_scratch, r_mac1_scratch, r_branch_tmp),             /* FIX B: src=sum (r_mac1_scratch), dst=same */
-	atom_label(aligned_done)
-	/* Save the shift count to r_shift before the next 5 instructions overwrite r_lzcr
-	 * (the sqrtbl lookup loads 1/|v| into r_lzcr, which becomes IR0 in stage 4). */
-	or_u(r_shift, r_lzcr, 0),                                    /* r_shift ← shift count (preserved through stage 4) */
+		li_s( r_branch_tmp, 24),
+		sub_s(r_branch_tmp, r_branch_tmp, r_shift),
+		shift_aright_var(r_mac1_scratch, r_mac1_scratch, r_branch_tmp), /* src=sum (r_mac1_scratch), dst=same */
+atom_label(aligned_done)
+	// Save the shift count to r_shift before the next 5 instructions overwrite r_norm (the sqrtbl lookup loads 1/|v| into r_norm, which becomes IR0 in stage 4).
+	or_u(r_shift, r_norm, 0), /* r_shift ← shift count (preserved through stage 4) */
 	/* r_mac1_scratch holds |v|² aligned (top bit at bit 7). */
 	add_si(     r_mac1_scratch, r_mac1_scratch, -64),
 	shift_lleft(r_mac1_scratch, r_mac1_scratch, 1),
-	load_upper_i(r_branch_tmp, u4_hi(& gte_normalize_sqr_tbl)),
-	or_i_self(   r_branch_tmp, u4_lo(& gte_normalize_sqr_tbl)),
-	add_u(r_branch_tmp, r_branch_tmp, r_mac1_scratch),
-	load_half(r_lzcr,   r_branch_tmp, 0), nop,                  /* r_lzcr = sqrtbl[aligned-64] = 1/|v| (IR0 in stage 4) */
+	mac_load_word_imm(r_branch_tmp, & gte_normalize_sqr_tbl), add_u_self(r_branch_tmp, r_mac1_scratch),
+	load_half(r_norm, r_branch_tmp, 0), /* r_norm = sqrtbl[aligned-64] = 1/|v| (IR0 in stage 4) */
 
-	/* FIX bug C: r_branch_tmp held the sqrtbl base+index, NOT src.z. Reload src.z from scratch now that r_branch_tmp is free. */
-	load_word(r_branch_tmp, r_src_ptr, O_(V3_S4,z)), nop,        /* r_branch_tmp = src.z (for IR3 in stage 4) */
+	/* r_branch_tmp held the sqrtbl base+index, NOT src.z. Reload src.z from scratch now that r_branch_tmp is free. */
+	LdSlot_ load_word(r_branch_tmp, r_src_ptr, O_(V3_S4,z)), /* r_branch_tmp = src.z (for IR3 in stage 4) */
 
-	/* Stage 4: GPF + srav finalize (r_shift = shift count, r_lzcr = 1/|v|). */
-	gte_mv_to_data_r(r_lzcr,         C2_IR0),
-	gte_mv_to_data_r(r_tmp,          C2_IR1),                    /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */
-	gte_mv_to_data_r(r_recip_est,    C2_IR2),
-	gte_mv_to_data_r(r_branch_tmp,   C2_IR3),                    /* IR3 = src.z (reloaded) */
-	nop2, gte_cmdw_gpf,
-	gte_mv_from_data_r(r_mac2_scratch, C2_MAC1),
-	gte_mv_from_data_r(r_recip_est,    C2_MAC2),
-	gte_mv_from_data_r(r_branch_tmp,   C2_MAC3),
-	shift_aright_var(r_mac2_scratch, r_mac2_scratch, r_shift),   /* sra by r_shift = (31-LZCR)/2 (saved before sqrtbl lookup) */
-	shift_aright_var(r_recip_est,    r_recip_est,    r_shift),
-	shift_aright_var(r_branch_tmp,   r_branch_tmp,   r_shift),
-
+	/* Stage 4: GPF + srav finalize (r_shift = shift count, r_norm = 1/|v|). */
+	LdSlot_ mac_gte_general_purpose_interopolation(
+		r_norm, 
+		r_tmp,        /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */
+		r_recip_est, 
+		r_branch_tmp, /* IR3 = src.z (reloaded) */
+		r_mac2_scratch, r_recip_est, r_branch_tmp,
+		LdSlot_ add_si(r_dst_ptr, r_scratch, dst_offset), // pre-laoding destination to register here.
+		LdSlot_ nop
+	),
+	/* sra by r_shift = (31-LZCR)/2 (saved before sqrtbl lookup) */
+	mac_shift_aright_var_v3_self(r_mac2_scratch, r_recip_est, r_branch_tmp, r_shift),
 	/* Store result.x/y/z to r_dst_ptr (caller-determined dst address). */
-	store_word(r_mac2_scratch, r_dst_ptr, O_(V3_S4,x)),
-	store_word(r_recip_est,    r_dst_ptr, O_(V3_S4,y)),
-	store_word(r_branch_tmp,   r_dst_ptr, O_(V3_S4,z)),
+	mac_store_v3s4(r_mac2_scratch, r_recip_est, r_branch_tmp, r_dst_ptr, 0),
 
 	mac_yield()
 })

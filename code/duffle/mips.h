@@ -318,7 +318,10 @@ enum { _BitOffsets = 0
 #define load_half(rt, base, off)   enc_i(op_lh,    (base), (rt), (off))
 #define load_byte_u(rt, base, off) enc_i(op_lbu,   (base), (rt), (off))
 #define load_half_u(rt, base, off) enc_i(op_lhu,   (base), (rt), (off))
+#define LdSlot_
+
 #define store_word(rt, base, off)  enc_i(op_sw,    (base), (rt), (off))
+
 #define add_ui(rt, rs, imm)        enc_i(op_addiu, (rs),   (rt), (imm))
 #define and_i(rt, rs, imm)         enc_i(op_andi,  (rs),   (rt), (imm))
 // #define and_si                     and_i
@@ -379,6 +382,9 @@ enum { _BitOffsets = 0
  */
 #define jump(off)                  enc_i(op_j,     R_0, R_0, (off))
 
+// Annotate an instruction as filling a branch-delay slot.
+#define BdSlot_
+
 /* jump_rel off — unconditional relative jump (the within-atom-safe `jump`).
  * MIPS I R3000A has no "branch always" opcode. The idiom for an unconditional relative jump is `beq $0, $0, off`. */
 #define jump_rel(off)              branch_equal(R_0, R_0, (off))
@@ -411,6 +417,7 @@ enum { _BitOffsets = 0
 #define div_s(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_div)
 #define div_u(rd, rs, rt)          enc_r(op_special, (rs), (rt), (rd), 0, fc_divu)
 
+// TODO(Ed): Change convention of 'self' to ds for (destination is source)?
 #define add_u_self(rd_rs, rt)      add_u(rd_rs, rd_rs, rt)
 
 /* --- Arithmetic I-type (immediate) --- */
@@ -457,7 +464,8 @@ enum { _BitOffsets = 0
 #define nop2 nop, nop
 
 // li_s — load signed 16-bit immediate into GPR (addiu rt, $0, imm — sign-extends).
-#define li_s(rt, imm)  add_ui((rt), R_0, (imm))
+#define li_s(rt, imm)       add_ui((rt), R_0, (imm))
+// #define load_imm_s(rt, imm) add_ui((rt), R_0, (imm))
 
 #define load_imm_1w(rt, imm)    add_ui((rt),  R_0, (imm))
 #define load_imm_1w_s0(rt, imm) add_si((rt)), R_0, (imm))
