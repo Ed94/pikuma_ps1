@@ -150,19 +150,6 @@ internal void resolve_look_at_init(void) {
 	U4 pin_mask = regfile_abi_mask | (1 << R_ResolveScratch);
 	RegFile rf  = regfile(pin_mask);
 
-	// defer(regfile_reset_mask(& rf, pin_mask)) {
-	// 	U4 r_target_ptr = regfile_alloc(& rf); 
-	// 	U4 r_eye_ptr    = regfile_alloc(& rf);
-	// 	U4 r_up_in_ptr  = regfile_alloc(& rf);
-	// 	U4 r_tmp0       = regfile_alloc(& rf);
-	// 	U4 r_tmp1       = regfile_alloc(& rf);
-	// 	U4 r_tmp2       = regfile_alloc(& rf);
-	// 	U4 r_tmp3       = regfile_alloc(& rf);
-	// 	tb_emit_(resolve_look_at__input_and_sub_proc(& ab,
-	// 		R_ResolveScratch,
-	// 		r_target_ptr, r_eye_ptr, r_up_in_ptr,
-	// 		r_tmp0, r_tmp1, r_tmp2, r_tmp3));
-	// }
 	U4 r_target_ptr = regfile_alloc(& rf); 
 	U4 r_eye_ptr    = regfile_alloc(& rf);
 	U4 r_up_in_ptr  = regfile_alloc(& rf);
@@ -176,25 +163,21 @@ internal void resolve_look_at_init(void) {
 		r_tmp0, r_tmp1, r_tmp2, r_tmp3);
 
 	/* === ATOM 1: normalize fwd→uz === */
-	U4 r_src_offset  = O_(ResolveLookAtScratch, fwd);
-	U4 r_dst_offset  = O_(ResolveLookAtScratch, uz);
-	U4 r_src_ptr     = R_T0;
-	U4 r_dst_ptr     = R_T1;
-	U4 r_tmp         = R_T2;
-	U4 r_mac1        = R_T3;
-	U4 r_mac2        = R_T5;
-	U4 r_recip       = R_T6;
-	U4 r_norm        = R_T7;
-	U4 r_shift       = R_V0;
-	U4 r_branch      = R_V1;
-	// tb_emit_(
+	U2 src_offset  = O_(ResolveLookAtScratch, fwd);
+	U2 dst_offset  = O_(ResolveLookAtScratch, uz);
 	smem.resolve_look_at_atom_addrs[1] = normalize_v3s4_proc(& ab,
-		R_ResolveScratch,
-		r_src_offset, r_dst_offset,
-		r_src_ptr, r_dst_ptr, r_tmp,
-		r_mac1, r_mac2, r_recip, r_norm,
-		r_shift, r_branch);
-	// );
+		src_offset, dst_offset, RegUse_(normalize_v3s4_proc){
+			.scratch   = R_ResolveScratch,
+			.src_ptr   = R_T0, 
+			.dst_ptr   = R_T1,
+			.recip_est = R_T6, 
+			.norm      = R_T7,
+			.shift     = R_V0,
+			.src_x     = R_T2,
+			.t3 = R_T3,
+			.t4 = R_T5,
+			.t5 = R_V1,
+		});
 
 	/* === ATOM 2: cross uz×up_in→right === */
 	U4 r_a_2 = R_T0;
@@ -209,23 +192,21 @@ internal void resolve_look_at_init(void) {
 		r_a_2, r_b_2, r_c_2, r_d_2, r_f_2, r_g_2, r_h_2);
 
 	/* === ATOM 3: normalize right→ux === */
-	U4 r_src_offset_3  = O_(ResolveLookAtScratch, right);
-	U4 r_dst_offset_3  = O_(ResolveLookAtScratch, ux);
-	U4 r_src_ptr_3     = R_T0;
-	U4 r_dst_ptr_3     = R_T1;
-	U4 r_tmp_3         = R_T2;
-	U4 r_mac1_3        = R_T3;
-	U4 r_mac2_3        = R_T5;
-	U4 r_recip_3       = R_T6;
-	U4 r_norm_3        = R_T7;
-	U4 r_shift_3       = R_V0;
-	U4 r_branch_3      = R_V1;
+	src_offset  = O_(ResolveLookAtScratch, right);
+	dst_offset  = O_(ResolveLookAtScratch, ux);
 	smem.resolve_look_at_atom_addrs[3] = normalize_v3s4_proc(& ab,
-		R_ResolveScratch,
-		r_src_offset_3, r_dst_offset_3,
-		r_src_ptr_3, r_dst_ptr_3, r_tmp_3,
-		r_mac1_3, r_mac2_3, r_recip_3, r_norm_3,
-		r_shift_3, r_branch_3);
+		src_offset, dst_offset, RegUse_(normalize_v3s4_proc){
+			.scratch   = R_ResolveScratch,
+			.src_ptr   = R_T0,
+			.dst_ptr   = R_T1,
+			.recip_est = R_T6,
+			.norm      = R_T7,
+			.shift     = R_V0,
+			.src_x     = R_T2,
+			.t3 = R_T3,
+			.t4 = R_T5,
+			.t5 = R_V1,
+		});
 
 	/* === ATOM 4: cross uz×ux→up === */
 	U4 r_a_4 = R_T0;
@@ -240,23 +221,22 @@ internal void resolve_look_at_init(void) {
 		r_a_4, r_b_4, r_c_4, r_d_4, r_f_4, r_g_4, r_h_4);
 
 	/* === ATOM 5: normalize up→uy === */
-	U4 r_src_offset_5  = O_(ResolveLookAtScratch, up);
-	U4 r_dst_offset_5  = O_(ResolveLookAtScratch, uy);
-	U4 r_src_ptr_5     = R_T0;
-	U4 r_dst_ptr_5     = R_T1;
-	U4 r_tmp_5         = R_T2;
-	U4 r_mac1_5        = R_T3;
-	U4 r_mac2_5        = R_T5;
-	U4 r_recip_5       = R_T6;
-	U4 r_norm_5        = R_T7;
-	U4 r_shift_5       = R_V0;
-	U4 r_branch_5      = R_V1;
+	src_offset = O_(ResolveLookAtScratch, up);
+	dst_offset = O_(ResolveLookAtScratch, uy);
 	smem.resolve_look_at_atom_addrs[5] = normalize_v3s4_proc(& ab,
-		R_ResolveScratch,
-		r_src_offset_5, r_dst_offset_5,
-		r_src_ptr_5, r_dst_ptr_5, r_tmp_5,
-		r_mac1_5, r_mac2_5, r_recip_5, r_norm_5,
-		r_shift_5, r_branch_5);
+		src_offset, dst_offset,
+		RegUse_(normalize_v3s4_proc){
+			.scratch   = R_ResolveScratch,
+			.src_ptr   = R_T0,
+			.dst_ptr   = R_T1,
+			.recip_est = R_T6,
+			.norm      = R_T7,
+			.shift     = R_V0,
+			.src_x     = R_T2,
+			.t3 = R_T3,
+			.t4 = R_T5,
+			.t5 = R_V1,
+		});
 
 	/* === ATOM 6a: populate (m[][] from ux/uy/uz, t[]=0) === */
 	U4 r_look_at_6a = R_T0;  /* tape pop → look_at* */
