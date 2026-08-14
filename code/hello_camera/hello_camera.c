@@ -132,13 +132,8 @@ I_ void resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4*
 FI_ void camera_look_at_c11(Camera* c, P3_S4* target, V3_S4* up_in) { resolve_look_at_c11(& c->look_at, & c->pos, target, up_in); }
 
 /* Pre-build all 7 chain atoms of the resolve_look_at bundle into the static arena.
- * Called ONCE from main() before the frame loop.
- * After this returns, the smem.resolve_look_at_atom_addrs[] array contains valid MIPS atom pointers
- * for the frame-time bundle helper to emit via tb_emit(tb, captured_addr).
- *
  * 4 unique procs in hello_camera.atom.c (chain atoms 0, 2, 4, 6); atoms 1, 3, 5
- * share the GENERIC normalize_v3s4_proc from gte.atom.c (called 3x with different
- * O_(ResolveLookAtScratch,...) offsets):
+ * share the GENERIC normalize_v3s4_proc from gte.atom.c
  * 	0: resolve_look_at__input_and_sub_proc
  * 	1: normalize_v3s4_proc                  (fwd → uz; offsets 0, 16)
  * 	2: resolve_look_at__cross_uz_up_in_to_right_proc
@@ -146,82 +141,6 @@ FI_ void camera_look_at_c11(Camera* c, P3_S4* target, V3_S4* up_in) { resolve_lo
  * 	4: resolve_look_at__cross_uz_ux_to_up_proc
  * 	5: normalize_v3s4_proc                  (up → uy; offsets 64, 80)
  * 	6: resolve_look_at__populate_and_translate_proc
- *
- * Task 12.16 promotion: the bundle-specific resolve_look_at__chain_normalize_proc
- * has been promoted to the generic normalize_v3s4_proc (gte.atom.c), which now
- * takes r_scratch + r_src_offset + r_dst_offset as U4 parameters. The 3 callers
- * pass O_(ResolveLookAtScratch,...) macros as offset args. The metaprogram emits
- * one set of `atom_offset__normalize_v3s4__srav_path__aligned_done` defs
- * (namespaced by atom name) in duffle/gen/offsets.h, shared by all 3 callers.
- *
- * GPR pool per atom: 10 free GPRs (R_T0..R_T3 + R_T5..R_T7 + R_V0 + R_V1 + R_AT).
- * R_T4 is reserved as the wave-context carrier (R_ResolveScratch).
- */
-/* === EXPLICIT REGISTER ALLOCATION TRACKER ===
- * Every GPR used by every atom is tracked below. NO GPR is assigned to
- * two atoms at overlapping lifetimes. The tape runtime preserves R_T8/R_T9
- * (R_AtomJmp/R_TapePtr) and clobbers R_T0-R_T7, R_AT, R_V0, R_V1.
- * R_T4 is reserved as R_ResolveScratch (wave-context carrier).
- *
- * GPR pool: R_T0($8), R_T1($9), R_T2($10), R_T3($11), R_T5($13),
- *           R_T6($14), R_T7($15), R_V0($2), R_V1($3), R_AT($1)
- * Reserved: R_T4($12) = R_ResolveScratch
- * Tape: R_T8($24) = R_AtomJmp, R_T9($25) = R_TapePtr (preserved)
- *
- * === ATOM 0: input_and_sub (stages eye/up_in, computes fwd) ===
- * Pop tape → R_T0(target), R_T1(eye), R_T2(up_in).
- * Use R_T3,R_T5,R_T6,R_T7 as temps.
- * NO conflict with other atoms (each atom has independent lifetime).
- *
- * === ATOM 1: normalize fwd→uz ===
- * r_src_offset=0, r_dst_offset=16.
- * r_src_ptr=R_T0, r_dst_ptr=R_T1, r_tmp=R_T2 (preserved for stage 4).
- * r_mac1=R_T3, r_mac2=R_T5, r_recip=R_T6, r_lzcr=R_T7, r_shift=R_V0, r_branch=R_V1.
- *
- * === ATOM 2: cross uz×up_in→right ===
- * r_a=R_T0, r_b=R_T1, r_c=R_T2, r_d=R_T3, r_f(out)=R_T5, r_g=R_T6, r_h=R_T7.
- *
- * === ATOM 3: normalize right→ux ===
- * Same GPR pool as atom 1.
- *
- * === ATOM 4: cross uz×ux→up ===
- * r_a=R_T0, r_b=R_T1, r_c=R_T2, r_d=R_T3, r_f(out)=R_T5, r_g=R_T6, r_h=R_T7.
- *
- * === ATOM 5: normalize up→uy ===
- * Same GPR pool as atom 1.
- *
- * === ATOM 6a: populate (m[][] from ux/uy/uz, t[]=0) ===
- * r_look_at=R_T0 (pop tape), r_scratch=R_T4.
- * r_pux=R_T1, r_puy=R_T3, r_puz=R_T5.
- * r_tmp0=R_T2, r_tmp1=R_T6, r_tmp2=R_V0.
- *
- * === ATOM 6a.5: set_gte_mt3s2s4 (ctc2 RT matrix) ===
- * BAKED atom. Uses R_T3 internally (hardcoded in gte.atom.c).
- * NO conflict — different GPR pool, and the atom body hardcodes R_T3
- * as the matrix pointer. We DON'T need to assign R_T3 to atom 6a.5
- * because it's a baked atom with its own GPR usage.
- *
- * === ATOM 6b: matrix_vector (RT * (-eye) >> 12) ===
- * r_look_at=R_T0 (pop tape), r_scratch=R_T4.
- * r_peye=R_T1.
- * r_tmp0=R_T2, r_tmp1=R_T3, r_tmp2=R_T5.
- * Uses mac_apply_matrix_lv which internally uses these temps.
- *
- * === ATOM 6c: trans_matrix (off → look_at->t[]) ===
- * r_look_at=R_T0 (pop tape), r_scratch=R_T4.
- * r_off_ptr=R_T1.
- * r_tmp0=R_T2.
- *
- * === CONFLICT CHECK ===
- * All atoms use the same GPR pool R_T0-R_T3, R_T5-R_T7, R_V0-R_V1.
- * But atoms are SEQUENTIAL — each atom's lifetime is disjoint from
- * the next atom's lifetime. The tape yield handshake between atoms
- * preserves R_TapePtr (R_T9) and R_AtomJmp (R_T8).
- *
- * The GPR pool is SHARED across atoms (they run sequentially, not
- * concurrently). Each atom's build call assigns specific R_T* codes
- * for that atom's body. The same R_T* code can be reused across atoms
- * because the previous atom's body has already yielded.
  */
 internal void resolve_look_at_init(void) {
 	/* Wrap the static arena in a MipsAtomBuilder. */
@@ -433,10 +352,10 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 				tb_data_(state, & smem.pad[0]);
 				tb_data_(cam, & smem.cam);
 
-			// tb_emit_(pad_input_cube_rotation);
-			// 	tb_data_(state,     & smem.pad[0]);
-			// 	tb_data_(cube_rot,  & smem.cube.rot);
-			// 	tb_data_(floor_rot, & smem.floor.rot);
+			tb_emit_(pad_input_cube_rotation);
+				tb_data_(state,     & smem.pad[0]);
+				tb_data_(cube_rot,  & smem.cube.rot);
+				tb_data_(floor_rot, & smem.floor.rot);
 		}
 	}
 

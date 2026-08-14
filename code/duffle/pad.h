@@ -81,9 +81,9 @@ typedef Enum_(U1, PadUnknownId) {
 	PadUnknownId_Sentinel      = 0xFF,
 };
 typedef Enum_(U4, PadAxisCentered) {
-	PadAxis_Centered_Hi   = 0x8080,
-	PadAxis_Centered_Lo   = 0x8080,
-	PadAxis_Centered_Word = 0x80808080U,
+	PadAxis_Centered_Hi = 0x8080,
+	PadAxis_Centered_Lo = 0x8080,
+	PadAxis_Centered    = 0x80808080U,
 };
 typedef Enum_(U1, PadDeadZone) {
 	PadDeadZone_LowBound  = 0x70,  /* left_x <  LowBound  → active;  delta = 0x80 - left_x > 0 (rightward pull) */

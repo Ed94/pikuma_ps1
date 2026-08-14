@@ -139,19 +139,17 @@ typedef Slice_(MipsAtom);
 //       atombuilder_push(ab, slice_from_array(MipsCode, atom_comp_code));
 //   }
 // The body must NOT include mac_yield() (the parent atom yields).
-// The component name is derived by the Lua metaprogram from the preceding
-// `FI_ Slice_MipsCode ac_X(...)` declaration (backward walk from the macro site).
-// Inline-only callers (the generated `mac_<name>` aliases) skip the `ab` arg via metaprogram filtering;
-// escape callers (ac_<name> invoked as a function) pass a long-lived builder.
+// The component name is derived by the Lua metaprogram from the preceding `FI_ Slice_MipsCode ac_X(...)` declaration (backward walk from the macro site).
+// Inline-only callers (the generated `mac_<name>` aliases) skip the `ab` arg via metaprogram filtering; escape callers (ac_<name> invoked as a function) pass a long-lived builder.
 #define MipsAtomComp_Proc_(ab, ...) { MipsCode atom_comp_code[] align_(4) = __VA_ARGS__; atombuilder_push(ab, slice_from_array(MipsCode, atom_comp_code)); }
 
 /* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.
 	Files containing only atoms and atom components.
    Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
-	 The macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
-	 The constant is in `.rodata` and unreferenced; the linker may eliminate it.
-	 The two-level concat + `__LINE__` suffix makes the identifier unique per call site
-	 (the identifier embeds the source line, so duplicates across `#include`d files don't collide). */
+	 Macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
+	 The constant is in `.rodata` so the linker may eliminate it.
+	 Two-level concat + `__LINE__` suffix makes the identifier unique per call site
+	 (identifier embeds the source line, so duplicates across `#include`d files don't collide). */
 #define ATOM_FILE_DEBUGGER_LINE_MARKER(file_name) internal U4 const tmpl(atom_file_debugger_line_marker,file_name) = 0
 
 typedef Slice_MipsAtom Tape;
@@ -294,29 +292,79 @@ FI_ void atomarena_reset(AtomArena_R aa) { aa->used = 0; }
 #pragma region RegFile (Register File Allocator)
 // A specialized allocator utilized to help the user track which registers are bound to values
 // that must be preserved for the arena's bounds.
+// TODO(Ed): Technically we can do this at comp-time with the metaprogram, but we may have namespace conflicts.
+// Unless we follow a convention for #define <Scope_Prefix> or something per register allocation boundary.
 
-enum {
-	RegFileArena_Len,
-};
-typedef Enum_(U4, RegFileEntry) {
-	// TODO(Ed): Define RF_Field, each field is maped by index + bit pos.
-	// the index is the upper portion of a U4 and the bit pos in the lower pos.
+/* ABI + tape reserves that are never handed out by alloc. */
+U4 const regfile_abi_mask =
+	(1u << R_0)  | (1u << R_AT)  |
+	(1u << R_K0) | (1u << R_K1)  |
+	(1u << R_GP) | (1u << R_SP)  |
+	(1u << R_FP) | (1u << R_RA)  |
+	(1u << R_T8) | (1u << R_T9); /* AtomJmp + TapePtr */
 
-	regfileentry_todo_,
-	// TODO(Ed): Is there a trick we can do with the current register enums to 
-	// just resolve an entry automatically when doing a pin?
-};
 typedef Struct_(RegFile) {
-	U1 GPR[RegFileArena_Len];
-	U1 GTE[RegFileArena_Len];
-	U1 GP[RegFileArena_Len];
+	A2_U2 GPR;
+	A2_U2 GTE;
 };
-
-void regfile_pin(U4 register) {
-
-	assert(false);
+typedef Struct_(RegFile_RInfo) {
+	U2_R section;
+	U2   mask;
+	B2   occupied;
+};
+FI_ void regfile_init(RegFile_R rf) {
+	/* pack the 32-bit ABI mask into the two U2s */
+	rf->GPR[0] = u4_lo(regfile_abi_mask);
+	rf->GPR[1] = u4_hi(regfile_abi_mask);
+	rf->GTE[0] = rf->GTE[1] = 0;
 }
+FI_ RegFile regfile_make(void) { RegFile rf; regfile_init(& rf); return rf; }
 
+FI_ RegFile_RInfo regfile_rinfo(A2_U2 file, Reg r_id) {
+	U2   s_id     = r_id >> 4;
+	U2_R section  = & file[s_id];
+	U2   mask     = (1u << (r_id & 15));
+	B2   occupied = section[0] & mask != 0;
+	return (RegFile_RInfo){section, mask, occupied};
+}
+FI_ Reg regfile__alloc_helper(A2_U2 file, Reg r_id) {
+	Reg result = 0; RegFile_RInfo info = regfile_rinfo(file, r_id);
+	if (info.occupied == false) {
+		info.section[0] |= info.mask;
+		result = r_id;
+	}
+	return result; 
+}
+I_ Reg regfile_alloc(RegFile_R rf) {
+	U2 allocated = 0;
+	for range_iter(r_id, <=, r1u2(R_T0, R_T7)) {
+		allocated = regfile__alloc_helper(rf->GPR, r_id); Jmp_nZero_(allocated,resolved);
+	}
+	for range_iter(r_id, <=, r1u2(R_V0, R_V1)) {
+		allocated = regfile__alloc_helper(rf->GPR, r_id); Jmp_nZero_(allocated,resolved);
+	}
+resolved: return allocated;
+}
+FI_ Reg regfile_pin(RegFile_R rf, Reg r_id) {
+	RegFile_RInfo info = regfile_rinfo(rf->GPR, r_id);
+	assert(info.occupied == false);
+	info.section[0] |= info.mask;
+	return r_id;
+}
+FI_ void regfile_free_mask(RegFile_R rf, U4 mask) {
+	if (regfile_abi_mask & mask) return;
+	u4_r(rf->GPR)[0] &= mask;
+}
+FI_ void regfile_free_reg(RegFile_R rf, Reg r_id) {
+	/* never free the ABI set */
+	if (regfile_abi_mask & (1u << r_id)) return;
+	RegFile_RInfo info = regfile_rinfo(rf->GPR, r_id);
+	info.section[0] &= ~info.mask;
+}
+FI_ void regfile_reset(RegFile_R rf) {
+	rf->GPR[0] = u4_lo(regfile_abi_mask);
+	rf->GPR[1] = u4_hi(regfile_abi_mask);
+}
 #pragma endregion RegFileArena (Register File Allocator)
 
 #pragma region Mips Atom Procs

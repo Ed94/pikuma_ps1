@@ -237,16 +237,16 @@ WORD_COUNT(mac_format_g4_color, 12)
 WORD_COUNT(mac_insert_ot_tag, 11)
 
 /* atom_dbg_skip */
-#define mac_pad_set_centered_axes(r_state, r_scratch) \
-	load_upper_i(r_scratch, (PadAxis_Centered_Word >> 16) & 0xFFFF) \
-,	or_i_self(   r_scratch,  PadAxis_Centered_Word        & 0xFFFF) \
-,	store_word(  r_scratch, r_state, O_(PadState,axes))
+#define mac_pad_set_centered_axes(state, scratch) \
+	load_upper_i(scratch, (PadAxis_Centered >> 16) & 0xFFFF) \
+,	or_i_self(   scratch,  PadAxis_Centered        & 0xFFFF)		/* mac_load_word_imm(scratch, PadAxis_Centered), */ \
+,	store_word(       scratch, state, O_(PadState,axes))
 WORD_COUNT(mac_pad_set_centered_axes, 3)
 
 /* atom_dbg_skip */
-#define mac_pad_set_id_byte(r_state, r_id, id_value) \
+#define mac_pad_set_id_byte(state, r_id, id_value) \
 	add_ui(    r_id, R_0, id_value) \
-,	store_byte(r_id, r_state, O_(PadState,id))
+,	store_byte(r_id, state, O_(PadState,id))
 WORD_COUNT(mac_pad_set_id_byte, 2)
 
 /* atom_dbg_skip */

@@ -779,32 +779,35 @@ internal MipsAtom_(pad_input_cam) atom_info(atom_bind(Binds_PadInputCam)
 
 	// D-pad Left → cam.pos.x -= 50.  and_i fulfills BD-slot for load on R_Cam.
 	and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(left_x, exit_left_x)), mac_yield_load(),
-		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.x)),
-atom_label(exit_left_x)
+		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.x)), 
+	atom_label(exit_left_x)
+
 	/* D-pad Right → cam.pos.x += 50. Reuses R_T1 from Left. */
 	and_i(R_T3, R_T0, Pad_Right), branch_le_zero(R_T3, atom_offset(right_x, exit_right_x)), nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.x)),
-atom_label(exit_right_x)
+	atom_label(exit_right_x)
 
 	/* D-pad Up → cam.pos.y -= 50. Load pos.y BEFORE the andi. */
 	load_word(R_T1, R_Cam, O_(Camera,pos.y)),
 	and_i(R_T3, R_T0, Pad_Up), branch_le_zero(R_T3, atom_offset(up_y, exit_up_y)), nop,
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.y)),
-atom_label(exit_up_y)
+	atom_label(exit_up_y)
+
 	/* D-pad Down → cam.pos.y += 50. Reuses R_T1 from Up. */
 	and_i(R_T3, R_T0, Pad_Down), branch_le_zero(R_T3, atom_offset(down_y, exit_down_y)), nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.y)),
-atom_label(exit_down_y)
+	atom_label(exit_down_y)
 
 	/* D-pad Cross → cam.pos.z -= 50. Load pos.z BEFORE the andi. */
 	load_word(R_T1, R_Cam, O_(Camera,pos.z)),
 	and_i(R_T3, R_T0, Pad_Cross), branch_le_zero(R_T3, atom_offset(cross_z, exit_cross_z)), nop,
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
-atom_label(exit_cross_z)
+	atom_label(exit_cross_z)
+
 	/* D-pad Circle → cam.pos.z += 50. Reuses R_T1 from Cross. */
 	and_i(R_T3, R_T0, Pad_Circle), branch_le_zero(R_T3, atom_offset(circle_z, exit_circle_z)), nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
-atom_label(exit_circle_z)
+	atom_label(exit_circle_z)
 
 	mac_yield_tail(),
 };

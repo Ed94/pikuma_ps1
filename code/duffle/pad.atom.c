@@ -11,16 +11,16 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(pad_atom_c);
 
 #pragma region MACs (Mips Atom Components)
 
-FI_ Slice_MipsCode ac_pad_set_centered_axes(AtomBuilder_R ab, U4 r_state, U4 r_scratch) atom_dbg_skip MipsAtomComp_Proc_(ab, {
-    load_upper_i(r_scratch, (PadAxis_Centered_Word >> 16) & 0xFFFF),
-    or_i_self(   r_scratch,  PadAxis_Centered_Word        & 0xFFFF),
-    store_word(  r_scratch, r_state, O_(PadState,axes)),
+FI_ Slice_MipsCode ac_pad_set_centered_axes(AtomBuilder_R ab, Reg state, Reg scratch) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+		load_upper_i(scratch, (PadAxis_Centered >> 16) & 0xFFFF),
+    or_i_self(   scratch,  PadAxis_Centered        & 0xFFFF),
+		// mac_load_word_imm(scratch, PadAxis_Centered),
+    store_word(       scratch, state, O_(PadState,axes)),
 })
 
-FI_ Slice_MipsCode ac_pad_set_id_byte(AtomBuilder_R ab, U1 r_state, U1 r_id, U1 id_value) 
-atom_dbg_skip MipsAtomComp_Proc_(ab, {
+FI_ Slice_MipsCode ac_pad_set_id_byte(AtomBuilder_R ab, Reg state, Reg r_id, U1 id_value) atom_dbg_skip MipsAtomComp_Proc_(ab, {
     add_ui(    r_id, R_0, id_value),
-    store_byte(r_id, r_state, O_(PadState,id)),
+    store_byte(r_id, state, O_(PadState,id)),
 })
 
 FI_ Slice_MipsCode ac_pad_set_status(AtomBuilder_R ab, U4 r_tmp, U1 r_state, U4 pad_status) atom_dbg_skip MipsAtomComp_Proc_(ab, {
@@ -55,12 +55,12 @@ FI_ Slice_MipsCode ac_pad_store_inverted_buttons(AtomBuilder_R ab, U1 r_buttons,
  *   byte_swap16(x) = (x >> 8) | (x << 8); nor(x, R_0) = ~x. store_half truncates to 16 bits so the upper-16 mask is implicit in the store.
  *
  * Register use (atom-local; no wave-context touched):
- *   R_T0 = raw base      (kept throughout; axes loads read raw[4..7] from R_T0)
- *   R_T1 = state base    (kept throughout; all stores go through R_T1)
- *   R_T2 = raw[0] status (alive across the disc/pending/id dispatch, then dead)
- *   R_T3 = raw[1] id     (alive across the id dispatch, then dead)
- *   R_T4 = scratch       (shifts, compares, immediate loads, store values)
- *   R_T5 = scratch       (parallel lui+ori for the 0x80808080 axes constant + byte-swap target)
+ *   R_T0 = raw base      : Kept throughout; axes loads read raw[4..7] from R_T0.
+ *   R_T1 = state base    : Kept throughout; all stores go through R_T1.
+ *   R_T2 = raw[0] status : Alive across the disc/pending/id dispatch, then dead.
+ *   R_T3 = raw[1] id     : Alive across the id dispatch, then dead.
+ *   R_T4 = scratch       : Shifts, compares, immediate loads, store values.
+ *   R_T5 = scratch       : Parallel lui + ori for the 0x80808080 axes constant + byte-swap target.
  */
 enum {
 	R_PadRaw    = R_T0 atom_reg atom_type(U1),
@@ -125,7 +125,8 @@ atom_label(id_dispatch) /* === Case 3-6: ID dispatch */
 	 * R_T5 is then "dead" — only consumed at the analog_pad range check downstream. */
 	mac_pad_set_status(R_T4, R_PadState, PadStatus_Digital),
 	load_half_u(       R_T4, R_PadRaw, O_(PadBiosRaw, buttons)), /* R_T4 = raw_buttons; */
-	load_upper_i(R_T5, PadAxis_Centered_Hi), or_i_self(R_T5, PadAxis_Centered_Lo), /* fills the buttons-load's delay slot (doesn't read R_T4) */
+	mac_load_word_imm(R_T5, PadAxis_Centered), /* fills the buttons-load's delay slot (doesn't read R_T4) */
+	// load_upper_i(R_T5, PadAxis_Centered_Hi), or_i_self(R_T5, PadAxis_Centered_Lo), 
 	mac_pad_store_inverted_buttons(R_T4, R_PadState),            /* R_T4 settled: nor + sh writes ~raw_buttons to state.buttons */
 	store_word(R_T5,    R_PadState, O_(PadState, axes)),         /* single sw writes the 4-byte axes block at offset 8 (left_x, left_y, right_x, right_y) */
 	mac_pad_set_id_byte(R_PadState, R_T4, PadRawId_Digital),

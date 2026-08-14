@@ -97,6 +97,7 @@
 #define Array_expand(type,len)         type Array_sym(type, len)[len]; typedef PtrSet_(Array_sym(type, len))
 #define Array_(type,len)               Array_expand(type,len)
 #define Bit_(id,b)                     id = (1 << b), tmpl(id,pos) = b
+#define Bitmask_(b)                    (1u << b)
 #define Enum_(underlying_type, symbol) underlying_type TSet_(symbol); enum   symbol
 #define Proc_(symbol)                  symbol
 #define Relative_(symbol)              // Does nothing but annotate that a symbol is associated with another.
@@ -199,6 +200,8 @@ def_signed_ops(le, <=)
 #define defer_info(type,expr, ...) for(type       info= {__VA_ARGS__}; info.once!=1;++info.once,(expr))    // Defer with tracked state
 
 #define do_while(cond) for (U8 once=0; once!=1 || (cond); ++once)
+
+#define Jmp_nZero_(cond,label) if (cond) goto label;
 #pragma endregion Control Flow & Iteration
 
 #define span_iter(type, iter, m_begin, op, m_end) ( \

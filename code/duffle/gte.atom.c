@@ -143,7 +143,7 @@ FI_ Slice_MipsCode ac_trans_mt3s3s4(AtomBuilder_R ab
  * The later 64 entries (octaves 2-3) are the `srav` branch when the magnitude's top bit is well above bit 24.
  *
  * 192-entry table is reproduced verbatim from libgte (verified against libpsn00b/psxgte/vector.s:100-123 — 24 rows × 8 halfwords, last entry 0x0804). */
-internal RO_ S2  gte_normalize_sqr_tbl[192] align_(2) = {
+internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x1000, 0x0fe0, 0x0fc1, 0x0fa3, 0x0f85, 0x0f68, 0x0f4c, 0x0f30,
 	0x0f15, 0x0efb, 0x0ee1, 0x0ec7, 0x0eae, 0x0e96, 0x0e7e, 0x0e66,
 	0x0e4f, 0x0e38, 0x0e22, 0x0e0c, 0x0df7, 0x0de2, 0x0dcd, 0x0db9,
@@ -309,7 +309,7 @@ internal MipsAtom_(set_gte_mt3s2s4) atom_info(
 	load_word(R_T3, R_TapePtr, O_(Binds_SetGteMT3S2S4,transform)),
 	add_ui_self(    R_TapePtr, S_(Binds_SetGteMT3S2S4)),
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
-	load_word(R_T0, R_T3, 0),  load_word(R_T1, R_T3,  4),
+	load_word(R_T0, R_T3, 0),  load_word(R_T1, R_T3,  4), 
 	gte_mv_to_ctrl_r(R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(R_T1, gte_cr_RT12),
 	load_word(R_T0, R_T3, 8),  load_word(R_T1, R_T3, 12), load_word(R_T2, R_T3, 16),
 	gte_mv_to_ctrl_r(R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(R_T2, gte_cr_RT22),
