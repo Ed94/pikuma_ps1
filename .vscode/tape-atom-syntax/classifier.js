@@ -23,6 +23,7 @@ const TOKEN_TYPES = [
 	"tapeDuffleType",
 	"tapeAttribute",
 	"keyword",
+	"macro",
 ];
 
 const TOKEN_MODIFIERS = ["declaration", "tapeRead", "tapeWrite", "tapeAuto"];
@@ -38,11 +39,14 @@ const ANNOTATIONS = new Set([
 ]);
 
 const DSL_KEYWORDS = new Set([
-	"FI_", "I_", "NI_", "Relative_", "Struct_", "Enum_", "Union_",
-	"TypeR_", "TypeV_", "align_", "internal", "local_persist", "global",
+	"FI_", "I_", "NI_", "Relative_", "Struct_", "Enum_", "Union_", "Array_",
+	"Slice_", "TypeR_", "TypeV_", "align_", "internal", "local_persist", "global",
+	"RO_", "LP_", "gknown", "expect_", "cexpr_",
+	"asm", "asm_words", "asm_rpins", "asm_clobber",
 	"O_", "S_", "C_", "T_", "tmpl", "glue", "r_", "v_", "tr_", "tv_",
-	"rgcc", "rlit", "r_use", "r_set", "r_mod", "r_imm", "r_mem",
-	"enc_op", "enc_rs", "enc_rt", "enc_rd", "enc_imm", "enc_i", "enc_r",
+	"rgcc", "r_use", "r_set", "r_mod", "r_imm", "r_mem",
+	"u1_", "u2_", "u4_", "u8_", "s1_", "s2_", "s4_", "s8_",
+	"u1_r", "u2_r", "u4_r", "u8_r", "u1_v", "u2_v", "u4_v", "u8_v",
 ]);
 
 const DELAY_SLOT_KEYWORDS = new Set(["LdSlot_", "BdSlot_"]);
@@ -67,15 +71,22 @@ function registerType(name, index) {
 
 function instructionType(name, index) {
 	const domain = index.macros.get(name);
+	if (domain === "control") return "tapeControlFlow";
 	if (domain === "cpu") return "tapeCpuInstruction";
 	if (domain === "gte") return "tapeGteInstruction";
 	if (domain === "gpu") return "tapeGpuInstruction";
-	if (domain === "component") return "tapeComponentInstruction";
+	if (domain === "component") {
+		if (/^mac_gte_/.test(name)) return "tapeGteInstruction";
+		if (/^mac_gp/.test(name)) return "tapeGpuInstruction";
+		if (/^mac_/.test(name)) return "tapeComponentInstruction";
+		return "macro";
+	}
+	if (domain === "utility") return "macro";
 	if (/^gte_(?!cr_)/.test(name)) return "tapeGteInstruction";
 	if (/^gp[01]_/.test(name)) return "tapeGpuInstruction";
 	if (/^mac_gte_/.test(name)) return "tapeGteInstruction";
 	if (/^mac_gp/.test(name)) return "tapeGpuInstruction";
-	if (/^mac_/.test(name)) return "tapeCpuInstruction";
+	if (/^mac_/.test(name)) return "tapeComponentInstruction";
 	return null;
 }
 
@@ -123,7 +134,7 @@ function classifyDocument(source, filePath, workspaceIndex, shouldCancel = () =>
 		} else if (ATOM_KEYWORDS.has(token.text)) {
 			type = "tapeAtomKeyword";
 		} else if (COMPONENT_KEYWORDS.has(token.text)) {
-			type = "tapeComponentKeyword";
+			type = "keyword";
 		} else if (ANNOTATIONS.has(token.text)) {
 			type = "tapeAnnotation";
 		} else if (context && context.callee === "atom_bind" && context.argIndex === 0) {
@@ -159,19 +170,21 @@ function classifyDocument(source, filePath, workspaceIndex, shouldCancel = () =>
 		}
 
 		if (!type && index.bindTypes.has(token.text)) type = "tapeBindType";
-		if (!type && index.types.has(token.text)) type = "tapeDuffleType";
 		if (!type && DSL_KEYWORDS.has(token.text)) type = "keyword";
+		if (!type && index.types.has(token.text)) type = "tapeDuffleType";
 		if (!type && index.attributes.has(token.text)) type = "tapeAttribute";
 		if (!type) type = registerType(token.text, index);
 		if (!type && DELAY_SLOT_KEYWORDS.has(token.text)) type = "tapeDelaySlot";
 		if (!type) {
 			const domain = index.macros.get(token.text);
-			if (domain && CONTROL_FLOW_PREFIXES.test(token.text)) {
+			if (domain === "control" || (domain && CONTROL_FLOW_PREFIXES.test(token.text))) {
 				type = "tapeControlFlow";
 			}
 		}
 		if (!type && isRegUseAccess(scanned.tokens, tokenIndex)) type = "tapeGprRegister";
 		if (!type) type = instructionType(token.text, index);
+		if (!type && /^(?:Slice_|A[0-9]+_)/.test(token.text)) type = "tapeDuffleType";
+		if (!type && /_[RV]$/.test(token.text)) type = "tapeDuffleType";
 		if (!type && index.atoms.has(token.text)) type = "tapeAtomName";
 		if (!type && index.components.has(token.text)) type = "tapeComponentName";
 		if (!type && index.phases.has(token.text)) type = "tapePhase";

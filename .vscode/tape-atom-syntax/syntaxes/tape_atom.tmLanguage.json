@@ -29,11 +29,11 @@
 				{
 					"match": "\\b(MipsAtomComp_)\\s*\\(\\s*(ac_[A-Za-z0-9_]*)",
 					"captures": {
-						"1": { "name": "keyword.control.duffle.component" },
+						"1": { "name": "keyword" },
 						"2": { "name": "entity.name.function.duffle.component" }
 					}
 				},
-				{ "match": "\\bMipsAtomComp_Proc_\\b", "name": "keyword.control.duffle.component" }
+				{ "match": "\\bMipsAtomComp_Proc_\\b", "name": "keyword" }
 			]
 		},
 		"annotation-arguments": {
@@ -64,7 +64,7 @@
 			"name": "storage.type.duffle.type"
 		},
 		"attributes": {
-			"match": "\\b(?:FI_|I_|NI_|Relative_|align_|internal|local_persist|global|O_|S_|C_|T_|tmpl|glue|r_|v_|tr_|tv_|rgcc|rlit|r_use|r_set|r_mod|r_imm|r_mem|enc_op|enc_rs|enc_rt|enc_rd|enc_imm|enc_i|enc_r)\\b",
+			"match": "\\b(?:FI_|I_|NI_|Relative_|Struct_|Enum_|Union_|Array_|Slice_|TypeR_|TypeV_|align_|internal|local_persist|global|RO_|LP_|gknown|expect_|cexpr_|asm|asm_words|asm_rpins|asm_clobber|O_|S_|C_|T_|tmpl|glue|r_|v_|tr_|tv_|rgcc|r_use|r_set|r_mod|r_imm|r_mem|u[1248]_|u[1248]_r|u[1248]_v|s[1248]_)\\b",
 			"name": "keyword"
 		}
 	}

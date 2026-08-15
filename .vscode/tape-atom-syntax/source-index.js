@@ -8,12 +8,21 @@ const BASE_TYPES = [
 	"U1", "U2", "U4", "U8", "MipsAtom", "MipsCode", "Reg",
 ];
 
+const C_BUILTINS = new Set([
+	"void", "type", "char", "short", "int", "long", "float", "double",
+	"unsigned", "signed", "bool", "size_t", "uint8_t", "uint16_t", "uint32_t",
+	"int8_t", "int16_t", "int32_t",
+]);
+
 const BASE_ATTRIBUTES = [
-	"FI_", "I_", "NI_", "Relative_", "Struct_", "Enum_", "Union_",
-	"TypeR_", "TypeV_", "align_", "internal", "local_persist", "global",
+	"FI_", "I_", "NI_", "Relative_", "Struct_", "Enum_", "Union_", "Array_",
+	"Slice_", "TypeR_", "TypeV_", "align_", "internal", "local_persist", "global",
+	"RO_", "LP_", "gknown", "expect_", "cexpr_",
+	"asm", "asm_words", "asm_rpins", "asm_clobber",
 	"O_", "S_", "C_", "T_", "tmpl", "glue", "r_", "v_", "tr_", "tv_",
-	"rgcc", "rlit", "r_use", "r_set", "r_mod", "r_imm", "r_mem",
-	"enc_op", "enc_rs", "enc_rt", "enc_rd", "enc_imm", "enc_i", "enc_r",
+	"rgcc", "r_use", "r_set", "r_mod", "r_imm", "r_mem",
+	"u1_", "u2_", "u4_", "u8_", "s1_", "s2_", "s4_", "s8_",
+	"u1_r", "u2_r", "u4_r", "u8_r", "u1_v", "u2_v", "u4_v", "u8_v",
 ];
 
 function createIndex() {
@@ -28,6 +37,7 @@ function createIndex() {
 		phases: new Set(),
 		labels: new Set(),
 		attributes: new Set(BASE_ATTRIBUTES),
+		componentCallees: new Map(),
 	};
 }
 
@@ -38,6 +48,7 @@ function cloneIndex(source) {
 	}
 	for (const [name, domain] of source.macros) result.macros.set(name, domain);
 	for (const [name, domain] of source.registers) result.registers.set(name, domain);
+	for (const [name, callees] of source.componentCallees) result.componentCallees.set(name, callees.slice());
 	return result;
 }
 
@@ -48,18 +59,78 @@ function mergeIndexes(...sources) {
 		for (const key of ["atoms", "components", "componentAliases", "bindTypes", "types", "phases", "labels", "attributes"]) {
 			for (const value of source[key]) result[key].add(value);
 		}
-		for (const [name, domain] of source.macros) result.macros.set(name, domain);
+		for (const [name, domain] of source.macros) {
+			const existing = result.macros.get(name);
+			if (!existing || domainRank(domain) >= domainRank(existing)) result.macros.set(name, domain);
+		}
 		for (const [name, domain] of source.registers) result.registers.set(name, domain);
+		for (const [name, callees] of source.componentCallees) {
+			const existing = result.componentCallees.get(name) || [];
+			result.componentCallees.set(name, existing.concat(callees));
+		}
 	}
-	return result;
+	return resolveComponentDomains(result);
 }
 
 function domainFromPath(filePath) {
 	const base = path.basename(filePath.replaceAll("\\", "/")).toLowerCase();
-	if (base === "mips.h" || base === "mips.atom.c") return "cpu";
-	if (base === "gte.h" || base === "gte.atom.c") return "gte";
-	if (base === "gp.h" || base === "gp.atom.c") return "gpu";
-	return "component";
+	if (base === "mips.h") return "cpu";
+	if (base === "gte.h") return "gte";
+	if (base === "gp.h") return "gpu";
+	return null;
+}
+
+function prefixDomain(name) {
+	if (/^(?:branch_|jump_|call_)/.test(name)) return "control";
+	if (/^gte_(?!cr_)/.test(name) || name.startsWith("mac_gte_") || name.startsWith("ac_gte_")) return "gte";
+	if (/^gp[01]_/.test(name) || name.startsWith("mac_gp_") || name.startsWith("ac_gp_")) return "gpu";
+	return null;
+}
+
+function collectBraceIdentifiers(tokens, openBraceIndex) {
+	const names = [];
+	let depth = 0;
+	for (let tokenIndex = openBraceIndex; tokenIndex < tokens.length; tokenIndex += 1) {
+		if (tokens[tokenIndex].text === "{") depth += 1;
+		if (tokens[tokenIndex].text === "}") {
+			depth -= 1;
+			if (depth === 0) break;
+		}
+		if (tokens[tokenIndex].kind === "identifier") names.push(tokens[tokenIndex].text);
+	}
+	return names;
+}
+
+function resolveComponentDomains(index) {
+	const hardwareRank = { cpu: 1, gpu: 2, gte: 3, control: 4 };
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const [alias, callees] of index.componentCallees) {
+			let best = index.macros.get(alias) || "component";
+			let bestRank = hardwareRank[best] || 0;
+			for (const callee of callees) {
+				const domain = prefixDomain(callee) || index.macros.get(callee);
+				const rank = hardwareRank[domain] || 0;
+				if (rank > bestRank) {
+					best = domain;
+					bestRank = rank;
+				}
+			}
+			if (bestRank > 0 && index.macros.get(alias) !== best) {
+				index.macros.set(alias, best);
+				changed = true;
+			}
+		}
+	}
+	return index;
+}
+
+function domainRank(domain) {
+	if (domain === "control") return 4;
+	if (domain === "cpu" || domain === "gte" || domain === "gpu") return 3;
+	if (domain === "component") return 2;
+	return 1;
 }
 
 function registerKind(name) {
@@ -103,20 +174,21 @@ function scanSource(source, filePath) {
 		declarations.set(token.start, { role, modifiers });
 	}
 
-	function componentDomain(name) {
-		if (name.startsWith("ac_gte_") || name.startsWith("mac_gte_")) return "gte";
-		if (name.startsWith("ac_gp_") || name.startsWith("mac_gp_")) return "gpu";
-		return "cpu";
-	}
-
 	function addComponent(token) {
 		index.components.add(token.text);
 		mark(token, "componentName");
 		const alias = componentAlias(token.text);
 		if (alias) {
 			index.componentAliases.add(alias);
-			index.macros.set(alias, componentDomain(token.text));
+			index.macros.set(alias, prefixDomain(alias) || prefixDomain(token.text) || "component");
 		}
+	}
+
+	function bindComponentCallees(alias, callees) {
+		if (!alias) return;
+		index.componentAliases.add(alias);
+		index.componentCallees.set(alias, callees);
+		if (!index.macros.has(alias)) index.macros.set(alias, "component");
 	}
 
 	for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
@@ -173,8 +245,19 @@ function scanSource(source, filePath) {
 			if (name && name.kind === "identifier" && name.line === token.line) {
 				if (/^(?:RegUse_|Struct_|Enum_|Union_|TypeR_|TypeV_|Relative_|Binds_)/.test(name.text)) {
 					index.types.add(name.text);
+				} else if (/^(?:ac_|mac_)/.test(name.text)) {
+					const alias = name.text.startsWith("ac_") ? componentAlias(name.text) : name.text;
+					const rest = [];
+					for (let restIndex = tokenIndex + 2; restIndex < tokens.length && tokens[restIndex].line === name.line; restIndex += 1) {
+						if (tokens[restIndex].kind === "identifier") rest.push(tokens[restIndex].text);
+					}
+					if (alias) {
+						index.componentAliases.add(alias);
+						index.macros.set(alias, prefixDomain(alias) || "component");
+						if (rest.length) index.componentCallees.set(alias, rest);
+					}
 				} else {
-					index.macros.set(name.text, domain);
+					index.macros.set(name.text, domain || "utility");
 				}
 			}
 		}
@@ -185,10 +268,10 @@ function scanSource(source, filePath) {
 			let lastIdentifier = null;
 			while (endIndex < tokens.length && tokens[endIndex].text !== ";") {
 				if (tokens[endIndex].text === "{") hasBrace = true;
-				if (tokens[endIndex].kind === "identifier") lastIdentifier = tokens[endIndex];
+				if (tokens[endIndex].kind === "identifier" && !C_BUILTINS.has(tokens[endIndex].text)) lastIdentifier = tokens[endIndex];
 				endIndex += 1;
 			}
-			if (!hasBrace && lastIdentifier) {
+			if (!hasBrace && lastIdentifier && !C_BUILTINS.has(lastIdentifier.text)) {
 				index.types.add(lastIdentifier.text);
 				mark(lastIdentifier, "duffleType");
 			}
@@ -213,7 +296,27 @@ function scanSource(source, filePath) {
 	}
 
 	for (const call of balanced.calls) {
-		if (domain === "component") continue;
+		if (call.callee === "MipsAtomComp_") {
+			const name = tokens[call.openTokenIndex + 1];
+			const brace = tokens[call.closeTokenIndex + 1];
+			if (name && name.kind === "identifier" && brace && brace.text === "{") {
+				bindComponentCallees(componentAlias(name.text), collectBraceIdentifiers(tokens, call.closeTokenIndex + 1));
+			}
+		}
+		if (call.callee === "MipsAtomComp_Proc_") {
+			const functionName = findFunctionNameBefore(tokens, call.calleeTokenIndex);
+			let braceIndex = -1;
+			for (let tokenIndex = call.openTokenIndex + 1; tokenIndex < call.closeTokenIndex; tokenIndex += 1) {
+				if (tokens[tokenIndex].text === "{") {
+					braceIndex = tokenIndex;
+					break;
+				}
+			}
+			if (functionName && braceIndex >= 0) {
+				bindComponentCallees(componentAlias(functionName.text), collectBraceIdentifiers(tokens, braceIndex));
+			}
+		}
+		if (!domain) continue;
 		const name = tokens[call.calleeTokenIndex];
 		const after = tokens[call.closeTokenIndex + 1];
 		if (!name || !after || after.text !== "{") continue;
@@ -221,7 +324,7 @@ function scanSource(source, filePath) {
 	}
 
 	return {
-		index: cloneIndex(index),
+		index: resolveComponentDomains(cloneIndex(index)),
 		declarations,
 		tokens,
 		contexts,
@@ -233,5 +336,6 @@ module.exports = {
 	createIndex,
 	domainFromPath,
 	mergeIndexes,
+	resolveComponentDomains,
 	scanSource,
 };

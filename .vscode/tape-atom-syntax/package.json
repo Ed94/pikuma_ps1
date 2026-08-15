@@ -39,7 +39,8 @@
 			{ "id": "tapeCop2Register", "superType": "variable", "description": "COP2 data or control register alias" },
 			{ "id": "tapeDuffleType", "superType": "type", "description": "Duffle type or type constructor" },
 			{ "id": "tapeAttribute", "superType": "keyword", "description": "Duffle linkage or storage attribute" },
-			{ "id": "keyword", "description": "Standard keyword (DSL built-in macros)" }
+			{ "id": "keyword", "description": "Standard keyword (DSL built-in macros)" },
+			{ "id": "macro", "description": "Standard macro (utility #define with no instruction domain)" }
 		],
 		"semanticTokenModifiers": [
 			{ "id": "tapeRead", "description": "Register declared in atom_reads" },
@@ -68,7 +69,8 @@
 					"tapeCop2Register": ["variable.other.constant.duffle.cop2"],
 					"tapeDuffleType": ["storage.type.duffle.type"],
 					"tapeAttribute": ["storage.modifier.duffle.attr"],
-				"keyword": ["keyword"]
+				"keyword": ["keyword"],
+				"macro": ["entity.name.function.preprocessor"]
 				}
 			}
 		],

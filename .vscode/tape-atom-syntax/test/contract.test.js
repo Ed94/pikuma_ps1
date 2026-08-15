@@ -57,7 +57,7 @@ test("every semantic token has a scope mapping; DSL-specific tokens also have gr
 	const grammarScopes = collectScopeNames(grammar);
 
 	const grammarRequired = new Set([
-		"tapeAtomKeyword", "tapeAtomName", "tapeComponentKeyword", "tapeComponentName",
+		"tapeAtomKeyword", "tapeAtomName", "tapeComponentName",
 		"tapeAnnotation", "tapeBindType", "tapePhase", "tapeLabel",
 		"tapeDelaySlot", "tapeDuffleType", "keyword",
 	]);
