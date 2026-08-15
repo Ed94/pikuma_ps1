@@ -128,6 +128,11 @@ typedef Struct_(Binds_ResolveLookAtSub) {
 	ResolveLookAtScratch* scratchpad;
 };
 
+typedef Struct_(RegUse_resolve_look_at__input_and_sub_proc) {
+	Reg const scratch;
+	Reg target; Reg eye; Reg up_in;
+	Reg t0; Reg t1; Reg t2; Reg t3; Reg t4;
+};
 /* Atom 0 in the bundle: input_and_sub. Stages C-side inputs into the scratchpad and computes fwd = target - eye.
  * Staging work:
  *   * Stage eye.x/y/z   → scratch (for atom 6's translation column)
@@ -146,66 +151,61 @@ typedef Struct_(Binds_ResolveLookAtSub) {
  *   R_V0         : hardcoded (load eye.z / target.z)
  * Pool cost: 8 GPRs + R_T4 (carrier) + R_AT + R_V0 (hardcoded) = 11 GPRs.
  */
-internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa,	
-			// TODO(Ed): We can resolve scratch at anytime its fixed to a specific address.
-			U4 r_scratch
-	,	U4 r_target_ptr,U4 r_eye_ptr, U4 r_up_in_ptr
-	,	U4 r_tmp0,      U4 r_tmp1,    U4 r_tmp2, U4 r_tmp3
-) MipsAtom_Proc_(aa, {
-	load_word(r_target_ptr, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
-	load_word(r_eye_ptr,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
-	load_word(r_up_in_ptr,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
-	load_word(r_scratch,    R_TapePtr, O_(Binds_ResolveLookAtSub,scratchpad)),
-	add_ui_self(            R_TapePtr, S_(Binds_ResolveLookAtSub)),
-
-	// Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation column).
-	mac_load_p3s4( r_tmp0, r_tmp1, r_tmp2, r_eye_ptr, 0),
-	mac_store_p3s4(r_tmp0, r_tmp1, r_tmp2, r_scratch, O_(ResolveLookAtScratch,eye)),
+internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa, RegUse_resolve_look_at__input_and_sub_proc r) 
+MipsAtom_Proc_(aa, atom_info(atom_bind(Binds_ResolveLookAtSub)){
+	load_word(r.target,  R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
+	load_word(r.eye,     R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
+	load_word(r.up_in,   R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
+	load_word(r.scratch, R_TapePtr, O_(Binds_ResolveLookAtSub,scratchpad)),
+	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtSub)),
 
 	/* Stage up_in.x/y/z into the scratchpad. */
-	mac_load_p3s4( r_tmp0, r_tmp1, r_tmp2, r_up_in_ptr, 0),
-	mac_store_p3s4(r_tmp0, r_tmp1, r_tmp2, r_scratch, O_(ResolveLookAtScratch,up_in)),
+	mac_load_p3s4( r.t0, r.t1, r.t2, r.up_in,   0),
+	mac_store_p3s4(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,up_in)),
+
+	// Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation column).
+	mac_load_p3s4( r.t0, r.t1, r.t2, r.eye,      0),
+	mac_store_p3s4(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,eye)),
 
 	/* Compute fwd = target - eye. */
-	mac_load_p3s4(r_tmp0, r_tmp1, r_tmp2, r_target_ptr, 0),
-	mac_load_p3s4(r_tmp3, R_AT, R_V0, r_eye_ptr, 0),
+	// mac_load_p3s4(t3, R_AT, t4, r.eye,    0),
+	mac_load_p3s4(r.t3, R_AT, r.t4, r.target, 0),
 	mac_sub_v3s4(
-		r_tmp0, r_tmp1, r_tmp2,
-		r_tmp3, R_AT,   R_V0),
-	mac_store_v3s4(r_tmp0, r_tmp1, r_tmp2, r_scratch, O_(ResolveLookAtScratch,fwd)),
+		r.t3, R_AT, r.t4,
+		r.t0, r.t1, r.t2),
+	mac_store_v3s4(r.t3, R_AT, r.t4, r.scratch, O_(ResolveLookAtScratch,fwd)),
 
 	mac_yield()
 })
 
+typedef Struct_(RegUse_resolve_look_at__cross_uz_up_into_right_proc) {
+	Reg scratch;
+	Reg a; Reg b; Reg c; /* load a.x/y/z; result out.x/y/z */
+	Reg d; /* load b.x */
+	Reg f; /* r_f = &right (out ptr), r_g = &uz, r_h = &up_in */
+	
+	union { Reg t1, g, target0; };
+	union { Reg t2, h, target1; };
+	Reg t0;
+};
 /* Atom 2: cross uz × up_in → right. */
-internal MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa, U4 r_scratch
-	,	U4 r_a, U4 r_b, U4 r_c /* load a.x/y/z; result out.x/y/z */
-	,	U4 r_d                 /* load b.x */
-	,	U4 r_f, U4 r_g, U4 r_h /* r_f = &right (out ptr), r_g = &uz, r_h = &up_in */
+internal MipsAtom* resolve_look_at__cross_uz_up_into_right_proc(AtomArena_R aa, 
+	RegUse_resolve_look_at__cross_uz_up_into_right_proc r
 ) MipsAtom_Proc_(aa, {
 	/* FIX: build packed RT22+RT33 with proper sign extension. */
-	add_si(r_g, r_scratch, O_(ResolveLookAtScratch,uz)),    /* r_g = &uz */
-	add_si(r_h, r_scratch, O_(ResolveLookAtScratch,up_in)), /* r_h = &up_in */
-	add_si(r_f, r_scratch, O_(ResolveLookAtScratch,right)), /* r_f = &right (out) */
+	add_si(r.g, r.scratch, O_(ResolveLookAtScratch,uz)),    /* r_g = &uz */
+	add_si(r.h, r.scratch, O_(ResolveLookAtScratch,up_in)), /* r_h = &up_in */
+	add_si(r.f, r.scratch, O_(ResolveLookAtScratch,right)), /* r_f = &right (out) */
 	nop,
 
 	/* Load a (uz).x/y/z into r_a/r_b/r_c. */
-	load_word(r_a, r_g, O_(V3_S4,x)),
-	load_word(r_b, r_g, O_(V3_S4,y)),
-	load_word(r_c, r_g, O_(V3_S4,z)),
-	nop,
-
+	mac_load_v3s4(r.a, r.b, r.c, r.g, 0),
 	/* Load b (up_in).x/y/z into r_d + R_AT/R_V0 (R_AT/R_V0 are hardcoded scratch). */
-	load_word(r_d,  r_h, O_(V3_S4,x)),
-	load_word(R_AT, r_h, O_(V3_S4,y)),
-	load_word(R_V0, r_h, O_(V3_S4,z)),
-	nop,
+	mac_load_v3s4(r.d, R_AT, r.t0, r.h, 0), LdSlot_
 
-	/* Save the two RT control-register slots OP will clobber. We reuse
-	 * r_g/r_h (scratch pointers, no longer needed) as the save targets. */
-	gte_mv_from_ctrl_r(r_g, gte_cr_RT11),    /* r_g = C2 r0 (RT11|RT12) */
-	gte_mv_from_ctrl_r(r_h, gte_cr_RT22),    /* r_h = C2 r4 (RT22|RT33) */
-
+	/* Save the two RT control-register slots OP will clobber. We reuse r_g/r_h (scratch pointers, no longer needed) as the save targets. */
+	gte_mv_from_ctrl_r(r.target0, gte_cr_RT11),    /* r_g = C2 r0 (RT11|RT12) */
+	gte_mv_from_ctrl_r(r.target1, gte_cr_RT22),    /* r_h = C2 r4 (RT22|RT33) */
 	/* Load uz.x/uz.y/uz.z into COP2 control registers.
 	 * OP reads D1 = RT11 from $0.low, D2 = RT22 from $2.high, D3 = RT33 from $4.high.
 	 * RT22 is in BOTH $2.high AND $4.low (shared bit position). OP reads from $2.high.
@@ -215,48 +215,43 @@ internal MipsAtom* resolve_look_at__cross_uz_up_in_to_right_proc(AtomArena_R aa,
 	 * The 2nd ctc2 DOES clobber $4.low (becomes a.z.low, NOT a.y.high), but since OP
 	 * reads RT22 from $2.high (which the 2nd ctc2 doesn't touch), D2 is still a.y.high.
 	 * This is libpsyx's OuterProduct12 convention EXACTLY. */
-	gte_mv_to_ctrl_r(r_b, gte_cr_RT13),    /* $2 = r_b = a.y. RT13=a.y.low, RT22=a.y.high. */
-	gte_mv_to_ctrl_r(r_c, gte_cr_RT22),    /* $4 = r_c = a.z. RT22=a.z.low, RT33=a.z.high. */
+	gte_mv_to_ctrl_r(r.b, gte_cr_RT13),    /* $2 = r_b = a.y. RT13=a.y.low, RT22=a.y.high. */
+	gte_mv_to_ctrl_r(r.c, gte_cr_RT22),    /* $4 = r_c = a.z. RT22=a.z.low, RT33=a.z.high. */
 
 	/* Load uz into the RT diagonal. */
-	gte_mv_to_ctrl_r(r_a, gte_cr_RT11),   /* D1 = RT11 = uz.x (low 16 of $0, sign-extended by OP). */
-	nop2,                                 /* CTC2 retirement (CPU→COP2 2-slot delay) */
+	gte_mv_to_ctrl_r(r.a, gte_cr_RT11),   /* D1 = RT11 = uz.x (low 16 of $0, sign-extended by OP). */
+	DmaSlot_ nop2,                         /* CTC2 retirement (CPU→COP2 2-slot delay) */
 
 	/* Load up_in into IR (the second operand for OP). */
-	gte_mv_to_data_r(r_d,  C2_IR1),       /* IR1 = up_in.x */
+	gte_mv_to_data_r(r.d,  C2_IR1),       /* IR1 = up_in.x */
 	gte_mv_to_data_r(R_AT, C2_IR2),       /* IR2 = up_in.y */
-	gte_mv_to_data_r(R_V0, C2_IR3),       /* IR3 = up_in.z */
-	nop2,                                 /* MTC2 retirement (CPU→COP2 2-slot delay) */
+	gte_mv_to_data_r(r.t0, C2_IR3),       /* IR3 = up_in.z */
+	DmaSlot_ nop2,                         /* MTC2 retirement (CPU→COP2 2-slot delay) */
 
+	// gte_cmdw_cross, /* OP: MAC1/2/3 = uz × up_in
 	gte_cmdw_outer_product, /* OP: MAC1/2/3 = uz × up_in
 		*   MAC1 = IR3*D2 - IR2*D3 = up_in.z*uz.y.high - up_in.y*uz.z.high
 		*   MAC2 = IR1*D3 - IR3*D1 = up_in.x*uz.z.high - up_in.z*uz.x
-		*   MAC3 = IR2*D1 - IR1*D2 = up_in.y*uz.x - up_in.x*uz.y.high
+		*   MAC3 = IR2*D1 - IR1*D2 = up_in.y*uz.x      - up_in.x*uz.y.high
 		* For up_in = (0, -fp_one, 0):
 		*   MAC1 = 0 - (-fp_one)*uz.z.high = fp_one*uz.z.high
 		*   MAC2 = 0 - 0 = 0
 		*   MAC3 = (-fp_one)*uz.x - 0 = -fp_one*uz.x */
 
 	/* Restore the RT slots we clobbered. */
-	gte_mv_to_ctrl_r(r_g, gte_cr_RT11),   /* restore C2 r0 (RT11|RT12) */
-	gte_mv_to_ctrl_r(r_h, gte_cr_RT22),   /* restore C2 r4 (RT22|RT33) */
+	gte_mv_to_ctrl_r(r.target0, gte_cr_RT11),   /* restore C2 r0 (RT11|RT12) */
+	gte_mv_to_ctrl_r(r.target1, gte_cr_RT22),   /* restore C2 r4 (RT22|RT33) */
 
 	/* mfc2 MAC1/2/3 → r_a/r_b/r_c (out.x/y/z). */
-	gte_mv_from_data_r(r_a, C2_MAC1),
-	gte_mv_from_data_r(r_b, C2_MAC2),
-	gte_mv_from_data_r(r_c, C2_MAC3),
-	nop,  /* MFC2 retirement */
+	mac_gte_mv_from_data_r_mac123(r.a, r.b, r.c),
+	DmaSlot_ nop,  /* MFC2 retirement */
 
 	/* Right-shift MAC by 12 to convert from GTE's S12.20 fixed-point scale back to libpsyx OuterProduct12 convention (S12.0, fp_one=4096=1<<12).
 	 * Without this, MAC values (~16M for unit-vector cross products) overflow the GTE's 16-bit IR registers when atom 3 normalizes via mtc2. */
-	shift_aright(r_a, r_a, 12),
-	shift_aright(r_b, r_b, 12),
-	shift_aright(r_c, r_c, 12),
+	mac_shift_aright_v3_self(r.a, r.b, r.c, 12),
 
 	/* Store out.x/y/z to r_f (out ptr = scratch+32). */
-	store_word(r_a, r_f, O_(V3_S4,x)),
-	store_word(r_b, r_f, O_(V3_S4,y)),
-	store_word(r_c, r_f, O_(V3_S4,z)),
+	mac_store_v3s4(r.a, r.b, r.c, r.f, 0),
 
 	mac_yield()
 })
@@ -774,34 +769,34 @@ internal MipsAtom_(pad_input_cam) atom_info(atom_bind(Binds_PadInputCam)
 	load_word(R_T1, R_Cam, O_(Camera,pos.x)), // BD-Slot.
 
 	// D-pad Left → cam.pos.x -= 50.  and_i fulfills BD-slot for load on R_Cam.
-	and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(left_x, exit_left_x)), mac_yield_load(),
+	LdSlot_ and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(left_x, exit_left_x)), BdSlot_ mac_yield_load(),
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.x)), 
 	atom_label(exit_left_x)
 
 	/* D-pad Right → cam.pos.x += 50. Reuses R_T1 from Left. */
-	and_i(R_T3, R_T0, Pad_Right), branch_le_zero(R_T3, atom_offset(right_x, exit_right_x)), nop,
+	and_i(R_T3, R_T0, Pad_Right), branch_le_zero(R_T3, atom_offset(right_x, exit_right_x)), BdSlot_ nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.x)),
 	atom_label(exit_right_x)
 
 	/* D-pad Up → cam.pos.y -= 50. Load pos.y BEFORE the andi. */
-	load_word(R_T1, R_Cam, O_(Camera,pos.y)),
-	and_i(R_T3, R_T0, Pad_Up), branch_le_zero(R_T3, atom_offset(up_y, exit_up_y)), nop,
+	load_word(R_T1, R_Cam, O_(Camera,pos.y)), LdSlot_ 
+	and_i(R_T3, R_T0, Pad_Up), branch_le_zero(R_T3, atom_offset(up_y, exit_up_y)), BdSlot_ nop,
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.y)),
 	atom_label(exit_up_y)
 
 	/* D-pad Down → cam.pos.y += 50. Reuses R_T1 from Up. */
-	and_i(R_T3, R_T0, Pad_Down), branch_le_zero(R_T3, atom_offset(down_y, exit_down_y)), nop,
+	and_i(R_T3, R_T0, Pad_Down), branch_le_zero(R_T3, atom_offset(down_y, exit_down_y)), BdSlot_ nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.y)),
 	atom_label(exit_down_y)
 
 	/* D-pad Cross → cam.pos.z -= 50. Load pos.z BEFORE the andi. */
-	load_word(R_T1, R_Cam, O_(Camera,pos.z)),
-	and_i(R_T3, R_T0, Pad_Cross), branch_le_zero(R_T3, atom_offset(cross_z, exit_cross_z)), nop,
+	load_word(R_T1, R_Cam, O_(Camera,pos.z)), LdSlot_
+	and_i(R_T3, R_T0, Pad_Cross), branch_le_zero(R_T3, atom_offset(cross_z, exit_cross_z)), BdSlot_ nop,
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
 	atom_label(exit_cross_z)
 
 	/* D-pad Circle → cam.pos.z += 50. Reuses R_T1 from Cross. */
-	and_i(R_T3, R_T0, Pad_Circle), branch_le_zero(R_T3, atom_offset(circle_z, exit_circle_z)), nop,
+	and_i(R_T3, R_T0, Pad_Circle), branch_le_zero(R_T3, atom_offset(circle_z, exit_circle_z)), BdSlot_ nop,
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
 	atom_label(exit_circle_z)
 

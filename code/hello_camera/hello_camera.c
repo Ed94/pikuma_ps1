@@ -150,17 +150,19 @@ internal void resolve_look_at_init(void) {
 	U4 pin_mask = regfile_abi_mask | (1 << R_ResolveScratch);
 	RegFile rf  = regfile(pin_mask);
 
-	U4 r_target_ptr = regfile_alloc(& rf); 
-	U4 r_eye_ptr    = regfile_alloc(& rf);
-	U4 r_up_in_ptr  = regfile_alloc(& rf);
-	U4 r_tmp0       = regfile_alloc(& rf);
-	U4 r_tmp1       = regfile_alloc(& rf);
-	U4 r_tmp2       = regfile_alloc(& rf);
-	U4 r_tmp3       = regfile_alloc(& rf);
 	smem.resolve_look_at_atom_addrs[0] = resolve_look_at__input_and_sub_proc(& ab,
-		R_ResolveScratch,
-		r_target_ptr, r_eye_ptr, r_up_in_ptr,
-		r_tmp0, r_tmp1, r_tmp2, r_tmp3);
+		RegUse_(resolve_look_at__input_and_sub_proc) {
+			.scratch = R_ResolveScratch,
+			.target  = regfile_alloc(& rf),
+			.eye     = regfile_alloc(& rf),
+			.up_in   = regfile_alloc(& rf),
+			.t0      = regfile_alloc(& rf),
+			.t1      = regfile_alloc(& rf),
+			.t2      = regfile_alloc(& rf),
+			.t3      = regfile_alloc(& rf),
+			.t4      = regfile_alloc(& rf),
+		}
+	);
 
 	/* === ATOM 1: normalize fwd→uz === */
 	U2 src_offset  = O_(ResolveLookAtScratch, fwd);
@@ -180,16 +182,16 @@ internal void resolve_look_at_init(void) {
 		});
 
 	/* === ATOM 2: cross uz×up_in→right === */
-	U4 r_a_2 = R_T0;
-	U4 r_b_2 = R_T1;
-	U4 r_c_2 = R_T2;
-	U4 r_d_2 = R_T3;
-	U4 r_f_2 = R_T5;  /* out ptr (HARDCODED in body: scratch+32) */
-	U4 r_g_2 = R_T6;  /* a ptr = scratch+16 */
-	U4 r_h_2 = R_T7;  /* b ptr = scratch+128 */
-	smem.resolve_look_at_atom_addrs[2] = resolve_look_at__cross_uz_up_in_to_right_proc(& ab,
-		R_ResolveScratch,
-		r_a_2, r_b_2, r_c_2, r_d_2, r_f_2, r_g_2, r_h_2);
+	smem.resolve_look_at_atom_addrs[2] = resolve_look_at__cross_uz_up_into_right_proc(& ab,
+		RegUse_(resolve_look_at__cross_uz_up_into_right_proc) {
+			.scratch = R_ResolveScratch,
+			.a = R_T0, .b = R_T1, .c = R_T2,
+			.d = R_T3,
+			.f = R_T5,
+			.t1 = R_T6,
+			.t2 = R_T7,
+			.t0 = R_V0,
+		});
 
 	/* === ATOM 3: normalize right→ux === */
 	src_offset  = O_(ResolveLookAtScratch, right);

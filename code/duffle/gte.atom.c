@@ -28,9 +28,9 @@ FI_ Slice_MipsCode ac_gte_store_f3(AtomBuilder_R ab, U4 r_primitive_cursor) atom
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
 I_ Slice_MipsCode ac_gte_load_tri_verts(AtomBuilder_R ab, U4 r_vert_base, U4 r_v0, U4 r_v1, U4 r_v2) atom_dbg_skip MipsAtomComp_Proc_(ab, {
-	shift_lleft(R_AT, r_v0, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
-	shift_lleft(R_AT, r_v1, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
-	shift_lleft(R_AT, r_v2, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
+	shift_lleft(R_AT, r_v0, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
+	shift_lleft(R_AT, r_v1, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
+	shift_lleft(R_AT, r_v2, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
 })
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
@@ -38,7 +38,7 @@ I_ Slice_MipsCode ac_gte_load_tri_verts(AtomBuilder_R ab, U4 r_vert_base, U4 r_v
  * PIPELINE: post-RTPT, pre-RTPS (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen).
  * MUST be called BEFORE V3-RTPS, otherwise SXY0/1/2 get overwritten with v3
  * (RTPS writes only to SXY2, but to keep the three registers aligned with v0/v1/v2 you must store before RTPS). */
-FI_ Slice_MipsCode ac_gte_store_g4_p012(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+FI_ Slice_MipsCode ac_gte_store_g4_p012(AtomBuilder_R ab, Reg r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_sw(C2_SXY0, r_primitive_cursor, O_(Poly_G4,p0)),
 	gte_sw(C2_SXY1, r_primitive_cursor, O_(Poly_G4,p1)),
 	gte_sw(C2_SXY2, r_primitive_cursor, O_(Poly_G4,p2)),
@@ -65,12 +65,12 @@ FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4
  * The SQR command always squares IR1/IR2/IR3 — those C2 registers are fixed.
  * The GPRs holding the source vector are caller-determined.
  * Words: 5 (3 mtc2 + 1 nop hazard + 1 cmd). */
-FI_ Slice_MipsCode ac_gte_sqr_v3s4(AtomBuilder_R ab, Reg r_sx, Reg r_sy, Reg r_sz, MipsCode nop_slot)
+FI_ Slice_MipsCode ac_gte_sqr_v3s4(AtomBuilder_R ab, Reg r_sx, Reg r_sy, Reg r_sz, MipsCode delay_slot)
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_mv_to_data_r(r_sx, C2_IR1),
 	gte_mv_to_data_r(r_sy, C2_IR2),
 	gte_mv_to_data_r(r_sz, C2_IR3),
-	nop_slot, gte_cmdw_sqr,
+	delay_slot, gte_cmdw_sqr,
 })
 
 /* ─── STAGE 4 of normalize: mtc2 IR0..3 + GPF + mfc2 MAC + srav finalize ───
@@ -132,33 +132,13 @@ FI_ Slice_MipsCode ac_trans_mt3s3s4(AtomBuilder_R ab
 FI_ Slice_MipsCode ac_lzcr_round_even_half_shift(AtomBuilder_R ab,
 	U4 r_shift,
 	U4 r_mag_sq,
-	U4 r_mag_sq_copy
-)
+	U4 r_mag_sq_copy)
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	and_i(r_shift, r_shift, gte_lzcr_even_mask),
 	or_u(r_mag_sq_copy, r_mag_sq, 0),
 	li_s(r_mag_sq, 31),
 	sub_s(r_mag_sq, r_mag_sq, r_shift),
 	shift_aright(r_mag_sq, r_mag_sq, 1),
-})
-
-FI_ Slice_MipsCode ac_shift_aright_var_v3(AtomBuilder_R ab
-	, Reg rd_v0, Reg rd_v1, Reg rd_v2
-	, Reg rs_v0, Reg rs_v1, Reg rs_v2
-	, Reg r_shift)
-MipsAtomComp_Proc_(ab, {
-	shift_aright_var(rd_v0, rs_v0, r_shift),
-	shift_aright_var(rd_v1, rs_v1, r_shift),
-	shift_aright_var(rd_v2, rs_v2, r_shift),
-})
-
-FI_ Slice_MipsCode ac_shift_aright_var_v3_self(AtomBuilder_R ab
-	, Reg rds_v0, Reg rds_v1, Reg rds_v2
-	, Reg r_shift)
-MipsAtomComp_Proc_(ab, {
-	shift_aright_var(rds_v0, rds_v0, r_shift),
-	shift_aright_var(rds_v1, rds_v1, r_shift),
-	shift_aright_var(rds_v2, rds_v2, r_shift),
 })
 
 FI_ Slice_MipsCode ac_gte_general_purpose_interopolation(AtomBuilder_R ab
@@ -178,9 +158,8 @@ MipsAtomComp_Proc_(ab, {
 	gte_mv_from_data_r(fr_mac3, C2_MAC3),
 })
 
-FI_ Slice_MipsCode gte_mv_from_data_r_mac123(AtomBuilder_R ab
-	, Reg fr_mac1, Reg fr_mac2, Reg fr_mac3
-)
+FI_ Slice_MipsCode ac_gte_mv_from_data_r_mac123(AtomBuilder_R ab
+	, Reg fr_mac1, Reg fr_mac2, Reg fr_mac3)
 MipsAtomComp_Proc_(ab, {
 	gte_mv_from_data_r(fr_mac1, C2_MAC1),
 	gte_mv_from_data_r(fr_mac2, C2_MAC2),
@@ -257,9 +236,8 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x0820, 0x081c, 0x0818, 0x0814, 0x0810, 0x080c, 0x0808, 0x0804,
 };
 
-#define RegUse_(proc_name) (tmpl(RegUse,proc_name))
 typedef Struct_(RegUse_normalize_v3s4_proc) {
-	Reg scratch; // Scratch base carrier.
+	Reg const scratch; // Scratch base carrier.
 	Reg src_ptr;
 	Reg dst_ptr;
 	Reg recip_est; // |v|² sum + shift-input + sqrtbl[index]
@@ -267,7 +245,7 @@ typedef Struct_(RegUse_normalize_v3s4_proc) {
 	Reg src_x;
 	union { Reg mac1_scratch; } t3;
 	union { Reg mac2_scratch; } t4;
-	union { Reg shift_count, btarget, lookup_addr, src_z; } t5;
+	union { Reg btarget, shift_count, lookup_addr, src_z; } t5;
 };
 /* ─── Full normalize (all 4 stages inline) ───
  * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav).
@@ -306,7 +284,7 @@ MipsAtom_Proc_(aa, {
 
 	/* Load src.x/y/z from r_src_ptr (caller-determined address) into r_tmp/r_recip_est/r_branch_tmp.
 	 * r.rt1_src_x holds src.x throughout stages 1-2 — r_mac2_scratch is clobbered to MAC2 in stage 1.5 (line below). */
-	mac_load_v3s4(r.src_x, r.recip_est, r.t5.lookup_addr, r.src_ptr, 0),
+	mac_load_v3s4(r.src_x, r.recip_est, r.t5.src_z, r.src_ptr, 0),
 
 	/* Stage 1: mtc2 src → IR1/2/3, SQR fires. */
 	LdSlot_ mac_gte_sqr_v3s4(r.src_x, r.recip_est, r.t5.src_z, LdSlot_ nop),

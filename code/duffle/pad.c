@@ -64,8 +64,8 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 		asm_words(
 			add_ui(  R_T1, R_0, bios_start_pad_2), /* $t1 = 0x13 */
 			add_ui(  R_T2, R_0, bios_btable_addr), /* $t2 = 0xB0 (re-load) */
-			call_reg(R_T2),                             /* jalr $t2, $ra */
-			nop                                           /* BD slot */
+			call_reg(R_T2),                        /* jalr $t2, $ra */
+			nop                                    /* BD slot */
 		)
 		asm_clobber:
 			rlit(R_AT),

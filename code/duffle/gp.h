@@ -418,14 +418,11 @@ typedef Struct_(PolyTag) {
 	};
 };
 
-/* DSL cast convention: every cast uses `C_()`, every pointer qualifier is `R_` (restrict) or `V_` (volatile).
- * No raw C-style casts. RHS values are assumed to be `U4` — caller passes a `U4` directly. */
 #define set_len(tag,v)  (C_(PolyTag_R,tag)->len  = u4_(v))
 #define set_addr(tag,v) (C_(PolyTag_R,tag)->addr = u4_(v))
-/* `set_code` is no longer in the new PolyTag design — the code byte lives in the primitive body
+/* `set_code` is no longer in the new PolyTag design
  * (e.g. `((Poly_F3*)(p))->code`), not in the tag.
- *  Use the typed primitive structs (Poly_F3, Poly_G4, etc.) and the `set_poly_*` setters,
- *  which set both the tag's length and the code. */
+ *  Use the typed primitive structs (Poly_F3, Poly_G4, etc.) and the `set_poly_*` setters, which set both the tag's length and the code. */
 #define get_len(tag)  C_(U4,C_(PolyTag_R,tag)->len)
 #define get_addr(tag) C_(U4,C_(PolyTag_R,tag)->addr)
 
@@ -572,7 +569,7 @@ enum {
 	/* Default TPage value libpsyx's SetDefDrawEnv writes (matches the `li v1, 10; sh v1, 20(v0)` sequence at C11_only.elf:0x8001273C). */
 	gp0_tpage_default    = 10,
 
-	/* TPage semi-transparency mode payload values (NOT bit positions). */
+	/* TPage semi-transparency mode payload values. */
 	gp0_tpage_semi_trans_none  = 0x0,
 	gp0_tpage_semi_trans_alpha = 0x1,
 	gp0_tpage_semi_trans_add   = 0x2,

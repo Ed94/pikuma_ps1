@@ -44,7 +44,8 @@ atom_dbg_skip MipsAtomComp_Proc_(ab, {
 })
 
 /* Words: 11; Correctly inserts a primitive into the Ordering Table linked list. */
-I_ Slice_MipsCode ac_insert_ot_tag(AtomBuilder_R ab, U4 r_ot_base, U4 r_prim_cursor, U4 poly_size) MipsAtomComp_Proc_(ab, {
+// TODO(Ed): Expose R_T1 as a r_t0, r_V0 as r_t2
+I_ Slice_MipsCode ac_insert_ot_tag(AtomBuilder_R ab, Reg r_ot_base, Reg r_prim_cursor, U2 poly_size) MipsAtomComp_Proc_(ab, {
 	shift_lleft( R_T1, R_T1, S_(U4)/2),                        // T1 = otz * S_(U4) (otz arg is implicit R_T1)
 	add_u_self(  R_T1, r_ot_base),                             // T1 = & OrderingTable[OTZ]
 	load_word(   R_AT, R_T1,          O_(PolyTag,code)),       // AT = old_ot_head

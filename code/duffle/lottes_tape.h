@@ -105,7 +105,7 @@ typedef U2 Reg; // Register parameter used with atom or atom component procedure
 typedef U4 const MipsCode; // Underlying type to mips asm words.
 typedef Slice_(MipsCode);
 
-typedef U4 const MipsAtom; 
+typedef U4 const MipsAtom; // Underlying type to a mips atom defnition 
 typedef Slice_(MipsAtom); 
 // Sometimes a user will define a bundle of atoms that represent a procedure of work as:
 //   MipsAtom* <identifier>[...];
@@ -242,6 +242,7 @@ atom_dbg_skip MipsAtomComp_(ac_yield_tail) {
 	add_ui_self(R_TapePtr, S_(MipsCode)),
 	jump_reg(  R_AtomJmp), nop,
 };
+
 #pragma endregion Macro Atom Components
 
 #pragma region Atom Builder
@@ -378,6 +379,27 @@ FI_ void regfile_reset_mask(RegFile_R rf, U4 mask) {
 #pragma endregion RegFileArena (Register File Allocator)
 
 #pragma region Mips Atom Procs
+/* RegUse structs are a convention to organize register allocations for a mips atom procedure.
+	Unlike the usual enum-based declarations, they provide a namespaced scope 
+	and have view types via union declarations.
+*/
+#define RegUse_(proc_name) (tmpl(RegUse,proc_name))
+
+	typedef Struct_(RegUse_example_atom_proc) {
+		Reg const ro_register; // Scratch base carrier.
+		Reg usual_modifiable;
+		union { Reg view_1, view_2, view_3; } t1;
+	};
+	internal MipsAtom* example_atom_proc(AtomArena_R aa, U2 offset, RegUse_example_atom_proc r) 
+	MipsAtom_Proc_(aa, {
+		add_si(r.usual_modifiable, r.ro_register, offset),
+		or_u(r.t1.view_1, r.ro_register, 0),
+		branch_lt_zero(r.t1.view_1, atom_offset(example_atom_proc, skip)), BdSlot_ nop,
+		li_s(r.t1.view_2, 100),
+	atom_label(skip)
+		add_si(r.t1.view_3, r.usual_modifiable, 10),
+		mac_yield(),
+	})
 
 #pragma endregion Mips Atom Procs
 

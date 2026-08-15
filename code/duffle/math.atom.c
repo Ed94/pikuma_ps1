@@ -39,6 +39,13 @@ FI_ Slice_MipsCode ac_store_v3s4(AtomBuilder_R ab, U4 rt_x, U4 rt_y, U4 rt_z, U4
 #define ac_store_p3s4 ac_store_v3s4
 #define mac_store_p3s4 mac_store_v3s4
 
+FI_ Slice_MipsCode ac_add_si_v3s4(AtomBuilder_R ab, Reg rt_x,  Reg rt_y,  Reg rt_z, Reg base, U2 offset)
+atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	add_si(rt_x, base, O_(V3_S4,x)),
+	add_si(rt_y, base, O_(V3_S4,y)),
+	add_si(rt_z, base, O_(V3_S4,z)),
+})
+
 FI_ Slice_MipsCode ac_sub_v3s4(AtomBuilder_R ab, U4 rds_x, U4 rds_y, U4 rds_z, U4 rt_x,  U4 rt_y,  U4 rt_z) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	sub_s(rds_x, rds_x, rt_x),
 	sub_s(rds_y, rds_y, rt_y),

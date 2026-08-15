@@ -33,7 +33,7 @@
  *  gte.h — Geometry Transformation Engine (COP2) for the PS1
  * ============================================================================
  *
- *  Hand-rolled DSL for emitting GTE/MIPS instruction words as raw `.word` constants from C.
+ *  Hand-rolled DSL for emitting GTE/MIPS instruction words from C.
  *  No GCC inline-assembly string syntax in the code body.
  *
  *  STYLE NOTES
@@ -191,27 +191,22 @@ enum {
 };
 
 /* --- GTE Control Register Aliases (Pitfall 1) ---
- * Three pairs of aliases map to the SAME C2 control-register slot on real silicon:
+ * Three pairs of aliases map to the C2 control-register slot:
  *   C2[24] = gte_cr_RBK (background R)         | gte_cr_OFX (screen offset X)
  *   C2[25] = gte_cr_GBK (background G)         | gte_cr_OFY (screen offset Y)
  *   C2[26] = gte_cr_BBK (background B)         | gte_cr_H   (projection plane distance H)
- * Cross-alias writes inside one atom body, or across the wave-context boundary,
- * silently clobber each other. The metaprogram's check_gte_cr_alias_writes
- * (CHECK_RULES row) warns about each pair per source. See
- * docs/gte_reference.md §"Control-register alias table" for the silicon
- * rationale and the libgte outer-product convention.
+ * Cross-alias writes inside one atom body, or across the wave-context boundary, silently clobber each other.
+ * The metaprogram's check_gte_cr_alias_writes (CHECK_RULES row) warns about each pair per source.
+ * See psx-spx docs/gte_reference.md §"Control-register alias table" for the silicon rationale and the libgte outer-product convention.
  */
 
 /* --- RT-matrix packed-slot convention (Pitfall 4) ---
  * The silicon packs two 16-bit RT elements per 32-bit C2 slot:
  *   C2[2] = (RT22 << 16) | RT13       (gte_cr_RT13 writes the low  half, gte_cr_RT22 writes the high half)
  *   C2[4] = (RT33 << 16) | RT22       (gte_cr_RT22 writes the low  half — clobbers prior RT22 value if RT13 was also written)
- * OP and MVMVA read D1/D2/D3 from these packed slots. The libgte outer-product
- * convention (see ac_apply_matrix_lv at gte.atom.c:108-122) writes C2[2] then
- * C2[4] in sequence; the SECOND write's low half is RT22, not RT13. An agent
- * who writes gte_cr_RT13 then gte_cr_RT22 to the SAME source GPR clobbers the
- * RT13 value. See docs/gte_reference.md §"RT-matrix packed-slot convention"
- * for the canonical write pattern.
+ * OP and MVMVA read D1/D2/D3 from these packed slots.
+ * The libgte outer-product convention (see ac_apply_matrix_lv at gte.atom.c:108-122) writes C2[2] then C2[4] in sequence;
+ * the SECOND write's low half is RT22, not RT13. 
  */
 
 /* --- GTE Control Register Indices (for ctc2/cfc2) ---
@@ -300,8 +295,7 @@ enum { _C2_TX_SUBS_ = 0
 // #define gte_mv_from_data_r(rt, rd) enc_gte_tx(cop_mf, (rt), (rd)) /* Move GTE Control Register (rd) to GPR (rt) */
 
 /* GTE Data vs Control Register Transfers
- *
- * Each macro emits a single .word constant for one of MFC2/CFC2/MTC2/CTC2.
+ * Each macro emits a single instruction for one of MFC2/CFC2/MTC2/CTC2.
  *
  * `rd` is the C2 register index in the file the sub-opcode names:
  *   gte_mv_from_data_r / gte_mv_to_data_r  →  C2 data register file
@@ -316,14 +310,14 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_mv_from_ctrl_r(rt, rd) enc_gte_tx(sub_cfc2, (rt), (rd)) /* Copy From ctrl reg */
 #define gte_mv_to_data_r(rt, rd)   enc_gte_tx(sub_mtc2, (rt), (rd)) /* Move To   data reg */
 #define gte_mv_to_ctrl_r(rt, rd)   enc_gte_tx(sub_ctc2, (rt), (rd)) /* Copy To   ctrl reg */
+#define DmaSlot_ // Annotate an instruction as filling a CPU <-> GTE DMA delay slot/s
 
 /* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
  * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]
  *   - rs: GPR base address
  *   - rt: COP2 data register index (0..31)
  *   - imm: signed 16-bit offset
- * NOTE: When `rs` is a runtime register, the encoding cannot be pre-baked
- * into a .word — use the string-style `gte_load_v0` macro below instead. */
+ * NOTE: When `rs` is a runtime register, the encoding cannot be pre-baked into a .word — use the string-style `gte_load_v0` macro below instead. */
 #define enc_gte_lw(rt, base, off) enc_i(op_lwc2, (base), (rt), (off))
 /* Store Word */
 #define enc_gte_sw(rt, base, off) enc_i(op_swc2, (base), (rt), (off))
@@ -332,8 +326,7 @@ enum { _C2_TX_SUBS_ = 0
  * `swc2` is redundant when we're already inside the `gte_` namespace.
  *   gte_lw rt, base, off  →  lwc2 rt, off(base)
  *   gte_sw rt, base, off  →  swc2 rt, off(base)
- * For the typical user-facing vector-level load (xy + z as two instructions),
- * use the higher-level `gte_load_vN` macros below. */
+ * For the typical user-facing vector-level load (xy + z as two instructions), use the higher-level `gte_load_vN` macros below. */
 #define gte_lw(rt, base, off) enc_gte_lw(rt, base, off)
 #define gte_sw(rt, base, off) enc_gte_sw(rt, base, off)
 
@@ -350,13 +343,13 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_cmd_base (enc_op(op_cop2) | (1 << 25))
 
 /* Per-field encoders. Each one does (value & mask) << shift on its own. */
-#define enc_gte_sf(sf)          ((sf)  << gte_shift_sf )
-#define enc_gte_mx(mx)          ((mx)  << gte_shift_mx )
-#define enc_gte_v(v)            ((v)   << gte_shift_v  )
-#define enc_gte_cv(cv)          ((cv)  << gte_shift_cv )
-#define enc_gte_lm(lm)          ((lm)  << gte_shift_lm )
-#define enc_gte_cmd(cmd)        ((cmd) << gte_shift_cmd )
-#define enc_gte_fake_cmd(x)     ((x)   << gte_shift_fake_cmd)
+#define enc_gte_sf(sf)      ((sf)  << gte_shift_sf )
+#define enc_gte_mx(mx)      ((mx)  << gte_shift_mx )
+#define enc_gte_v(v)        ((v)   << gte_shift_v  )
+#define enc_gte_cv(cv)      ((cv)  << gte_shift_cv )
+#define enc_gte_lm(lm)      ((lm)  << gte_shift_lm )
+#define enc_gte_cmd(cmd)    ((cmd) << gte_shift_cmd )
+#define enc_gte_fake_cmd(x) ((x)   << gte_shift_fake_cmd)
 
 /* Composite: all six GTE fields + the COP2/CO base. */
 #define enc_gte_cmdw(sf, mx, v, cv, lm, cmd) ( \
@@ -408,10 +401,11 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_cmdw_rtpt   (gte_cmd_base | enc_gte_cmd(gte_cmd_rtpt ) | gte_cmdw_psyq_compat)
 #define gte_cmdw_nclip  (gte_cmd_base | enc_gte_cmd(gte_cmd_nclip))
 #define gte_cmdw_op     (gte_cmd_base | enc_gte_cmd(gte_cmd_op   ))
-#define gte_cmdw_outer_product gte_cmdw_op      /* "outer product" -- NOCASH/Sdk terminology */
-#define gte_cmdw_wedge         gte_cmdw_op      /* "wedge product"  -- geometric-algebra terminology.
-	* RGA(Lengyel): the GTE OP is a 3D signed-16-bit D x IR cross, not a generic RGA exterior product.
-	* The wedge alias is the 3D complement interpretation of the same 3 scalars (MAC1..MAC3). */
+#define gte_cmdw_outer_product gte_cmdw_op      /* "outer product" -- PSY-Q terminology */
+#define gte_cmdw_wedge         gte_cmdw_op      /* "wedge product"  -- geometric-algebra terminology. */
+#define gte_cmdw_cross         gte_cmdw_op      /* "cross product"  -- geometric-algebra terminology.
+	* RGA(Lengyel): The GTE OP is a 3D signed-16-bit D x IR cross, not a generic RGA exterior product.
+	* The wedge alias is a 3D complement interpretation of the same 3 scalars (MAC1..MAC3). */
 #define gte_cmdw_mvmva  (gte_cmd_base | enc_gte_cmd(gte_cmd_mvmva))
 
 /* MVMVA with sf=0 (no shift, full-integer), cv=3 (no translation), v=3 (IR vector input).

@@ -85,6 +85,13 @@ WORD_COUNT(mac_load_v3s4, 3)
 WORD_COUNT(mac_store_v3s4, 3)
 
 /* atom_dbg_skip */
+#define mac_add_si_v3s4(rt_x, rt_y, rt_z, base, offset) \
+	add_si(rt_x, base, O_(V3_S4,x)) \
+,	add_si(rt_y, base, O_(V3_S4,y)) \
+,	add_si(rt_z, base, O_(V3_S4,z))
+WORD_COUNT(mac_add_si_v3s4, 3)
+
+/* atom_dbg_skip */
 #define mac_sub_v3s4(rds_x, rds_y, rds_z, rt_x, rt_y, rt_z) \
 	sub_s(rds_x, rds_x, rt_x) \
 ,	sub_s(rds_y, rds_y, rt_y) \
@@ -104,6 +111,24 @@ WORD_COUNT(mac_store_rects2, 4)
 	load_upper_i(dst, u4_hi(imm)) \
 ,	or_i_self(   dst, u4_lo(imm))
 WORD_COUNT(mac_load_word_imm, 2)
+
+#define mac_shift_aright_v3_self(dt_x, dt_y, dt_z, shift_amount) \
+	shift_aright(dt_x, dt_x, shift_amount) \
+,	shift_aright(dt_y, dt_y, shift_amount) \
+,	shift_aright(dt_z, dt_z, shift_amount)
+WORD_COUNT(mac_shift_aright_v3_self, 3)
+
+#define mac_shift_aright_var_v3(rd_v0, rd_v1, rd_v2, rs_v0, rs_v1, rs_v2, r_shift) \
+	shift_aright_var(rd_v0, rs_v0, r_shift) \
+,	shift_aright_var(rd_v1, rs_v1, r_shift) \
+,	shift_aright_var(rd_v2, rs_v2, r_shift)
+WORD_COUNT(mac_shift_aright_var_v3, 3)
+
+#define mac_shift_aright_var_v3_self(rds_v0, rds_v1, rds_v2, r_shift) \
+	shift_aright_var(rds_v0, rds_v0, r_shift) \
+,	shift_aright_var(rds_v1, rds_v1, r_shift) \
+,	shift_aright_var(rds_v2, rds_v2, r_shift)
+WORD_COUNT(mac_shift_aright_var_v3_self, 3)
 
 /* atom_dbg_skip */
 #define mac_load_tri_indices(r_face_cusor, r_i0, r_i1, r_i2) \
@@ -125,19 +150,19 @@ WORD_COUNT(mac_gte_store_f3, 3)
 ,	add_u_self(R_AT, r_vert_base) \
 ,	load_word(R_V0, R_AT, O_(V3_S2,x)) \
 ,	load_word(R_V1, R_AT, O_(V3_S2,z)) \
-,	gte_mv_to_data_r(R_V0, C2_VXY0) \
+,	LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY0) \
 ,	gte_mv_to_data_r(R_V1, C2_VZ0) \
 ,	shift_lleft(R_AT, r_v1, v3s2_byteoff) \
 ,	add_u_self(R_AT, r_vert_base) \
 ,	load_word(R_V0, R_AT, O_(V3_S2,x)) \
 ,	load_word(R_V1, R_AT, O_(V3_S2,z)) \
-,	gte_mv_to_data_r(R_V0, C2_VXY1) \
+,	LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY1) \
 ,	gte_mv_to_data_r(R_V1, C2_VZ1) \
 ,	shift_lleft(R_AT, r_v2, v3s2_byteoff) \
 ,	add_u_self(R_AT, r_vert_base) \
 ,	load_word(R_V0, R_AT, O_(V3_S2,x)) \
 ,	load_word(R_V1, R_AT, O_(V3_S2,z)) \
-,	gte_mv_to_data_r(R_V0, C2_VXY2) \
+,	LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY2) \
 ,	gte_mv_to_data_r(R_V1, C2_VZ2)
 WORD_COUNT(mac_gte_load_tri_verts, 18)
 
@@ -162,11 +187,11 @@ WORD_COUNT(mac_gte_store_g4_p3, 1)
 WORD_COUNT(mac_gte_sqr_v3, 8)
 
 /* atom_dbg_skip */
-#define mac_gte_sqr_v3s4(r_sx, r_sy, r_sz, nop_slot) \
+#define mac_gte_sqr_v3s4(r_sx, r_sy, r_sz, delay_slot) \
 	gte_mv_to_data_r(r_sx, C2_IR1) \
 ,	gte_mv_to_data_r(r_sy, C2_IR2) \
 ,	gte_mv_to_data_r(r_sz, C2_IR3) \
-,	nop_slot \
+,	delay_slot \
 ,	gte_cmdw_sqr
 WORD_COUNT(mac_gte_sqr_v3s4, 5)
 
@@ -203,18 +228,6 @@ WORD_COUNT(mac_trans_mt3s3s4, 6)
 ,	sub_s(r_mag_sq, r_mag_sq, r_shift) \
 ,	shift_aright(r_mag_sq, r_mag_sq, 1)
 WORD_COUNT(mac_lzcr_round_even_half_shift, 5)
-
-#define mac_shift_aright_var_v3(rd_v0, rd_v1, rd_v2, rs_v0, rs_v1, rs_v2, r_shift) \
-	shift_aright_var(rd_v0, rs_v0, r_shift) \
-,	shift_aright_var(rd_v1, rs_v1, r_shift) \
-,	shift_aright_var(rd_v2, rs_v2, r_shift)
-WORD_COUNT(mac_shift_aright_var_v3, 3)
-
-#define mac_shift_aright_var_v3_self(rds_v0, rds_v1, rds_v2, r_shift) \
-	shift_aright_var(rds_v0, rds_v0, r_shift) \
-,	shift_aright_var(rds_v1, rds_v1, r_shift) \
-,	shift_aright_var(rds_v2, rds_v2, r_shift)
-WORD_COUNT(mac_shift_aright_var_v3_self, 3)
 
 #define mac_gte_general_purpose_interopolation(to_ir0, to_ir1, to_ir2, to_ir3, fr_mac1, fr_mac2, fr_mac3, nop_slot1, nop_slot2) \
 	gte_mv_to_data_r(to_ir0, C2_IR0) \
