@@ -1,0 +1,25 @@
+{
+	"name": "cozy-and-windy",
+	"displayName": "Cozy and Windy",
+	"description": "Editor theme ported from the Rider Cozy and Windy scheme. Colors C/C++ and tape-atom DSL keywords.",
+	"publisher": "local",
+	"version": "0.1.0",
+	"engines": {
+		"vscode": "^1.80.0"
+	},
+	"categories": [
+		"Themes"
+	],
+	"scripts": {
+		"package": "npx --yes @vscode/vsce@3.6.1 package --allow-missing-repository --skip-license --out cozy-and-windy-0.1.0.vsix"
+	},
+	"contributes": {
+		"themes": [
+			{
+				"label": "Cozy and Windy",
+				"uiTheme": "vs-dark",
+				"path": "./themes/cozy-and-windy-color-theme.json"
+			}
+		]
+	}
+}

@@ -64,7 +64,9 @@ function instructionType(name, index) {
 	if (domain === "component") return "tapeComponentInstruction";
 	if (/^gte_(?!cr_)/.test(name)) return "tapeGteInstruction";
 	if (/^gp[01]_/.test(name)) return "tapeGpuInstruction";
-	if (/^mac_/.test(name)) return "tapeComponentInstruction";
+	if (/^mac_gte_/.test(name)) return "tapeGteInstruction";
+	if (/^mac_gp/.test(name)) return "tapeGpuInstruction";
+	if (/^mac_/.test(name)) return "tapeCpuInstruction";
 	return null;
 }
 
@@ -82,6 +84,8 @@ function isRegUseAccess(tokens, tokenIndex) {
 	if (!prev || prev.text !== ".") return false;
 	const prevPrev = tokens[tokenIndex - 2];
 	if (!prevPrev || prevPrev.kind !== "identifier") return false;
+	const next = tokens[tokenIndex + 1];
+	if (next && next.text === ".") return false;
 	if (prevPrev.text === "r") return true;
 	const prev3 = tokens[tokenIndex - 3];
 	const prev4 = tokens[tokenIndex - 4];

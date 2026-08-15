@@ -67,7 +67,7 @@ test("document-local declarations override an empty workspace index", () => {
 	const result = classifyDocument(source, "C:/x/code/duffle/math.atom.c", createIndex());
 
 	assert.equal(byText(result, "ac_new_component")[0].type, "tapeComponentName");
-	assert.equal(byText(result, "mac_new_component")[0].type, "tapeComponentInstruction");
+	assert.equal(byText(result, "mac_new_component")[0].type, "tapeCpuInstruction");
 });
 
 test("classifier returns ordered non-overlapping spans and partial malformed output", () => {

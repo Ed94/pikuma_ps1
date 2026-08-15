@@ -100,13 +100,19 @@ function scanSource(source, filePath) {
 		declarations.set(token.start, { role, modifiers });
 	}
 
+	function componentDomain(name) {
+		if (name.startsWith("ac_gte_") || name.startsWith("mac_gte_")) return "gte";
+		if (name.startsWith("ac_gp_") || name.startsWith("mac_gp_")) return "gpu";
+		return "cpu";
+	}
+
 	function addComponent(token) {
 		index.components.add(token.text);
 		mark(token, "componentName");
 		const alias = componentAlias(token.text);
 		if (alias) {
 			index.componentAliases.add(alias);
-			index.macros.set(alias, domain);
+			index.macros.set(alias, componentDomain(token.text));
 		}
 	}
 
@@ -161,7 +167,13 @@ function scanSource(source, filePath) {
 
 		if (token.text === "define" && tokens[tokenIndex - 1] && tokens[tokenIndex - 1].text === "#") {
 			const name = tokens[tokenIndex + 1];
-			if (name && name.kind === "identifier" && name.line === token.line) index.macros.set(name.text, domain);
+			if (name && name.kind === "identifier" && name.line === token.line) {
+				if (/^(?:RegUse_|Struct_|Enum_|Union_|TypeR_|TypeV_|Relative_|Binds_)/.test(name.text)) {
+					index.types.add(name.text);
+				} else {
+					index.macros.set(name.text, domain);
+				}
+			}
 		}
 
 		if (token.text === "typedef") {

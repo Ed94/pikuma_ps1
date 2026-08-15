@@ -6,8 +6,7 @@
 		{ "include": "#component-declarations" },
 		{ "include": "#annotation-arguments" },
 		{ "include": "#annotations" },
-		{ "include": "#instructions" },
-		{ "include": "#registers" },
+		{ "include": "#delay-slots" },
 		{ "include": "#types" },
 		{ "include": "#attributes" }
 	],
@@ -34,15 +33,11 @@
 						"2": { "name": "entity.name.function.duffle.component" }
 					}
 				},
-				{ "match": "\\bMipsAtomComp_Proc_\\b", "name": "keyword.control.duffle.component" },
-				{ "match": "\\bac_[A-Za-z0-9_]+\\b", "name": "entity.name.function.duffle.component" }
+				{ "match": "\\bMipsAtomComp_Proc_\\b", "name": "keyword.control.duffle.component" }
 			]
 		},
 		"annotation-arguments": {
 			"patterns": [
-				{ "match": "(?<=\\batom_bind\\()\\s*Binds_[A-Za-z0-9_]+", "name": "entity.name.type.duffle.bind" },
-				{ "match": "(?<=\\batom_phase\\()\\s*[A-Za-z_][A-Za-z0-9_]*", "name": "entity.name.tag.duffle.phase" },
-				{ "match": "(?<=\\batom_label\\()\\s*[A-Za-z_][A-Za-z0-9_]*", "name": "entity.name.label.duffle.atom" },
 				{
 					"match": "\\b(atom_offset)\\s*\\(\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*,\\s*([A-Za-z_][A-Za-z0-9_]*)",
 					"captures": {
@@ -50,31 +45,22 @@
 						"2": { "name": "entity.name.label.duffle.atom" },
 						"3": { "name": "entity.name.label.duffle.atom" }
 					}
-				}
+				},
+				{ "match": "(?<=\\batom_bind\\()\\s*Binds_[A-Za-z0-9_]+", "name": "entity.name.type.duffle.bind" },
+				{ "match": "(?<=\\batom_phase\\()\\s*[A-Za-z_][A-Za-z0-9_]*", "name": "entity.name.tag.duffle.phase" },
+				{ "match": "(?<=\\batom_label\\()\\s*[A-Za-z_][A-Za-z0-9_]*", "name": "entity.name.label.duffle.atom" }
 			]
 		},
 		"annotations": {
 			"match": "\\b(atom_info|atom_bind|atom_reads|atom_writes|atom_label|atom_offset|atom_reg|atom_type|atom_ctx|atom_phase|atom_auto_reg|phase_auto_reg|atom_dbg_skip)\\b",
 			"name": "support.function.duffle.annotation"
 		},
-		"instructions": {
-			"patterns": [
-				{ "match": "\\b(branch_|jump_|jump_rel|call_)[A-Za-z0-9_]*\\b", "name": "keyword.control.duffle.branch" },
-				{ "match": "\\b(LdSlot_|BdSlot_)\\b", "name": "keyword.operator.duffle.delayslot" },
-				{ "match": "\\b(load_|store_|add_|sub_|shift_|set_lt_|and_i|or_i|xor_i|nop[0-9]*)[A-Za-z0-9_]*\\b", "name": "support.function.duffle.cpu" },
-				{ "match": "\\bgte_(?!cr_)[A-Za-z0-9_]+\\b", "name": "support.function.duffle.gte" },
-				{ "match": "\\bgp[01]_[A-Za-z0-9_]+\\b", "name": "support.function.duffle.gpu" },
-				{ "match": "\\bmac_[A-Za-z0-9_]+\\b", "name": "support.function.duffle.component" }
-			]
-		},
-		"registers": {
-			"patterns": [
-				{ "match": "\\bR_[A-Za-z0-9_]+\\b", "name": "variable.other.constant.duffle.gpr" },
-				{ "match": "\\b(?:C2_|gte_cr_)[A-Za-z0-9_]+\\b", "name": "variable.other.constant.duffle.cop2" }
-			]
+		"delay-slots": {
+			"match": "\\b(LdSlot_|BdSlot_)\\b",
+			"name": "keyword.operator.duffle.delayslot"
 		},
 		"types": {
-			"match": "\\b(?:[USFB][1248]|MipsAtom|MipsCode|Reg|Binds_[A-Za-z0-9_]+|Struct_|Enum_|Union_|TypeR_|TypeV_)\\b",
+			"match": "\\b(?:Binds_[A-Za-z0-9_]+|RegUse_[A-Za-z0-9_]+)\\b",
 			"name": "storage.type.duffle.type"
 		},
 		"attributes": {
