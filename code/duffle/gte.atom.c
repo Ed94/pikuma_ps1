@@ -150,8 +150,8 @@ MipsAtomComp_Proc_(ab, {
 	gte_mv_to_data_r(to_ir1, C2_IR1), /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */
 	gte_mv_to_data_r(to_ir2, C2_IR2),
 	gte_mv_to_data_r(to_ir3, C2_IR3), /* IR3 = src.z (reloaded) */
-	DmaSlot_ nop_slot1,
-	DmaSlot_ nop_slot2,
+	GteDelay_ nop_slot1,
+	GteDelay_ nop_slot2,
 	gte_cmdw_gpf,
 	gte_mv_from_data_r(fr_mac1, C2_MAC1),
 	gte_mv_from_data_r(fr_mac2, C2_MAC2),
@@ -293,8 +293,8 @@ MipsAtom_Proc_(aa, {
 	mac_gte_mv_from_data_r_mac123(r.t3.mac1_scratch, r.t4.mac2_scratch, r.norm), LdSlot_ nop,
 	add_u_self(        r.norm, r.t3.mac1_scratch),
 	add_u_self(        r.norm, r.t4.mac2_scratch),
-	gte_mv_to_data_r(  r.norm,  C2_LZCS), DmaSlot_ nop2,
-	gte_mv_from_data_r(r.shift, C2_LZCR), DmaSlot_ nop,
+	gte_mv_to_data_r(  r.norm,  C2_LZCS), GteDelay_ nop2,
+	gte_mv_from_data_r(r.shift, C2_LZCR), GteDelay_ nop,
 
 	/* Stage 3: round LZCR to even, compute half-shift, align |v|² to bit 24.
 	 * r_norm holds |v|² sum; r_shift holds the LZCR count from mfc2.
@@ -328,8 +328,8 @@ MipsAtom_Proc_(aa, {
 		r.recip_est, 
 		r.t5.src_z,  /* IR3 = src.z (reloaded) */
 		r.t4.mac2_scratch, r.recip_est, r.t5.src_z,
-		DmaSlot_ add_si(r.dst_ptr, r.scratch, dst_offset), // pre-laoding destination to register here.
-		DmaSlot_ nop
+		GteDelay_ add_si(r.dst_ptr, r.scratch, dst_offset), // pre-laoding destination to register here.
+		GteDelay_ nop
 	),
 	/* sra by r_shift = (31-LZCR)/2 (saved before sqrtbl lookup) */
 	mac_shift_aright_var_v3_self(r.t4.mac2_scratch, r.recip_est, r.t5.src_z, r.shift),

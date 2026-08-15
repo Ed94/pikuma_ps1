@@ -310,7 +310,7 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_mv_from_ctrl_r(rt, rd) enc_gte_tx(sub_cfc2, (rt), (rd)) /* Copy From ctrl reg */
 #define gte_mv_to_data_r(rt, rd)   enc_gte_tx(sub_mtc2, (rt), (rd)) /* Move To   data reg */
 #define gte_mv_to_ctrl_r(rt, rd)   enc_gte_tx(sub_ctc2, (rt), (rd)) /* Copy To   ctrl reg */
-#define DmaSlot_ // Annotate an instruction as filling a CPU <-> GTE DMA delay slot/s
+#define GteDelay_ // Annotate an instruction as filling a CPU <-> GTE DMA delay slot/s
 
 /* COP2 Data Load (lwc2): `lwc2 rt, off(rs)`
  * Layout: [op_lwc2:6][rs:5][rt:5][imm:16]

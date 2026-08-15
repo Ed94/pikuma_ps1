@@ -150,6 +150,7 @@ internal void resolve_look_at_init(void) {
 	U4 pin_mask = regfile_abi_mask | (1 << R_ResolveScratch);
 	RegFile rf  = regfile(pin_mask);
 #define ralloc() regfile_alloc(& rf)
+#define ralloc_v3() { ralloc(), ralloc(), ralloc() }
 
 	smem.resolve_look_at_atom_addrs[0] = resolve_look_at__input_and_sub_proc(& ab,
 		RegUse_(resolve_look_at__input_and_sub_proc) {
@@ -216,16 +217,16 @@ internal void resolve_look_at_init(void) {
 		});
 
 	/* === ATOM 4: cross uz×ux→up === */
-	U4 r_a_4 = R_T0;
-	U4 r_b_4 = R_T1;
-	U4 r_c_4 = R_T2;
-	U4 r_d_4 = R_T3;
-	U4 r_f_4 = R_T5;  /* out ptr (HARDCODED: scratch+64) */
-	U4 r_g_4 = R_T6;  /* a ptr = scratch+16 */
-	U4 r_h_4 = R_T7;  /* b ptr = scratch+48 */
+	regfile_reset_to_mask(& rf, pin_mask);
 	smem.resolve_look_at_atom_addrs[4] = resolve_look_at__cross_uz_ux_to_up_proc(& ab,
-		R_ResolveScratch,
-		r_a_4, r_b_4, r_c_4, r_d_4, r_f_4, r_g_4, r_h_4);
+		RegUse_(resolve_look_at__cross_uz_ux_to_up_proc){
+			.scratch = R_ResolveScratch,
+			.a  = ralloc_v3(),   /* T0 T1 T2 */
+			.b  = ralloc_v3(),   /* T3 T5 T6 */
+			.t0 = ralloc(),      /* T7  = up */
+			.t1 = ralloc(),      /* V0  = uz / rt11 */
+			.t2 = ralloc(),      /* V1  = ux / rt22 */
+		});
 
 	/* === ATOM 5: normalize up→uy === */
 	src_offset = O_(ResolveLookAtScratch, up);

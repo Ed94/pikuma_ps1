@@ -26,7 +26,7 @@ enum {
     atom_offset_end_low_exit_stick = _atom_offset_end_low_exit_stick,
 };
 
-// --- atom: pad_input_cam (42 words) ---
+// --- atom: pad_input_cam (40 words) ---
 
 #define _atom_offset_left_x_exit_left_x               3
 #define _atom_offset_right_x_exit_right_x             3

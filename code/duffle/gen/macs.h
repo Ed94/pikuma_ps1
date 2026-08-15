@@ -250,8 +250,8 @@ WORD_COUNT(mac_lzcr_round_even_half_shift, 5)
 ,	gte_mv_to_data_r(to_ir1, C2_IR1) /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */ \
 ,	gte_mv_to_data_r(to_ir2, C2_IR2) \
 ,	gte_mv_to_data_r(to_ir3, C2_IR3) /* IR3 = src.z (reloaded) */ \
-,	DmaSlot_ nop_slot1 \
-,	DmaSlot_ nop_slot2 \
+,	GteDelay_ nop_slot1 \
+,	GteDelay_ nop_slot2 \
 ,	gte_cmdw_gpf \
 ,	gte_mv_from_data_r(fr_mac1, C2_MAC1) \
 ,	gte_mv_from_data_r(fr_mac2, C2_MAC2) \

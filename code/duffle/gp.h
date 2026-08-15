@@ -68,6 +68,7 @@ enum {
 
 #define gp0_send(word) (HW_GP0[0] = (word))
 #define gp1_send(word) (HW_GP1[0] = (word))
+#define DmaSlot_ // Annotate an instruction as filling a CPU <-> Command DMA delay slot/s
 
 /* ============================================================================
  *  GP0 command byte constants + Layer 1 (GPU bitfield shifts)

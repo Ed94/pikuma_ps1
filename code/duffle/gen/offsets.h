@@ -25,7 +25,7 @@
 #pragma region duffle
 
 
-// --- atom: example_atom (10 words) ---
+// --- atom: example_atom_proc (10 words) ---
 
 #define _atom_offset_example_atom_proc_skip           2
 
@@ -33,7 +33,7 @@ enum {
     atom_offset_example_atom_proc_skip = _atom_offset_example_atom_proc_skip,
 };
 
-// --- atom: normalize_v3s4 (47 words) ---
+// --- atom: normalize_v3s4_proc (61 words) ---
 
 #define _atom_offset_aligned_done_srav_path           3
 #define _atom_offset_srav_path_aligned_done           4
