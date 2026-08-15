@@ -6,6 +6,7 @@
 ---   MipsAtom_Proc_         (kind = "atom_proc", body inside last {})
 ---   MipsAtomComp_          (kind = "comp_bare")
 ---   MipsAtomComp_Proc_     (kind = "comp_proc", body inside last {})
+---   MipsAtomComp_ProcMap_  (kind = "comp_proc", body is the one command)
 ---   atom_dbg_skip          — bare whole-atom/component debug-step marker; following declaration disambiguates
 ---   MipsCode code_<name>   (kind = "raw_atom", offsets pass only)
 ---   typedef Struct_(Binds_X) { fields }
@@ -1380,6 +1381,32 @@ local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
 	return after_paren
 end
 
+--- Parse: `MipsAtomComp_ProcMap_(ab, command)` — body is the one command (second arg).
+--- Reuses the proc name walk. Kind is `comp_proc`. The C expansion wraps
+--- `atom_dbg_skip MipsAtomComp_Proc_(ab, {command })`; source-as-written is the map.
+--- @param source    string
+--- @param pos       integer
+--- @param ident_end integer
+--- @param line_of   fun(pos: integer): integer
+--- @param out       SourceScan
+--- @return integer
+local function parse_mips_atom_comp_proc_map(source, pos, ident_end, line_of, out)
+	local inner, after_paren, open_paren = read_parens_after(source, ident_end)
+	if not inner then return after_paren end
+	local args = duffle.split_top_level_commas(inner)
+	if #args < 2 then return after_paren end
+	local command = duffle.trim(args[2])
+	if command == "" then return after_paren end
+	local raw_name = duffle.find_function_decl_for(source, open_paren, SLICE_MIPS_CODE_LEN)
+	if not raw_name then raw_name = "?" end
+	local name = strip_ac_prefix(raw_name)
+	local body_off = open_paren + 1 + (inner:find(command, 1, true) or 1) - 1
+	register_atom(out, "comp_proc", line_of(pos), name, command, body_off, raw_name, pos, after_paren, source)
+	local entry = out.atoms[#out.atoms]
+	entry.map_command = command
+	return after_paren
+end
+
 --- Parse: `MipsAtom_Proc_(<name>, <abuilder>, { <body> })` — body is inside the LAST `{` in args.
 --- Per Task 12.10: full support for the runtime-proc atom form. Registers the atom
 --- with kind `"atom_proc"` so offsets.lua / components.lua can emit
@@ -2109,6 +2136,7 @@ local DECL_PARSERS = {
 	MipsAtom_Proc_             = parse_mips_atom_proc,
 	MipsAtomComp_              = parse_mips_atom_comp,
 	MipsAtomComp_Proc_         = parse_mips_atom_comp_proc,
+	MipsAtomComp_ProcMap_     = parse_mips_atom_comp_proc_map,
 	-- `atom_dbg_skip` is the only debug-skip parser entry. Every other
 	-- identifier follows the ordinary unrelated-token path; there is no alias.
 	atom_dbg_skip              = parse_dbg_skip_marker,

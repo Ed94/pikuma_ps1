@@ -4,8 +4,8 @@
 ---   - `build/gen/<dir_basename>.annotations.txt` — one per source-directory containing atoms; aggregates across all sources in the directory.
 ---   - `build/gen/annotation_validation.txt` — the project summary.
 ---
---- The annotation pass emits `errors.h` files per module and the canonical `corpus.sources_by_dir` projection groups sources by directory.
---- This pass iterates the dir projection directly and re-validates each source via `annotation.validate()` to get the detailed per-source results.
+--- The canonical `corpus.sources_by_dir` projection groups sources by directory.
+--- This pass builds one ModuleView per directory and walks SECTION_RENDERERS.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module-scope requires + package.path setup
@@ -19,11 +19,6 @@
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
-
--- Load the annotation pass so we can re-validate each source against the canonical corpus projection.
--- The annotation pass exposes `M.validate`, which returns the per-source AnnotationResult (atoms / annots / macros / binds / errors / warnings)
--- that the report pass renders into the per-module `<dir_basename>.annotations.txt` output.
-local annotation = dofile(_bootstrap_dir .. "annotation.lua")
 
 -- Load atoms_source_map for the `render_source_map` / `render_provenance` module functions (used by `render_module_atoms_md` to produce `<module>.atoms.md` without re-walking source tokens).
 -- The pass itself emits no per-source files anymore; we only consume the two pure renderers here.
@@ -225,7 +220,7 @@ local function render_module_atoms_md(dir, dir_sources, wc)
 			for _, atom in ipairs(atoms_list) do
 				lines[#lines + 1] = string.format(
 					"### atom: %s (line %d, %d words)",
-					atom.name, atom.line or 0, #(atom.paths.items or {}))
+					atom.name, atom.line or 0, #((atom.paths or {}).word_events or {}))
 				lines[#lines + 1] = ""
 				lines[#lines + 1] = "**Sourcemap** — per-word call site:"
 				lines[#lines + 1] = "```"
@@ -246,17 +241,349 @@ local function render_module_atoms_md(dir, dir_sources, wc)
 	return table.concat(lines, "\n") .. "\n"
 end
 
---- Render the consolidated per-module markdown (`build/<module>.atom_meta_report.md`).
---- Aggregates annotation + static-analysis content across all sources in `dir`.
---- Annotations come from re-running `annotation.validate()` per source (the existing pattern);
---- static-analysis comes from `corpus.static_analysis_results[dir_basename]` (populated by `static_analysis.lua` — no second corpus_pipe_ctx build).
---- @param dir           string
---- @param dir_sources   SourceFile[]
---- @param annot_results AnnotationResult[]
---- @param sa_results    table -- corpus.static_analysis_results[dir_basename]
---- @return string
-local function render_module_meta_report(dir, dir_sources, annot_results, sa_results)
+local function decl_words(atom)
+	local p = atom.paths or {}
+	return #(p.word_events or {})
+end
+
+local function count_kinds(decls)
+	local n = { atom = 0, atom_proc = 0, comp_bare = 0, comp_proc = 0 }
+	for _, a in ipairs(decls or {}) do
+		if n[a.kind] ~= nil then n[a.kind] = n[a.kind] + 1 end
+	end
+	return n
+end
+
+local function slot_suffix(key)
+	if type(key) ~= "string" or key:sub(1, 7) ~= "reguse:" then return nil end
+	return key:match("([^:]+)$")
+end
+
+local function build_module_view(dir, dir_sources, corpus)
+	local decls = {}
+	for _, src in ipairs(dir_sources or {}) do
+		for _, a in ipairs((src.scan and src.scan.atoms) or {}) do
+			if not a.source_path then a.source_path = src.path end
+			decls[#decls + 1] = a
+		end
+	end
 	local dir_basename = source_basename(dir)
+	local sa = (corpus.static_analysis_results or {})[dir_basename] or {}
+	local schemas = {}
+	for name, schema in pairs(corpus.reg_use_schemas or {}) do
+		for _, a in ipairs(decls) do
+			if a.reg_use_schema_name == name then
+				schemas[#schemas + 1] = schema
+				break
+			end
+		end
+	end
+	return {
+		dir      = dir,
+		sources  = dir_sources or {},
+		decls    = decls,
+		schemas  = schemas,
+		findings = sa.findings or {},
+		sa       = sa,
+		corpus   = corpus,
+	}
+end
+
+local function render_section_declarations(add, view)
+	if #view.decls == 0 then add("_(none)_"); add(""); return end
+	add("| kind | name | source | line | words | min | max | branches | paths |")
+	add("|------|------|--------|------|-------|-----|-----|----------|-------|")
+	for _, a in ipairs(view.decls) do
+		local p = a.paths or {}
+		add(string.format("| %s | %s | %s | %d | %d | %s | %s | %s | %s |",
+			a.kind or "?",
+			a.name or "?",
+			source_basename(a.source_path or ""),
+			a.line or 0,
+			decl_words(a),
+			tostring(p.cycles_min or "—"),
+			tostring(p.cycles_max or "—"),
+			tostring(p.branches or "—"),
+			tostring(p.paths or "—")))
+	end
+	add("")
+end
+
+local function render_section_components(add, view)
+	local rows = {}
+	local index = (view.corpus and view.corpus.component_body_index) or {}
+	for _, a in ipairs(view.decls) do
+		if a.kind == "comp_bare" or a.kind == "comp_proc" then
+			local idx = index[a.name] or {}
+			local args = idx.arg_names or {}
+			rows[#rows + 1] = {
+				name = a.name,
+				kind = a.kind,
+				args = table.concat(args, ", "),
+				words = decl_words(a),
+				map = a.map_command or "—",
+			}
+		end
+	end
+	if #rows == 0 then add("_(none)_"); add(""); return end
+	add("| name | kind | arg_names | words | map |")
+	add("|------|------|-----------|-------|-----|")
+	for _, r in ipairs(rows) do
+		add(string.format("| %s | %s | %s | %d | %s |",
+			r.name, r.kind, r.args ~= "" and r.args or "—", r.words, r.map))
+	end
+	add("")
+end
+
+local function render_section_reguse(add, view)
+	local wrote = false
+	for _, schema in ipairs(view.schemas or {}) do
+		wrote = true
+		add(string.format("### %s", schema.name or "?"))
+		for _, slot in ipairs(schema.slots or {}) do
+			local aliases = table.concat(slot.aliases or { slot.name }, ", ")
+			local ro = slot.readonly and " readonly" or ""
+			add(string.format("- slot `%s` aliases %s%s", slot.name, aliases, ro))
+		end
+		for _, a in ipairs(view.decls) do
+			if a.reg_use_schema_name == schema.name then
+				add(string.format("- bound `%s` param `%s`", a.name, a.reg_use_param_name or "?"))
+			end
+		end
+		add("")
+	end
+	local errors = (view.corpus and view.corpus.reg_use_errors) or {}
+	if #errors > 0 then
+		wrote = true
+		add("### parse errors")
+		for _, err in ipairs(errors) do
+			add(string.format("- `%s` %s", err.kind or "?", err.schema_name or ""))
+		end
+		add("")
+	end
+	if not wrote then add("_(none)_"); add("") end
+end
+
+local function render_section_annotations(add, view)
+	local rows = {}
+	for _, src in ipairs(view.sources) do
+		for _, info in ipairs((src.scan and src.scan.atom_infos) or {}) do
+			rows[#rows + 1] = {
+				source = source_basename(src.path),
+				line   = info.info_line or 0,
+				name   = info.atom_name or "?",
+				binds  = info.binds or "—",
+				reads  = (#(info.reads or {}) > 0 and table.concat(info.reads, ",")) or "—",
+				writes = (#(info.writes or {}) > 0 and table.concat(info.writes, ",")) or "—",
+				phase  = info.phase or "—",
+			}
+		end
+	end
+	if #rows == 0 then add("_(none)_"); add(""); return end
+	add("| source | line | name | binds | reads | writes | phase |")
+	add("|--------|------|------|-------|-------|--------|-------|")
+	for _, r in ipairs(rows) do
+		add(string.format("| %s | %d | %s | %s | %s | %s | %s |",
+			r.source, r.line, r.name, r.binds, r.reads, r.writes, r.phase))
+	end
+	add("")
+end
+
+local function render_section_binds(add, view)
+	local wrote = false
+	for _, src in ipairs(view.sources) do
+		for _, b in ipairs((src.scan and src.scan.binds) or {}) do
+			wrote = true
+			local line = b.line or 0
+			if src.scan.line_of and type(b.line) == "number" then
+				line = src.scan.line_of(b.line) or b.line
+			end
+			add(string.format("### %s (%s:%s, %s bytes)",
+				b.name, source_basename(src.path), tostring(line), tostring(b.bytes or "—")))
+			for _, f in ipairs(b.fields or {}) do
+				add(string.format("- `+%s %s`", tostring(f.offset or "?"), f.name or "?"))
+			end
+			add("")
+		end
+	end
+	if not wrote then add("_(none)_"); add("") end
+end
+
+local function render_section_phases(add, view)
+	local corpus = view.corpus or {}
+	local wrote = false
+	for phase, entry in pairs(corpus.atom_phases or {}) do
+		wrote = true
+		add(string.format("- phase `%s`: %s", phase, table.concat(entry.atoms or {}, ", ")))
+	end
+	for name, entry in pairs(corpus.atom_views or {}) do
+		wrote = true
+		add(string.format("- view `%s` binds `%s`", name, entry.binds_name or "—"))
+	end
+	for name, entry in pairs(corpus.atom_ctxs or {}) do
+		wrote = true
+		add(string.format("- ctx `%s` rbind `%s`", name, entry.rbind_atom or "—"))
+	end
+	if not wrote then add("_(none)_") end
+	add("")
+end
+
+local function render_section_aliases(add, view)
+	local reg = (view.corpus and view.corpus.register_alias_registry) or {}
+	local names = {}
+	for name in pairs(reg) do names[#names + 1] = name end
+	table.sort(names)
+	if #names == 0 then add("_(none)_"); add(""); return end
+	add("| alias | type |")
+	add("|-------|------|")
+	for _, name in ipairs(names) do
+		local e = reg[name]
+		add(string.format("| %s | %s |", name, (e and e.default_type) or "—"))
+	end
+	add("")
+end
+
+local function render_section_autoreg(add, view)
+	local corpus = view.corpus or {}
+	local wrote = false
+	local function dump(label, table_map)
+		local scopes = {}
+		for scope in pairs(table_map or {}) do scopes[#scopes + 1] = scope end
+		table.sort(scopes)
+		for _, scope in ipairs(scopes) do
+			wrote = true
+			local syms = {}
+			for sym, gpr in pairs(table_map[scope] or {}) do
+				if type(gpr) == "string" and gpr ~= sym then
+					syms[#syms + 1] = string.format("%s → %s", sym, gpr)
+				else
+					syms[#syms + 1] = tostring(sym)
+				end
+			end
+			table.sort(syms)
+			add(string.format("- %s `%s`: %s", label, scope, table.concat(syms, ", ")))
+		end
+	end
+	dump("atom", corpus.atom_auto_regs)
+	dump("phase", corpus.phase_auto_regs)
+	if not wrote then add("_(none)_") end
+	add("")
+end
+
+local function render_section_collisions(add, view)
+	local cols = (view.corpus and view.corpus.collisions) or {}
+	if #cols == 0 then add("_(none)_"); add(""); return end
+	for _, c in ipairs(cols) do
+		local first = c.first_site or {}
+		local other = c.conflicting_site or {}
+		add(string.format("- `%s` `%s` first %s:%s conflict %s:%s",
+			c.kind or "?", c.name or "?",
+			tostring(first.path or "?"), tostring(first.line or "?"),
+			tostring(other.path or "?"), tostring(other.line or "?")))
+	end
+	add("")
+end
+
+local function render_section_findings(add, view)
+	local by_atom = {}
+	for _, f in ipairs(view.findings or {}) do
+		local key = f.atom or "?"
+		by_atom[key] = by_atom[key] or {}
+		by_atom[key][#by_atom[key] + 1] = f
+	end
+	if next(by_atom) == nil then add("_(none)_"); add(""); return end
+	local seen = {}
+	local function emit(name, fs)
+		add("### " .. name)
+		for _, f in ipairs(fs) do
+			local msg = f.msg or ""
+			local slot = slot_suffix(f.gpr_key or f.producer_destination)
+			if slot and not msg:find("(slot ", 1, true) then
+				msg = msg .. " (slot " .. slot .. ")"
+			end
+			add(string.format("- `[%s/%s] %s`", f.kind or "info", f.check or "?", msg))
+		end
+		add("")
+	end
+	for _, a in ipairs(view.decls) do
+		if by_atom[a.name] then
+			seen[a.name] = true
+			emit(a.name, by_atom[a.name])
+		end
+	end
+	local leftovers = {}
+	for name in pairs(by_atom) do
+		if not seen[name] then leftovers[#leftovers + 1] = name end
+	end
+	table.sort(leftovers)
+	for _, name in ipairs(leftovers) do emit(name, by_atom[name]) end
+end
+
+local function render_section_relations(add, view)
+	local wrote = false
+	for _, a in ipairs(view.decls) do
+		local rels = (a.paths and a.paths.relations) or {}
+		if #rels > 0 then
+			wrote = true
+			add("### " .. a.name)
+			for _, rel in ipairs(rels) do
+				local dest = rel.destination or rel.producer_destination or "—"
+				local slot = slot_suffix(dest)
+				local dest_s = tostring(dest)
+				if slot then dest_s = dest_s .. " (slot " .. slot .. ")" end
+				add(string.format("- `%s` words %s → %s dest %s",
+					rel.semantic or "?",
+					tostring(rel.producer_word or "?"),
+					tostring(rel.consumer_word or "?"),
+					dest_s))
+			end
+			add("")
+		end
+	end
+	if not wrote then add("_(none)_"); add("") end
+end
+
+local function render_section_forward(add, view)
+	local wrote = false
+	for _, a in ipairs(view.decls) do
+		local gpr = a.paths and a.paths.forward_state and a.paths.forward_state.gpr_values
+		if gpr and next(gpr) ~= nil then
+			wrote = true
+			add("### " .. a.name)
+			local keys = {}
+			for k in pairs(gpr) do keys[#keys + 1] = k end
+			table.sort(keys)
+			for _, k in ipairs(keys) do
+				local slot = gpr[k]
+				add(string.format("- `%s` %s", k, (slot and slot.kind) or "unknown"))
+			end
+			add("")
+		end
+	end
+	if not wrote then add("_(none)_"); add("") end
+end
+
+local SECTION_RENDERERS = {
+	{ header = "## Declarations",          render = render_section_declarations },
+	{ header = "## Components",            render = render_section_components },
+	{ header = "## RegUse schemas",        render = render_section_reguse },
+	{ header = "## Annotations",           render = render_section_annotations },
+	{ header = "## Binds_* structs",       render = render_section_binds },
+	{ header = "## Phases / views / ctx",  render = render_section_phases },
+	{ header = "## Register aliases",      render = render_section_aliases },
+	{ header = "## Auto-reg",              render = render_section_autoreg },
+	{ header = "## Collisions",            render = render_section_collisions },
+	{ header = "## Findings",              render = render_section_findings },
+	{ header = "## Relations",             render = render_section_relations },
+	{ header = "## Forward GPR",           render = render_section_forward },
+}
+
+--- Render the consolidated per-module markdown (`build/<module>.atom_meta_report.md`).
+--- One ModuleView from the corpus; SECTION_RENDERERS walks it.
+--- @param view table
+--- @return string
+local function render_module_meta_report(view)
+	local dir_basename = source_basename(view.dir)
 	local lines        = {
 		"# " .. dir_basename .. " — atom meta report",
 		"> Auto-generated by ps1_meta.lua (passes/report.lua). Do not edit.",
@@ -264,199 +591,41 @@ local function render_module_meta_report(dir, dir_sources, annot_results, sa_res
 	}
 	local function add(s) lines[#lines + 1] = s end
 
-	-- Module summary table.
-	local n_atoms        = 0
-	local n_annot        = 0
-	local n_binds        = 0
-	local n_macros       = 0
-	local n_bare, n_proc = 0, 0
-	for _, r in ipairs(annot_results) do
-		n_atoms  = n_atoms  + #r.atoms
-		n_annot  = n_annot  + #r.annots
-		n_binds  = n_binds  + #r.binds
-		n_macros = n_macros + #r.macros
+	local kinds = count_kinds(view.decls)
+	local n_annot, n_binds, n_macros = 0, 0, 0
+	for _, src in ipairs(view.sources) do
+		n_annot  = n_annot  + #((src.scan and src.scan.atom_infos) or {})
+		n_binds  = n_binds  + #((src.scan and src.scan.binds) or {})
+		n_macros = n_macros + #((src.scan and src.scan.macros) or {})
 	end
-	for _, a in ipairs(sa_results.atoms or {}) do
-		if     a.kind == "comp_bare" then n_bare = n_bare + 1
-		elseif a.kind == "comp_proc" then n_proc = n_proc + 1
+	local n_err, n_warn, n_info = 0, 0, 0
+	for _, f in ipairs(view.findings or {}) do
+		if     f.kind == "error"   then n_err  = n_err  + 1
+		elseif f.kind == "warning" then n_warn = n_warn + 1
+		else                            n_info = n_info + 1
 		end
 	end
 
 	add("## Module summary"); add("")
 	add("| metric | value |"); add("|--------|-------|")
-	add(string.format("| sources | %d |", #dir_sources))
-	add(string.format("| atoms | %d (atoms: %d, comp_bare: %d, comp_proc: %d) |",
-		#(sa_results.atoms or {}),
-		#(sa_results.atoms or {}) - n_bare - n_proc, n_bare, n_proc))
+	add(string.format("| sources | %d |", #view.sources))
+	add(string.format("| decls | %d (atom: %d, atom_proc: %d, comp_bare: %d, comp_proc: %d) |",
+		#view.decls, kinds.atom, kinds.atom_proc, kinds.comp_bare, kinds.comp_proc))
 	add(string.format("| annotations | %d |", n_annot))
 	add(string.format("| binds structs | %d |", n_binds))
 	add(string.format("| macro decls | %d |", n_macros))
 	add(string.format("| findings | %d (errors: %d, warnings: %d, info: %d) |",
-		#(sa_results.findings or {}),
-		#(sa_results.errors   or {}),
-		#(sa_results.warnings or {}),
-		#(sa_results.info     or {})))
+		#(view.findings or {}), n_err, n_warn, n_info))
 	add("")
 
-	-- Sources
 	add("## Sources"); add("")
-	for _, s in ipairs(dir_sources) do add("- `" .. s.path .. "`") end
+	for _, s in ipairs(view.sources) do add("- `" .. s.path .. "`") end
 	add("")
 
-	-- Atoms (annotation)
-	add("## Atoms"); add("")
-	add("| kind | name | source | line |"); add("|------|------|--------|------|")
-	for _, r in ipairs(annot_results) do
-		local src_name = source_basename(r.source)
-		for _, a in ipairs(r.atoms) do
-			add(string.format("| atom | %s | %s | %d |", a.name, src_name, a.line))
-		end
+	for _, row in ipairs(SECTION_RENDERERS) do
+		add(row.header); add("")
+		row.render(add, view)
 	end
-	add("")
-
-	-- Annotations
-	add("## Annotations"); add("")
-	if #annot_results == 0 then
-		add("_(none)_")
-	else
-		add("| source | line | name | binds | reads | writes |")
-		add("|--------|------|------|-------|-------|--------|")
-		for _, r in ipairs(annot_results) do
-			local src_name = source_basename(r.source)
-			for _, a in ipairs(r.annots) do
-				local binds  = a.binds  or "—"
-				local reads  = (#a.reads  > 0 and table.concat(a.reads,  ",")) or "—"
-				local writes = (#a.writes > 0 and table.concat(a.writes, ",")) or "—"
-				add(string.format("| %s | %d | %s | %s | %s | %s |"
-					, src_name, a.line, a.name, binds, reads, writes))
-			end
-		end
-	end
-	add("")
-
-	-- Binds_* structs
-	add("## Binds_* structs"); add("")
-	if #annot_results == 0 then
-		add("_(none)_")
-	else
-		for _, r in ipairs(annot_results) do
-			local src_name = source_basename(r.source)
-			for _, b in ipairs(r.binds) do
-				add(string.format("### %s (%s:%d, %d bytes)",
-					b.name, src_name, b.line, b.bytes))
-				for _, f in ipairs(b.fields) do
-					add(string.format("- `+%d %s`", f.offset, f.name))
-				end
-				add("")
-			end
-		end
-	end
-
-	-- Macro decls
-	add("## Macro word-count declarations"); add("")
-	if #annot_results == 0 then
-		add("_(none)_")
-	else
-		add("| source | line | macro declaration |")
-		add("|--------|------|-------------------|")
-		for _, r in ipairs(annot_results) do
-			local src_name = source_basename(r.source)
-			for _, m in ipairs(r.macros) do
-				add(string.format("| %s | %d | %s |",
-					src_name, m.line, m.name))
-			end
-		end
-	end
-	add("")
-
-	-- Findings by atom (static-analysis)
-	add("## Static analysis — findings by atom"); add("")
-	local by_atom = {}
-	for _, f in ipairs(sa_results.findings or {}) do
-		by_atom[f.atom] = by_atom[f.atom] or {}
-		by_atom[f.atom][#by_atom[f.atom] + 1] = f
-	end
-	if next(by_atom) == nil then
-		add("_(no findings)_")
-	else
-		for _, a in ipairs(sa_results.atoms or {}) do
-			local fs = by_atom[a.name]
-			if fs then
-				add(string.format("### %s", a.name))
-				for _, f in ipairs(fs) do
-					add(string.format("- `[%s] %s`", f.check, f.msg))
-				end
-				add("")
-			end
-		end
-	end
-
-	-- Errors / Warnings / Info
-	local function add_findings(label, entries)
-		add(string.format("## %s", label))
-		if #entries == 0 then
-			add("_(none)_")
-		else
-			for _, e in ipairs(entries) do
-				add(string.format("- line %d  %s", e.line, e.msg))
-			end
-		end
-		add("")
-	end
-	add_findings("Errors",   sa_results.errors   or {})
-	add_findings("Warnings", sa_results.warnings or {})
-	add_findings("Info",     sa_results.info     or {})
-
-	-- Per-atom cycle counts (path-aware)
-	add("## Per-atom cycle counts (path-aware, best case, no stalls)"); add("")
-	add("| atom | source | min | max | branches | paths | notes |")
-	add("|------|--------|-----|-----|----------|-------|-------|")
-	local sorted = {}
-	for _, a in ipairs(sa_results.atoms or {}) do sorted[#sorted + 1] = a end
-	table.sort(sorted, function(x, y)
-		return ((x.paths or {}).cycles_max or 0) > ((y.paths or {}).cycles_max or 0)
-	end)
-	for _, a in ipairs(sorted) do
-		local p        = a.paths or {}
-		local src_name = a.source_path and source_basename(a.source_path) or ""
-		local notes    = ""
-		if p.has_loops then notes = notes .. " [loop!]" end
-		if p.unknown_macros and #p.unknown_macros > 0 then
-			notes = notes .. " [unknown: " .. table.concat(p.unknown_macros, ", ") .. "]"
-		end
-		add(string.format("| %s | %s | %d | %d | %d | %d | %s |",
-			a.name, src_name,
-			p.cycles_min or 0, p.cycles_max or 0,
-			p.branches   or 0, p.paths      or 0, notes))
-	end
-	add("")
-
-	-- Per-source scan summary
-	add("## Per-source scan summary"); add("")
-	for _, src in ipairs(dir_sources) do
-		local src_atoms = {}
-		for _, a in ipairs(sa_results.atoms or {}) do
-			if a.source_path == src.path then src_atoms[#src_atoms + 1] = a end
-		end
-		if #src_atoms > 0 then
-			local mn, mx = math.huge, -1
-			for _, a in ipairs(src_atoms) do
-				local p = a.paths or {}
-				if (p.cycles_min or 0) < mn then mn = p.cycles_min or 0 end
-				if (p.cycles_max or 0) > mx then mx = p.cycles_max or 0 end
-			end
-			local path_str
-			if mx > 0 then
-				path_str = string.format("  cycles=%d..%d", mn, mx)
-			else
-				path_str = string.format("  %d cycles", mn)
-			end
-			add(string.format("- `%s` — %d atom%s%s",
-				src.basename, #src_atoms,
-				#src_atoms == 1 and "" or "s", path_str))
-		end
-	end
-	add("")
 
 	return table.concat(lines, "\n") .. "\n"
 end
@@ -474,19 +643,8 @@ local REPORT_RENDERERS = {
 		basename = function(dir_basename) return dir_basename .. ".atom_meta_report" end,
 		once     = false,
 		gather   = function(ctx, dir, dir_sources)
-			-- Annotations: re-run `annotation.validate()` per source (the existing pattern).
-			local annot_results = {}
-			for _, src in ipairs(dir_sources) do
-				if src.scan then
-					local r = annotation.validate(ctx, src, nil)
-					r.source = src.path
-					annot_results[#annot_results + 1] = r
-				end
-			end
-			-- Static-analysis: read stashed projection (no re-validate).
-			local dir_basename = dir:match("([^/\\]+)$") or dir
-			local sa_results   = (ctx.shared.corpus.static_analysis_results or {})[dir_basename] or {}
-			return render_module_meta_report(dir, dir_sources, annot_results, sa_results)
+			local corpus = ctx.shared.corpus
+			return render_module_meta_report(build_module_view(dir, dir_sources, corpus))
 		end,
 	},
 	{
@@ -554,32 +712,30 @@ function M.run(ctx)
 			end
 		end
 
-		-- For the summary, compute per-module totals once (re-validating annotations per source — same pattern as the meta_report renderer).
-		local annot_results = {}
+		local view = build_module_view(dir, dir_sources, corpus)
+		local n_annot, n_binds, n_macros = 0, 0, 0
 		for _, src in ipairs(dir_sources) do
-			if src.scan then
-				local r = annotation.validate(ctx, src, nil)
-				r.source = src.path
-				annot_results[#annot_results + 1] = r
+			n_annot  = n_annot  + #((src.scan and src.scan.atom_infos) or {})
+			n_binds  = n_binds  + #((src.scan and src.scan.binds) or {})
+			n_macros = n_macros + #((src.scan and src.scan.macros) or {})
+		end
+		local n_err, n_warn, n_info = 0, 0, 0
+		for _, f in ipairs(view.findings or {}) do
+			if     f.kind == "error"   then n_err  = n_err  + 1
+			elseif f.kind == "warning" then n_warn = n_warn + 1
+			else                            n_info = n_info + 1
 			end
 		end
-		local n_annot, n_binds, n_macros = 0, 0, 0
-		for _, r in ipairs(annot_results) do
-			n_annot  = n_annot  + #r.annots
-			n_binds  = n_binds  + #r.binds
-			n_macros = n_macros + #r.macros
-		end
-		local sa_results = (corpus.static_analysis_results or {})[dir_basename] or {}
 		all_modules[#all_modules + 1] = {
 			module   = dir_basename,
-			atoms    = #(sa_results.atoms or {}),
+			atoms    = #view.decls,
 			annots   = n_annot,
 			binds    = n_binds,
 			macros   = n_macros,
-			findings = #(sa_results.findings or {}),
-			errors   = #(sa_results.errors   or {}),
-			warnings = #(sa_results.warnings or {}),
-			info     = #(sa_results.info     or {}),
+			findings = #(view.findings or {}),
+			errors   = n_err,
+			warnings = n_warn,
+			info     = n_info,
 		}
 	end
 

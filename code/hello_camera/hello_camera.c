@@ -32,7 +32,7 @@
 
 #pragma region Duffle TUs
 #include "duffle/pad.c"
-#include "duffle/math.atom.c"
+#include "duffle/math.atom.h"
 #include "duffle/mips.atom.c"
 #include "duffle/gte.atom.c"
 #include "duffle/gp.atom.c"
@@ -149,20 +149,22 @@ internal void resolve_look_at_init(void) {
 
 	U4 pin_mask = regfile_abi_mask | (1 << R_ResolveScratch);
 	RegFile rf  = regfile(pin_mask);
+#define ralloc() regfile_alloc(& rf)
 
 	smem.resolve_look_at_atom_addrs[0] = resolve_look_at__input_and_sub_proc(& ab,
 		RegUse_(resolve_look_at__input_and_sub_proc) {
 			.scratch = R_ResolveScratch,
-			.target  = regfile_alloc(& rf),
-			.eye     = regfile_alloc(& rf),
-			.up_in   = regfile_alloc(& rf),
-			.t0      = regfile_alloc(& rf),
-			.t1      = regfile_alloc(& rf),
-			.t2      = regfile_alloc(& rf),
-			.t3      = regfile_alloc(& rf),
-			.t4      = regfile_alloc(& rf),
+			.target  = ralloc(),
+			.eye     = ralloc(),
+			.up_in   = ralloc(),
+			.t0      = ralloc(),
+			.t1      = ralloc(),
+			.t2      = ralloc(),
+			.t3      = ralloc(),
+			.t4      = ralloc(),
 		}
 	);
+	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 1: normalize fwd→uz === */
 	U2 src_offset  = O_(ResolveLookAtScratch, fwd);
@@ -170,27 +172,30 @@ internal void resolve_look_at_init(void) {
 	smem.resolve_look_at_atom_addrs[1] = normalize_v3s4_proc(& ab,
 		src_offset, dst_offset, RegUse_(normalize_v3s4_proc){
 			.scratch   = R_ResolveScratch,
-			.src_ptr   = R_T0, 
-			.dst_ptr   = R_T1,
-			.recip_est = R_T6, 
-			.norm      = R_T7,
-			.shift     = R_V0,
-			.src_x     = R_T2,
-			.t3 = R_T3,
-			.t4 = R_T5,
-			.t5 = R_V1,
+			.src_ptr   = ralloc(), 
+			.dst_ptr   = ralloc(),
+			.recip_est = ralloc(), 
+			.norm      = ralloc(),
+			.shift     = ralloc(),
+			.src_x     = ralloc(),
+			.t3 = ralloc(),
+			.t4 = ralloc(),
+			.t5 = ralloc(),
 		});
+	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 2: cross uz×up_in→right === */
 	smem.resolve_look_at_atom_addrs[2] = resolve_look_at__cross_uz_up_into_right_proc(& ab,
 		RegUse_(resolve_look_at__cross_uz_up_into_right_proc) {
 			.scratch = R_ResolveScratch,
-			.a = R_T0, .b = R_T1, .c = R_T2,
-			.d = R_T3,
-			.f = R_T5,
-			.t1 = R_T6,
-			.t2 = R_T7,
-			.t0 = R_V0,
+			.a  = ralloc(), 
+			.b  = ralloc(), 
+			.c  = ralloc(),
+			.d  = ralloc(),
+			.f  = ralloc(),
+			.t1 = ralloc(),
+			.t2 = ralloc(),
+			.t0 = ralloc(),
 		});
 
 	/* === ATOM 3: normalize right→ux === */
@@ -285,6 +290,7 @@ internal void resolve_look_at_init(void) {
 
 	/* Sanity check: arena didn't overflow. */
 	assert(ab.used <= ResolveLookAtArena_Size);
+#undef ralloc
 }
 
 /* Emit the resolve_look_at bundle into the tape. Called once per frame from update().

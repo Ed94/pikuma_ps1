@@ -2248,8 +2248,15 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	end
 
 	local function apply_sub(sub_map, operand)
-		if sub_map and type(operand) == "string" and sub_map[operand] then
-			return sub_map[operand]
+		if not (sub_map and type(operand) == "string") then return operand end
+		if sub_map[operand] then return sub_map[operand] end
+		local dot = operand:find(".", 1, true)
+		if dot then
+			local head = operand:sub(1, dot - 1)
+			local mapped = sub_map[head]
+			if type(mapped) == "string" then
+				return mapped .. operand:sub(dot)
+			end
 		end
 		return operand
 	end

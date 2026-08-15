@@ -83,6 +83,7 @@ local function canonical_word_entries(atom)
 			line       = event.call_line or item.line or 0,
 			text       = event.call_text or item.call_text or "",
 			body_line  = event.body_line or item.body_line or item.line or 0,
+			gpr_keys   = event.gpr_keys,
 			invocation = (event.outermost_invocation_id
 				and paths.invocations
 				and paths.invocations[event.outermost_invocation_id]) or nil,
@@ -491,8 +492,19 @@ function M.render_atom_source_map(atom)
 	local lines = {}
 	lines[#lines + 1] = string.format("ATOM %s  %d", (atom.raw_name or atom.name), total)
 	for _, entry in ipairs(entries) do
-		lines[#lines + 1] = string.format("WORD %d  LINE %d  TEXT %s",
+		local word_line = string.format("WORD %d  LINE %d  TEXT %s",
 			entry.pos, entry.line, entry.text)
+		local keys = {}
+		for pos = 1, 16 do
+			local k = entry.gpr_keys and entry.gpr_keys[pos]
+			if type(k) == "string" and k:sub(1, 7) == "reguse:" then
+				keys[#keys + 1] = k
+			end
+		end
+		if #keys > 0 then
+			word_line = word_line .. "  KEYS " .. table.concat(keys, ",")
+		end
+		lines[#lines + 1] = word_line
 	end
 	lines[#lines + 1] = "ENDATOM"
 	return table.concat(lines, "\n") .. "\n"

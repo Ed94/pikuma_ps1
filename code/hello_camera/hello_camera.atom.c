@@ -10,7 +10,7 @@
 #	include "duffle/pad.h"
 #	include "duffle/word_count.metadata.h"
 #	include "duffle/psyq.h"
-#	include "duffle/math.atom.c"
+#	include "duffle/math.atom.h"
 #	include "duffle/mips.atom.c"
 #	include "duffle/gte.atom.c"
 #	include "duffle/gp.atom.c"
@@ -129,7 +129,7 @@ typedef Struct_(Binds_ResolveLookAtSub) {
 };
 
 typedef Struct_(RegUse_resolve_look_at__input_and_sub_proc) {
-	Reg const scratch;
+	Reg scratch;
 	Reg target; Reg eye; Reg up_in;
 	Reg t0; Reg t1; Reg t2; Reg t3; Reg t4;
 };
@@ -152,7 +152,7 @@ typedef Struct_(RegUse_resolve_look_at__input_and_sub_proc) {
  * Pool cost: 8 GPRs + R_T4 (carrier) + R_AT + R_V0 (hardcoded) = 11 GPRs.
  */
 internal MipsAtom* resolve_look_at__input_and_sub_proc(AtomArena_R aa, RegUse_resolve_look_at__input_and_sub_proc r) 
-MipsAtom_Proc_(aa, atom_info(atom_bind(Binds_ResolveLookAtSub)){
+atom_info(atom_bind(Binds_ResolveLookAtSub)) MipsAtom_Proc_(aa, {
 	load_word(r.target,  R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
 	load_word(r.eye,     R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
 	load_word(r.up_in,   R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
@@ -160,20 +160,20 @@ MipsAtom_Proc_(aa, atom_info(atom_bind(Binds_ResolveLookAtSub)){
 	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtSub)),
 
 	/* Stage up_in.x/y/z into the scratchpad. */
-	mac_load_p3s4( r.t0, r.t1, r.t2, r.up_in,   0),
-	mac_store_p3s4(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,up_in)),
+	mac_load_word_v3( r.t0, r.t1, r.t2, r.up_in,   0),
+	mac_store_word_v3(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,up_in)),
 
 	// Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation column).
-	mac_load_p3s4( r.t0, r.t1, r.t2, r.eye,      0),
-	mac_store_p3s4(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,eye)),
+	mac_load_word_v3( r.t0, r.t1, r.t2, r.eye,      0),
+	mac_store_word_v3(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,eye)),
 
 	/* Compute fwd = target - eye. */
 	// mac_load_p3s4(t3, R_AT, t4, r.eye,    0),
-	mac_load_p3s4(r.t3, R_AT, r.t4, r.target, 0),
+	mac_load_word_v3(r.t3, R_AT, r.t4, r.target, 0),
 	mac_sub_v3s4(
 		r.t3, R_AT, r.t4,
 		r.t0, r.t1, r.t2),
-	mac_store_v3s4(r.t3, R_AT, r.t4, r.scratch, O_(ResolveLookAtScratch,fwd)),
+	mac_store_word_v3(r.t3, R_AT, r.t4, r.scratch, O_(ResolveLookAtScratch,fwd)),
 
 	mac_yield()
 })
@@ -199,9 +199,9 @@ internal MipsAtom* resolve_look_at__cross_uz_up_into_right_proc(AtomArena_R aa,
 	nop,
 
 	/* Load a (uz).x/y/z into r_a/r_b/r_c. */
-	mac_load_v3s4(r.a, r.b, r.c, r.g, 0),
+	mac_load_word_v3(r.a, r.b, r.c, r.g, 0),
 	/* Load b (up_in).x/y/z into r_d + R_AT/R_V0 (R_AT/R_V0 are hardcoded scratch). */
-	mac_load_v3s4(r.d, R_AT, r.t0, r.h, 0), LdSlot_
+	mac_load_word_v3(r.d, R_AT, r.t0, r.h, 0), LdSlot_ // (taken by gte_mv_from_ctrl_r)
 
 	/* Save the two RT control-register slots OP will clobber. We reuse r_g/r_h (scratch pointers, no longer needed) as the save targets. */
 	gte_mv_from_ctrl_r(r.target0, gte_cr_RT11),    /* r_g = C2 r0 (RT11|RT12) */
@@ -228,8 +228,7 @@ internal MipsAtom* resolve_look_at__cross_uz_up_into_right_proc(AtomArena_R aa,
 	gte_mv_to_data_r(r.t0, C2_IR3),       /* IR3 = up_in.z */
 	DmaSlot_ nop2,                         /* MTC2 retirement (CPU→COP2 2-slot delay) */
 
-	// gte_cmdw_cross, /* OP: MAC1/2/3 = uz × up_in
-	gte_cmdw_outer_product, /* OP: MAC1/2/3 = uz × up_in
+	gte_cmdw_cross, /* OP: MAC1/2/3 = uz × up_in
 		*   MAC1 = IR3*D2 - IR2*D3 = up_in.z*uz.y.high - up_in.y*uz.z.high
 		*   MAC2 = IR1*D3 - IR3*D1 = up_in.x*uz.z.high - up_in.z*uz.x
 		*   MAC3 = IR2*D1 - IR1*D2 = up_in.y*uz.x      - up_in.x*uz.y.high
@@ -249,9 +248,8 @@ internal MipsAtom* resolve_look_at__cross_uz_up_into_right_proc(AtomArena_R aa,
 	/* Right-shift MAC by 12 to convert from GTE's S12.20 fixed-point scale back to libpsyx OuterProduct12 convention (S12.0, fp_one=4096=1<<12).
 	 * Without this, MAC values (~16M for unit-vector cross products) overflow the GTE's 16-bit IR registers when atom 3 normalizes via mtc2. */
 	mac_shift_aright_v3_self(r.a, r.b, r.c, 12),
-
 	/* Store out.x/y/z to r_f (out ptr = scratch+32). */
-	mac_store_v3s4(r.a, r.b, r.c, r.f, 0),
+	mac_store_word_v3(r.a, r.b, r.c, r.f, 0),
 
 	mac_yield()
 })

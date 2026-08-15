@@ -17,7 +17,7 @@
 //   source: C:\projects\Pikuma\ps1\code\duffle\bios.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\psyq.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\pad.c
-//   source: C:\projects\Pikuma\ps1\code\duffle\math.atom.c
+//   source: C:\projects\Pikuma\ps1\code\duffle\math.atom.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\mips.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\gp.atom.c
@@ -71,18 +71,34 @@ WORD_COUNT(mac_load_v2s2, 2)
 WORD_COUNT(mac_store_v2s2, 2)
 
 /* atom_dbg_skip */
-#define mac_load_v3s4(rs_x, rs_y, rs_z, r_base, offset) \
-	load_word( rs_x, r_base, offset + O_(V3_S4,x)) \
-,	load_word( rs_y, r_base, offset + O_(V3_S4,y)) \
-,	load_word( rs_z, r_base, offset + O_(V3_S4,z))
+#define mac_load_word_v3(tx, ty, tz, base, offset) \
+	load_word(tx, base, offset + OA_(U4,[0])) \
+,	load_word(ty, base, offset + OA_(U4,[1])) \
+,	load_word(tz, base, offset + OA_(U4,[2]))
+WORD_COUNT(mac_load_word_v3, 3)
+
+#define mac_load_v3s4(transfer, base, offset) \
+	mac_load_word_v3(transfer.x, transfer.y, transfer.z, base, offset)
 WORD_COUNT(mac_load_v3s4, 3)
 
+#define mac_load_p3s4(transfer, base, offset) \
+	mac_load_word_v3(transfer.x, transfer.y, transfer.z, base, offset)
+WORD_COUNT(mac_load_p3s4, 3)
+
 /* atom_dbg_skip */
-#define mac_store_v3s4(rt_x, rt_y, rt_z, base, offset) \
-	store_word(rt_x, base, offset + O_(V3_S4,x)) \
-,	store_word(rt_y, base, offset + O_(V3_S4,y)) \
-,	store_word(rt_z, base, offset + O_(V3_S4,z))
+#define mac_store_word_v3(tx, ty, tz, base, offset) \
+	store_word(tx, base, offset + OA_(U4,[0])) \
+,	store_word(ty, base, offset + OA_(U4,[1])) \
+,	store_word(tz, base, offset + OA_(U4,[2]))
+WORD_COUNT(mac_store_word_v3, 3)
+
+#define mac_store_v3s4(transfer, base, offset) \
+	mac_store_word_v3(transfer.x, transfer.y, transfer.z, base, offset)
 WORD_COUNT(mac_store_v3s4, 3)
+
+#define mac_store_p3s4(transfer, base, offset) \
+	mac_store_word_v3(transfer.x, transfer.y, transfer.z, base, offset)
+WORD_COUNT(mac_store_p3s4, 3)
 
 /* atom_dbg_skip */
 #define mac_add_si_v3s4(rt_x, rt_y, rt_z, base, offset) \
@@ -234,8 +250,8 @@ WORD_COUNT(mac_lzcr_round_even_half_shift, 5)
 ,	gte_mv_to_data_r(to_ir1, C2_IR1) /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */ \
 ,	gte_mv_to_data_r(to_ir2, C2_IR2) \
 ,	gte_mv_to_data_r(to_ir3, C2_IR3) /* IR3 = src.z (reloaded) */ \
-,	LdSlot_ nop_slot1 \
-,	LdSlot_ nop_slot2 \
+,	DmaSlot_ nop_slot1 \
+,	DmaSlot_ nop_slot2 \
 ,	gte_cmdw_gpf \
 ,	gte_mv_from_data_r(fr_mac1, C2_MAC1) \
 ,	gte_mv_from_data_r(fr_mac2, C2_MAC2) \

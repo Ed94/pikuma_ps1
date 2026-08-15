@@ -101,6 +101,7 @@ enum {
 };
 
 typedef U2 Reg; // Register parameter used with atom or atom component procedures
+#define Reg_(type) tmpl(Reg,type) // Just a way to template register allocations of C-struct types.
 
 typedef U4 const MipsCode; // Underlying type to mips asm words.
 typedef Slice_(MipsCode);
@@ -142,6 +143,8 @@ typedef Slice_(MipsAtom);
 // The component name is derived by the Lua metaprogram from the preceding `FI_ Slice_MipsCode ac_X(...)` declaration (backward walk from the macro site).
 // Inline-only callers (the generated `mac_<name>` aliases) skip the `ab` arg via metaprogram filtering; escape callers (ac_<name> invoked as a function) pass a long-lived builder.
 #define MipsAtomComp_Proc_(ab, ...) { MipsCode atom_comp_code[] align_(4) = __VA_ARGS__; atombuilder_push(ab, slice_from_array(MipsCode, atom_comp_code)); }
+
+#define MipsAtomComp_ProcMap_(ab, base_command) atom_dbg_skip MipsAtomComp_Proc_(ab, {base_command })
 
 /* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.
 	Files containing only atoms and atom components.
@@ -372,7 +375,7 @@ FI_ void regfile_reset(RegFile_R rf) {
 	rf->GPR[0] = u4_lo(regfile_abi_mask);
 	rf->GPR[1] = u4_hi(regfile_abi_mask);
 }
-FI_ void regfile_reset_mask(RegFile_R rf, U4 mask) {
+FI_ void regfile_reset_to_mask(RegFile_R rf, U4 mask) {
 	rf->GPR[0] = u4_lo(mask);
 	rf->GPR[1] = u4_hi(mask);
 }

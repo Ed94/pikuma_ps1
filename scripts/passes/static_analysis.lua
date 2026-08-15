@@ -1322,8 +1322,14 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 					if    is_load_delay then
 						-- Determine the destination register from the load's `writes` field.
 						local prev_writes = gpr_effects[prev_ident] and gpr_effects[prev_ident].writes or {}
-						local prev_args   = prev_ev.args or {}
-						local load_dest   = prev_writes[1] and prev_args[prev_writes[1]] or "<load-destination>"
+						local dest_pos    = prev_writes[1]
+						local load_dest   = dest_pos and (gpr_identity(prev_ev, dest_pos) or (prev_ev.args or {})[dest_pos]) or "<load-destination>"
+						local authored    = dest_pos and (prev_ev.args or {})[dest_pos] or load_dest
+						local shown      = authored
+						if type(load_dest) == "string" and load_dest:sub(1, 7) == "reguse:" then
+							local slot = load_dest:match("([^:]+)$")
+							if slot then shown = authored .. " (slot " .. slot .. ")" end
+						end
 						findings[#findings + 1] = {
 							check                = "hazard_nop_use",
 							kind                 = "info",
@@ -1336,7 +1342,7 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 							producer_destination = load_dest,
 							consumer_token       = "<would-be-consumer>",
 							msg = string.format("%s at line %d: nop at word %d is modeled-required (load-delay slot for %s)"
-								, atom.name, ev_line, ev_word, load_dest
+								, atom.name, ev_line, ev_word, shown
 							),
 						}
 					else
