@@ -2236,6 +2236,36 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	local invocation_stack = {}   -- stack of currently-open invocation records
 	local next_inv_id      = 0
 
+	local reg_use_schema = ctx_table.reg_use_schema
+	local reg_use_param  = ctx_table.reg_use_param
+	local atom_name      = ctx_table.atom_name
+
+	local slot_readonly = {}
+	if reg_use_schema then
+		for _, slot in ipairs(reg_use_schema.slots or {}) do
+			slot_readonly[slot.name] = slot.readonly == true
+		end
+	end
+
+	local function apply_sub(sub_map, operand)
+		if sub_map and type(operand) == "string" and sub_map[operand] then
+			return sub_map[operand]
+		end
+		return operand
+	end
+
+	local function resolve_gpr_key(operand)
+		if type(operand) ~= "string" then return nil end
+		if operand:sub(1, 2) == "R_" then return operand end
+		if not (reg_use_schema and reg_use_param) then return nil end
+		local prefix = reg_use_param .. "."
+		if operand:sub(1, #prefix) ~= prefix then return nil end
+		local member_path = operand:sub(#prefix + 1)
+		local slot = reg_use_schema.alias_to_slot[member_path]
+		if not slot then return nil, member_path end
+		return "reguse:" .. atom_name .. ":" .. slot, nil, slot
+	end
+
 	local function open_invocation_ids_snapshot()
 		local ids = {}
 		for _, inv in ipairs(invocation_stack) do
@@ -2246,7 +2276,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 
 	local function emit_word(encoder, args, line, word_call_text,
 		def_source_now, def_line_now,
-		immediate_call_text, root_call_text_w)
+		immediate_call_text, root_call_text_w, sub_map)
 		local inv_ids   = open_invocation_ids_snapshot()
 		local outermost = inv_ids[1] or 0
 		-- For words emitted at the root atom body, `immediate_call_text` is nil and the walker's `word_call_text` (the word's own token, e.g. "nop") becomes the effective call_text.
@@ -2254,6 +2284,42 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		-- The call that triggered the body expansion we're currently walking.
 		local eff_call_text      = immediate_call_text or word_call_text
 		local eff_root_call_text = root_call_text_w
+		local gpr_keys = nil
+		if reg_use_schema or sub_map then
+			gpr_keys = {}
+			for pos, arg in ipairs(args or {}) do
+				local effective = apply_sub(sub_map, arg)
+				local key, unresolved, slot = resolve_gpr_key(effective)
+				gpr_keys[pos] = key
+				if unresolved then
+					errors[#errors + 1] = {
+						kind = "reguse_unresolved",
+						line = line,
+						msg  = string.format("RegUse operand %q does not resolve in schema %q",
+							effective, (reg_use_schema and reg_use_schema.name) or "?"),
+					}
+				end
+				if key and slot and slot_readonly[slot] then
+					local effects = M.INSTRUCTION_GPR_EFFECTS or {}
+					local row = effects[encoder]
+					if row and row.writes then
+						for _, wpos in ipairs(row.writes) do
+							if wpos == pos then
+								errors[#errors + 1] = {
+									kind = "reguse_const_write",
+									line = line,
+									msg  = string.format("RegUse slot %q is Reg const; %s writes it",
+										slot, encoder),
+								}
+							end
+						end
+					end
+				end
+			end
+		end
+		if not reg_use_schema then
+			gpr_keys = nil
+		end
 		items[#items + 1] = {
 			kind                     = "word",
 			encoder                  = encoder,
@@ -2265,6 +2331,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			root_call_text           = eff_root_call_text,
 			invocation_ids           = inv_ids,
 			outermost_invocation_id  = outermost,
+			gpr_keys                 = gpr_keys,
 		}
 		word_events[#word_events + 1] = {
 			i                        = word_idx,
@@ -2277,6 +2344,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			invocation_ids           = inv_ids,
 			outermost_invocation_id  = outermost,
 			word_count               = 1,
+			gpr_keys                 = gpr_keys,
 		}
 		word_idx = word_idx + 1
 	end
@@ -2520,6 +2588,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		local line_of    = body_entry.line_of or M.LineIndex("")
 		local def_source = body_entry.source or ""
 		local def_line   = body_entry.declaration or 0
+		local sub_map    = body_entry.sub_map
 		-- Per-token dispatch: each matched branch returns; only the fall-through
 		-- "opaque word" emit handles direct encoders + mac_X-without-component.
 		local function process_token(bt)
@@ -2575,12 +2644,22 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					-- Propagate trackers into the recursive walk:
 					--   immediate_call_text = this call's tok (the IMMEDIATE outer call for words emitted in this body)
 					--   root_call_text      = the OUTERMOST call (immutable across the recursion)
+					local formal_names = ctx_table.component_index[bare]
+						and ctx_table.component_index[bare].arg_names
+					local child_map = nil
+					if formal_names then
+						child_map = {}
+						for i, fname in ipairs(formal_names) do
+							child_map[fname] = apply_sub(sub_map, args[i])
+						end
+					end
 					walk_body_entry({
 							body_tokens = comp.body_tokens or {},
 							body_off    = comp.body_off or 0,
 							line_of     = comp.line_of,
 							source      = comp.source,
 							declaration = comp.declaration,
+							sub_map     = child_map,
 						},
 						inv.id,
 						invocation_root_call_text,
@@ -2618,7 +2697,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			local n         = resolve_count(ident, tok_line)
 			local out_ident = (ident == "nop2") and "nop" or ident
 			for _ = 1, n do
-				emit_word(out_ident, args, tok_line, tok, def_source, def_line, walk_immediate_call_text, walk_root_call_text)
+				emit_word(out_ident, args, tok_line, tok, def_source, def_line, walk_immediate_call_text, walk_root_call_text, sub_map)
 			end
 		end
 		
@@ -2683,7 +2762,7 @@ end
 --- @param components      table   -- bare-name → component definition (corpus.components); REQUIRED — consumed at the invocation-construction site to stamp
 ---                                   `invocation.debug_skip`. A missing or non-table `components` raises a fail-loud error rather than silently falling back.
 --- @return EmissionProjection
-function M.project_emission(body_text, component_index, word_counts, components)
+function M.project_emission(body_text, component_index, word_counts, components, reg_use_ctx)
 	-- The recursive walk delegates to `_project_emission_inner` so component bodies (which arrive as
 	-- `{body_tokens, body_off, line_of, source, declaration}` records from `corpus.component_body_index`)
 	-- re-enter the same walker with the same shared output state.
@@ -2726,6 +2805,10 @@ function M.project_emission(body_text, component_index, word_counts, components)
 		component_index = component_index or {},
 		word_counts     = word_counts     or {},
 		components      = components,
+		reg_use_schema  = reg_use_ctx and reg_use_ctx.reg_use_schema,
+		reg_use_param   = reg_use_ctx and reg_use_ctx.reg_use_param,
+		atom_name       = reg_use_ctx and reg_use_ctx.atom_name,
+		schema_name     = reg_use_ctx and reg_use_ctx.schema_name,
 	})
 end
 
@@ -2860,13 +2943,12 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 		if source:sub(next_pos, next_pos) == "(" then
 			local inner = M.read_parens(source, next_pos)
 			if inner then
-				-- strip the _proc suffix to get the atom name
 				local proc_suffix = "_proc"
+				local atom_name = ident
 				if #ident > #proc_suffix and ident:sub(-#proc_suffix) == proc_suffix then
-					return ident:sub(1, #ident - #proc_suffix), inner
+					atom_name = ident:sub(1, #ident - #proc_suffix)
 				end
-				-- no _proc suffix — return as-is
-				return ident, inner
+				return atom_name, inner, ident
 			end
 		end
 		-- ident not followed by "(" — it's a qualifier; skip it

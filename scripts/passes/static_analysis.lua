@@ -451,6 +451,14 @@ local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
 	return false
 end
 
+local function gpr_identity(event, pos)
+	local keys = event and event.gpr_keys
+	if keys and keys[pos] then return keys[pos] end
+	local arg = event and event.args and event.args[pos]
+	if type(arg) == "string" and arg:sub(1, 2) == "R_" then return arg end
+	return nil
+end
+
 -- True iff `consumer_event` reads the GPR operand at any position the destination register occupies.
 -- read_pos lookup consults `duffle.OPERAND_READ_POSITIONS` for the consumer's encoder and walks each `args[pos]` to find an operand-equal match.
 local function is_gpr_consumer_of(consumer_event, destination)
@@ -458,9 +466,8 @@ local function is_gpr_consumer_of(consumer_event, destination)
 	local read_pos       = duffle.OPERAND_READ_POSITIONS or {}
 	local positions      = read_pos[consumer_token]
 	if not positions then return false end
-	local args = consumer_event.args or {}
 	for _, pos in ipairs(positions) do
-		if args[pos] == destination then return true end
+		if gpr_identity(consumer_event, pos) == destination then return true end
 	end
 	return false
 end
@@ -552,6 +559,11 @@ local function is_gpr_operand(operand)
 	return type(operand) == "string" and operand:sub(1, 2) == "R_"
 end
 
+local function is_tracked_gpr(operand)
+	return is_gpr_operand(operand)
+		or (type(operand) == "string" and operand:sub(1, 7) == "reguse:")
+end
+
 local function constant_for_operand(gpr_values, operand)
 	if operand == "R_0" then return 0 end
 	local slot = is_gpr_operand(operand) and gpr_values[operand] or nil
@@ -560,13 +572,13 @@ local function constant_for_operand(gpr_values, operand)
 end
 
 local function invalidate_gpr(gpr_values, operand)
-	if is_gpr_operand(operand) and operand ~= "R_0" then
+	if is_tracked_gpr(operand) and operand ~= "R_0" then
 		gpr_values[operand] = { kind = "unknown" }
 	end
 end
 
 local function store_gpr_constant(gpr_values, operand, value)
-	if not is_gpr_operand(operand) or operand == "R_0" then return end
+	if not is_tracked_gpr(operand) or operand == "R_0" then return end
 	if value == nil then gpr_values[operand] = { kind = "unknown" }
 	else                 gpr_values[operand] = { kind = "constant", value = wrap_u4(value) }
 	end
@@ -629,26 +641,31 @@ end
 -- Encoders without an explicit effect row conservatively invalidate every R_-prefixed operand.
 -- Recognized value rules are evaluated before their destination is invalidated.
 -- A failed/unknown evaluation writes `{kind = "unknown"}` instead.
-local function apply_gpr_effects(ev_ident, ev_args, forward_state)
+local function apply_gpr_effects(ev, forward_state)
+	local ev_ident   = ev.encoder or ev.ident
+	local ev_args    = ev.args or {}
 	local gpr_values = forward_state.gpr_values
 	local effects    = duffle.INSTRUCTION_GPR_EFFECTS or {}
 	local row        = effects[ev_ident]
 	if row == nil then
-		for _, operand in ipairs(ev_args or {}) do
-			invalidate_gpr(gpr_values, operand)
+		for pos, operand in ipairs(ev_args) do
+			local key = gpr_identity(ev, pos) or operand
+			if type(key) == "string" and (key:sub(1, 2) == "R_" or key:sub(1, 7) == "reguse:") then
+				if key ~= "R_0" then gpr_values[key] = { kind = "unknown" } end
+			end
 		end
 		return
 	end
 
 	local value_rule = (duffle.GPR_VALUE_RULES or {})[ev_ident]
-	local value      = value_rule and evaluate_gpr_value_rule(value_rule, ev_args or {}, gpr_values) or nil
+	local value      = value_rule and evaluate_gpr_value_rule(value_rule, ev_args, gpr_values) or nil
 	for _, position in ipairs(row.writes or {}) do
-		local destination = ev_args and ev_args[position]
-		if is_gpr_operand(destination) then
+		local destination = gpr_identity(ev, position)
+		if destination then
 			if value_rule and position == value_rule.dest and value ~= nil then
 				store_gpr_constant(gpr_values, destination, value)
 			else
-				invalidate_gpr(gpr_values, destination)
+				if destination ~= "R_0" then gpr_values[destination] = { kind = "unknown" } end
 			end
 		end
 	end
@@ -953,7 +970,7 @@ local function analyze_hardware_relations(atom)
 		end
 
 		-- ── 2. Apply GPR value effects. ──
-		apply_gpr_effects(ev_ident, ev_args, forward)
+		apply_gpr_effects(ev, forward)
 
 		-- ── 3. Stage producers created by this event. ──
 		local rows = rows_by_token[ev_ident]
@@ -962,7 +979,7 @@ local function analyze_hardware_relations(atom)
 				-- `stage = false` rows document a direction but do not create a later command-input producer (SWC2 and ordinary MTC0).
 				if row.stage ~= false then
 					local dest_arg    = row.writes and row.writes.arg
-					local destination = dest_arg   and ev_args[dest_arg] or nil
+					local destination = dest_arg and (gpr_identity(ev, dest_arg) or ev_args[dest_arg]) or nil
 					if destination then
 						-- Apply the destination_match filter when present.
 						if row.destination_match and row.destination_match ~= destination then
@@ -1352,7 +1369,7 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 			for _, row in ipairs(relations_table) do
 				if row.token == ev_ident and row.stage ~= false then
 					local dest_arg    = row.writes and row.writes.arg
-					local destination = dest_arg   and ev_args[dest_arg] or nil
+					local destination = dest_arg and (gpr_identity(ev, dest_arg) or ev_args[dest_arg]) or nil
 					if destination and (not row.destination_match or row.destination_match == destination) then
 						local required = row.visibility and row.visibility.required
 						if    required == nil and not (row.visibility and row.visibility.kind == "unknown_consumer") then
@@ -1517,11 +1534,12 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 		-- Use `net_reads` to ignore RMW positions (write shadows read within the same instruction).
 		if not is_load then
 			for _, pos in ipairs(net_reads(event_ident, args)) do
-				local reg = args[pos]
-				if type(reg) == "string" and reg:sub(1, 2) == "R_" then
+				local reg = gpr_identity(event, pos)
+				if reg then
 					local until_idx = volatile_until[reg]
 					if until_idx and event_idx <= until_idx then
 						local ev_line = line_for_word_event(event)
+						local authored = args[pos] or reg
 						findings[#findings + 1] = {
 							atom  = atom.name,
 							line  = ev_line,
@@ -1530,7 +1548,7 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 							msg   = string.format("%s at line %d reads %s at word %d, but a prior load's "
 								.. "delay slot is not over until word %d; insert a `nop` between the "
 								.. "load and this instruction.",
-								atom.name, ev_line, reg, event_idx, until_idx),
+								atom.name, ev_line, authored, event_idx, until_idx),
 						}
 					end
 				end
@@ -1541,8 +1559,8 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 		local effect = gpr_effects[event_ident]
 		if effect and effect.writes then
 			for _, pos in ipairs(effect.writes) do
-				local reg = args[pos]
-				if type(reg) == "string" and reg:sub(1, 2) == "R_" then
+				local reg = gpr_identity(event, pos)
+				if reg then
 					if is_load then
 						-- Load: destination volatile for exactly 1 slot (the delay slot).
 						volatile_until[reg] = event_idx + 1

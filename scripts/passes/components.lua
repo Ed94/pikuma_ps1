@@ -159,6 +159,14 @@ local function extract_arg_names(args_str)
 	return names
 end
 
+local function formal_arg_names(args_str)
+	local names = extract_arg_names(args_str)
+	if not names then return nil end
+	if names[1] == "ab" then table.remove(names, 1) end
+	if #names == 0 then return nil end
+	return names
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- Component projection (read from pre-scanned SourceScan)
 -- ════════════════════════════════════════════════════════════════════════════
@@ -197,6 +205,7 @@ local function project_components(source, scan)
 				body_off    = a.body_off,
 				body_tokens = a.body_tokens,
 				args        = args,
+				arg_names   = formal_arg_names(args),
 				comment     = comment,
 				kind        = a.kind,  -- "comp_bare" | "comp_proc"; provenance emitter reads this.
 				debug_skip  = a.debug_skip == true,
@@ -466,18 +475,9 @@ end
 --- @param args_str string|nil
 --- @return string
 local function signature_from_args(args_str)
-	local arg_names = extract_arg_names(args_str)
-	if    arg_names and #arg_names > 0 then
-		-- Drop the leading `ab` (atom-builder) first arg if present.
-		-- Convention: `MipsAtomComp_Proc_` components always declare `ab` as the first function-arg
-		-- (type `MipsAtomBuilder_R`), mirroring the macro signature in `lottes_tape.h`.
-		if arg_names[1] == "ab" then
-			table.remove(arg_names, 1)
-		end
-		if #arg_names > 0 then
-			return table.concat(arg_names, ", ")
-		end
-		return "..."  -- `ab` was the only arg; fall through to variadic
+	local names = formal_arg_names(args_str)
+	if names then
+		return table.concat(names, ", ")
 	end
 	return "..."
 end
@@ -710,6 +710,7 @@ local function update_canonical_component_body_index(corpus, src, components, sc
 				source      = src.path,
 				declaration = c.line,
 				kind        = c.kind,
+				arg_names   = c.arg_names,
 			}
 		end
 	end

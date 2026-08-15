@@ -155,8 +155,28 @@ local function project_atom(atom_record, src, corpus)
 	local body  = atom_record.body or ""
 	local wc    = corpus.word_counts or {}
 	local cbi   = corpus.component_body_index or {}
+	local schema = nil
+	if atom_record.reg_use_schema_name then
+		schema = corpus.reg_use_schemas and corpus.reg_use_schemas[atom_record.reg_use_schema_name]
+	end
 	-- That construction site stamps `invocation.debug_skip` while appending each record to `proj.invocations`.
-	local proj  = duffle.project_emission(body, cbi, wc, corpus.components)
+	local proj  = duffle.project_emission(body, cbi, wc, corpus.components, {
+		reg_use_schema = schema,
+		reg_use_param  = atom_record.reg_use_param_name,
+		atom_name      = atom_record.name,
+		schema_name    = atom_record.reg_use_schema_name,
+	})
+	if atom_record.reg_use_schema_name and not schema then
+		proj.errors[#proj.errors + 1] = {
+			kind = "reguse_missing_schema",
+			msg  = string.format("RegUse schema %q is missing", atom_record.reg_use_schema_name),
+		}
+	end
+	for _, err in ipairs(corpus.reg_use_errors or {}) do
+		if err.schema_name == atom_record.reg_use_schema_name then
+			proj.errors[#proj.errors + 1] = err
+		end
+	end
 	local paths = {
 		tokens       = atom_record.body_tokens or {},
 		line_in_body = duffle.build_body_line_index(body),

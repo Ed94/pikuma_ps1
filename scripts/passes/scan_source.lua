@@ -1416,12 +1416,48 @@ local function parse_mips_atom_proc(source, pos, ident_end, line_of, out)
 	-- (`internal MipsAtom* X_proc(...)`), not from the first macro arg (which
 	-- is now `aa`). The backward walk finds the function decl before open_paren
 	-- and strips the `_proc` suffix.
-	local raw_name = duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
+	local raw_name, args_inner, func_ident = duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
 	if not raw_name then raw_name = "?" end
-	local name     = strip_ac_prefix(raw_name)
+	local name = strip_ac_prefix(raw_name)
+	local reg_use_schema_name = nil
+	local reg_use_param_name  = nil
+	if args_inner then
+		local arg_tokens = duffle.split_top_level_commas(args_inner)
+		for _, tok in ipairs(arg_tokens) do
+			local trimmed = duffle.trim(tok)
+			local schema_suffix, param = trimmed:match("RegUse_([%w_]+)%s+([%w_]+)$")
+			if schema_suffix then
+				if reg_use_schema_name then
+					out.reg_use_errors[#out.reg_use_errors + 1] = {
+						kind        = "reguse_multiple_params",
+						schema_name = "RegUse_" .. schema_suffix,
+						source_line = line_of(pos),
+					}
+				else
+					reg_use_schema_name = "RegUse_" .. schema_suffix
+					reg_use_param_name  = param
+				end
+			end
+		end
+	end
 	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
 	local body_off = open_paren + 2 + last_brace_pos
 	register_atom(out, "atom_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
+
+	local entry = out.atoms[#out.atoms]
+	entry.reg_use_schema_name = reg_use_schema_name
+	entry.reg_use_param_name  = reg_use_param_name
+	if reg_use_schema_name and func_ident then
+		local expected = "RegUse_" .. func_ident
+		if reg_use_schema_name ~= expected then
+			out.reg_use_errors[#out.reg_use_errors + 1] = {
+				kind        = "reguse_name_mismatch",
+				schema_name = reg_use_schema_name,
+				func_ident  = func_ident,
+				source_line = line_of(pos),
+			}
+		end
+	end
 
 	return after_paren
 end
@@ -1530,6 +1566,171 @@ local function register_typedef_alias(underlying, name, pos, line_of, out)
 	}
 end
 
+local function parse_reg_use_schema_body(body)
+	local slots = {}
+	local alias_to_slot = {}
+	local slot_names = {}
+	local errors = {}
+
+	local function add_alias(path, slot)
+		if alias_to_slot[path] then
+			errors[#errors + 1] = { kind = "reguse_duplicate_alias", path = path }
+			return false
+		end
+		alias_to_slot[path] = slot
+		return true
+	end
+
+	local function add_slot(name, aliases, readonly)
+		if slot_names[name] then
+			errors[#errors + 1] = { kind = "reguse_duplicate_slot", name = name }
+			return nil
+		end
+		slot_names[name] = true
+		local slot = { name = name, aliases = aliases, readonly = readonly == true }
+		slots[#slots + 1] = slot
+		return slot
+	end
+
+	local function parse_reg_names(text, pos)
+		local names = {}
+		while pos <= #text do
+			pos = duffle.skip_ws_and_cmt(text, pos)
+			local name, name_end = duffle.read_ident(text, pos)
+			if not name then return nil, pos end
+			names[#names + 1] = name
+			pos = duffle.skip_ws_and_cmt(text, name_end)
+			if text:sub(pos, pos) == "," then
+				pos = pos + 1
+			else
+				break
+			end
+		end
+		if text:sub(pos, pos) == ";" then pos = pos + 1 end
+		return names, pos
+	end
+
+	local pos = 1
+	while pos <= #body do
+		pos = duffle.skip_ws_and_cmt(body, pos)
+		if pos > #body then break end
+		local first, first_end = duffle.read_ident(body, pos)
+		if not first then
+			pos = pos + 1
+			goto continue
+		end
+		local after = duffle.skip_ws_and_cmt(body, first_end)
+		if first == "const" then
+			errors[#errors + 1] = { kind = "reguse_const_reg_spelling" }
+			return nil, errors
+		elseif first == "union" then
+			if body:sub(after, after) ~= "{" then
+				errors[#errors + 1] = { kind = "reguse_malformed" }
+				return nil, errors
+			end
+			local inner, after_braces = duffle.read_braces(body, after)
+			if not inner then
+				errors[#errors + 1] = { kind = "reguse_malformed" }
+				return nil, errors
+			end
+			local members = {}
+			local union_readonly = nil
+			local inner_pos = 1
+			while inner_pos <= #inner do
+				inner_pos = duffle.skip_ws_and_cmt(inner, inner_pos)
+				if inner_pos > #inner then break end
+				local m_type, m_type_end = duffle.read_ident(inner, inner_pos)
+				if not m_type then
+					inner_pos = inner_pos + 1
+					goto continue_inner
+				end
+				if m_type == "const" then
+					errors[#errors + 1] = { kind = "reguse_const_reg_spelling" }
+					return nil, errors
+				end
+				if m_type ~= "Reg" then
+					errors[#errors + 1] = { kind = "reguse_malformed" }
+					return nil, errors
+				end
+				local m_after = duffle.skip_ws_and_cmt(inner, m_type_end)
+				local m_readonly = false
+				local maybe_const, maybe_end = duffle.read_ident(inner, m_after)
+				if maybe_const == "const" then
+					m_readonly = true
+					m_after = duffle.skip_ws_and_cmt(inner, maybe_end)
+				end
+				if union_readonly == nil then
+					union_readonly = m_readonly
+				elseif union_readonly ~= m_readonly then
+					errors[#errors + 1] = { kind = "reguse_mixed_const" }
+					return nil, errors
+				end
+				local names, new_inner = parse_reg_names(inner, m_after)
+				if not names or #names == 0 then
+					errors[#errors + 1] = { kind = "reguse_malformed" }
+					return nil, errors
+				end
+				for _, n in ipairs(names) do members[#members + 1] = n end
+				inner_pos = new_inner
+				::continue_inner::
+			end
+			if #members == 0 then
+				errors[#errors + 1] = { kind = "reguse_malformed" }
+				return nil, errors
+			end
+			local after_close = duffle.skip_ws_and_cmt(body, after_braces)
+			local inst_name, inst_end = duffle.read_ident(body, after_close)
+			local aliases = {}
+			local slot_name
+			if inst_name then
+				slot_name = inst_name
+				for _, m in ipairs(members) do
+					local path = inst_name .. "." .. m
+					if not add_alias(path, slot_name) then return nil, errors end
+					aliases[#aliases + 1] = path
+				end
+				after_close = inst_end
+			else
+				slot_name = members[1]
+				for _, m in ipairs(members) do
+					if not add_alias(m, slot_name) then return nil, errors end
+					aliases[#aliases + 1] = m
+				end
+			end
+			if not add_slot(slot_name, aliases, union_readonly) then return nil, errors end
+			after_close = duffle.skip_ws_and_cmt(body, after_close)
+			if body:sub(after_close, after_close) == ";" then after_close = after_close + 1 end
+			pos = after_close
+		elseif first == "Reg" then
+			local readonly = false
+			local maybe_const, maybe_end = duffle.read_ident(body, after)
+			if maybe_const == "const" then
+				readonly = true
+				after = duffle.skip_ws_and_cmt(body, maybe_end)
+			end
+			local names, new_pos = parse_reg_names(body, after)
+			if not names or #names == 0 then
+				errors[#errors + 1] = { kind = "reguse_malformed" }
+				return nil, errors
+			end
+			for _, n in ipairs(names) do
+				if not add_alias(n, n) then return nil, errors end
+				if not add_slot(n, { n }, readonly) then return nil, errors end
+			end
+			pos = new_pos
+		else
+			errors[#errors + 1] = { kind = "reguse_malformed" }
+			return nil, errors
+		end
+		::continue::
+	end
+	if #slots == 0 then
+		errors[#errors + 1] = { kind = "reguse_malformed" }
+		return nil, errors
+	end
+	return { slots = slots, alias_to_slot = alias_to_slot }, errors
+end
+
 --- Parse: `typedef` declarations.
 ---
 --- Recognizes four shapes:
@@ -1563,6 +1764,21 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		local body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
 		if not body then return after_brace end
 		register_struct_type(body, name, pos, line_of, out)
+		if name:sub(1, 7) == "RegUse_" then
+			local schema, schema_errors = parse_reg_use_schema_body(body)
+			if schema then
+				schema.name        = name
+				schema.source_file = out._source_file
+				schema.source_line = line_of(pos)
+				out.reg_use_schemas[name] = schema
+			end
+			for _, err in ipairs(schema_errors or {}) do
+				err.schema_name = name
+				err.source_file = out._source_file
+				err.source_line = line_of(pos)
+				out.reg_use_errors[#out.reg_use_errors + 1] = err
+			end
+		end
 		attach_debug_skip_marker(out, "unrelated")
 		return after_brace
 
@@ -1954,6 +2170,8 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		-- typedef chain walking (cycle-guarded, depth <= 8), and struct field sums.
 		-- See `propagate_type_sizes()` below.
 		type_name_registry = {},
+		reg_use_schemas    = {},
+		reg_use_errors     = {},
 		-- Shared `R_*_Code -> integer code` registry
 		-- (passed in from M.run pass 1; same reference so preprocessor intercept writes are visible to the enum-value resolver).
 		-- Stripped from `src.scan` before return.
@@ -2186,13 +2404,15 @@ local function merge_corpus_registries(corpus)
 	corpus.atom_auto_regs          = corpus.atom_auto_regs          or {}
 	corpus.phase_auto_regs         = corpus.phase_auto_regs         or {}
 	corpus.collisions              = corpus.collisions              or {}
+	corpus.reg_use_schemas         = corpus.reg_use_schemas         or {}
+	corpus.reg_use_errors          = corpus.reg_use_errors          or {}
 
 	-- Replace the existing corpus collections with empty tables so a re-run on the same corpus produces identical state (deterministic merge).
 	-- This is safe because M.run is the only writer to these tables within a single orchestrator invocation.
 	for _, key in ipairs({
 		"register_alias_registry", "type_name_registry", "binds_by_name",
 		"atoms_by_name", "atom_views", "atom_ctxs", "atom_phases",
-		"atom_infos", "collisions",
+		"atom_infos", "collisions", "reg_use_schemas", "reg_use_errors",
 	}) do
 		corpus[key] = {}
 	end
@@ -2284,6 +2504,15 @@ local function merge_corpus_registries(corpus)
 			-- The merge is purely order-preserving.
 			for _, info in ipairs(scan.atom_infos or {}) do
 				corpus.atom_infos[#corpus.atom_infos + 1] = info
+			end
+
+			for name, schema in pairs(scan.reg_use_schemas or {}) do
+				if corpus.reg_use_schemas[name] == nil then
+					corpus.reg_use_schemas[name] = schema
+				end
+			end
+			for _, err in ipairs(scan.reg_use_errors or {}) do
+				corpus.reg_use_errors[#corpus.reg_use_errors + 1] = err
 			end
 		end
 	end
