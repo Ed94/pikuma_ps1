@@ -105,6 +105,16 @@ test("document-local declarations override an empty workspace index", () => {
 	assert.equal(byText(result, "mac_new_component")[0].type, "tapeComponentInstruction");
 });
 
+test("delay slot markers share the tapeDelaySlot token", () => {
+	const source = "LdSlot_ nop, BdSlot_ nop, DmaSlot_ nop2, GteDelay_ nop";
+	const result = classifyDocument(source, "C:/x/code/duffle/gte.atom.c", createIndex());
+
+	assert.equal(byText(result, "LdSlot_")[0].type, "tapeDelaySlot");
+	assert.equal(byText(result, "BdSlot_")[0].type, "tapeDelaySlot");
+	assert.equal(byText(result, "DmaSlot_")[0].type, "tapeDelaySlot");
+	assert.equal(byText(result, "GteDelay_")[0].type, "tapeDelaySlot");
+});
+
 test("classifier returns ordered non-overlapping spans and partial malformed output", () => {
 	const source = "atom_reads(R_A /* broken";
 	const result = classifyDocument(source, "C:/x/code/test.atom.c", createIndex());

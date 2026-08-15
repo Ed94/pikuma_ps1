@@ -49,7 +49,7 @@ const DSL_KEYWORDS = new Set([
 	"u1_r", "u2_r", "u4_r", "u8_r", "u1_v", "u2_v", "u4_v", "u8_v",
 ]);
 
-const DELAY_SLOT_KEYWORDS = new Set(["LdSlot_", "BdSlot_"]);
+const DELAY_SLOT_KEYWORDS = new Set(["LdSlot_", "BdSlot_", "DmaSlot_", "GteDelay_"]);
 
 const CONTROL_FLOW_PREFIXES = /^(?:branch_|jump_|call_)/;
 

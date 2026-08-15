@@ -16,7 +16,7 @@ define tape_atoms
   echo "[gdb_tape_atoms] STUB: run .\\build_psyq.ps1 to regenerate, then re-source this file."
 end
 document tape_atoms
-  List every tape atom symbol in the loaded ELF (code_<name>) with its .rodata address and word count.
+  List every tape atom symbol in the loaded ELF with its .rodata address and word count.
   STUB state: runtime file not sourced. Run build_psyq.ps1 to regenerate.
 end
 

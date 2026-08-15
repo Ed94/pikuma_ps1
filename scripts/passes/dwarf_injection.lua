@@ -2,7 +2,7 @@
 ---
 --- Reads the post-link ELF directly (io.open; walks the ELF32 section header table to find
 --- `.debug_info` + `.debug_abbrev` + `.debug_str` + `.debug_line` + `.debug_aranges` + `.debug_rnglists`),
---- APPENDS synthetic DWARF line-program sequences for every `code_<name>` atom, EXTENDS the `.debug_aranges`
+--- APPENDS synthetic DWARF line-program sequences for every tape atom, EXTENDS the `.debug_aranges`
 --- and main-CU range tables with the atom ranges, and INSERTS synthetic atom/component DIE children into the
 --- existing main compilation unit in `.debug_info` (no second compilation unit).
 --- Per-atom `DW_TAG_subprogram` + per-register `DW_TAG_variable` entries make
@@ -1344,7 +1344,7 @@ local function build_new_abbrev()
 		attr(   DW_AT_name,         DW_FORM_string)
 	  .. attr(DW_AT_low_pc,       DW_FORM_addr)
 	  .. attr(DW_AT_high_pc,      DW_FORM_addr)
-	  .. attr(DW_AT_linkage_name, DW_FORM_string))  -- equals DW_AT_name; lets gdb's symbol-table lookup resolve to our subprogram (not the gcc global `code_<name>` const U4 array)
+	  .. attr(DW_AT_linkage_name, DW_FORM_string))  -- equals DW_AT_name; gdb resolves the subprogram, not the gcc global array
 
 	local abbrev_variable = abbrev(ABBREV_VARIABLE, DW_TAG_variable, false,  -- DW_CHILDREN_no
 		attr(   DW_AT_name,     DW_FORM_string)
@@ -1857,7 +1857,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	end
 
 	-- 4) Emit per-atom DW_TAG_subprograms (children of main CU).
-	--    Subprogram names match nm symbols without a `code_` prefix.
+	--    Subprogram names match the written C ident (the ELF symbol).
 	--    The gcc global `<name>[]` is a DW_TAG_variable without children; our subprogram has the wave-context var children.
 	--    gdb's symbol resolution picks our subprogram (it has low_pc/high_pc + children) over the gcc global for function-context lookups.
 	for _, atom in ipairs(atom_table) do
@@ -2313,5 +2313,6 @@ end
 M.compute_loclists_offsets_for_test     = compute_loclists_offsets
 M.build_debug_loclists_section_for_test = build_debug_loclists_section
 M.tape_piece_size_for_test              = tape_piece_size
+M.build_atom_table_for_test             = build_atom_table
 
 return M

@@ -259,6 +259,27 @@ local function slot_suffix(key)
 	return key:match("([^:]+)$")
 end
 
+local function decl_names(view)
+	local names = {}
+	for _, a in ipairs(view.decls or {}) do
+		if a.name then names[a.name] = true end
+	end
+	return names
+end
+
+local function path_in_module(path, view)
+	if type(path) ~= "string" or path == "" then return false end
+	local norm = path:gsub("\\", "/")
+	local dir  = (view.dir or ""):gsub("\\", "/")
+	if dir ~= "" and (norm == dir or norm:sub(1, #dir + 1) == dir .. "/") then
+		return true
+	end
+	for _, src in ipairs(view.sources or {}) do
+		if (src.path or ""):gsub("\\", "/") == norm then return true end
+	end
+	return false
+end
+
 local function build_module_view(dir, dir_sources, corpus)
 	local decls = {}
 	for _, src in ipairs(dir_sources or {}) do
@@ -352,7 +373,16 @@ local function render_section_reguse(add, view)
 		end
 		add("")
 	end
-	local errors = (view.corpus and view.corpus.reg_use_errors) or {}
+	local bound = {}
+	for _, schema in ipairs(view.schemas or {}) do
+		if schema.name then bound[schema.name] = true end
+	end
+	local errors = {}
+	for _, err in ipairs((view.corpus and view.corpus.reg_use_errors) or {}) do
+		if bound[err.schema_name] or path_in_module(err.source_file, view) then
+			errors[#errors + 1] = err
+		end
+	end
 	if #errors > 0 then
 		wrote = true
 		add("### parse errors")
@@ -394,12 +424,8 @@ local function render_section_binds(add, view)
 	for _, src in ipairs(view.sources) do
 		for _, b in ipairs((src.scan and src.scan.binds) or {}) do
 			wrote = true
-			local line = b.line or 0
-			if src.scan.line_of and type(b.line) == "number" then
-				line = src.scan.line_of(b.line) or b.line
-			end
 			add(string.format("### %s (%s:%s, %s bytes)",
-				b.name, source_basename(src.path), tostring(line), tostring(b.bytes or "—")))
+				b.name, source_basename(src.path), tostring(b.line or 0), tostring(b.bytes or "—")))
 			for _, f in ipairs(b.fields or {}) do
 				add(string.format("- `+%s %s`", tostring(f.offset or "?"), f.name or "?"))
 			end
@@ -411,46 +437,75 @@ end
 
 local function render_section_phases(add, view)
 	local corpus = view.corpus or {}
-	local wrote = false
+	local names  = decl_names(view)
+	local wrote  = false
 	for phase, entry in pairs(corpus.atom_phases or {}) do
-		wrote = true
-		add(string.format("- phase `%s`: %s", phase, table.concat(entry.atoms or {}, ", ")))
+		local here = {}
+		for _, atom_name in ipairs(entry.atoms or {}) do
+			if names[atom_name] then here[#here + 1] = atom_name end
+		end
+		if #here > 0 then
+			wrote = true
+			add(string.format("- phase `%s`: %s", phase, table.concat(here, ", ")))
+		end
 	end
 	for name, entry in pairs(corpus.atom_views or {}) do
-		wrote = true
-		add(string.format("- view `%s` binds `%s`", name, entry.binds_name or "—"))
+		if names[name] then
+			wrote = true
+			add(string.format("- view `%s` binds `%s`", name, entry.binds_name or "—"))
+		end
 	end
 	for name, entry in pairs(corpus.atom_ctxs or {}) do
-		wrote = true
-		add(string.format("- ctx `%s` rbind `%s`", name, entry.rbind_atom or "—"))
+		if names[name] then
+			wrote = true
+			add(string.format("- ctx `%s` rbind `%s`", name, entry.rbind_atom or "—"))
+		end
 	end
 	if not wrote then add("_(none)_") end
 	add("")
 end
 
 local function render_section_aliases(add, view)
-	local reg = (view.corpus and view.corpus.register_alias_registry) or {}
 	local names = {}
-	for name in pairs(reg) do names[#names + 1] = name end
+	local seen  = {}
+	for _, src in ipairs(view.sources or {}) do
+		for name, entry in pairs((src.scan and src.scan.register_alias_registry) or {}) do
+			if not seen[name] then
+				seen[name] = entry
+				names[#names + 1] = name
+			end
+		end
+	end
 	table.sort(names)
 	if #names == 0 then add("_(none)_"); add(""); return end
 	add("| alias | type |")
 	add("|-------|------|")
 	for _, name in ipairs(names) do
-		local e = reg[name]
+		local e = seen[name]
 		add(string.format("| %s | %s |", name, (e and e.default_type) or "—"))
 	end
 	add("")
 end
 
 local function render_section_autoreg(add, view)
-	local corpus = view.corpus or {}
+	local allowed = decl_names(view)
+	for phase, entry in pairs((view.corpus and view.corpus.atom_phases) or {}) do
+		for _, atom_name in ipairs(entry.atoms or {}) do
+			if allowed[atom_name] then allowed[phase] = true end
+		end
+	end
 	local wrote = false
+	local seen  = {}
 	local function dump(label, table_map)
 		local scopes = {}
-		for scope in pairs(table_map or {}) do scopes[#scopes + 1] = scope end
+		for scope in pairs(table_map or {}) do
+			if allowed[scope] and not seen[label .. "\0" .. scope] then
+				scopes[#scopes + 1] = scope
+			end
+		end
 		table.sort(scopes)
 		for _, scope in ipairs(scopes) do
+			seen[label .. "\0" .. scope] = true
 			wrote = true
 			local syms = {}
 			for sym, gpr in pairs(table_map[scope] or {}) do
@@ -464,16 +519,28 @@ local function render_section_autoreg(add, view)
 			add(string.format("- %s `%s`: %s", label, scope, table.concat(syms, ", ")))
 		end
 	end
+	local corpus = view.corpus or {}
 	dump("atom", corpus.atom_auto_regs)
 	dump("phase", corpus.phase_auto_regs)
+	for _, src in ipairs(view.sources or {}) do
+		dump("atom", src.scan and src.scan.atom_auto_regs)
+		dump("phase", src.scan and src.scan.phase_auto_regs)
+	end
 	if not wrote then add("_(none)_") end
 	add("")
 end
 
 local function render_section_collisions(add, view)
-	local cols = (view.corpus and view.corpus.collisions) or {}
-	if #cols == 0 then add("_(none)_"); add(""); return end
-	for _, c in ipairs(cols) do
+	local rows = {}
+	for _, c in ipairs((view.corpus and view.corpus.collisions) or {}) do
+		local first = c.first_site or {}
+		local other = c.conflicting_site or {}
+		if path_in_module(first.path, view) or path_in_module(other.path, view) then
+			rows[#rows + 1] = c
+		end
+	end
+	if #rows == 0 then add("_(none)_"); add(""); return end
+	for _, c in ipairs(rows) do
 		local first = c.first_site or {}
 		local other = c.conflicting_site or {}
 		add(string.format("- `%s` `%s` first %s:%s conflict %s:%s",
@@ -547,11 +614,13 @@ local function render_section_forward(add, view)
 	local wrote = false
 	for _, a in ipairs(view.decls) do
 		local gpr = a.paths and a.paths.forward_state and a.paths.forward_state.gpr_values
-		if gpr and next(gpr) ~= nil then
+		local keys = {}
+		for k in pairs(gpr or {}) do
+			if k ~= "R_0" then keys[#keys + 1] = k end
+		end
+		if #keys > 0 then
 			wrote = true
 			add("### " .. a.name)
-			local keys = {}
-			for k in pairs(gpr) do keys[#keys + 1] = k end
 			table.sort(keys)
 			for _, k in ipairs(keys) do
 				local slot = gpr[k]

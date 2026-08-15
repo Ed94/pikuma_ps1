@@ -1014,12 +1014,18 @@ end
 -- Section 7: domain tables
 -- ════════════════════════════════════════════════════════════════════════════
 
--- The annotation DSL has been reduced to a single annotation macro: atom_info(atom_bind(Binds_X), atom_reads(...), atom_writes(...))
--- All phase / region / cadence / async / resource / group tokens have been dropped.
--- They may be reintroduced later as optional sub-calls of atom_info;
--- For now, the parser only recognizes atom_info + its three sub-calls (atom_bind, atom_reads, atom_writes).
+-- atom_info sub-calls: atom_bind, atom_reads, atom_writes, atom_view, atom_reg_types, atom_ctx, atom_phase.
 M.TAPE_ATOM_MACROS = {
 	["atom_info"] = { kind = "info", binds = false },
+}
+
+-- Empty C macros that prefix the next encoder. Zero words.
+-- BdSlot_ nop is one nop word. The marker is not the BD instruction.
+M.DELAY_MARKERS = {
+	["GteDelay_"] = true,
+	["LdSlot_"]   = true,
+	["BdSlot_"]   = true,
+	["DmaSlot_"]  = true,
 }
 
 -- GTE command-alias resolution table.
@@ -1326,6 +1332,13 @@ M.GTE_CR_ALIAS_GROUPS = {
 	{ 24, { "gte_cr_RBK", "gte_cr_OFX" } },   -- background R vs screen offset X
 	{ 25, { "gte_cr_GBK", "gte_cr_OFY" } },   -- background G vs screen offset Y
 	{ 26, { "gte_cr_BBK", "gte_cr_H"   } },   -- background B vs projection plane distance H
+}
+
+-- Packed RT slots named by the gte.h packed-slot comment.
+-- first must be written before second.
+M.GTE_PACKED_SLOT_RELATIONS = {
+	{ slot = 2, first = "gte_cr_RT13", second = "gte_cr_RT22" },
+	{ slot = 4, first = "gte_cr_RT22", second = "gte_cr_RT33" },
 }
 
 -- Operand-class table for the COP2->GPR load-delay check.
@@ -2455,6 +2468,15 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				pos = (next_pos > pos) and next_pos or (pos + 1)
 				goto continue_loop
 			end
+			if M.DELAY_MARKERS[ident] then
+				local arg_pos = nil
+				if consuming_encoder and consuming_paren then
+					arg_pos = count_top_level_commas(tok, consuming_paren + 1, pos) + 1
+				end
+				emit_marker("delay", ident, nil, tok_line, nil, nil, consuming_encoder, arg_pos)
+				pos = after
+				goto continue_loop
+			end
 			if ident ~= "atom_label" and ident ~= "atom_offset" then
 				-- Ordinary ident; nothing to emit, step past the ident only.
 				pos = after
@@ -2601,9 +2623,18 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		local function process_token(bt)
 			local tok = M.trim(bt.tok or "")
 			if tok == "" then return end
-			local ident    = M.read_ident(tok, 1) or "?"
+			local ident, after = M.read_ident(tok, 1)
+			if not ident then ident = "?" end
 			local _, args  = token_ident_and_args(tok)
 			local tok_line = line_of(body_off + bt.rel) or 0
+			if M.DELAY_MARKERS[ident] then
+				emit_marker("delay", ident, nil, tok_line)
+				local rest = M.trim(tok:sub(after or (#tok + 1)))
+				if rest ~= "" then
+					process_token({ tok = rest, rel = bt.rel })
+				end
+				return
+			end
 			-- embedded markers live only in non-marker tokens.
 			-- Pass `ident` as the consuming instruction so `emit_embedded_markers` can compute each marker's arg position + record the consuming_encoder for the offsets pass.
 			-- Canonicalize `jump_rel` to `branch_equal` (its preprocessor-expanded form) so the `consuming_encoder` metadata in marker records is canonical. 
@@ -2751,6 +2782,7 @@ end
 ---     `nop2` is normalized to encoder `nop` (per the spec).
 ---   * `atom_label(F)` markers: one `label` item with `name = "F"`, `word_index = current word_idx`; zero-width (does NOT advance word_idx).
 ---   * `atom_offset(B, T)` markers: one `offset` item with `name = "B"`, `target = "T"`, `word_index = current word_idx`; zero-width.
+---   * Delay markers (`GteDelay_` / `LdSlot_` / `BdSlot_` / `DmaSlot_`): one `delay` item; zero-width. The following encoder is the next token.
 ---   * `mac_X(...)` calls: emit `invoke_begin` (zero-width), recurse into the component body, emit `invoke_end` (zero-width).
 ---     The component body's words land between the begin/end pair; one invocation record is allocated per call (monotonic ID per atom).
 ---   * Unknown uncounted macros emit 1 opaque word + one warning per occurrence.
@@ -2950,12 +2982,7 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 		if source:sub(next_pos, next_pos) == "(" then
 			local inner = M.read_parens(source, next_pos)
 			if inner then
-				local proc_suffix = "_proc"
-				local atom_name = ident
-				if #ident > #proc_suffix and ident:sub(-#proc_suffix) == proc_suffix then
-					atom_name = ident:sub(1, #ident - #proc_suffix)
-				end
-				return atom_name, inner, ident
+				return ident, inner, ident
 			end
 		end
 		-- ident not followed by "(" — it's a qualifier; skip it

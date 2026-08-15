@@ -477,8 +477,8 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	-- Project the pre-scanned atoms to the AtomEntry shape this pass needs.
 	local atoms = {}
 	for _, a in ipairs(scan.atoms) do
-		if a.kind == "atom" then
-			atoms[#atoms + 1] = { line = a.line, name = a.raw_name }
+		if a.kind == "atom" or a.kind == "atom_proc" then
+			atoms[#atoms + 1] = { line = a.line, name = a.raw_name or a.name }
 		end
 	end
 

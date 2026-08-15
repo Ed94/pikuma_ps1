@@ -612,13 +612,13 @@ function M.read_elf_sections(elf_path, section_names)
 end
 
 --- Read ELF symbol addresses by walking the `.symtab` + `.strtab` sections directly (no `nm` subprocess). 
---- Returns a map `{name -> {addr, size_bytes}}` for every `code_<name>` symbol.
+--- Returns a map `{name -> {addr, size_bytes}}` for every defined symbol.
 ---
 --- **Conventions:**
 --- - ELF32 symtab entry = 16 bytes (`st_name:4 + st_value:4 + st_size:4 + st_info:1 + st_other:1 + st_shndx:2`); offsets within each entry are zero-based wire offsets.
 --- - Direct Lua `string.byte`/`string.sub`/`string.find` boundaries receive `+ 1`.
 --- - We filter on STB_GLOBAL (high nibble of st_info = 1) to match `nm`'s default (external symbols only). STB_WEAK excluded.
---- - The `code_` prefix is stripped (MipsAtom_ macros emit bare atom names, no `code_` prefix).
+--- - Keys are the ELF symbol names as written (the C ident).
 --- - `st_size > 0` filter excludes undefined/imported symbols.
 ---
 --- @param elf_path Path

@@ -1252,6 +1252,80 @@ local function parse_atom_dbg_reg_default(source, pos, ident_end, line_of, out)
 	return after_paren
 end
 
+--- Lookahead for `atom_info(...)` after a declaration's closing paren.
+--- Records into `dest` (atom_infos or component_atom_infos). Returns the position after the info, or after_paren if none.
+local function parse_atom_info_after_decl(source, after_paren, raw_name, line_of, out, dest)
+	local lookahead            = duffle.skip_ws_and_cmt(source, after_paren)
+	local look_ident, look_end = duffle.read_ident(source, lookahead)
+	if look_ident ~= "atom_info" then return after_paren end
+	local info_open = duffle.skip_ws_and_cmt(source, look_end)
+	if source:sub(info_open, info_open) ~= "(" then return after_paren end
+	local info_inner, info_after = duffle.read_parens(source, info_open)
+	if not info_inner then return after_paren end
+	local info_line = line_of(info_open)
+	local ai_binds, ai_reads, ai_writes, ai_view, ai_overrides, ai_ctx, ai_phase = scan_atom_info_subcalls(info_inner, info_line)
+	dest = dest or out.atom_infos
+	dest[#dest + 1] = {
+		atom_name = raw_name or "?", binds = ai_binds,
+		reads     = ai_reads or {}, writes = ai_writes or {},
+		view      = ai_view,
+		reg_type_overrides = ai_overrides,
+		ctx_atom  = ai_ctx,
+		phase     = ai_phase,
+		info_line = line_of(lookahead),
+	}
+	if ai_view and raw_name then
+		out.atom_views[raw_name] = {
+			atom_name          = raw_name,
+			binds_name         = ai_view,
+			reg_type_overrides = ai_overrides,
+			info_line          = line_of(lookahead),
+		}
+	elseif raw_name and ai_overrides then
+		out.atom_views[raw_name] = out.atom_views[raw_name] or { atom_name = raw_name, binds_name = nil, reg_type_overrides = nil, info_line = line_of(lookahead) }
+		out.atom_views[raw_name].reg_type_overrides = ai_overrides
+	end
+	if raw_name then
+		if ai_ctx then
+			out.atom_ctxs = out.atom_ctxs or {}
+			out.atom_ctxs[raw_name] = { rbind_atom = ai_ctx, info_line = line_of(lookahead), source = source }
+		end
+		if ai_phase then
+			out.atom_phases = out.atom_phases or {}
+			out.atom_phases[ai_phase] = out.atom_phases[ai_phase] or { atoms = {} }
+			out.atom_phases[ai_phase].atoms[#out.atom_phases[ai_phase].atoms + 1] = raw_name
+		end
+	end
+	return info_after
+end
+
+--- Parse `atom_info(...)` immediately before `before_pos` (the MipsAtom_Proc_ token).
+local function parse_atom_info_before(source, before_pos, raw_name, line_of, out, dest)
+	local i = before_pos - 1
+	while i >= 1 and source:sub(i, i):match("%s") do i = i - 1 end
+	if source:sub(i, i) ~= ")" then return end
+	local depth = 0
+	local j = i
+	while j >= 1 do
+		local c = source:sub(j, j)
+		if c == ")" then
+			depth = depth + 1
+		elseif c == "(" then
+			depth = depth - 1
+			if depth == 0 then break end
+		end
+		j = j - 1
+	end
+	if j < 1 then return end
+	local k = j - 1
+	while k >= 1 and source:sub(k, k):match("%s") do k = k - 1 end
+	local ident_end = k
+	while k >= 1 and source:sub(k, k):match("[%w_]") do k = k - 1 end
+	local ident_start = k + 1
+	if source:sub(ident_start, ident_end) ~= "atom_info" then return end
+	parse_atom_info_after_decl(source, ident_start, raw_name, line_of, out, dest)
+end
+
 --- Parse: `MipsAtom_(<name>) [atom_info(<binds>, <reads>, <writes>)] { <body> }`
 --- @param source    string
 --- @param pos       integer
@@ -1265,53 +1339,8 @@ local function parse_mips_atom(source, pos, ident_end, line_of, out)
 
 	local raw_name = duffle.read_ident(inner, 1)
 
-	-- Lookahead for atom_info(...) between `)` and `{`. Captures sub-calls; updates brace search start.
-	local brace_search_pos     = after_paren
-	local lookahead            = duffle.skip_ws_and_cmt(source, after_paren)
-	local look_ident, look_end = duffle.read_ident(source, lookahead)
-	if    look_ident == "atom_info" then
-		local info_open = duffle.skip_ws_and_cmt(source, look_end)
-		if source:sub(info_open, info_open) == "(" then
-			local info_inner, info_after = duffle.read_parens(source, info_open)
-			-- info_line feeds the per-atom reg_type_overrides table.
-			local info_line = line_of(info_open)
-			local ai_binds, ai_reads, ai_writes, ai_view, ai_overrides, ai_ctx, ai_phase = scan_atom_info_subcalls(info_inner, info_line)
-			out.atom_infos[#out.atom_infos + 1] = {
-				atom_name = raw_name or "?", binds = ai_binds,
-				reads     = ai_reads or {}, writes = ai_writes or {},
-				view      = ai_view,
-				reg_type_overrides = ai_overrides,
-				ctx_atom  = ai_ctx,
-				phase     = ai_phase,
-				info_line = line_of(lookahead),
-			}
-			if ai_view and raw_name then
-				out.atom_views[raw_name] = {
-					atom_name          = raw_name,
-					binds_name         = ai_view,
-					reg_type_overrides = ai_overrides,
-					info_line          = line_of(lookahead),
-				}
-			elseif raw_name and ai_overrides then
-				-- Record per-atom overrides even without atom_view.
-				out.atom_views[raw_name] = out.atom_views[raw_name] or { atom_name = raw_name, binds_name = nil, reg_type_overrides = nil, info_line = line_of(lookahead) }
-				out.atom_views[raw_name].reg_type_overrides = ai_overrides
-			end
-			-- Project the per-atom atom_ctx / atom_phase declarations onto the global phase index.
-			if raw_name then
-				if ai_ctx then
-					out.atom_ctxs = out.atom_ctxs or {}
-					out.atom_ctxs[raw_name] = { rbind_atom = ai_ctx, info_line = line_of(lookahead), source = source }
-				end
-				if ai_phase then
-					out.atom_phases = out.atom_phases or {}
-					out.atom_phases[ai_phase] = out.atom_phases[ai_phase] or { atoms = {} }
-					out.atom_phases[ai_phase].atoms[#out.atom_phases[ai_phase].atoms + 1] = raw_name
-				end
-			end
-			brace_search_pos = info_after
-		end
-	end
+	-- Lookahead for atom_info(...) between `)` and `{`.
+	local brace_search_pos = parse_atom_info_after_decl(source, after_paren, raw_name, line_of, out, out.atom_infos)
 
 	local  body, after_brace, body_off = find_body_braces(source, brace_search_pos, open_paren + 1)
 	if not body then return after_brace end
@@ -1336,7 +1365,9 @@ local function parse_mips_atom_comp(source, pos, ident_end, line_of, out)
 	local  raw_name = duffle.read_ident(inner, 1)
 	if not raw_name then return open_paren + 1 end
 
-	local  body, after_brace, body_off = find_body_braces(source, after_paren, open_paren + 1)
+	out.component_atom_infos = out.component_atom_infos or {}
+	local brace_search_pos = parse_atom_info_after_decl(source, after_paren, strip_ac_prefix(raw_name), line_of, out, out.component_atom_infos)
+	local  body, after_brace, body_off = find_body_braces(source, brace_search_pos, open_paren + 1)
 	if not body then return after_brace end
 	local name = strip_ac_prefix(raw_name)
 	register_atom(out, "comp_bare", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
@@ -1407,15 +1438,9 @@ local function parse_mips_atom_comp_proc_map(source, pos, ident_end, line_of, ou
 	return after_paren
 end
 
---- Parse: `MipsAtom_Proc_(<name>, <abuilder>, { <body> })` — body is inside the LAST `{` in args.
---- Per Task 12.10: full support for the runtime-proc atom form. Registers the atom
---- with kind `"atom_proc"` so offsets.lua / components.lua can emit
----   * `mac_<name>` aliases in `gen/macs.h` (the components pass)
----   * `atom_offset__X__Y` defs in `gen/offsets.h` (the offsets pass)
---- The atom name is the FIRST ident of the args (the second arg `ab` is the
---- atom-builder, not the name). Unlike `MipsAtomComp_Proc_`, there is no `ac_`
---- prefix on the symbol — `MipsAtom_Proc_` is the runtime-proc wrapper, so the
---- symbol IS the bare atom name (e.g. `normalize_v3s4`, not `ac_normalize_v3s4`).
+--- Parse: `MipsAtom_Proc_(aa, { body })` — body is inside the LAST `{` in args.
+--- Kind is `atom_proc`. The name is the preceding function ident as written.
+--- Offsets walk this kind. Components do not emit a `mac_*` alias for it.
 --- @param source    string
 --- @param pos       integer
 --- @param ident_end integer
@@ -1439,13 +1464,12 @@ local function parse_mips_atom_proc(source, pos, ident_end, line_of, out)
 	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
 	if close_pos > #inner + 1 then return after_paren end
 
-	-- The atom name is derived from the preceding function declaration
-	-- (`internal MipsAtom* X_proc(...)`), not from the first macro arg (which
-	-- is now `aa`). The backward walk finds the function decl before open_paren
-	-- and strips the `_proc` suffix.
+	-- The atom name is the preceding function ident as written
+	-- (`internal MipsAtom* X(...)`). The first macro arg is the arena.
 	local raw_name, args_inner, func_ident = duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
 	if not raw_name then raw_name = "?" end
 	local name = strip_ac_prefix(raw_name)
+	parse_atom_info_before(source, pos, name, line_of, out, out.atom_infos)
 	local reg_use_schema_name = nil
 	local reg_use_param_name  = nil
 	if args_inner then
@@ -1593,7 +1617,32 @@ local function register_typedef_alias(underlying, name, pos, line_of, out)
 	}
 end
 
-local function parse_reg_use_schema_body(body)
+-- Layout of Reg_<type> only. Never the C data struct (V3_S4 has a pad field).
+local REG_ALLOC_FIELDS = {
+	Reg_V3_S4 = { "x", "y", "z" },
+	Reg_P3_S4 = { "x", "y", "z" },
+	Reg_V3_S2 = { "x", "y", "z" },
+}
+
+local parse_reg_use_schema_body
+
+local function fields_for_reg_type(type_name, type_registry)
+	local reg_name = "Reg_" .. type_name
+	local entry = type_registry and type_registry[reg_name]
+	if entry and entry.body and parse_reg_use_schema_body then
+		local schema = parse_reg_use_schema_body(entry.body, type_registry)
+		if schema and schema.slots then
+			local names = {}
+			for _, slot in ipairs(schema.slots) do
+				if slot.name then names[#names + 1] = slot.name end
+			end
+			if #names > 0 then return names end
+		end
+	end
+	return REG_ALLOC_FIELDS[reg_name]
+end
+
+parse_reg_use_schema_body = function(body, type_registry)
 	local slots = {}
 	local alias_to_slot = {}
 	local slot_names = {}
@@ -1728,7 +1777,25 @@ local function parse_reg_use_schema_body(body)
 			after_close = duffle.skip_ws_and_cmt(body, after_close)
 			if body:sub(after_close, after_close) == ";" then after_close = after_close + 1 end
 			pos = after_close
-		elseif first == "Reg" then
+		elseif first == "Reg" or first == "Reg_" then
+			local typed_fields = nil
+			if first == "Reg_" then
+				if body:sub(after, after) ~= "(" then
+					errors[#errors + 1] = { kind = "reguse_malformed" }
+					return nil, errors
+				end
+				local type_inner, after_paren = duffle.read_parens(body, after)
+				if not type_inner then
+					errors[#errors + 1] = { kind = "reguse_malformed" }
+					return nil, errors
+				end
+				typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry)
+				if not typed_fields then
+					errors[#errors + 1] = { kind = "reguse_malformed" }
+					return nil, errors
+				end
+				after = duffle.skip_ws_and_cmt(body, after_paren)
+			end
 			local readonly = false
 			local maybe_const, maybe_end = duffle.read_ident(body, after)
 			if maybe_const == "const" then
@@ -1741,8 +1808,16 @@ local function parse_reg_use_schema_body(body)
 				return nil, errors
 			end
 			for _, n in ipairs(names) do
-				if not add_alias(n, n) then return nil, errors end
-				if not add_slot(n, { n }, readonly) then return nil, errors end
+				if typed_fields then
+					for _, field in ipairs(typed_fields) do
+						local path = n .. "." .. field
+						if not add_alias(path, path) then return nil, errors end
+						if not add_slot(path, { path }, readonly) then return nil, errors end
+					end
+				else
+					if not add_alias(n, n) then return nil, errors end
+					if not add_slot(n, { n }, readonly) then return nil, errors end
+				end
 			end
 			pos = new_pos
 		else
@@ -1792,7 +1867,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 		if not body then return after_brace end
 		register_struct_type(body, name, pos, line_of, out)
 		if name:sub(1, 7) == "RegUse_" then
-			local schema, schema_errors = parse_reg_use_schema_body(body)
+			local schema, schema_errors = parse_reg_use_schema_body(body, out.type_name_registry)
 			if schema then
 				schema.name        = name
 				schema.source_file = out._source_file
@@ -2174,6 +2249,7 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		raw_atoms         = {},
 		binds             = {},
 		atom_infos        = {},
+		component_atom_infos = {},
 		macros            = {},
 		-- Raw marker evidence for annotation validation. The `debug_skip` boolean
 		-- is stamped on the declaration record itself; the projection lives on AtomEntry.debug_skip.
@@ -2429,6 +2505,7 @@ local function merge_corpus_registries(corpus)
 	corpus.atom_ctxs               = corpus.atom_ctxs               or {}
 	corpus.atom_phases             = corpus.atom_phases             or {}
 	corpus.atom_infos              = corpus.atom_infos              or {}
+	corpus.component_atom_infos    = corpus.component_atom_infos    or {}
 	corpus.atom_auto_regs          = corpus.atom_auto_regs          or {}
 	corpus.phase_auto_regs         = corpus.phase_auto_regs         or {}
 	corpus.collisions              = corpus.collisions              or {}
@@ -2440,7 +2517,7 @@ local function merge_corpus_registries(corpus)
 	for _, key in ipairs({
 		"register_alias_registry", "type_name_registry", "binds_by_name",
 		"atoms_by_name", "atom_views", "atom_ctxs", "atom_phases",
-		"atom_infos", "collisions", "reg_use_schemas", "reg_use_errors",
+		"atom_infos", "component_atom_infos", "collisions", "reg_use_schemas", "reg_use_errors",
 	}) do
 		corpus[key] = {}
 	end
@@ -2532,6 +2609,9 @@ local function merge_corpus_registries(corpus)
 			-- The merge is purely order-preserving.
 			for _, info in ipairs(scan.atom_infos or {}) do
 				corpus.atom_infos[#corpus.atom_infos + 1] = info
+			end
+			for _, info in ipairs(scan.component_atom_infos or {}) do
+				corpus.component_atom_infos[#corpus.component_atom_infos + 1] = info
 			end
 
 			for name, schema in pairs(scan.reg_use_schemas or {}) do

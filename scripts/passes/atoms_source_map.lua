@@ -261,12 +261,12 @@ local function append_gdb_commands(lines, matched)
 	for _, a in ipairs(matched) do
 		-- gdb 12.1 quirk: literals in printf args require an attached target.
 		-- Use the per-atom convenience vars set above as printf args.
-		lines[#lines + 1] = string.format('  printf "  code_%%-32s @ 0x%%08x  %%4d words\\n", $__atom_name_%d, $__atom_addr_%d, $__atom_words_%d',
+		lines[#lines + 1] = string.format('  printf "  %%-32s @ 0x%%08x  %%4d words\\n", $__atom_name_%d, $__atom_addr_%d, $__atom_words_%d',
 			a.idx, a.idx, a.idx)
 	end
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = "document tape_atoms"
-	lines[#lines + 1] = "  List every tape atom symbol in the loaded ELF (code_<name>) with .rodata addr + word count."
+	lines[#lines + 1] = "  List every tape atom symbol in the loaded ELF with .rodata addr + word count."
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = ""
 
@@ -285,10 +285,10 @@ local function append_gdb_commands(lines, matched)
 	for _, a in ipairs(matched) do
 		lines[#lines + 1] = string.format("define break_atom_%s", a.name)
 		lines[#lines + 1] = string.format("  break *$__atom_addr_%d", a.idx)
-		lines[#lines + 1] = string.format('  printf "  Breakpoint set at code_%s (0x%%08x)\\n", $__atom_addr_%d', a.name, a.idx)
+		lines[#lines + 1] = string.format('  printf "  Breakpoint set at %s (0x%%08x)\\n", $__atom_addr_%d', a.name, a.idx)
 		lines[#lines + 1] = "end"
 		lines[#lines + 1] = string.format("document break_atom_%s", a.name)
-		lines[#lines + 1] = string.format("  Set a breakpoint at code_%s.", a.name)
+		lines[#lines + 1] = string.format("  Set a breakpoint at %s.", a.name)
 		lines[#lines + 1] = "end"
 		lines[#lines + 1] = ""
 	end
@@ -323,7 +323,7 @@ local function append_gdb_commands(lines, matched)
 		-- Precompute end_addr (gdb 12.1's expression evaluator chokes on `addr + words*4`).
 		lines[#lines + 1] = string.format("  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
 		lines[#lines + 1] = string.format("  if $__pc >= $__atom_addr_%d && $__pc < $__end_%d", a.idx, a.idx)
-		lines[#lines + 1] = string.format('    printf "atom:    code_%%s\\n", $__atom_name_%d', a.idx)
+		lines[#lines + 1] = string.format('    printf "atom:    %%s\\n", $__atom_name_%d', a.idx)
 		lines[#lines + 1] = '    printf "addr:    0x%08x\\n", $__pc'
 		lines[#lines + 1] = string.format("    set $__word = ($__pc - $__atom_addr_%d) / 4", a.idx)
 		lines[#lines + 1] = string.format('    printf "word:    %%d/%%d\\n", $__word, $__atom_words_%d', a.idx)
@@ -541,7 +541,7 @@ function M.render_atom_provenance(atom, wc, rel_path)
 	return table.concat(lines, "\n") .. "\n"
 end
 
---- Pass entry. For each source that declares at least one `MipsAtom_(name)` / `MipsCode code_<name>`,
+--- Pass entry. For each source that declares at least one tape atom,
 --- emit two files in `<out_root>/`: `<basename>.atoms.sourcemap.txt` (per-word call-site map) and `<basename>.atoms.provenance.txt`
 --- (per-word definition + body line, resolved via the outermost `mac_X(...)` invocation).
 --- When `ctx.flags.gdb_runtime` is true and `ctx.flags.elf_path` exists, also emit the post-link gdb script `<ctx.out_root>/gdb_tape_atoms_runtime.gdb`.

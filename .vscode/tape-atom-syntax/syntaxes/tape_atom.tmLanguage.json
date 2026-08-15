@@ -56,7 +56,7 @@
 			"name": "support.function.duffle.annotation"
 		},
 		"delay-slots": {
-			"match": "\\b(LdSlot_|BdSlot_)\\b",
+			"match": "\\b(LdSlot_|BdSlot_|DmaSlot_|GteDelay_)\\b",
 			"name": "keyword.operator.duffle.delayslot"
 		},
 		"types": {
