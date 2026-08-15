@@ -1,9 +1,9 @@
 {
-	"name": "tape-atom-syntax",
-	"displayName": "Tape Atom DSL",
-	"description": "Source-derived semantic highlighting for the Tape/Atom MIPS macro DSL",
+	"name": "atomasm-psx",
+	"displayName": "AtomAsm-PSX",
+	"description": "Semantic highlighting for the PS1 Tape/Atom MIPS macro DSL",
 	"publisher": "local",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"engines": { "vscode": "^1.80.0" },
 	"categories": ["Programming Languages"],
 	"activationEvents": ["onLanguage:c", "onLanguage:cpp"],
@@ -17,7 +17,7 @@
 	],
 	"scripts": {
 		"test": "node --test test/*.test.js",
-		"package": "npx --yes @vscode/vsce@3.6.1 package --allow-missing-repository --skip-license --out tape-atom-syntax-0.2.0.vsix"
+		"package": "npx --yes @vscode/vsce@3.6.1 package --allow-missing-repository --skip-license --out atomasm-psx-0.3.0.vsix"
 	},
 	"contributes": {
 		"semanticTokenTypes": [
@@ -38,7 +38,8 @@
 			{ "id": "tapeGprRegister", "superType": "variable", "description": "MIPS GPR alias" },
 			{ "id": "tapeCop2Register", "superType": "variable", "description": "COP2 data or control register alias" },
 			{ "id": "tapeDuffleType", "superType": "type", "description": "Duffle type or type constructor" },
-			{ "id": "tapeAttribute", "superType": "keyword", "description": "Duffle linkage or storage attribute" }
+			{ "id": "tapeAttribute", "superType": "keyword", "description": "Duffle linkage or storage attribute" },
+			{ "id": "keyword", "description": "Standard keyword (DSL built-in macros)" }
 		],
 		"semanticTokenModifiers": [
 			{ "id": "tapeRead", "description": "Register declared in atom_reads" },
@@ -66,7 +67,8 @@
 					"tapeGprRegister": ["variable.other.constant.duffle.gpr"],
 					"tapeCop2Register": ["variable.other.constant.duffle.cop2"],
 					"tapeDuffleType": ["storage.type.duffle.type"],
-					"tapeAttribute": ["storage.modifier.duffle.attr"]
+					"tapeAttribute": ["storage.modifier.duffle.attr"],
+				"keyword": ["keyword"]
 				}
 			}
 		],

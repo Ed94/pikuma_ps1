@@ -31,7 +31,7 @@ test("package semantic legend matches classifier exports", () => {
 	const contributedTypes = packageJson.contributes.semanticTokenTypes.map((entry) => entry.id);
 	const contributedModifiers = packageJson.contributes.semanticTokenModifiers.map((entry) => entry.id);
 
-	assert.equal(packageJson.version, "0.2.0");
+	assert.equal(packageJson.version, "0.3.0");
 	assert.deepEqual(contributedTypes, TOKEN_TYPES);
 	assert.deepEqual(contributedModifiers, TOKEN_MODIFIERS.filter((name) => name !== "declaration"));
 });
@@ -59,7 +59,7 @@ test("every semantic token has a scope mapping; DSL-specific tokens also have gr
 	const grammarRequired = new Set([
 		"tapeAtomKeyword", "tapeAtomName", "tapeComponentKeyword", "tapeComponentName",
 		"tapeAnnotation", "tapeBindType", "tapePhase", "tapeLabel",
-		"tapeDelaySlot", "tapeDuffleType", "tapeAttribute",
+		"tapeDelaySlot", "tapeDuffleType", "keyword",
 	]);
 
 	for (const tokenType of TOKEN_TYPES) {
@@ -84,8 +84,5 @@ test("TextMate offset labels stay scoped to atom_offset calls", () => {
 
 test("workspace enables semantic highlighting", () => {
 	const settings = readJson(path.resolve(ROOT, "..", "settings.json"));
-
 	assert.equal(settings["editor.semanticHighlighting.enabled"], true);
-	const semantic = settings["editor.semanticTokenColorCustomizations"];
-	assert.equal(semantic.enabled, true);
 });

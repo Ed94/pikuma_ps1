@@ -11,6 +11,9 @@ const BASE_TYPES = [
 const BASE_ATTRIBUTES = [
 	"FI_", "I_", "NI_", "Relative_", "Struct_", "Enum_", "Union_",
 	"TypeR_", "TypeV_", "align_", "internal", "local_persist", "global",
+	"O_", "S_", "C_", "T_", "tmpl", "glue", "r_", "v_", "tr_", "tv_",
+	"rgcc", "rlit", "r_use", "r_set", "r_mod", "r_imm", "r_mem",
+	"enc_op", "enc_rs", "enc_rt", "enc_rd", "enc_imm", "enc_i", "enc_r",
 ];
 
 function createIndex() {

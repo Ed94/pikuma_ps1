@@ -22,6 +22,7 @@ const TOKEN_TYPES = [
 	"tapeCop2Register",
 	"tapeDuffleType",
 	"tapeAttribute",
+	"keyword",
 ];
 
 const TOKEN_MODIFIERS = ["declaration", "tapeRead", "tapeWrite", "tapeAuto"];
@@ -34,6 +35,14 @@ const ANNOTATIONS = new Set([
 	"atom_info", "atom_bind", "atom_reads", "atom_writes", "atom_label",
 	"atom_offset", "atom_reg", "atom_type", "atom_ctx", "atom_phase",
 	"atom_auto_reg", "phase_auto_reg", "atom_dbg_skip",
+]);
+
+const DSL_KEYWORDS = new Set([
+	"FI_", "I_", "NI_", "Relative_", "Struct_", "Enum_", "Union_",
+	"TypeR_", "TypeV_", "align_", "internal", "local_persist", "global",
+	"O_", "S_", "C_", "T_", "tmpl", "glue", "r_", "v_", "tr_", "tv_",
+	"rgcc", "rlit", "r_use", "r_set", "r_mod", "r_imm", "r_mem",
+	"enc_op", "enc_rs", "enc_rt", "enc_rd", "enc_imm", "enc_i", "enc_r",
 ]);
 
 const DELAY_SLOT_KEYWORDS = new Set(["LdSlot_", "BdSlot_"]);
@@ -151,6 +160,7 @@ function classifyDocument(source, filePath, workspaceIndex, shouldCancel = () =>
 
 		if (!type && index.bindTypes.has(token.text)) type = "tapeBindType";
 		if (!type && index.types.has(token.text)) type = "tapeDuffleType";
+		if (!type && DSL_KEYWORDS.has(token.text)) type = "keyword";
 		if (!type && index.attributes.has(token.text)) type = "tapeAttribute";
 		if (!type) type = registerType(token.text, index);
 		if (!type && DELAY_SLOT_KEYWORDS.has(token.text)) type = "tapeDelaySlot";
