@@ -247,18 +247,16 @@ internal void resolve_look_at_init(void) {
 		});
 
 	/* === ATOM 6a: populate (m[][] from ux/uy/uz, t[]=0) === */
-	U4 r_look_at_6a = R_T0;  /* tape pop → look_at* */
-	U4 r_scratch_6a = R_ResolveScratch;
-	U4 r_pux_6a      = R_T1;
-	U4 r_puy_6a      = R_T3;
-	U4 r_puz_6a      = R_T5;
-	U4 r_tmp0_6a     = R_T2;
-	U4 r_tmp1_6a     = R_T6;
-	U4 r_tmp2_6a     = R_V0;
+	regfile_reset_to_mask(& rf, pin_mask);
 	smem.resolve_look_at_atom_addrs[6] = resolve_look_at__populate_proc(& ab,
-		r_look_at_6a, r_scratch_6a,
-		r_pux_6a, r_puy_6a, r_puz_6a,
-		r_tmp0_6a, r_tmp1_6a, r_tmp2_6a);
+		RegUse_(resolve_look_at__populate_proc){
+			.scratch = R_ResolveScratch,
+			.look_at = ralloc(),     /* T0 */
+			.row     = ralloc_v3(),  /* T1 T2 T3 */
+			.ux      = ralloc(),     /* T5 = ux */
+			.uy      = ralloc(),     /* T6 = uy */
+			.uz      = ralloc(),     /* T7 = uz */
+		});
 
 	/* === ATOM 6a.5: set_gte_mt3s2s4 (BAKED — ctc2 RT matrix) ===
 	 * This is a BAKED atom from gte.atom.c. Its body hardcodes R_T3 as

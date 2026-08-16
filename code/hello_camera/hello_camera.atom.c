@@ -273,7 +273,6 @@ internal MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,
 
 	/* Load a (uz).x/y/z into r.a. */
 	mac_load_v3s4(r.a, r.uz, 0), LdSlot_ nop,
-
 	/* Load b (ux).x/y/z into r.b. */
 	mac_load_v3s4(r.b, r.ux, 0), LdSlot_ /* taken by gte_mv_from_ctrl_r */
 
@@ -321,76 +320,39 @@ internal MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,
 typedef Struct_(Binds_ResolveLookAtPopAndTrans) {
 	U4 look_at;  /* U4 (MT3_S2S4* — destination matrix address) */
 };
-/* Atom 6 in the bundle: write look_at->m[][] from ux/uy/uz, then compute the translation column t[] = R * (-eye).
+typedef Struct_(RegUse_resolve_look_at__populate_proc) {
+	Reg const   scratch;
+	Reg         look_at;
+	Reg_(V3_S4) row;              /* one matrix row, reused */
+	Reg ux;
+	Reg uy;
+	Reg uz;
+};
+/* Atom 6a: write look_at->m[][] from ux/uy/uz as S2. Zero t[].
+ * MT3_S2S4 { A3x3_S2 m; A3_S4 t; }
+ *   m[][] is S2 packed (9 × 2 = 18 bytes at offset 0)
+ *   t[0/1/2] is S4     (3 × 4 = 12 bytes at offset 18)
  *
- * GPR codes (assigned by resolve_look_at_init):
- *   r_look_at   : MT3_S2S4* (popped from tape; output matrix destination)
- *   r_pux       : pointer to ux   (offset O_(ResolveLookAtScratch,ux))
- *   r_puy       : pointer to uy   (offset O_(ResolveLookAtScratch,uy))
- *   r_puz       : pointer to uz   (offset O_(ResolveLookAtScratch,uz))
- *   r_peye      : pointer to eye  (offset O_(ResolveLookAtScratch,eye))
- *   r_tmp0/1/2  : atom-local scratch (load + MVMVA + store temps)
- *
- * 4 pointer regs (r_pux/r_puy/r_puz/r_peye) are DEDICATED — they hold the scratch addresses for the entire body.
- * They are computed in-body via `add_si(r_px, r_scratch, O_(ResolveLookAtScratch, field))` so no tape-data pointer is needed.
- *
- * Struct layout (per duffle/math.h):
- *   MT3_S2S4 { A3x3_S2 m; A3_S4 t; }  →  m[][] is S2 packed (9 × 2 = 18 bytes at offset 0) 
- *                                        t[0/1/2] is S4     (3 × 4 = 12 bytes at offset 18)
- *
- * Translation column: GTE MVMVA with the world rotation matrix pre-set
- * (helper emits set_gte_world before the bundle, per the bundle design).
- * MVMVA computes R * pos (with cv=0/mx=0/sf=0/v=0); MAC1/2/3 = R * (-eye).
- * Pool cost: r_look_at (1) + r_scratch (R_T4 carrier) + 4 ptr regs + 3 tmp regs = 9 GPRs.
+ * ux/uy/uz stay dedicated address regs for the whole body.
+ * row is the S4 load / S2 store transfer, reused per matrix row.
+ * Eye is not read here — atom 6b reads it.
  */
-internal MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa
-	,	U4 r_look_at
-	,	U4 r_scratch
-	,	U4 r_pux, U4 r_puy, U4 r_puz
-	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
+internal MipsAtom* resolve_look_at__populate_proc(AtomArena_R aa,
+	RegUse_resolve_look_at__populate_proc r
 ) MipsAtom_Proc_(aa, {
-	/* Pop look_at* (the matrix output) — advance R_TapePtr by 4 bytes. */
-	load_word(r_look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
+	load_word(r.look_at, R_TapePtr, O_(Binds_ResolveLookAtPopAndTrans,look_at)),
 	add_ui_self(         R_TapePtr, S_(Binds_ResolveLookAtPopAndTrans)),
 
-	/* Compute the 3 scratch pointers in their dedicated GPRs (eye isn't needed by 6a — 6b reads it). */
-	add_si(r_pux, r_scratch, O_(ResolveLookAtScratch,ux)),  /* r_pux = &ux */
-	add_si(r_puy, r_scratch, O_(ResolveLookAtScratch,uy)),  /* r_puy = &uy */
-	add_si(r_puz, r_scratch, O_(ResolveLookAtScratch,uz)),  /* r_puz = &uz */
-	nop,
+	add_si(r.ux, r.scratch, O_(ResolveLookAtScratch,ux)), /* r.ux = &ux */
+	add_si(r.uy, r.scratch, O_(ResolveLookAtScratch,uy)), /* r.uy = &uy */
+	add_si(r.uz, r.scratch, O_(ResolveLookAtScratch,uz)), /* r.uz = &uz */
 
-	/* ── m[0] = (S2)ux ── */
-	load_word(r_tmp0, r_pux, O_(V3_S4,x)),
-	load_word(r_tmp1, r_pux, O_(V3_S4,y)),
-	load_word(r_tmp2, r_pux, O_(V3_S4,z)),
-	nop,
-	store_half(r_tmp0, r_look_at, O_(MT3_S2S4,m[0][0])),
-	store_half(r_tmp1, r_look_at, O_(MT3_S2S4,m[0][1])),
-	store_half(r_tmp2, r_look_at, O_(MT3_S2S4,m[0][2])),
-
-	/* ── m[1] = (S2)uy ── */
-	load_word(r_tmp0, r_puy, O_(V3_S4,x)),
-	load_word(r_tmp1, r_puy, O_(V3_S4,y)),
-	load_word(r_tmp2, r_puy, O_(V3_S4,z)),
-	nop,
-	store_half(r_tmp0, r_look_at, O_(MT3_S2S4,m[1][0])),
-	store_half(r_tmp1, r_look_at, O_(MT3_S2S4,m[1][1])),
-	store_half(r_tmp2, r_look_at, O_(MT3_S2S4,m[1][2])),
-
-	/* ── m[2] = (S2)uz ── */
-	load_word(r_tmp0, r_puz, O_(V3_S4,x)),
-	load_word(r_tmp1, r_puz, O_(V3_S4,y)),
-	load_word(r_tmp2, r_puz, O_(V3_S4,z)),
-	nop,
-	store_half(r_tmp0, r_look_at, O_(MT3_S2S4,m[2][0])),
-	store_half(r_tmp1, r_look_at, O_(MT3_S2S4,m[2][1])),
-	store_half(r_tmp2, r_look_at, O_(MT3_S2S4,m[2][2])),
+	mac_load_v3s4(r.row, r.ux, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4,m[0])),
+	mac_load_v3s4(r.row, r.uy, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4,m[1])),
+	mac_load_v3s4(r.row, r.uz, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4,m[2])),
 
 	/* Zero t[0..2] — atom 6c writes the final values here. */
-	store_word(R_0, r_look_at, O_(MT3_S2S4,t[0])),
-	store_word(R_0, r_look_at, O_(MT3_S2S4,t[1])),
-	store_word(R_0, r_look_at, O_(MT3_S2S4,t[2])),
-
+	mac_store_v3s4(v3s4_R_0(), r.look_at, O_(MT3_S2S4,t)),
 	mac_yield()
 })
 

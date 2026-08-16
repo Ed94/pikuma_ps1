@@ -59,9 +59,20 @@ WORD_COUNT(mac_yield_load, 1)
 WORD_COUNT(mac_yield_tail, 3)
 
 /* atom_dbg_skip */
+#define mac_load_half_v3(tx, ty, tz, base, offset) \
+	load_half(tx, base, offset + OA_(U2,[0])) \
+,	load_half(ty, base, offset + OA_(U2,[1])) \
+,	load_half(tz, base, offset + OA_(U2,[2]))
+WORD_COUNT(mac_load_half_v3, 3)
+
+#define mac_load_v3s2(transfer, base, offset) \
+	mac_load_half_v3(transfer.x, transfer.y, transfer.z, base, offset)
+WORD_COUNT(mac_load_v3s2, 3)
+
+/* atom_dbg_skip */
 #define mac_load_v2s2(rs_x, rs_y, r_base, offset) \
-	load_half( rs_x, r_base, offset + O_(V3_S2,x)) \
-,	load_half( rs_y, r_base, offset + O_(V3_S2,y))
+	load_half(rs_x, r_base, offset + O_(V3_S2,x)) \
+,	load_half(rs_y, r_base, offset + O_(V3_S2,y))
 WORD_COUNT(mac_load_v2s2, 2)
 
 /* atom_dbg_skip */
@@ -84,6 +95,17 @@ WORD_COUNT(mac_load_v3s4, 3)
 #define mac_load_p3s4(transfer, base, offset) \
 	mac_load_word_v3(transfer.x, transfer.y, transfer.z, base, offset)
 WORD_COUNT(mac_load_p3s4, 3)
+
+/* atom_dbg_skip */
+#define mac_store_half_v3(tx, ty, tz, base, offset) \
+	store_half(tx, base, offset + OA_(U2,[0])) \
+,	store_half(ty, base, offset + OA_(U2,[1])) \
+,	store_half(tz, base, offset + OA_(U2,[2]))
+WORD_COUNT(mac_store_half_v3, 3)
+
+#define mac_store_v3s2(transfer, base, offset) \
+	mac_store_half_v3(transfer.x, transfer.y, transfer.z, base, offset)
+WORD_COUNT(mac_store_v3s2, 3)
 
 /* atom_dbg_skip */
 #define mac_store_word_v3(tx, ty, tz, base, offset) \

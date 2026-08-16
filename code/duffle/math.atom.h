@@ -7,14 +7,25 @@
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(math_atom_c);
 
+#define v3s4_R_0() ((Reg_(V3_S4)){R_0,R_0,R_0})
+
+typedef Struct_(Reg_V3_S2) { Reg x, y, z; };
 typedef Struct_(Reg_V3_S4) { Reg x, y, z; }; // Register allocation of a V3_S4
 typedef Struct_(Reg_P3_S4) { Reg x, y, z; }; // Register allocation of a P3_S4
 
 #pragma region MACs (Mips Atom Component)
 
+FI_ Slice_MipsCode ac_load_half_v3(AtomBuilder_R ab, Reg tx, Reg ty, Reg tz, Reg base, U2 offset) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	load_half(tx, base, offset + OA_(U2,[0])),
+	load_half(ty, base, offset + OA_(U2,[1])),
+	load_half(tz, base, offset + OA_(U2,[2])),
+})
+
+FI_ Slice_MipsCode ac_load_v3s2(AtomBuilder_R ab, Reg_(V3_S2) transfer, Reg base, U2 offset) MipsAtomComp_ProcMap_(ab, mac_load_half_v3(transfer.x, transfer.y, transfer.z, base, offset))
+
 FI_ Slice_MipsCode ac_load_v2s2(AtomBuilder_R ab, U4 rs_x, U4 rs_y, U4 r_base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ab, {
-	load_half( rs_x, r_base, offset + O_(V3_S2,x)),
-	load_half( rs_y, r_base, offset + O_(V3_S2,y)),
+	load_half(rs_x, r_base, offset + O_(V3_S2,x)),
+	load_half(rs_y, r_base, offset + O_(V3_S2,y)),
 })
 
 FI_ Slice_MipsCode ac_store_v2s2(AtomBuilder_R ab, U4 rt_x, U4 rt_y, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ab, {
@@ -31,7 +42,15 @@ FI_ Slice_MipsCode ac_load_word_v3(AtomBuilder_R ab, Reg tx, Reg ty, Reg tz, Reg
 FI_ Slice_MipsCode ac_load_v3s4(AtomBuilder_R ab, Reg_(V3_S4) transfer, Reg base, U2 offset) MipsAtomComp_ProcMap_(ab, mac_load_word_v3(transfer.x, transfer.y, transfer.z, base, offset))
 FI_ Slice_MipsCode ac_load_p3s4(AtomBuilder_R ab, Reg_(P3_S4) transfer, Reg base, U2 offset) MipsAtomComp_ProcMap_(ab, mac_load_word_v3(transfer.x, transfer.y, transfer.z, base, offset))
 
-FI_ Slice_MipsCode ac_store_word_v3(AtomBuilder_R ab, U4 tx, U4 ty, U4 tz, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+FI_ Slice_MipsCode ac_store_half_v3(AtomBuilder_R ab, Reg tx, Reg ty, Reg tz, Reg base, U2 offset) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	store_half(tx, base, offset + OA_(U2,[0])),
+	store_half(ty, base, offset + OA_(U2,[1])),
+	store_half(tz, base, offset + OA_(U2,[2])),
+})
+
+FI_ Slice_MipsCode ac_store_v3s2(AtomBuilder_R ab, Reg_(V3_S2) transfer, Reg base, U2 offset) MipsAtomComp_ProcMap_(ab, mac_store_half_v3(transfer.x, transfer.y, transfer.z, base, offset))
+
+FI_ Slice_MipsCode ac_store_word_v3(AtomBuilder_R ab, Reg tx, Reg ty, Reg tz, Reg base, U2 offset) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	store_word(tx, base, offset + OA_(U4,[0])),
 	store_word(ty, base, offset + OA_(U4,[1])),
 	store_word(tz, base, offset + OA_(U4,[2])),
