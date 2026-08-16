@@ -7,7 +7,7 @@
 --- then resolves the function-args string from the preceding `FI_ Slice_MipsCode ac_X(...)` declaration via a backward walk.
 ---
 --- `MipsAtom_Proc_(X, ab, { body })` declarations (kind="atom_proc") are ATOMS, not components, and are deliberately excluded —
---- atoms get emitted via `tb_emit(tb, code_<name>)` linker symbols, not inlined as `mac_*` macros.
+--- the ELF symbol is the C ident. Raw `MipsCode code_*` is leftover, not the atom rule.
 ---
 --- Emits one `gen/macs.h` per *immediate source directory* with `#define mac_X(sig) \` macros plus `WORD_COUNT(mac_X, N)` entries for downstream offset computation.
 --- All sources inside the same directory contribute to the same file (per-directory aggregation).
@@ -187,7 +187,7 @@ local function project_components(source, scan)
 		-- Only `MipsAtomComp_(ac_X)` (kind="comp_bare") and `MipsAtomComp_Proc_(ac_X, ...)` (kind="comp_proc")
 		-- are COMPONENTS — they get inlined via `mac_<name>` aliases inside atom bodies.
 		-- `MipsAtom_Proc_` (kind="atom_proc") is an ATOM (ends with `mac_yield()`); it gets emitted via
-		-- `tb_emit(tb, code_<name>)` (linker symbol), NOT inlined as a macro. Including `atom_proc` here
+		-- `tb_emit` of the C ident, NOT inlined as a macro. Including `atom_proc` here
 		-- would incorrectly emit `mac_<name>` aliases for atoms, polluting `gen/macs.h`.
 		-- See `docs/duffle_dsl_primer.md` §"mac_* aliases" for the contract.
 		if a.kind == "comp_bare" or a.kind == "comp_proc" then
@@ -393,6 +393,10 @@ end
 --- @param cache        table<string, integer>
 --- @return integer
 local function gp0_contrib_rec(name, comp_by_name, cache)
+	if name:match("^insert_ot_tag") then
+		cache[name] = 0
+		return 0
+	end
 	if cache[name] ~= nil then return cache[name] end
 	cache[name] = -1
 	local cc = comp_by_name[name]
@@ -408,8 +412,15 @@ local function gp0_contrib_rec(name, comp_by_name, cache)
 					-- Nested `mac_X(...)` call: recurse.
 					local nested = ident:sub(MAC_PREFIX_LEN + 1)
 					n = n + gp0_contrib_rec(nested, comp_by_name, cache)
+				elseif ident == "gte_sw" then
+					n = n + 1
 				elseif ident == "store_word" or ident == "store_half" or ident == "store_byte" then
-					if trimmed:find("R_PrimCursor", 1, true) then
+					if trimmed:find("R_PrimCursor", 1, true)
+						or trimmed:find("O_(Poly_", 1, true)
+						or trimmed:find("r_prim_cursor", 1, true)
+						or trimmed:find("r_primitive_cursor", 1, true)
+						or trimmed:find("r_base", 1, true)
+					then
 						n = n + 1
 					end
 				end

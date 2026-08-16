@@ -416,31 +416,51 @@ local function walk_body_fields(body, build_field)
 	return fields
 end
 
--- Parse the `<type> <field>;` declarations from a Struct_ body.
+-- Parse the `<type> <field>[, <field>...];` declarations from a Struct_ body.
+-- After the type and `*` chain, keep reading `, ident` until `;`.
+-- Same type, same pointer depth for every name on that list.
 -- Returns the raw fields array with `{name, type_name, pointer_depth}` only (NO offset / byte_size).
 -- The propagation pass `resolve_struct_field_sizes` walks each struct's fields AFTER type resolution and populates offset + byte_size in place.
--- Returns (fields). The aggregate byte_count is computed in the propagation pass (it depends on whether every field's type resolved).
 local function parse_struct_body_fields(body)
-	return walk_body_fields(body, function(type_name, type_end, after_type)
-		-- Parse the trailing `*` chain to derive pointer_depth.
-		local depth, cursor = 0, after_type
-		while cursor <= #body and body:sub(cursor, cursor) == "*" do
-			depth  = depth  + 1
-			cursor = cursor + 1
-			cursor = duffle.skip_ws_and_cmt(body, cursor)
+	local fields = {}
+	local body_pos = 1
+	local body_len = #body
+	while body_pos <= body_len do
+		body_pos = duffle.skip_ws_and_cmt(body, body_pos)
+		if body_pos > body_len then break end
+		local type_name, type_end = duffle.read_ident(body, body_pos)
+		if not type_name then
+			body_pos = body_pos + 1
+		else
+			local depth, cursor = 0, duffle.skip_ws_and_cmt(body, type_end)
+			while cursor <= body_len and body:sub(cursor, cursor) == "*" do
+				depth = depth + 1
+				cursor = duffle.skip_ws_and_cmt(body, cursor + 1)
+			end
+			while cursor <= body_len do
+				local field_ident, field_end = duffle.read_ident(body, cursor)
+				if not field_ident then break end
+				fields[#fields + 1] = {
+					name          = field_ident,
+					type_name     = type_name,
+					pointer_depth = depth,
+					offset        = nil,
+					byte_size     = nil,
+				}
+				cursor = duffle.skip_ws_and_cmt(body, field_end)
+				if body:sub(cursor, cursor) == "," then
+					cursor = duffle.skip_ws_and_cmt(body, cursor + 1)
+				else
+					break
+				end
+			end
+			if cursor <= body_len and body:sub(cursor, cursor) == ";" then
+				cursor = cursor + 1
+			end
+			body_pos = cursor
 		end
-		-- Read the field ident immediately after the type chain.
-		local field_ident, field_end = duffle.read_ident(body, cursor)
-		if not field_ident then return nil, type_end + 1 end
-		return {
-			name          = field_ident,
-			type_name     = type_name,
-			pointer_depth = depth,
-			-- offset + byte_size filled by resolve_struct_field_sizes
-			offset        = nil,
-			byte_size     = nil,
-		}, field_end
-	end)
+	end
+	return fields
 end
 
 -- Parse the `Enum_(<underlying>, <name>) { <body> }` body for entries.
@@ -1299,33 +1319,6 @@ local function parse_atom_info_after_decl(source, after_paren, raw_name, line_of
 	return info_after
 end
 
---- Parse `atom_info(...)` immediately before `before_pos` (the MipsAtom_Proc_ token).
-local function parse_atom_info_before(source, before_pos, raw_name, line_of, out, dest)
-	local i = before_pos - 1
-	while i >= 1 and source:sub(i, i):match("%s") do i = i - 1 end
-	if source:sub(i, i) ~= ")" then return end
-	local depth = 0
-	local j = i
-	while j >= 1 do
-		local c = source:sub(j, j)
-		if c == ")" then
-			depth = depth + 1
-		elseif c == "(" then
-			depth = depth - 1
-			if depth == 0 then break end
-		end
-		j = j - 1
-	end
-	if j < 1 then return end
-	local k = j - 1
-	while k >= 1 and source:sub(k, k):match("%s") do k = k - 1 end
-	local ident_end = k
-	while k >= 1 and source:sub(k, k):match("[%w_]") do k = k - 1 end
-	local ident_start = k + 1
-	if source:sub(ident_start, ident_end) ~= "atom_info" then return end
-	parse_atom_info_after_decl(source, ident_start, raw_name, line_of, out, dest)
-end
-
 --- Parse: `MipsAtom_(<name>) [atom_info(<binds>, <reads>, <writes>)] { <body> }`
 --- @param source    string
 --- @param pos       integer
@@ -1466,10 +1459,15 @@ local function parse_mips_atom_proc(source, pos, ident_end, line_of, out)
 
 	-- The atom name is the preceding function ident as written
 	-- (`internal MipsAtom* X(...)`). The first macro arg is the arena.
-	local raw_name, args_inner, func_ident = duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
+	local raw_name, args_inner, func_ident, after_func_paren =
+		duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
 	if not raw_name then raw_name = "?" end
 	local name = strip_ac_prefix(raw_name)
-	parse_atom_info_before(source, pos, name, line_of, out, out.atom_infos)
+	if after_func_paren then
+		parse_atom_info_after_decl(source, after_func_paren, name, line_of, out, out.atom_infos)
+	else
+		parse_atom_info_after_decl(source, pos, name, line_of, out, out.atom_infos)
+	end
 	local reg_use_schema_name = nil
 	local reg_use_param_name  = nil
 	if args_inner then
@@ -1617,18 +1615,18 @@ local function register_typedef_alias(underlying, name, pos, line_of, out)
 	}
 end
 
--- Layout of Reg_<type> only. Never the C data struct (V3_S4 has a pad field).
-local REG_ALLOC_FIELDS = {
-	Reg_V3_S4 = { "x", "y", "z" },
-	Reg_P3_S4 = { "x", "y", "z" },
-	Reg_V3_S2 = { "x", "y", "z" },
-}
-
 local parse_reg_use_schema_body
 
 local function fields_for_reg_type(type_name, type_registry)
 	local reg_name = "Reg_" .. type_name
 	local entry = type_registry and type_registry[reg_name]
+	if entry and entry.fields and #entry.fields > 0 then
+		local names = {}
+		for _, field in ipairs(entry.fields) do
+			if field.name then names[#names + 1] = field.name end
+		end
+		if #names > 0 then return names end
+	end
 	if entry and entry.body and parse_reg_use_schema_body then
 		local schema = parse_reg_use_schema_body(entry.body, type_registry)
 		if schema and schema.slots then
@@ -1639,10 +1637,13 @@ local function fields_for_reg_type(type_name, type_registry)
 			if #names > 0 then return names end
 		end
 	end
-	return REG_ALLOC_FIELDS[reg_name]
+	return nil
 end
 
-parse_reg_use_schema_body = function(body, type_registry)
+parse_reg_use_schema_body = function(body, type_registry, opts)
+	opts = opts or {}
+	local require_types = opts.require_types == true
+	local pending = false
 	local slots = {}
 	local alias_to_slot = {}
 	local slot_names = {}
@@ -1789,10 +1790,14 @@ parse_reg_use_schema_body = function(body, type_registry)
 					errors[#errors + 1] = { kind = "reguse_malformed" }
 					return nil, errors
 				end
-				typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry)
+				local type_ident = duffle.trim(type_inner)
+				typed_fields = fields_for_reg_type(type_ident, type_registry)
 				if not typed_fields then
-					errors[#errors + 1] = { kind = "reguse_malformed" }
-					return nil, errors
+					if require_types then
+						errors[#errors + 1] = { kind = "reguse_unknown_reg_type", type_name = type_ident }
+					else
+						pending = true
+					end
 				end
 				after = duffle.skip_ws_and_cmt(body, after_paren)
 			end
@@ -1808,11 +1813,13 @@ parse_reg_use_schema_body = function(body, type_registry)
 				return nil, errors
 			end
 			for _, n in ipairs(names) do
-				if typed_fields then
-					for _, field in ipairs(typed_fields) do
-						local path = n .. "." .. field
-						if not add_alias(path, path) then return nil, errors end
-						if not add_slot(path, { path }, readonly) then return nil, errors end
+				if first == "Reg_" then
+					if typed_fields then
+						for _, field in ipairs(typed_fields) do
+							local path = n .. "." .. field
+							if not add_alias(path, path) then return nil, errors end
+							if not add_slot(path, { path }, readonly) then return nil, errors end
+						end
 					end
 				else
 					if not add_alias(n, n) then return nil, errors end
@@ -1827,10 +1834,15 @@ parse_reg_use_schema_body = function(body, type_registry)
 		::continue::
 	end
 	if #slots == 0 then
-		errors[#errors + 1] = { kind = "reguse_malformed" }
+		if pending and not require_types then
+			return { slots = slots, alias_to_slot = alias_to_slot, pending = true }, errors
+		end
+		if #errors == 0 then
+			errors[#errors + 1] = { kind = "reguse_malformed" }
+		end
 		return nil, errors
 	end
-	return { slots = slots, alias_to_slot = alias_to_slot }, errors
+	return { slots = slots, alias_to_slot = alias_to_slot, pending = pending }, errors
 end
 
 --- Parse: `typedef` declarations.
@@ -2231,6 +2243,137 @@ local DECL_PARSERS = {
 -- Only the bare `atom_dbg_skip` marker reaches `parse_dbg_skip_marker`.
 -- Unknown identifiers follow the same unrelated-token path as every other unsupported source token.
 
+local TAPE_SKIP_MACROS = {
+	MipsAtom_ = true,
+	MipsAtom_Proc_ = true,
+	MipsAtomComp_ = true,
+	MipsAtomComp_Proc_ = true,
+	MipsAtomComp_ProcMap_ = true,
+	Struct_ = true,
+	Enum_ = true,
+}
+
+local function collect_addrs_assigns(text)
+	local addrs = {}
+	local pos = 1
+	local n = #text
+	while pos <= n do
+		pos = duffle.skip_ws_and_cmt(text, pos)
+		if pos > n then break end
+		local ident, ident_end = duffle.read_ident(text, pos)
+		if ident == "addrs" then
+			local after = duffle.skip_ws_and_cmt(text, ident_end)
+			if text:sub(after, after) == "[" then
+				local inner, after_br = duffle.read_brackets(text, after)
+				local idx = inner and tonumber(duffle.trim(inner))
+				after_br = duffle.skip_ws_and_cmt(text, after_br or after)
+				if idx and text:sub(after_br, after_br) == "=" then
+					local rhs = duffle.skip_ws_and_cmt(text, after_br + 1)
+					local rhs_ident = duffle.read_ident(text, rhs)
+					if rhs_ident then addrs[idx] = rhs_ident end
+					pos = rhs
+				else
+					pos = after_br or (after + 1)
+				end
+			else
+				pos = ident_end
+			end
+		elseif ident then
+			pos = ident_end
+		else
+			pos = pos + 1
+		end
+	end
+	return addrs
+end
+
+local function collect_tb_emits(body, addrs)
+	local names = {}
+	local pos = 1
+	local n = #body
+	while pos <= n do
+		pos = duffle.skip_ws_and_cmt(body, pos)
+		if pos > n then break end
+		local ident, ident_end = duffle.read_ident(body, pos)
+		if ident == "tb_emit_" or ident == "tb_emit" then
+			local after = duffle.skip_ws_and_cmt(body, ident_end)
+			if body:sub(after, after) == "(" then
+				local inner, after_p = duffle.read_parens(body, after)
+				local name
+				if ident == "tb_emit_" then
+					name = duffle.trim(inner or ""):match("^([%w_]+)")
+				else
+					local args = duffle.split_top_level_commas(inner or "")
+					local last = duffle.trim(args[#args] or "")
+					local idx = last:match("^addrs%s*%[%s*(%d+)%s*%]$")
+					if idx then
+						name = addrs[tonumber(idx)]
+					else
+						name = last:match("([%w_]+)$")
+					end
+				end
+				if name then names[#names + 1] = name end
+				pos = after_p or (after + 1)
+			else
+				pos = ident_end
+			end
+		elseif ident then
+			pos = ident_end
+		else
+			pos = pos + 1
+		end
+	end
+	return names
+end
+
+-- Linear appearance order of tb_emit / tb_emit_ in each C function body.
+-- Commented-out emits are skipped by skip_ws_and_cmt. No C if/loop CFG.
+local function scan_tape_chains(source)
+	local addrs = collect_addrs_assigns(source)
+	local chains = {}
+	local pos = 1
+	local n = #source
+	while pos <= n do
+		pos = duffle.skip_ws_and_cmt(source, pos)
+		if pos > n then break end
+		local ident, ident_end = duffle.read_ident(source, pos)
+		if ident and TAPE_SKIP_MACROS[ident] then
+			local after = duffle.skip_ws_and_cmt(source, ident_end)
+			if source:sub(after, after) == "(" then
+				local _, after_p = duffle.read_parens(source, after)
+				after = duffle.skip_ws_and_cmt(source, after_p or after)
+			end
+			if source:sub(after, after) == "{" then
+				local _, after_b = duffle.read_braces(source, after)
+				pos = after_b or (after + 1)
+			else
+				pos = after
+			end
+		elseif ident then
+			local after = duffle.skip_ws_and_cmt(source, ident_end)
+			if source:sub(after, after) == "(" then
+				local _, after_p = duffle.read_parens(source, after)
+				after = duffle.skip_ws_and_cmt(source, after_p or after)
+				if source:sub(after, after) == "{" then
+					local body, after_b = duffle.read_braces(source, after)
+					local names = collect_tb_emits(body or "", addrs)
+					if #names > 0 then
+						chains[#chains + 1] = names
+					end
+					pos = after_b or (after + 1)
+				else
+					pos = after
+				end
+			else
+				pos = ident_end
+			end
+		else
+			pos = pos + 1
+		end
+	end
+	return chains
+end
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- The single source walker
 -- ════════════════════════════════════════════════════════════════════════════
@@ -2343,6 +2486,7 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 	-- Runs AFTER the source walk so all typedef / Struct_ / Enum_ declarations have been parsed into `out.type_name_registry`.
 	-- Mutates each entry's `byte_size` field in place; fields with pointer_depth > 0 already carry byte_size = 4 from parse time and are unaffected.
 	propagate_type_sizes(out)
+	out.tape_chains = scan_tape_chains(source)
 
 	return out
 end
@@ -2511,6 +2655,7 @@ local function merge_corpus_registries(corpus)
 	corpus.collisions              = corpus.collisions              or {}
 	corpus.reg_use_schemas         = corpus.reg_use_schemas         or {}
 	corpus.reg_use_errors          = corpus.reg_use_errors          or {}
+	corpus.tape_chains             = corpus.tape_chains             or {}
 
 	-- Replace the existing corpus collections with empty tables so a re-run on the same corpus produces identical state (deterministic merge).
 	-- This is safe because M.run is the only writer to these tables within a single orchestrator invocation.
@@ -2518,6 +2663,7 @@ local function merge_corpus_registries(corpus)
 		"register_alias_registry", "type_name_registry", "binds_by_name",
 		"atoms_by_name", "atom_views", "atom_ctxs", "atom_phases",
 		"atom_infos", "component_atom_infos", "collisions", "reg_use_schemas", "reg_use_errors",
+		"tape_chains",
 	}) do
 		corpus[key] = {}
 	end
@@ -2622,6 +2768,53 @@ local function merge_corpus_registries(corpus)
 			for _, err in ipairs(scan.reg_use_errors or {}) do
 				corpus.reg_use_errors[#corpus.reg_use_errors + 1] = err
 			end
+			for _, chain in ipairs(scan.tape_chains or {}) do
+				corpus.tape_chains[#corpus.tape_chains + 1] = chain
+			end
+		end
+	end
+end
+
+local SCHEMA_BODY_ERROR = {
+	reguse_malformed          = true,
+	reguse_unknown_reg_type   = true,
+	reguse_duplicate_alias    = true,
+	reguse_duplicate_slot     = true,
+	reguse_const_reg_spelling = true,
+	reguse_mixed_const        = true,
+}
+
+-- Re-parse every RegUse_* body against the merged type_name_registry.
+-- Scan-time expansion still runs when Reg_T is in the same source.
+-- Missing Reg_T after merge is reguse_unknown_reg_type, not a fallback table.
+local function resolve_reg_use_schemas(corpus)
+	local kept = {}
+	for _, err in ipairs(corpus.reg_use_errors or {}) do
+		if not SCHEMA_BODY_ERROR[err.kind] then
+			kept[#kept + 1] = err
+		end
+	end
+	corpus.reg_use_errors = kept
+
+	for name, type_entry in pairs(corpus.type_name_registry or {}) do
+		if name:sub(1, 7) == "RegUse_" and type_entry.body then
+			local fresh, errs = parse_reg_use_schema_body(
+				type_entry.body, corpus.type_name_registry, { require_types = true })
+			if fresh then
+				fresh.name = name
+				local old = corpus.reg_use_schemas[name]
+				fresh.source_file = (old and old.source_file) or type_entry.source_file
+				fresh.source_line = (old and old.source_line) or type_entry.source_line
+				corpus.reg_use_schemas[name] = fresh
+			else
+				corpus.reg_use_schemas[name] = nil
+			end
+			for _, err in ipairs(errs or {}) do
+				err.schema_name = name
+				err.source_file = type_entry.source_file
+				err.source_line = type_entry.source_line
+				corpus.reg_use_errors[#corpus.reg_use_errors + 1] = err
+			end
 		end
 	end
 end
@@ -2710,6 +2903,7 @@ function M.run(ctx)
 
 	-- Merge per-source scans into the corpus registries (see merge_corpus_registries for first-wins + collision discipline).
 	merge_corpus_registries(corpus)
+	resolve_reg_use_schemas(corpus)
 
 	-- code_macros and code_macro_bodies are function-local; the GC reclaims them on M.run return.
 	return { outputs = {}, errors = {}, warnings = {} }

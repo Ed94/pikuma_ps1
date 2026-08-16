@@ -1338,7 +1338,6 @@ M.GTE_CR_ALIAS_GROUPS = {
 -- first must be written before second.
 M.GTE_PACKED_SLOT_RELATIONS = {
 	{ slot = 2, first = "gte_cr_RT13", second = "gte_cr_RT22" },
-	{ slot = 4, first = "gte_cr_RT22", second = "gte_cr_RT33" },
 }
 
 -- Operand-class table for the COP2->GPR load-delay check.
@@ -2924,18 +2923,17 @@ end
 -------------------------------------------------------------------------------
 -- find_atom_proc_decl_for — backward walk for MipsAtom_Proc_ name extraction.
 --
--- After the `sym` arg was dropped from MipsAtom_Proc_, the atom name is
--- derived from the preceding `MipsAtom* X_proc(args)` function declaration.
+-- The atom name is the preceding `MipsAtom* ident(args)` function ident.
 -- This function walks backward from `before_pos` to find it.
 --
--- Returns (raw_name, args_inner) or (nil, nil).
---   raw_name   — e.g. "normalize_v3s4" (the _proc suffix is stripped)
---   args_inner — e.g. "AtomArena_R aa, U4 r_scratch, ..."
+-- Returns (raw_name, args_inner, func_ident, after_paren) or (nil, nil).
+--   raw_name    — the function ident as written
+--   args_inner  — e.g. "AtomArena_R aa, U4 r_scratch, ..."
+--   after_paren — source position after the function `)`
 --
 -- The walk finds the LAST "MipsAtom*" before before_pos, then skips
 -- whitespace + qualifiers (internal, I_, FI_, comments) until it finds an
--- ident followed by "(". That ident is the function name (with _proc suffix);
--- the suffix is stripped to get raw_name. The parens contents are the args.
+-- ident followed by "(". That ident is the name. The parens contents are the args.
 -------------------------------------------------------------------------------
 function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 	local search_pos = 1
@@ -2980,9 +2978,9 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 		-- check if the next non-ws char after ident is "("
 		local next_pos = M.skip_ws_and_cmt(source, ident_end)
 		if source:sub(next_pos, next_pos) == "(" then
-			local inner = M.read_parens(source, next_pos)
+			local inner, after_paren = M.read_parens(source, next_pos)
 			if inner then
-				return ident, inner, ident
+				return ident, inner, ident, after_paren
 			end
 		end
 		-- ident not followed by "(" — it's a qualifier; skip it

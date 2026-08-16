@@ -1,7 +1,8 @@
 --- passes/offsets.lua — Branch-offset generator.
 ---
 --- Reads the pre-scanned SourceScan payload (produced once upstream by `duffle.scan_source`)
---- for `MipsAtom_(name)` and `MipsCode code_<name>` declarations, computes the word offset
+--- for `MipsAtom_(name)` and leftover `MipsCode code_*` declarations, computes the word offset
+--- (ELF symbol is the C ident; raw `code_*` is leftover, not the atom rule)
 --- from each `atom_offset(F, T)` marker to its target `atom_label(T)` declaration, and emits
 --- `gen/offsets.h` with one `#define _atom_offset_F_T = N` per branch.
 ---

@@ -419,6 +419,29 @@ local function render_section_annotations(add, view)
 	add("")
 end
 
+local function render_section_component_annotations(add, view)
+	local rows = {}
+	for _, src in ipairs(view.sources) do
+		for _, info in ipairs((src.scan and src.scan.component_atom_infos) or {}) do
+			rows[#rows + 1] = {
+				source = source_basename(src.path),
+				line   = info.info_line or 0,
+				name   = info.atom_name or "?",
+				reads  = (#(info.reads or {}) > 0 and table.concat(info.reads, ",")) or "—",
+				writes = (#(info.writes or {}) > 0 and table.concat(info.writes, ",")) or "—",
+			}
+		end
+	end
+	if #rows == 0 then add("_(none)_"); add(""); return end
+	add("| source | line | name | reads | writes |")
+	add("|--------|------|------|-------|--------|")
+	for _, r in ipairs(rows) do
+		add(string.format("| %s | %d | %s | %s | %s |",
+			r.source, r.line, r.name, r.reads, r.writes))
+	end
+	add("")
+end
+
 local function render_section_binds(add, view)
 	local wrote = false
 	for _, src in ipairs(view.sources) do
@@ -610,21 +633,123 @@ local function render_section_relations(add, view)
 	if not wrote then add("_(none)_"); add("") end
 end
 
+local HIDDEN_UNLESS_WRITTEN = {
+	R_AT = true, R_TapePtr = true, R_AtomJmp = true,
+}
+
+local PHYSICAL_GPR = {
+	R_T0 = true, R_T1 = true, R_T2 = true, R_T3 = true,
+	R_T4 = true, R_T5 = true, R_T6 = true, R_T7 = true,
+	R_V0 = true, R_V1 = true,
+}
+
+local function encoder_wrote_key(atom, key)
+	for _, ev in ipairs((atom.paths and atom.paths.word_events) or {}) do
+		for _, dest in pairs(ev.gpr_keys or {}) do
+			if dest == key then return true end
+		end
+	end
+	return false
+end
+
+local function written_name_for(key, atom)
+	local slot = key:match("^reguse:.+:(.+)$")
+	if slot then
+		local param = atom.reg_use_param_name
+		if param and param ~= "" then return param .. "." .. slot end
+		return slot
+	end
+	return key
+end
+
+local function aliases_for_key(key, atom, view)
+	local slot = key:match("^reguse:.+:(.+)$")
+	if not slot then return "—" end
+	local schema_name = atom.reg_use_schema_name
+	local schema = view.corpus and view.corpus.reg_use_schemas and view.corpus.reg_use_schemas[schema_name]
+	if not schema then return "—" end
+	for _, s in ipairs(schema.slots or {}) do
+		if s.name == slot then
+			local names = {}
+			for _, alias in ipairs(s.aliases or {}) do
+				if alias ~= slot then names[#names + 1] = alias end
+			end
+			if #names == 0 then
+				if s.aliases and #s.aliases > 0 then return table.concat(s.aliases, ", ") end
+				return "—"
+			end
+			return table.concat(names, ", ")
+		end
+	end
+	return "—"
+end
+
+local function physical_for_key(key, atom, view)
+	if PHYSICAL_GPR[key] then return key end
+	local corpus = view.corpus or {}
+	local alias = (corpus.register_alias_registry or {})[key]
+	if type(alias) == "table" then
+		local phys = alias.physical or alias.gpr or alias.code_name
+		if type(phys) == "string" and PHYSICAL_GPR[phys] then return phys end
+		if type(alias.name) == "string" and PHYSICAL_GPR[alias.name] then return alias.name end
+	elseif type(alias) == "string" and PHYSICAL_GPR[alias] then
+		return alias
+	end
+	local atom_map = (corpus.atom_auto_regs or {})[atom.name]
+	if type(atom_map) == "table" then
+		local slot = key:match("^reguse:.+:(.+)$") or key
+		local bound = atom_map[slot] or atom_map["R_" .. slot]
+		if type(bound) == "string" and PHYSICAL_GPR[bound] then return bound end
+	end
+	return "—"
+end
+
+local function last_relation_for(key, atom)
+	local last = nil
+	for _, rel in ipairs((atom.paths and atom.paths.relations) or {}) do
+		local dest = rel.destination or rel.producer_destination
+		if dest == key then last = rel end
+	end
+	if not last then return "—" end
+	local sem = last.semantic or "?"
+	local a = last.producer_word
+	local b = last.consumer_word
+	if a and b then return string.format("%s w%s→%s", sem, tostring(a), tostring(b)) end
+	return sem
+end
+
 local function render_section_forward(add, view)
 	local wrote = false
 	for _, a in ipairs(view.decls) do
 		local gpr = a.paths and a.paths.forward_state and a.paths.forward_state.gpr_values
 		local keys = {}
 		for k in pairs(gpr or {}) do
-			if k ~= "R_0" then keys[#keys + 1] = k end
+			if k == "R_0" then
+				-- hidden
+			elseif HIDDEN_UNLESS_WRITTEN[k] and not encoder_wrote_key(a, k) then
+				-- hidden
+			else
+				keys[#keys + 1] = k
+			end
 		end
 		if #keys > 0 then
 			wrote = true
 			add("### " .. a.name)
+			add("| written | aliases | physical | lattice | last relation |")
+			add("|---|---|---|---|---|")
 			table.sort(keys)
 			for _, k in ipairs(keys) do
 				local slot = gpr[k]
-				add(string.format("- `%s` %s", k, (slot and slot.kind) or "unknown"))
+				local lattice = "—"
+				if slot and slot.kind == "constant" then
+					lattice = tostring(slot.value)
+				end
+				add(string.format("| `%s` | %s | %s | %s | %s |",
+					written_name_for(k, a),
+					aliases_for_key(k, a, view),
+					physical_for_key(k, a, view),
+					lattice,
+					last_relation_for(k, a)))
 			end
 			add("")
 		end
@@ -637,6 +762,7 @@ local SECTION_RENDERERS = {
 	{ header = "## Components",            render = render_section_components },
 	{ header = "## RegUse schemas",        render = render_section_reguse },
 	{ header = "## Annotations",           render = render_section_annotations },
+	{ header = "## Component annotations", render = render_section_component_annotations },
 	{ header = "## Binds_* structs",       render = render_section_binds },
 	{ header = "## Phases / views / ctx",  render = render_section_phases },
 	{ header = "## Register aliases",      render = render_section_aliases },
@@ -644,7 +770,7 @@ local SECTION_RENDERERS = {
 	{ header = "## Collisions",            render = render_section_collisions },
 	{ header = "## Findings",              render = render_section_findings },
 	{ header = "## Relations",             render = render_section_relations },
-	{ header = "## Forward GPR",           render = render_section_forward },
+	{ header = "## GPR model",             render = render_section_forward },
 }
 
 --- Render the consolidated per-module markdown (`build/<module>.atom_meta_report.md`).
