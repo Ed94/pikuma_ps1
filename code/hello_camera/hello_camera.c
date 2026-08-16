@@ -60,8 +60,12 @@ enum {
 enum {
 	Scratchpad_Len           = 1024,
 	MemTape_Len              = 512,
+
 	ResolveLookAtArena_Words = 1024,
 	ResolveLookAtArena_Size  = ResolveLookAtArena_Words * S_(MipsCode),
+
+	CT_InitAtomMem_Words     = Kilo_(4),
+	CT_InitAtomMem_Size       = CT_InitAtomMem_Words * S_(MipsCode),
 };
 typedef Struct_(SMemory) {
 	PrimitiveArena          primitives;
@@ -85,8 +89,14 @@ typedef Struct_(SMemory) {
 	// TODO(Ed): We don't need this we can just cast at any point an address to a desired view of scratchpad, we have the address.
 	U4_V scratchpad; // d-cache
 
+	U1 ct_init_atom_mem[CT_InitAtomMem_Size];
+	MipsAtom* normalize_v3s4;
+	// TODO(Ed): Convert normalize_v3s4 to a generic atom?
+	// This would allow us to reduce specializations with the loss being some cycles to loading registers.
+	// The cost would be 3 loads (scratch, src_ptr, dst_offset) from tape and 
+
 	U1        resolve_look_at_mem[ResolveLookAtArena_Size];
-	MipsAtom* resolve_look_at_atom_addrs[10];
+	MipsAtom* resolve_look_at_bundle[AtomBundle_Len(resolve_look_at)];
 };
 global SMemory smem;
 extern SMemory smem;
@@ -131,29 +141,20 @@ I_ void resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4*
 }
 FI_ void camera_look_at_c11(Camera* c, P3_S4* target, V3_S4* up_in) { resolve_look_at_c11(& c->look_at, & c->pos, target, up_in); }
 
-/* Pre-build all 7 chain atoms of the resolve_look_at bundle into the static arena.
- * 4 unique procs in hello_camera.atom.c (chain atoms 0, 2, 4, 6); atoms 1, 3, 5
- * share the GENERIC normalize_v3s4_proc from gte.atom.c
- * 	0: resolve_look_at__input_and_sub_proc
- * 	1: normalize_v3s4_proc                  (fwd → uz; offsets 0, 16)
- * 	2: resolve_look_at__cross_uz_up_in_to_right_proc
- * 	3: normalize_v3s4_proc                  (right → ux; offsets 32, 48)
- * 	4: resolve_look_at__cross_uz_ux_to_up_proc
- * 	5: normalize_v3s4_proc                  (up → uy; offsets 64, 80)
- * 	6: resolve_look_at__populate_and_translate_proc
- */
-internal void resolve_look_at_init(void) {
+
+
+internal void compile_resolve_look_at(void) {
 	/* Wrap the static arena in a MipsAtomBuilder. */
 	AtomArena   ab = atomarena_make(slice_ut_arr(smem.resolve_look_at_mem));
-	TapeBuilder tb = tb_make(slice_ut_arr(smem.resolve_look_at_atom_addrs));
+	TapeBuilder tb = tb_make(slice_ut_arr(smem.resolve_look_at_bundle));
 
 	U4 pin_mask = regfile_abi_mask | (1 << R_ResolveScratch);
 	RegFile rf  = regfile(pin_mask);
 #define ralloc() regfile_alloc(& rf)
 #define ralloc_v3() { ralloc(), ralloc(), ralloc() }
 
-	smem.resolve_look_at_atom_addrs[0] = resolve_look_at__input_and_sub_proc(& ab,
-		RegUse_(resolve_look_at__input_and_sub_proc) {
+	tb_emit_(AtomBundleEntry_(resolve_look_at, input_and_sub)(& ab,
+		RegUse_(resolve_look_at_input_and_sub) {
 			.scratch = R_ResolveScratch,
 			.target  = ralloc(),
 			.eye     = ralloc(),
@@ -164,14 +165,14 @@ internal void resolve_look_at_init(void) {
 			.t3      = ralloc(),
 			.t4      = ralloc(),
 		}
-	);
+	));
 	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 1: normalize fwd→uz === */
 	U2 src_offset  = O_(ResolveLookAtScratch, fwd);
 	U2 dst_offset  = O_(ResolveLookAtScratch, uz);
-	smem.resolve_look_at_atom_addrs[1] = normalize_v3s4_proc(& ab,
-		src_offset, dst_offset, RegUse_(normalize_v3s4_proc){
+	smem.resolve_look_at_bundle[1] = build_normalize_v3s4(& ab,
+		src_offset, dst_offset, RegUse_(build_normalize_v3s4){
 			.scratch   = R_ResolveScratch,
 			.src_ptr   = ralloc(), 
 			.dst_ptr   = ralloc(),
@@ -186,8 +187,9 @@ internal void resolve_look_at_init(void) {
 	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 2: cross uz×up_in→right === */
-	smem.resolve_look_at_atom_addrs[2] = resolve_look_at__cross_uz_up_into_right_proc(& ab,
-		RegUse_(resolve_look_at__cross_uz_up_into_right_proc) {
+	// smem.resolve_look_at_bundle[2] = AtomBundleEntry_(resolve_look_at,cross_uz_up_to_right)(& ab,
+	smem.resolve_look_at_bundle[2] = resolve_look_at_cross_uz_up_into_right(& ab,
+		RegUse_(resolve_look_at_cross_uz_up_into_right) {
 			.scratch = R_ResolveScratch,
 			.a  = ralloc(), 
 			.b  = ralloc(), 
@@ -198,27 +200,28 @@ internal void resolve_look_at_init(void) {
 			.t2 = ralloc(),
 			.t0 = ralloc(),
 		});
+	regfile_reset_to_mask(& rf, pin_mask);	
 
 	/* === ATOM 3: normalize right→ux === */
 	src_offset  = O_(ResolveLookAtScratch, right);
 	dst_offset  = O_(ResolveLookAtScratch, ux);
-	smem.resolve_look_at_atom_addrs[3] = normalize_v3s4_proc(& ab,
-		src_offset, dst_offset, RegUse_(normalize_v3s4_proc){
+	smem.resolve_look_at_bundle[3] = build_normalize_v3s4(& ab,
+		src_offset, dst_offset, RegUse_(build_normalize_v3s4){
 			.scratch   = R_ResolveScratch,
-			.src_ptr   = R_T0,
-			.dst_ptr   = R_T1,
-			.recip_est = R_T6,
-			.norm      = R_T7,
-			.shift     = R_V0,
-			.src_x     = R_T2,
-			.t3 = R_T3,
-			.t4 = R_T5,
-			.t5 = R_V1,
+			.src_ptr   = ralloc(),
+			.dst_ptr   = ralloc(),
+			.recip_est = ralloc(),
+			.norm      = ralloc(),
+			.shift     = ralloc(),
+			.src_x     = ralloc(),
+			.t3        = ralloc(),
+			.t4        = ralloc(),
+			.t5        = ralloc(),
 		});
+	regfile_reset_to_mask(& rf, pin_mask);	
 
 	/* === ATOM 4: cross uz×ux→up === */
-	regfile_reset_to_mask(& rf, pin_mask);
-	smem.resolve_look_at_atom_addrs[4] = resolve_look_at__cross_uz_ux_to_up_proc(& ab,
+	smem.resolve_look_at_bundle[4] = resolve_look_at__cross_uz_ux_to_up_proc(& ab,
 		RegUse_(resolve_look_at__cross_uz_ux_to_up_proc){
 			.scratch = R_ResolveScratch,
 			.a  = ralloc_v3(),   /* T0 T1 T2 */
@@ -227,28 +230,29 @@ internal void resolve_look_at_init(void) {
 			.t1 = ralloc(),      /* V0  = uz / rt11 */
 			.t2 = ralloc(),      /* V1  = ux / rt22 */
 		});
+	regfile_reset_to_mask(& rf, pin_mask);	
 
 	/* === ATOM 5: normalize up→uy === */
 	src_offset = O_(ResolveLookAtScratch, up);
 	dst_offset = O_(ResolveLookAtScratch, uy);
-	smem.resolve_look_at_atom_addrs[5] = normalize_v3s4_proc(& ab,
+	smem.resolve_look_at_bundle[5] = build_normalize_v3s4(& ab,
 		src_offset, dst_offset,
-		RegUse_(normalize_v3s4_proc){
+		RegUse_(build_normalize_v3s4){
 			.scratch   = R_ResolveScratch,
-			.src_ptr   = R_T0,
-			.dst_ptr   = R_T1,
-			.recip_est = R_T6,
-			.norm      = R_T7,
-			.shift     = R_V0,
-			.src_x     = R_T2,
-			.t3 = R_T3,
-			.t4 = R_T5,
-			.t5 = R_V1,
+			.src_ptr   = ralloc(),
+			.dst_ptr   = ralloc(),
+			.recip_est = ralloc(),
+			.norm      = ralloc(),
+			.shift     = ralloc(),
+			.src_x     = ralloc(),
+			.t3 = ralloc(),
+			.t4 = ralloc(),
+			.t5 = ralloc(),
 		});
+	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 6a: populate (m[][] from ux/uy/uz, t[]=0) === */
-	regfile_reset_to_mask(& rf, pin_mask);
-	smem.resolve_look_at_atom_addrs[6] = resolve_look_at__populate_proc(& ab,
+	smem.resolve_look_at_bundle[6] = resolve_look_at__populate_proc(& ab,
 		RegUse_(resolve_look_at__populate_proc){
 			.scratch = R_ResolveScratch,
 			.look_at = ralloc(),     /* T0 */
@@ -257,34 +261,30 @@ internal void resolve_look_at_init(void) {
 			.uy      = ralloc(),     /* T6 = uy */
 			.uz      = ralloc(),     /* T7 = uz */
 		});
+	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 6a.5: set_gte_mt3s2s4 (BAKED — ctc2 RT matrix) ===
 	 * This is a BAKED atom from gte.atom.c. Its body hardcodes R_T3 as
 	 * the matrix pointer (popped from tape). It does NOT need GPR
 	 * assignment from us — it has its own internal GPR usage.
 	 * We just take its address. */
-	smem.resolve_look_at_atom_addrs[7] = (MipsAtom*) & set_gte_mt3s2s4;
+	smem.resolve_look_at_bundle[7] = (MipsAtom*) & set_gte_mt3s2s4;
 
-	/* === ATOM 6b: matrix_vector (RT * (-eye) >> 12) ===
-	 * Uses mac_apply_matrix_lv component macro which internally uses
-	 * r_t0 for the RT matrix load + V0 load, then r_t0/r_t1/r_t2
-	 * for the mfc2/store. We pass our GPRs. */
-	U4 r_scratch_6b = R_ResolveScratch;
-	U4 r_peye_6b    = R_T1;  /* scratch+96 (packed V0 dst, then off dst) */
-	U4 r_look_at_6b = R_T0;  /* tape pop → look_at* */
-	U4 r_tmp0_6b    = R_T2;
-	U4 r_tmp1_6b    = R_T3;
-	U4 r_tmp2_6b    = R_T5;
-	smem.resolve_look_at_atom_addrs[8] = resolve_look_at__matrix_vector_proc(& ab,
-		r_scratch_6b, r_peye_6b, r_look_at_6b,
-		r_tmp0_6b, r_tmp1_6b, r_tmp2_6b);
+	/* === ATOM 6b: matrix_vector (RT * (-eye) >> 12) === */
+	smem.resolve_look_at_bundle[8] = resolve_look_at__matrix_vector_proc(& ab,
+		RegUse_(resolve_look_at__matrix_vector_proc){
+			.scratch = R_ResolveScratch,
+			.look_at = ralloc(),     /* T0 */
+			.eye     = ralloc(),     /* T1 */
+			.v       = ralloc_v3(),  /* T2 T3 T5 */
+		});
 
 	/* === ATOM 6c: trans_matrix (off → look_at->t[]) === */
 	U4 r_look_at_6c = R_T0;  /* tape pop → look_at* */
 	U4 r_scratch_6c = R_ResolveScratch;
 	U4 r_off_ptr_6c = R_T1;  /* &scratch.eye (= off dst) */
 	U4 r_tmp0_6c    = R_T2;
-	smem.resolve_look_at_atom_addrs[9] = resolve_look_at__trans_matrix_proc(& ab,
+	smem.resolve_look_at_bundle[9] = resolve_look_at__trans_matrix_proc(& ab,
 		r_look_at_6c, r_scratch_6c, r_off_ptr_6c, r_tmp0_6c, R_T3, R_T4);
 
 	/* Sanity check: arena didn't overflow. */
@@ -303,36 +303,41 @@ internal void resolve_look_at_init(void) {
  *                                       ----
  *                                       5 tb_data words total per frame.
  */
-I_ void resolve_look_at(
-		TapeBuilder_R tb
+I_ void resolve_look_at(TapeBuilder_R tb
 	,	MT3_S2S4* look_at
 	,	P3_S4*    eye
 	,	P3_S4*    target
 	,	V3_S4*    up_in
 ){
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[0]); {
+	tb_emit(tb, smem.resolve_look_at_bundle[0]); {
 		tb_data(tb, u4_(target));
 		tb_data(tb, u4_(eye));
 		tb_data(tb, u4_(up_in));
 		tb_data(tb, u4_(smem.scratchpad));
 	}
 
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[1]); { }
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[2]); { }
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[3]); { }
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[4]); { }
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[5]); { }
+	tb_emit(tb, smem.resolve_look_at_bundle[1]); { 
+		// tb_data(tb, u4_(Scratchpad_Loc));
+	}
+	tb_emit(tb, smem.resolve_look_at_bundle[2]); { }
+	tb_emit(tb, smem.resolve_look_at_bundle[3]); { 
+		// tb_data(tb, u4_(Scratchpad_Loc));
+	}
+	tb_emit(tb, smem.resolve_look_at_bundle[4]); { }
+	tb_emit(tb, smem.resolve_look_at_bundle[5]); { 
+		// tb_data(tb, u4_(Scratchpad_Loc));
+	}
 
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[6]); {
+	tb_emit(tb, smem.resolve_look_at_bundle[6]); {
 		tb_data(tb, u4_(look_at));
 	}
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[7]); {
+	tb_emit(tb, smem.resolve_look_at_bundle[7]); {
 		tb_data(tb, u4_(look_at));
 	}
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[8]); {
+	tb_emit(tb, smem.resolve_look_at_bundle[8]); {
 		tb_data(tb, u4_(look_at));
 	}
-	tb_emit(tb, smem.resolve_look_at_atom_addrs[9]); {
+	tb_emit(tb, smem.resolve_look_at_bundle[9]); {
 		// tb_data(tb, u4_(look_at));
 	}
 }
@@ -526,8 +531,7 @@ int main(void)
 		/* Direct BIOS: poll both ports during VBlank. */
 		pad_bios_init_start(& smem.pad_raw[0], & smem.pad_raw[1]);
 
-		/* Pre-build the resolve_look_at bundle atoms into the static arena. */
-		resolve_look_at_init();
+		compile_resolve_look_at();
 
 		/* Pinned registers for the GPU init atom. */
 		register U4*           io_base_addr rgcc(R_IO_BaseAddr) = u4_r(IO_BASE_ADDR);
@@ -548,4 +552,3 @@ int main(void)
 	return 0;
 }
 GCC_OPTIMIZATION_ENABLE
-

@@ -8,7 +8,7 @@
 #pragma region hello_camera
 
 
-// --- atom: pad_input_cube_rotation (60 words) ---
+// --- atom: pad_input_cube_rotation (61 words) ---
 
 #define _atom_offset_dpad_left_exit_dpad_left         6
 #define _atom_offset_dpad_right_exit_dpad_right       6
@@ -44,7 +44,7 @@ enum {
     atom_offset_circle_z_exit_circle_z = _atom_offset_circle_z_exit_circle_z,
 };
 
-// --- atom: cube_g4_face (76 words) ---
+// --- atom: cube_g4_face (75 words) ---
 
 #define _atom_offset_cull_cube_g4_face_exit           41
 #define _atom_offset_bounds_chk_cube_g4_face_exit     24

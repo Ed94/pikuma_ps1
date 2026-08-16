@@ -236,8 +236,13 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x0820, 0x081c, 0x0818, 0x0814, 0x0810, 0x080c, 0x0808, 0x0804,
 };
 
-typedef Struct_(RegUse_normalize_v3s4_proc) {
-	Reg const scratch; // Scratch base carrier.
+typedef Struct_(Binds_build_normalize_v3s4) {
+	U4 scratch;
+	U2 src_offset;
+	U2 dst_offset;
+};
+typedef Struct_(RegUse_build_normalize_v3s4) {
+	Reg scratch;
 	Reg src_ptr;
 	Reg dst_ptr;
 	Reg recip_est; // |v|² sum + shift-input + sqrtbl[index]
@@ -278,9 +283,12 @@ typedef Struct_(RegUse_normalize_v3s4_proc) {
  * Sqrtbl: hardcoded to 0x800185B4 (libgte msc02.rel.data). Note: swapped to local.
  * Pipeline: clobbers IR0..3, MAC1..3, LZCS, LZCR.
  */
-internal MipsAtom* normalize_v3s4_proc(AtomArena_R aa,	U2 src_offset, U2 dst_offset, RegUse_normalize_v3s4_proc r)
+internal MipsAtom* build_normalize_v3s4(AtomArena_R aa,	U2 src_offset, U2 dst_offset, RegUse_build_normalize_v3s4 r)
 MipsAtom_Proc_(aa, {
-	add_si(r.src_ptr, r.scratch, src_offset),     /* r_src_ptr = &src */
+	// load_word(r.scratch, R_TapePtr, O_(Binds_build_normalize_v3s4,scratch)),
+	// add_ui_self(R_TapePtr, S_(Binds_build_normalize_v3s4)),
+
+	add_si(r.src_ptr, r.scratch, src_offset), /* r_src_ptr = &src */
 
 	/* Load src.x/y/z from r_src_ptr (caller-determined address) into r_tmp/r_recip_est/r_branch_tmp.
 	 * r.rt1_src_x holds src.x throughout stages 1-2 — r_mac2_scratch is clobbered to MAC2 in stage 1.5 (line below). */

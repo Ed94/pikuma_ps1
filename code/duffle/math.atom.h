@@ -66,11 +66,25 @@ atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	add_si(rt_z, base, O_(V3_S4,z)),
 })
 
-FI_ Slice_MipsCode ac_sub_v3s4(AtomBuilder_R ab, U4 rds_x, U4 rds_y, U4 rds_z, U4 rt_x,  U4 rt_y,  U4 rt_z) atom_dbg_skip MipsAtomComp_Proc_(ab, {
-	sub_s(rds_x, rds_x, rt_x),
-	sub_s(rds_y, rds_y, rt_y),
-	sub_s(rds_z, rds_z, rt_z),
+FI_ Slice_MipsCode ac_sub_s_v3(AtomBuilder_R ab
+	, Reg dx, Reg dy, Reg dz
+	, Reg sx, Reg sy, Reg sz
+	, Reg tx, Reg ty, Reg tz
+) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	sub_s(dx, sx, tx),
+	sub_s(dy, sy, ty),
+	sub_s(dz, sz, tz),
 })
+
+FI_ Slice_MipsCode ac_sub_v3s4(AtomBuilder_R ab, Reg_(V3_S4) d, Reg_(V3_S4) s, Reg_(V3_S4) t) MipsAtomComp_ProcMap_(ab, mac_sub_s_v3(d.x, d.y, d.z, s.x, s.y, s.z, t.x, t.y, t.z))
+
+FI_ Slice_MipsCode ac_sub_s_v3_self(AtomBuilder_R ab, Reg ds_x, Reg ds_y, Reg ds_z, Reg tx,  Reg ty,  Reg tz) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	sub_s(ds_x, ds_x, tx),
+	sub_s(ds_y, ds_y, ty),
+	sub_s(ds_z, ds_z, tz),
+})
+
+FI_ Slice_MipsCode ac_sub_v3s4_self(AtomBuilder_R ab, Reg_(V3_S4) ds, Reg_(V3_S4) t) MipsAtomComp_ProcMap_(ab, mac_sub_s_v3_self(ds.x, ds.y, ds.z, t.x, t.y, t.z))
 
 FI_ Slice_MipsCode ac_store_rects2(AtomBuilder_R ab, U4 rt_x, U4 rt_y, U4 rt_width, U4 rt_height, U4 base, U4 offset) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	store_half(rt_x,      base, offset + O_(Rect_S2,x)),

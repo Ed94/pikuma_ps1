@@ -130,11 +130,26 @@ WORD_COUNT(mac_store_p3s4, 3)
 WORD_COUNT(mac_add_si_v3s4, 3)
 
 /* atom_dbg_skip */
-#define mac_sub_v3s4(rds_x, rds_y, rds_z, rt_x, rt_y, rt_z) \
-	sub_s(rds_x, rds_x, rt_x) \
-,	sub_s(rds_y, rds_y, rt_y) \
-,	sub_s(rds_z, rds_z, rt_z)
+#define mac_sub_s_v3(dx, dy, dz, sx, sy, sz, tx, ty, tz) \
+	sub_s(dx, sx, tx) \
+,	sub_s(dy, sy, ty) \
+,	sub_s(dz, sz, tz)
+WORD_COUNT(mac_sub_s_v3, 3)
+
+#define mac_sub_v3s4(d, s, t) \
+	mac_sub_s_v3(d.x, d.y, d.z, s.x, s.y, s.z, t.x, t.y, t.z)
 WORD_COUNT(mac_sub_v3s4, 3)
+
+/* atom_dbg_skip */
+#define mac_sub_s_v3_self(ds_x, ds_y, ds_z, tx, ty, tz) \
+	sub_s(ds_x, ds_x, tx) \
+,	sub_s(ds_y, ds_y, ty) \
+,	sub_s(ds_z, ds_z, tz)
+WORD_COUNT(mac_sub_s_v3_self, 3)
+
+#define mac_sub_v3s4_self(ds, t) \
+	mac_sub_s_v3_self(ds.x, ds.y, ds.z, t.x, t.y, t.z)
+WORD_COUNT(mac_sub_v3s4_self, 3)
 
 /* atom_dbg_skip */
 #define mac_store_rects2(rt_x, rt_y, rt_width, rt_height, base, offset) \
