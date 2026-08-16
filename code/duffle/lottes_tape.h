@@ -77,8 +77,7 @@ enum {
 
 // Reserved Registers (Callee-saved):
 // - R_T9: Holds the Tape Ptr which we need to increment
-//         If we hit a wall with register allocations we can clobber V0 & V1 (return values), defering as opt-in by user.
-// - R_RA: Not sure??
+// - R_RA: Return address register
 // Needed by ac_yield but can be used as atom scratch:
 // - R_T8: Will be used as the atom jump register.
 
@@ -144,6 +143,7 @@ typedef Slice_(MipsAtom);
 // Inline-only callers (the generated `mac_<name>` aliases) skip the `ab` arg via metaprogram filtering; escape callers (ac_<name> invoked as a function) pass a long-lived builder.
 #define MipsAtomComp_Proc_(ab, ...) { MipsCode atom_comp_code[] align_(4) = __VA_ARGS__; atombuilder_push(ab, slice_from_array(MipsCode, atom_comp_code)); }
 
+// Used for trivial mappings from one atom component proc to the command of a more baser (meant for type-mapping)
 #define MipsAtomComp_ProcMap_(ab, base_command) atom_dbg_skip MipsAtomComp_Proc_(ab, {base_command })
 
 /* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.

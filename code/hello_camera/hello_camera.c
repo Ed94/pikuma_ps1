@@ -263,11 +263,7 @@ internal void compile_resolve_look_at(void) {
 		});
 	regfile_reset_to_mask(& rf, pin_mask);
 
-	/* === ATOM 6a.5: set_gte_mt3s2s4 (BAKED — ctc2 RT matrix) ===
-	 * This is a BAKED atom from gte.atom.c. Its body hardcodes R_T3 as
-	 * the matrix pointer (popped from tape). It does NOT need GPR
-	 * assignment from us — it has its own internal GPR usage.
-	 * We just take its address. */
+	/* === ATOM 6a.5: set_gte_mt3s2s4 (BAKED — ctc2 RT matrix) === */
 	smem.resolve_look_at_bundle[7] = (MipsAtom*) & set_gte_mt3s2s4;
 
 	/* === ATOM 6b: matrix_vector (RT * (-eye) >> 12) === */
@@ -292,17 +288,7 @@ internal void compile_resolve_look_at(void) {
 #undef ralloc
 }
 
-/* Emit the resolve_look_at bundle into the tape. Called once per frame from update().
- * The 7 chain atoms are pre-built at init time (resolve_look_at_init) and referenced by address via smem.resolve_look_at_atom_addrs[].
- * Per-frame work: 7 tb_emit (atom pointer emissions) + 5 tb_data (C-side pointers for atom 0 + look_at for atom 6).
- *
- * Binds_ contract (the field-name labels are for human readability):
- *   Atom 0  input_and_sub              target(4) eye(4) up_in(4) scratch_base(4) = 4 words
- *   Atoms 1-5                           (no tape data — atom uses r_scratch + offset internally)
- *   Atom 6  populate_and_translate     look_at(4)                                = 1 word
- *                                       ----
- *                                       5 tb_data words total per frame.
- */
+/* Emit the resolve_look_at bundle into the tape. Called once per frame from update(). */
 I_ void resolve_look_at(TapeBuilder_R tb
 	,	MT3_S2S4* look_at
 	,	P3_S4*    eye

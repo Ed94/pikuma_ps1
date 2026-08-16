@@ -140,9 +140,9 @@ typedef Struct_(ResolveLookAtScratch) {
 };
 
 typedef Struct_(Binds_ResolveLookAtSub) {
-	P3_S4* target;  /* U4 (C-side P3_S4* — read by atom 0 directly; NOT a scratchpad address) */
-	P3_S4* eye;     /* U4 (C-side P3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
-	V3_S4* up_in;   /* U4 (C-side V3_S4* — read by atom 0 directly; staged into scratchpad by atom 0) */
+	P3_S4* target;
+	P3_S4* eye;   
+	V3_S4* up_in;
 	ResolveLookAtScratch* scratchpad;
 };
 typedef Struct_(RegUse_resolve_look_at_input_and_sub) {
@@ -150,25 +150,7 @@ typedef Struct_(RegUse_resolve_look_at_input_and_sub) {
 	Reg target; Reg eye; Reg up_in;
 	Reg t0; Reg t1; Reg t2; Reg t3; Reg t4;
 };
-/* Atom 0 in the bundle: input_and_sub. Stages C-side inputs into the scratchpad and computes fwd = target - eye.
- * Staging work:
- *   * Stage eye.x/y/z   → scratch (for atom 6's translation column)
- *   * Stage up_in.x/y/z → scratch (for atom 2's outer-product operand)
- *   * Compute fwd = target - eye, store fwd.x/y/z → scratch+0/+4/+8 (for atom 1)
- * GPR codes (assigned by resolve_look_at_init):
- *   r_target_ptr : R_T0
- *   r_eye_ptr    : R_T1
- *   r_up_in_ptr  : R_T2
- *   r_scratch    : R_T4 (R_ResolveScratch; wave-context carrier)
- *   r_tmp0       : R_T3 (stage eye/up_in + load eye.y)
- *   r_tmp1       : R_T5 (stage eye/up_in + load eye.z)
- *   r_tmp2       : R_T6 (stage eye/up_in + load target.x)
- *   r_tmp3       : R_T7 (stage eye/up_in + load target.y)
- *   R_AT         : hardcoded (load eye.y / eye.z / target.z)
- *   R_V0         : hardcoded (load eye.z / target.z)
- * Pool cost: 8 GPRs + R_T4 (carrier) + R_AT + R_V0 (hardcoded) = 11 GPRs.
- */
-// internal MipsAtom* resolve_look_at_input_and_sub(AtomArena_R aa, RegUse_resolve_look_at_input_and_sub r) 
+/* Atom 0 in the bundle: input_and_sub. Stages C-side inputs into the scratchpad and computes fwd = target - eye. */
 internal MipsAtom* AtomBundleEntry_(resolve_look_at,input_and_sub)(AtomArena_R aa, RegUse_resolve_look_at_input_and_sub r) 
 atom_info(atom_bind(Binds_ResolveLookAtSub)) MipsAtom_Proc_(aa, {
 	load_word(r.target,  R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
@@ -238,14 +220,14 @@ internal MipsAtom* resolve_look_at_cross_uz_up_into_right(AtomArena_R aa,
 	gte_mv_to_ctrl_r(r.c, gte_cr_RT22),    /* $4 = r_c = a.z. RT22=a.z.low, RT33=a.z.high. */
 
 	/* Load uz into the RT diagonal. */
-	gte_mv_to_ctrl_r(r.a, gte_cr_RT11),   /* D1 = RT11 = uz.x (low 16 of $0, sign-extended by OP). */
-	GteDelay_ nop2,                         /* CTC2 retirement (CPU→COP2 2-slot delay) */
+	gte_mv_to_ctrl_r(r.a, gte_cr_RT11),   /* D1 = RT11 = uz.x. */
+	GteDelay_ nop2,                         /* CTC2 retirement */
 
 	/* Load up_in into IR (the second operand for OP). */
 	gte_mv_to_data_r(r.d,  C2_IR1),       /* IR1 = up_in.x */
 	gte_mv_to_data_r(R_AT, C2_IR2),       /* IR2 = up_in.y */
 	gte_mv_to_data_r(r.t0, C2_IR3),       /* IR3 = up_in.z */
-	GteDelay_ nop2,                         /* MTC2 retirement (CPU→COP2 2-slot delay) */
+	GteDelay_ nop2,                         /* MTC2 retirement */
 
 	gte_cmdw_cross, /* OP: MAC1/2/3 = uz × up_in
 		*   MAC1 = IR3*D2 - IR2*D3 = up_in.z*uz.y.high - up_in.y*uz.z.high

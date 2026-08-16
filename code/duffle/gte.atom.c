@@ -51,9 +51,7 @@ FI_ Slice_MipsCode ac_gte_store_g4_p012(AtomBuilder_R ab, Reg r_primitive_cursor
 FI_ Slice_MipsCode ac_gte_store_g4_p3(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, { gte_sw(C2_SXY2, r_primitive_cursor, O_(Poly_G4,p3)) })
 
 /* ─── STAGE 1 of normalize: SQR + mfc2 MAC1/2/3 ───
- * Emits squared magnitude per component (in MAC1/2/3) into caller-provided scratch regs.
- * Stage 2 of normalize consumes these directly.
- * Words: 8.  Clobbers: IR1/2/3, MAC1/2/3.  Uses gte_cmdw_sqr (sf=0, lm=1). */
+ * Emits squared magnitude per component (in MAC1/2/3) into caller-provided scratch regs. */
 FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4 r_sq_x, U4 r_sq_y, U4 r_sq_z) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	mac_gte_sqr_v3s4(r_sx, r_sy, r_sz, nop),
 	gte_mv_from_data_r(r_sq_x, C2_MAC1),
@@ -61,10 +59,7 @@ FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4
 	gte_mv_from_data_r(r_sq_z, C2_MAC3),
 })
 
-/* ─── SQR FIRE — mtc2 3 GPRs into IR1/IR2/IR3, then fire SQR. ───
- * The SQR command always squares IR1/IR2/IR3 — those C2 registers are fixed.
- * The GPRs holding the source vector are caller-determined.
- * Words: 5 (3 mtc2 + 1 nop hazard + 1 cmd). */
+/* ─── SQR FIRE — mtc2 3 GPRs into IR1/IR2/IR3, then fire SQR. ─── */
 FI_ Slice_MipsCode ac_gte_sqr_v3s4(AtomBuilder_R ab, Reg r_sx, Reg r_sy, Reg r_sz, MipsCode delay_slot)
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_mv_to_data_r(r_sx, C2_IR1),
@@ -254,29 +249,6 @@ typedef Struct_(RegUse_build_normalize_v3s4) {
 };
 /* ─── Full normalize (all 4 stages inline) ───
  * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav).
- *
- * Parameterized by caller-provided scratch base + src/dst offsets.
- * The caller passes r_src_offset and r_dst_offset as compile-time constants
- * (typically derived from O_ macros in the caller's struct schema, e.g., `O_(CallerBundleScratch, fwd)`).
- *
- * This design lets any caller (with a scratch base + struct schema) use `normalize_v3s4_proc` 
- * without putting magic offsets in the C-side bundle helper — the offsets come from O_ macros at the call site.
- *
- * Body uses 9 GPRs (r_src_ptr..r_branch_tmp):
- *   r_src_ptr, r_dst_ptr : src/dst pointers (computed from r_scratch + caller offsets)
- *   r_tmp                : src.x PRESERVED across stages 1-2 (NOT clobbered by mfc2 MAC2) → fed to IR1 in stage 4
- *   r_mac1_scratch       : MAC1 result scratch (also holds aligned |v|² in stage 3)
- *   r_mac2_scratch       : MAC2 result scratch → result.x after stage 4 sra
- *   r_recip_est          : src.y PRESERVED across stages 1-2 → fed to IR2 in stage 4 → result.y
- *   r_norm               : |v|² sum (stage 2) → half-shift (stage 3) → 1/|v| (stage 4 IR0)
- *   r_shift              : shift count SAVED in stage 3 → consumed by stage 4 srav
-*   r_branch_tmp         : src.z PRESERVED across stages 1-2 → fed to IR3 in stage 4 → result.z (also sqrtbl base addr)
- *
- * Atom_labels are srav_path / aligned_done 
- * (NOT namespaced — they're internal to this proc; 
- * the metaprogram's per-atom-name enum emission handles any collision across different atoms/files that share the same labels).
- *
- * Pool cost: 11 GPRs (well within the 9-10 caller-trash GPR budget when r_scratch is a wave-context carrier).
  *
  * Direct port of PSYQ libgte msc02.rel.text VectorNormal disassembly (0x800160a0..0x8001615c).
  * Words: ~59 (matches libgte 0x800160a0..0x8001615c at +/- 0-2 words for BD-slot reshuffling).
