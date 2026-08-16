@@ -115,7 +115,7 @@ end
 --- Post-loop: Needs full-corpus `annot_counts` from pipe_ctx.
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
-local function check_unique_annotation(pipe_ctx, findings)
+local function check_unique_annotation(_item, pipe_ctx, findings)
 	for name, n in pairs(pipe_ctx.annot_counts) do
 		if n > 1 then
 			findings.errors[#findings.errors + 1] = {
@@ -147,7 +147,8 @@ end
 --- @param m  MacroEntry
 --- @param wc table<string, integer> -- Shared word-count table (from ctx.shared.word_counts)
 --- @param findings Findings
-local function check_macro_word_drift(m, wc, findings)
+local function check_macro_word_drift(m, pipe_ctx, findings)
+	local wc = (pipe_ctx and pipe_ctx.word_counts) or {}
 	local  declared = wc[m.name]
 	if not declared then
 		findings.errors[#findings.errors + 1] = {
@@ -429,40 +430,17 @@ local CHECK_RULES = {
 --- @param ctx PassCtx
 --- @return PipeCtx
 local function build_corpus_pipe_ctx(ctx)
-	local corpus = ctx.shared and ctx.shared.corpus
-	if not corpus then
-		error("annotation requires ctx.shared.corpus "
-			.. "(the canonical corpus is the source of truth; "
-			.. "no per-source fallback is supported)", 0)
-	end
-
-	-- `corpus.atom_infos` preserves source order and duplicates; I precompute counts here for `check_unique_annotation` and the per-source checks.
+	local view = duffle.corpus_view(ctx)
 	local annot_counts = {}
-	for _, info in ipairs(corpus.atom_infos or {}) do
+	for _, info in ipairs(view.atom_infos) do
 		if info and info.atom_name then
 			annot_counts[info.atom_name] = (annot_counts[info.atom_name] or 0) + 1
 		end
 	end
-
-	-- Every consumer of these fields observes mutations via the canonical corpus without independently mutable registry construction.
-	return {
-		-- Cross-source lookup tables from corpus.
-		register_alias_registry  = corpus.register_alias_registry or {},
-		type_name_registry       = corpus.type_name_registry      or {},
-		atom_views               = corpus.atom_views              or {},
-		atom_ctxs                = corpus.atom_ctxs               or {},
-		atom_phases              = corpus.atom_phases             or {},
-		binds_by_name            = corpus.binds_by_name           or {},
-		atoms_by_name            = corpus.atoms_by_name           or {},
-		-- Corpus-wide ordered list of atom_info records (source-order + duplicates).
-		atom_infos_list          = corpus.atom_infos              or {},
-		-- Corpus-wide annotation count aggregation (post-rule consumes this).
-		annot_counts             = annot_counts,
-		-- Corpus-wide collisions (recorded by scan_source.merge_corpus_registries).
-		collisions               = corpus.collisions              or {},
-		-- `check_macro_word_drift` reads `corpus.word_counts`, populated by word_count_eval.run.
-		word_counts              = corpus.word_counts or {},
-	}
+	view.annot_counts    = annot_counts
+	view.atom_infos_list = view.atom_infos
+	view.word_counts     = ctx.shared.corpus.word_counts or {}
+	return view
 end
 
 --- Validate one source against its pre-scanned SourceScan payload + the corpus-wide pipe_ctx.
@@ -536,38 +514,28 @@ local function validate(ctx, src, corpus_pipe_ctx)
 
 	-- THE per-annotation pipeline. ONE loop. CHECK_RULES dispatches per_annot rules.
 	for _, a in ipairs(annots) do
-		for _, rule in ipairs(CHECK_RULES) do
-			if rule.per_annot then rule.per_annot(a, pipe_ctx, findings) end
-		end
+		duffle.run_check_rules(CHECK_RULES, "per_annot", a, pipe_ctx, findings)
 	end
 
 	-- Post-loop rules (one-shot checks that need full-corpus aggregation in pipe_ctx).
-	for _, rule in ipairs(CHECK_RULES) do
-		if rule.post then rule.post(pipe_ctx, findings) end
-	end
+	duffle.run_check_rules(CHECK_RULES, "post", nil, pipe_ctx, findings)
 
 	-- scan_source records each marker in scan.debug_skip_markers; this loop validates each record independently and emits at most one error per marker.
 	-- Valid markers stamp `debug_skip = true` on the following atom or component declaration, which downstream consumers read directly.
 	local skip_markers = scan.debug_skip_markers or {}
 	for _, marker in ipairs(skip_markers) do
-		for _, rule in ipairs(CHECK_RULES) do
-			if rule.per_skip_marker then rule.per_skip_marker(marker, pipe_ctx, findings) end
-		end
+		duffle.run_check_rules(CHECK_RULES, "per_skip_marker", marker, pipe_ctx, findings)
 	end
 
 	-- Per-macro rules (TAPE_WORDS vs WORD_COUNT drift).
-	local wc = corpus_pipe_ctx.word_counts
+	pipe_ctx.word_counts = corpus_pipe_ctx.word_counts
 	for _, m in ipairs(scan.macros) do
-		for _, rule in ipairs(CHECK_RULES) do
-			if rule.per_macro then rule.per_macro(m, wc, findings) end
-		end
+		duffle.run_check_rules(CHECK_RULES, "per_macro", m, pipe_ctx, findings)
 	end
 
 	-- Per-source rules (reg defaults, atom_view layout, compute-register type overrides, Binds_* field uniqueness).
 	-- Each per_source rule sees the full scan payload via pipe_ctx.
-	for _, rule in ipairs(CHECK_RULES) do
-		if rule.per_source then rule.per_source(src, pipe_ctx, findings) end
-	end
+	duffle.run_check_rules(CHECK_RULES, "per_source", src, pipe_ctx, findings)
 
 	-- Information summary (always emitted).
 	findings.info[#findings.info + 1] = {

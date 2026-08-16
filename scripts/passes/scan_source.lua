@@ -1319,159 +1319,49 @@ local function parse_atom_info_after_decl(source, after_paren, raw_name, line_of
 	return info_after
 end
 
---- Parse: `MipsAtom_(<name>) [atom_info(<binds>, <reads>, <writes>)] { <body> }`
---- @param source    string
---- @param pos       integer
---- @param ident_end integer
---- @param line_of   fun(pos: integer): integer
---- @param out       SourceScan
---- @return integer
-local function parse_mips_atom(source, pos, ident_end, line_of, out)
-	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
-	if not inner then return after_paren end
+local DECL_FORMS = {
+	MipsAtom_ = {
+		kind = "atom", name = "paren_ident", body = "braces_after",
+		info_dest = "atom_infos", strip = false,
+	},
+	MipsAtom_Proc_ = {
+		kind = "atom_proc", name = "backward_atom_proc", body = "last_brace_in_args",
+		info_dest = "atom_infos", strip = false, after = "reguse_hook",
+	},
+	MipsAtomComp_ = {
+		kind = "comp_bare", name = "paren_ident", body = "braces_after",
+		info_dest = "component_atom_infos", strip = "ac_",
+	},
+	MipsAtomComp_Proc_ = {
+		kind = "comp_proc", name = "backward_fi", body = "last_brace_in_args",
+		info_dest = nil, strip = "ac_",
+	},
+	MipsAtomComp_ProcMap_ = {
+		kind = "comp_proc", name = "backward_fi", body = "comma_arg_2",
+		info_dest = nil, strip = "ac_", after = "map_command_hook",
+	},
+}
 
-	local raw_name = duffle.read_ident(inner, 1)
-
-	-- Lookahead for atom_info(...) between `)` and `{`.
-	local brace_search_pos = parse_atom_info_after_decl(source, after_paren, raw_name, line_of, out, out.atom_infos)
-
-	local  body, after_brace, body_off = find_body_braces(source, brace_search_pos, open_paren + 1)
-	if not body then return after_brace end
-	if raw_name and raw_name ~= "" then
-		register_atom(out, "atom", line_of(pos), raw_name, body, body_off, raw_name, pos, after_paren, source)
-	end
-
-	return after_brace
-end
-
---- Parse: `MipsAtomComp_(<name>) { <body> }`
---- @param source    string
---- @param pos       integer
---- @param ident_end integer
---- @param line_of   fun(pos: integer): integer
---- @param out       SourceScan
---- @return integer
-local function parse_mips_atom_comp(source, pos, ident_end, line_of, out)
-	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
-	if not inner then return after_paren end
-
-	local  raw_name = duffle.read_ident(inner, 1)
-	if not raw_name then return open_paren + 1 end
-
-	out.component_atom_infos = out.component_atom_infos or {}
-	local brace_search_pos = parse_atom_info_after_decl(source, after_paren, strip_ac_prefix(raw_name), line_of, out, out.component_atom_infos)
-	local  body, after_brace, body_off = find_body_braces(source, brace_search_pos, open_paren + 1)
-	if not body then return after_brace end
-	local name = strip_ac_prefix(raw_name)
-	register_atom(out, "comp_bare", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
-
-	return after_brace
-end
-
---- Parse: `MipsAtomComp_Proc_(<name>, { <body> })` — body is inside the LAST `{` in args.
---- @param source    string
---- @param pos       integer
---- @param ident_end integer
---- @param line_of   fun(pos: integer): integer
---- @param out       SourceScan
---- @return integer
-local function parse_mips_atom_comp_proc(source, pos, ident_end, line_of, out)
-	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
-	if not inner then return after_paren end
-
-	-- Find the LAST `{` in inner (the body brace, not any potential embedded braces in expressions).
+local function last_brace_body(inner, open_paren)
 	local last_brace_pos = nil
 	for search_pos = #inner, 1, -1 do
-		if inner:sub(search_pos, search_pos) == "{" then last_brace_pos = search_pos; break end
+		if inner:sub(search_pos, search_pos) == "{" then
+			last_brace_pos = search_pos
+			break
+		end
 	end
-	if not last_brace_pos then return after_paren end
-
-	-- Use duffle.read_braces to find the matching close brace.
-	-- Uses `read_balanced` for delimiter-depth tracking.
-	-- If close_pos is past the end of inner, the brace didn't match (malformed input); skip.
+	if not last_brace_pos then return nil end
 	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
-	if close_pos > #inner + 1 then return after_paren end
-
-	-- The component name is derived from the preceding function declaration
-	-- (`FI_ Slice_MipsCode ac_X(...)`), not from the first macro arg (which
-	-- is now `ab`). The backward walk finds the function decl before open_paren.
-	local raw_name = duffle.find_function_decl_for(source, open_paren, SLICE_MIPS_CODE_LEN)
-	if not raw_name then raw_name = "?" end
-	local name     = strip_ac_prefix(raw_name)
-	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
-	local body_off = open_paren + 2 + last_brace_pos
-	register_atom(out, "comp_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
-
-	return after_paren
+	if close_pos > #inner + 1 then return nil end
+	return body, open_paren + 2 + last_brace_pos
 end
 
---- Parse: `MipsAtomComp_ProcMap_(ab, command)` — body is the one command (second arg).
---- Reuses the proc name walk. Kind is `comp_proc`. The C expansion wraps
---- `atom_dbg_skip MipsAtomComp_Proc_(ab, {command })`; source-as-written is the map.
---- @param source    string
---- @param pos       integer
---- @param ident_end integer
---- @param line_of   fun(pos: integer): integer
---- @param out       SourceScan
---- @return integer
-local function parse_mips_atom_comp_proc_map(source, pos, ident_end, line_of, out)
-	local inner, after_paren, open_paren = read_parens_after(source, ident_end)
-	if not inner then return after_paren end
-	local args = duffle.split_top_level_commas(inner)
-	if #args < 2 then return after_paren end
-	local command = duffle.trim(args[2])
-	if command == "" then return after_paren end
-	local raw_name = duffle.find_function_decl_for(source, open_paren, SLICE_MIPS_CODE_LEN)
-	if not raw_name then raw_name = "?" end
-	local name = strip_ac_prefix(raw_name)
-	local body_off = open_paren + 1 + (inner:find(command, 1, true) or 1) - 1
-	register_atom(out, "comp_proc", line_of(pos), name, command, body_off, raw_name, pos, after_paren, source)
+local function reguse_hook(source, pos, line_of, out, extras)
 	local entry = out.atoms[#out.atoms]
-	entry.map_command = command
-	return after_paren
-end
-
---- Parse: `MipsAtom_Proc_(aa, { body })` — body is inside the LAST `{` in args.
---- Kind is `atom_proc`. The name is the preceding function ident as written.
---- Offsets walk this kind. Components do not emit a `mac_*` alias for it.
---- @param source    string
---- @param pos       integer
---- @param ident_end integer
---- @param line_of   fun(pos: integer): integer
---- @param out       SourceScan
---- @return integer
-local function parse_mips_atom_proc(source, pos, ident_end, line_of, out)
-	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
-	if not inner then return after_paren end
-
-	-- Find the LAST `{` in inner (the body brace, not any potential embedded braces in expressions).
-	local last_brace_pos = nil
-	for search_pos = #inner, 1, -1 do
-		if inner:sub(search_pos, search_pos) == "{" then last_brace_pos = search_pos; break end
-	end
-	if not last_brace_pos then return after_paren end
-
-	-- Use duffle.read_braces to find the matching close brace.
-	-- Uses `read_balanced` for delimiter-depth tracking.
-	-- If close_pos is past the end of inner, the brace didn't match (malformed input); skip.
-	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
-	if close_pos > #inner + 1 then return after_paren end
-
-	-- The atom name is the preceding function ident as written
-	-- (`internal MipsAtom* X(...)`). The first macro arg is the arena.
-	local raw_name, args_inner, func_ident, after_func_paren =
-		duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
-	if not raw_name then raw_name = "?" end
-	local name = strip_ac_prefix(raw_name)
-	if after_func_paren then
-		parse_atom_info_after_decl(source, after_func_paren, name, line_of, out, out.atom_infos)
-	else
-		parse_atom_info_after_decl(source, pos, name, line_of, out, out.atom_infos)
-	end
-	local reg_use_schema_name = nil
-	local reg_use_param_name  = nil
-	if args_inner then
-		local arg_tokens = duffle.split_top_level_commas(args_inner)
+	if not entry then return end
+	local reg_use_schema_name, reg_use_param_name
+	if extras.args_inner then
+		local arg_tokens = duffle.split_top_level_commas(extras.args_inner)
 		for _, tok in ipairs(arg_tokens) do
 			local trimmed = duffle.trim(tok)
 			local schema_suffix, param = trimmed:match("RegUse_([%w_]+)%s+([%w_]+)$")
@@ -1489,26 +1379,100 @@ local function parse_mips_atom_proc(source, pos, ident_end, line_of, out)
 			end
 		end
 	end
-	-- Position of body[1] in source = open_paren + 1 (start of inner) + last_brace_pos + 1 (past '{').
-	local body_off = open_paren + 2 + last_brace_pos
-	register_atom(out, "atom_proc", line_of(pos), name, body, body_off, raw_name, pos, after_paren, source)
-
-	local entry = out.atoms[#out.atoms]
 	entry.reg_use_schema_name = reg_use_schema_name
 	entry.reg_use_param_name  = reg_use_param_name
-	if reg_use_schema_name and func_ident then
-		local expected = "RegUse_" .. func_ident
+	if reg_use_schema_name and extras.func_ident then
+		local expected = "RegUse_" .. extras.func_ident
 		if reg_use_schema_name ~= expected then
 			out.reg_use_errors[#out.reg_use_errors + 1] = {
 				kind        = "reguse_name_mismatch",
 				schema_name = reg_use_schema_name,
-				func_ident  = func_ident,
+				func_ident  = extras.func_ident,
 				source_line = line_of(pos),
 			}
 		end
 	end
+end
 
-	return after_paren
+local function parse_decl_form(source, pos, ident_end, line_of, out)
+	local ident = duffle.read_ident(source, pos)
+	local form = ident and DECL_FORMS[ident]
+	if not form then return ident_end end
+
+	local inner, after_paren, open_paren = read_parens_after(source, ident_end)
+	if not inner then return after_paren end
+
+	local extras = {}
+	local raw_name
+	if form.name == "paren_ident" then
+		raw_name = duffle.read_ident(inner, 1)
+		if form.strip and not raw_name then return open_paren + 1 end
+	elseif form.name == "backward_fi" then
+		raw_name = duffle.find_function_decl_for(source, open_paren, SLICE_MIPS_CODE_LEN)
+	elseif form.name == "backward_atom_proc" then
+		raw_name, extras.args_inner, extras.func_ident, extras.after_func_paren =
+			duffle.find_atom_proc_decl_for(source, open_paren, MIPS_ATOM_PTR_LEN)
+	end
+	if form.name == "paren_ident" and form.strip and not raw_name then
+		return open_paren + 1
+	end
+	if not raw_name then raw_name = "?" end
+	local name = form.strip and strip_ac_prefix(raw_name) or raw_name
+
+	if form.info_dest == "component_atom_infos" then
+		out.component_atom_infos = out.component_atom_infos or {}
+	end
+	local info_dest = form.info_dest and out[form.info_dest]
+
+	local body, body_off, resume
+	if form.body == "braces_after" then
+		local brace_search = after_paren
+		if info_dest then
+			brace_search = parse_atom_info_after_decl(
+				source, after_paren, name, line_of, out, info_dest)
+		end
+		local after_brace
+		body, after_brace, body_off = find_body_braces(source, brace_search, open_paren + 1)
+		if not body then return after_brace end
+		resume = after_brace
+	elseif form.body == "last_brace_in_args" then
+		body, body_off = last_brace_body(inner, open_paren)
+		if not body then return after_paren end
+		resume = after_paren
+		if form.info_dest then
+			if extras.after_func_paren then
+				parse_atom_info_after_decl(
+					source, extras.after_func_paren, name, line_of, out, out.atom_infos)
+			else
+				parse_atom_info_after_decl(source, pos, name, line_of, out, out.atom_infos)
+			end
+		end
+	elseif form.body == "comma_arg_2" then
+		local args = duffle.split_top_level_commas(inner)
+		if #args < 2 then return after_paren end
+		body = duffle.trim(args[2])
+		if body == "" then return after_paren end
+		body_off = open_paren + 1 + (inner:find(body, 1, true) or 1) - 1
+		resume = after_paren
+	else
+		return after_paren
+	end
+
+	local skip_register = form.name == "paren_ident" and not form.strip
+		and (raw_name == "?" or raw_name == "")
+	if not skip_register then
+		register_atom(out, form.kind, line_of(pos), name, body, body_off,
+			raw_name, pos, after_paren, source)
+	end
+
+	if form.after == "reguse_hook" then
+		reguse_hook(source, pos, line_of, out, extras)
+	elseif form.after == "map_command_hook" then
+		local entry = out.atoms[#out.atoms]
+		if entry then entry.map_command = body end
+	end
+
+	return resume
 end
 
 --- Parse: `MipsCode code_<name> { <body> }` (raw atom form — offsets pass only).
@@ -2219,11 +2183,11 @@ end
 -- Adding a new construct = 1 row here + 1 parser function above.
 
 local DECL_PARSERS = {
-	MipsAtom_                  = parse_mips_atom,
-	MipsAtom_Proc_             = parse_mips_atom_proc,
-	MipsAtomComp_              = parse_mips_atom_comp,
-	MipsAtomComp_Proc_         = parse_mips_atom_comp_proc,
-	MipsAtomComp_ProcMap_     = parse_mips_atom_comp_proc_map,
+	MipsAtom_                  = parse_decl_form,
+	MipsAtom_Proc_             = parse_decl_form,
+	MipsAtomComp_              = parse_decl_form,
+	MipsAtomComp_Proc_         = parse_decl_form,
+	MipsAtomComp_ProcMap_     = parse_decl_form,
 	-- `atom_dbg_skip` is the only debug-skip parser entry. Every other
 	-- identifier follows the ordinary unrelated-token path; there is no alias.
 	atom_dbg_skip              = parse_dbg_skip_marker,
@@ -2243,17 +2207,11 @@ local DECL_PARSERS = {
 -- Only the bare `atom_dbg_skip` marker reaches `parse_dbg_skip_marker`.
 -- Unknown identifiers follow the same unrelated-token path as every other unsupported source token.
 
-local TAPE_SKIP_MACROS = {
-	MipsAtom_ = true,
-	MipsAtom_Proc_ = true,
-	MipsAtomComp_ = true,
-	MipsAtomComp_Proc_ = true,
-	MipsAtomComp_ProcMap_ = true,
-	Struct_ = true,
-	Enum_ = true,
-}
+local function tape_skip_ident(ident)
+	return ident and (DECL_FORMS[ident] or ident == "Struct_" or ident == "Enum_")
+end
 
-local function collect_addrs_assigns(text)
+local function collect_addrs_assigns_REMOVED(text)
 	local addrs = {}
 	local pos = 1
 	local n = #text
@@ -2337,7 +2295,7 @@ local function scan_tape_chains(source)
 		pos = duffle.skip_ws_and_cmt(source, pos)
 		if pos > n then break end
 		local ident, ident_end = duffle.read_ident(source, pos)
-		if ident and TAPE_SKIP_MACROS[ident] then
+		if tape_skip_ident(ident) then
 			local after = duffle.skip_ws_and_cmt(source, ident_end)
 			if source:sub(after, after) == "(" then
 				local _, after_p = duffle.read_parens(source, after)
@@ -2418,6 +2376,10 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		-- See `propagate_type_sizes()` below.
 		type_name_registry = {},
 		reg_use_schemas    = {},
+		tape_chains        = {},
+		_addrs             = {},
+		_chain             = nil,
+		_brace_depth       = 0,
 		reg_use_errors     = {},
 		-- Shared `R_*_Code -> integer code` registry
 		-- (passed in from M.run pass 1; same reference so preprocessor intercept writes are visible to the enum-value resolver).
@@ -2452,6 +2414,48 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 					local parser = DECL_PARSERS[ident]
 					if parser then
 						pos = parser(source, pos, ident_end, line_of, out)
+					elseif ident == "addrs" then
+						local after = duffle.skip_ws_and_cmt(source, ident_end)
+						if source:sub(after, after) == "[" then
+							local inner, after_br = duffle.read_brackets(source, after)
+							local idx = inner and tonumber(duffle.trim(inner))
+							after_br = duffle.skip_ws_and_cmt(source, after_br or after)
+							if idx and source:sub(after_br, after_br) == "=" then
+								local rhs = duffle.skip_ws_and_cmt(source, after_br + 1)
+								local rhs_ident = duffle.read_ident(source, rhs)
+								if rhs_ident then out._addrs[idx] = rhs_ident end
+								pos = rhs
+							else
+								pos = after_br or (after + 1)
+							end
+						else
+							pos = ident_end
+						end
+					elseif ident == "tb_emit_" or ident == "tb_emit" then
+						local after = duffle.skip_ws_and_cmt(source, ident_end)
+						if source:sub(after, after) == "(" then
+							local inner, after_p = duffle.read_parens(source, after)
+							local name
+							if ident == "tb_emit_" then
+								name = duffle.trim(inner or ""):match("^([%w_]+)")
+							else
+								local args = duffle.split_top_level_commas(inner or "")
+								local last = duffle.trim(args[#args] or "")
+								local idx = last:match("^addrs%s*%[%s*(%d+)%s*%]$")
+								if idx then
+									name = out._addrs[tonumber(idx)]
+								else
+									name = last:match("([%w_]+)$")
+								end
+							end
+							if name then
+								out._chain = out._chain or {}
+								out._chain[#out._chain + 1] = name
+							end
+							pos = after_p or (after + 1)
+						else
+							pos = ident_end
+						end
 					else
 						-- Unsupported identifiers follow the unrelated-token path. If a
 						-- pending marker is still open, consume it so it cannot drift to a
@@ -2470,11 +2474,21 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 				else
 					local markers = out.debug_skip_markers
 					local marker  = markers[#markers]
+					local c = source:sub(pos, pos)
 					if marker and marker.pending and marker.proc_prelude then
-						local c = source:sub(pos, pos)
 						if c == "{" or c == ";" then
 							attach_debug_skip_marker(out, "unrelated")
 						end
+					end
+					if c == "{" then
+						out._brace_depth = out._brace_depth + 1
+					elseif c == "}" then
+						if out._brace_depth == 1 and out._chain and #out._chain > 0 then
+							out.tape_chains[#out.tape_chains + 1] = out._chain
+						end
+						out._chain = nil
+						out._brace_depth = out._brace_depth - 1
+						if out._brace_depth < 0 then out._brace_depth = 0 end
 					end
 					pos = pos + 1
 				end
@@ -2486,7 +2500,12 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 	-- Runs AFTER the source walk so all typedef / Struct_ / Enum_ declarations have been parsed into `out.type_name_registry`.
 	-- Mutates each entry's `byte_size` field in place; fields with pointer_depth > 0 already carry byte_size = 4 from parse time and are unaffected.
 	propagate_type_sizes(out)
-	out.tape_chains = scan_tape_chains(source)
+	if out._chain and #out._chain > 0 then
+		out.tape_chains[#out.tape_chains + 1] = out._chain
+	end
+	out._addrs = nil
+	out._chain = nil
+	out._brace_depth = nil
 
 	return out
 end

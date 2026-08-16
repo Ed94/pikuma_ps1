@@ -372,8 +372,10 @@ local function cycle_cost_rec(name, comp_by_name, latency, cache)
 						local nested = ident:sub(MAC_PREFIX_LEN + 1)
 						n = n + cycle_cost_rec(nested, comp_by_name, latency, cache)
 					else
-						-- Leaf instruction or pseudo-macro. Look up in INSTRUCTION_LATENCY; default 1.
-						n = n + (latency[ident] or 1)
+						-- Leaf instruction or pseudo-macro.
+						local isa = duffle.instr(ident)
+						local gte = duffle.gte(ident)
+						n = n + ((isa and isa.cycles) or (gte and gte.cycles) or latency[ident] or 1)
 					end
 				end
 			end

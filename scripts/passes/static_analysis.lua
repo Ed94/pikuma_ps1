@@ -227,19 +227,7 @@ end
 --- @field o_arg2             string|nil       -- Second arg of O_(<a>, <b>) captures
 --- @field s_arg1             string|nil       -- Arg of S_(<a>) captures; nil for non-S_ tokens
 
--- The set of MIPS instruction idents that have a load-delay slot.
--- Per MIPS I R3000A: `lw`, `lh`, `lhu`, `lb`, `lbu`, `lwc2` (gte_lw).
--- Note: `lui` (load_upper_i) does NOT have a load delay on MIPS I — it's an ALU op, not a load.
--- The `load_imm_*` macros are lui + ori sequences with no per-component load delay either.
-local LOAD_INSTRUCTION_IDENTS = {
-	load_word   = true,
-	load_half   = true,
-	load_half_u = true,
-	load_byte   = true,
-	load_byte_u = true,
-	gte_lw      = true,
-	gte_lwc2    = true,
-}
+-- Load-delay idents are M.INSTRUCTION rows with kind == "load".
 
 -- Patterns for O_(<arg1>, <arg2>) and S_(<arg>) captures.
 -- UNANCHORED, the substring can appea anywhere in the token (e.g., `load_word(R_T0, R_TapePtr, O_(Binds_X, field))` matches at position ~24).
@@ -256,21 +244,6 @@ local BRANCH_PATTERN          = "^branch_[%w_]+%s*%("
 -- The C preprocessor expands it BEFORE the metaprogram sees the source, but for source-level metadata consistency we still match it here and classify it as a branch_equal.
 -- This keeps `consuming_encoder` canonical for any downstream tooling that consults the metadata field.
 local JUMP_REL_PATTERN      = "^jump_rel%s*%("
-local UNCOND_JUMP_PATTERNS = {
-    "^%f[%w]jump%f[%W]",
-    "^%f[%w]call_addr%f[%W]",
-}
-local TERMINAL_JUMP_PATTERNS = {
-    "^%f[%w]jump_reg%f[%W]",
-    "^%f[%w]call_reg%f[%W]",
-    "^%f[%w]jump_link%f[%W]",
-}
-local function matches_any(tok, patterns)
-    for i = 1, #patterns do
-        if tok:match(patterns[i]) then return true end
-    end
-    return false
-end
 
 local function classify_tokens(tokens)
 	local n       = #tokens
@@ -303,7 +276,8 @@ local function classify_tokens(tokens)
 		local is_unconditional_jump = false
 		local is_terminal_jump   = false
 		local branch_label  = nil
-		local is_load       = LOAD_INSTRUCTION_IDENTS[ident] == true
+		local isa           = duffle.instr(ident)
+		local is_load       = isa and isa.kind == "load"
 		local is_store_word = ident == "store_word"
 
 		-- Per-check pre-computes (R3 lift).
@@ -319,18 +293,18 @@ local function classify_tokens(tokens)
 		if ident == "atom_label" then
 			is_atom_label = true
 			label_name    = tok:match("^atom_label%s*%(%s*([%w_]+)%s*%)")
-		elseif tok:match(BRANCH_PATTERN) or tok:match(JUMP_REL_PATTERN) then
+		elseif (isa and isa.kind == "branch") or tok:match(BRANCH_PATTERN) or tok:match(JUMP_REL_PATTERN) then
 			-- Conditional branch OR `jump_rel` (the within-atom-safe unconditional jump alias).
 			-- Both encode a 16-bit signed relative word offset.
 			is_branch    = true
 			branch_label = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
-		elseif matches_any(tok, UNCOND_JUMP_PATTERNS) then
+		elseif ident == "jump" or ident == "call_addr" then
 			-- Unconditional absolute jump / call: `jump(off)` / `call_addr(off)`.
 			-- One immediate offset field; can carry an `atom_offset(F, T)` marker (the offsets pass dispatches on `consuming_encoder` — see `passes/offsets.lua::compute_offsets`).
 			is_branch              = true
 			is_unconditional_jump = true
 			branch_label           = tok:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
-		elseif matches_any(tok, TERMINAL_JUMP_PATTERNS) then
+		elseif ident == "jump_reg" or ident == "call_reg" or ident == "jump_link" then
 			-- Register-form jump / call: no offset field; `atom_offset` is invalid here (the offsets pass will error if one is supplied).
 			-- Transfers control OUT of the current atom — the CFG treats this as a path terminator.
 			is_terminal_jump = true
@@ -427,8 +401,7 @@ end
 local function is_gte_command(consumer_event)
 	local tok = consumer_event.encoder or consumer_event.ident or ""
 	if tok:sub(1, 9) == "gte_cmdw_" then return true end
-	local  aliases = duffle.GTE_COMMAND_ALIASES or {}
-	return aliases[tok] ~= nil
+	return duffle.gte(tok) ~= nil
 end
 
 -- True iff `consumer_word` falls inside the COP2 command's input set OR inside the producer's `fanout_to` set (for IRGB writes).
@@ -443,12 +416,11 @@ local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
 		if   pos == destination then return true end
 	end
 	-- Match via the command's input set: the consumer encoder resolves to a `gte_cmdw_*`
-	-- short form whose `duffle.GTE_COMMAND_INPUTS` entry includes the destination (or a fan-out target).
-	local aliases   = duffle.GTE_COMMAND_ALIASES or {}
-	local canonical = aliases[consumer_token] or consumer_token
-	if canonical:sub(1, 9) == "gte_cmdw_" or aliases[consumer_token] then
-		local inputs     = duffle.GTE_COMMAND_INPUTS or {}
-		local cmd_inputs = inputs[canonical]
+	-- short form whose GTE_COMMAND.inputs includes the destination (or a fan-out target).
+	local gte       = duffle.gte(consumer_token)
+	local canonical = duffle.gte_canon(consumer_token)
+	if gte or canonical:sub(1, 9) == "gte_cmdw_" then
+		local cmd_inputs = gte and gte.inputs
 		if cmd_inputs then
 			-- Direct hit.
 			for _, in_reg in ipairs(cmd_inputs) do
@@ -659,8 +631,11 @@ local function apply_gpr_effects(ev, forward_state)
 	local ev_ident   = ev.encoder or ev.ident
 	local ev_args    = ev.args or {}
 	local gpr_values = forward_state.gpr_values
-	local effects    = duffle.INSTRUCTION_GPR_EFFECTS or {}
-	local row        = effects[ev_ident]
+	local isa        = duffle.instr(ev_ident)
+	local row        = isa and (isa.reads or isa.writes) and isa or nil
+	if row == nil and duffle.gte(ev_ident) then
+		row = { reads = {}, writes = {} }
+	end
 	if row == nil then
 		for pos, operand in ipairs(ev_args) do
 			local key = gpr_identity(ev, pos) or operand
@@ -671,7 +646,7 @@ local function apply_gpr_effects(ev, forward_state)
 		return
 	end
 
-	local value_rule = (duffle.GPR_VALUE_RULES or {})[ev_ident]
+	local value_rule = isa and isa.value
 	local value      = value_rule and evaluate_gpr_value_rule(value_rule, ev_args, gpr_values) or nil
 	for _, position in ipairs(row.writes or {}) do
 		local destination = gpr_identity(ev, position)
@@ -688,8 +663,7 @@ end
 -- Look up the alias of a GTE command ident.
 -- Defaults to the input ident so unknown idents surface rather than silently inheriting a 0-cycle command input set.
 local function canonical_command(ident)
-	local aliases = duffle.GTE_COMMAND_ALIASES or {}
-	return aliases[ident] or ident
+	return duffle.gte_canon(ident)
 end
 
 -- True for a COP2/GTE use that can make a pending SR.CU2 transition observable.
@@ -1041,8 +1015,8 @@ local function analyze_hardware_relations(atom)
 			local canonical = canonical_command(ev_ident)
 			if canonical:sub(1, 9) == "gte_cmdw_" then
 				-- Update the post-command role state.
-				local outputs = duffle.GTE_COMMAND_OUTPUTS or {}
-				local cmd_outputs = outputs[canonical]
+				local gte_row = duffle.gte(canonical)
+				local cmd_outputs = gte_row and gte_row.outputs
 				if cmd_outputs then
 					for _, out in ipairs(cmd_outputs) do
 						if out.register then
@@ -1058,8 +1032,7 @@ local function analyze_hardware_relations(atom)
 					end
 				end
 				-- Stage post-command latch relations for every measured output.
-				local latch_table = duffle.GTE_COMMAND_LATCH_WINDOWS or {}
-				local cmd_latches = latch_table[canonical]
+				local cmd_latches = gte_row and gte_row.latch
 				if cmd_latches then
 					for _, latch in ipairs(cmd_latches) do
 						if latch.register and latch.required then
@@ -1237,7 +1210,6 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 	local forward = atom.paths and atom.paths.forward_state
 	local events  = atom.paths.word_events or {}
 	-- GPR effects table used to resolve load destinations when classifying load-delay-slot nops.
-	local gpr_effects = duffle.INSTRUCTION_GPR_EFFECTS or {}
 	if not events or #events == 0 then return end
 	-- Runtime-helper atoms / components (e.g. tape_exit, ac_yield) carry `debug_skip = true` from the bare
 	-- `atom_dbg_skip` marker; their structural nops are part of the fixed handshake and not author choices.
@@ -1260,8 +1232,10 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 			-- Every BD-slot nop is structural; this check never reports on it.
 			-- (The earlier `if not suppressed then is_bd_slot = true end` form inverted the suppression - the `mac_yield()` handshake's `jump_reg(R_AtomJmp)` was incorrectly flagged.)
 			local prev_ident   = prev_ev.encoder or ""
-			local bd_policies  = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
-			local is_bd_slot   = bd_policies[prev_ident] ~= nil
+			local prev_isa     = duffle.instr(prev_ident)
+			local is_bd_slot   = prev_isa
+				and (prev_isa.kind == "branch" or prev_isa.kind == "jump" or prev_isa.kind == "call")
+				and prev_isa.delay_slot ~= false
 			if not is_bd_slot then
 				-- Find a pending modeled relation that this nop would retire.
 				local retired = nil
@@ -1280,11 +1254,10 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 						if f_word > ev_word then
 							local f_ident   = future_ev.encoder or future_ev.ident or ""
 							local f_args    = future_ev.args or {}
-							local aliases   = duffle.GTE_COMMAND_ALIASES or {}
-							local canonical = aliases[f_ident] or f_ident
+							local f_gte     = duffle.gte(f_ident)
+							local canonical = duffle.gte_canon(f_ident)
 							if canonical:sub(1, 9) == "gte_cmdw_" then
-								local inputs     = duffle.GTE_COMMAND_INPUTS or {}
-								local cmd_inputs = inputs[canonical]
+								local cmd_inputs = f_gte and f_gte.inputs
 								if cmd_inputs then
 									for _, in_reg in ipairs(cmd_inputs) do
 										if in_reg == retired.destination then
@@ -1323,20 +1296,10 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 					-- This `nop` is structurally required; classifying it as `modeled-required` is the correct signal
 					-- (removing it would make the following instruction read the OLD value of the loaded register, a load-use hazard).
 					-- The `load_delay_violations` check (Concern 3) catches the actual read-side error; here we suppress the `modeled-redundant` misclassification.
-					-- The set of load instructions mirrors the LOAD_INSTRUCTION_IDENTS in `check_load_delay_slots`.
-					local load_idents = {
-						 load_word   = true,
-						 load_half   = true,
-						 load_half_u = true,
-					   load_byte   = true,
-						 load_byte_u = true,
-						 gte_lw      = true,
-						 gte_lwc2    = true 
-					}
-					local is_load_delay = load_idents[prev_ident] == true
+					local is_load_delay = prev_isa and prev_isa.kind == "load"
 					if    is_load_delay then
 						-- Determine the destination register from the load's `writes` field.
-						local prev_writes = gpr_effects[prev_ident] and gpr_effects[prev_ident].writes or {}
+						local prev_writes = prev_isa.writes or {}
 						local dest_pos    = prev_writes[1]
 						local load_dest   = dest_pos and (gpr_identity(prev_ev, dest_pos) or (prev_ev.args or {})[dest_pos]) or "<load-destination>"
 						local authored    = dest_pos and (prev_ev.args or {})[dest_pos] or load_dest
@@ -1383,8 +1346,7 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 		-- Update the pending snapshot for the next iteration.
 		-- The replay is observation-only; we mirror the walker's staging
 		-- behavior for MTC2 / CTC2 / LWC2 / MFC2 / CFC2 / MFC0 / command_latch.
-		local aliases   = duffle.GTE_COMMAND_ALIASES or {}
-		local canonical = aliases[ev_ident] or ev_ident
+		local canonical = duffle.gte_canon(ev_ident)
 		if ev_ident == "gte_mv_to_data_r" or ev_ident == "gte_mv_to_ctrl_r" then
 			local relations_table = duffle.HARDWARE_RELATIONS or {}
 			for _, row in ipairs(relations_table) do
@@ -1407,8 +1369,7 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 			end
 		elseif canonical:sub(1, 9) == "gte_cmdw_" then
 			-- Command: stage post-command latch relations (same as the walker).
-			local latch_table = duffle.GTE_COMMAND_LATCH_WINDOWS or {}
-			local cmd_latches = latch_table[canonical]
+			local cmd_latches = (duffle.gte(canonical) or {}).latch
 			if cmd_latches then
 				for _, latch in ipairs(cmd_latches) do
 					if latch.register and latch.required then
@@ -1459,13 +1420,16 @@ local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
 	-- Runtime-helper atoms / components (e.g. tape_exit, ac_yield) carry `debug_skip = true` from the bare
 	-- `atom_dbg_skip` marker; their structural BD slots are part of the fixed handshake.
 	if is_runtime_helper(atom) then return end
-	local policies = duffle.CONTROL_TRANSFER_DELAY_SLOT_POLICIES or {}
 	for event_idx, event in ipairs(events) do
 		-- Canonical word_events use `encoder` as the leading identifier of the emitting token).
 		-- Focused inputs may supply `ident` when constructing isolated events.
 		local event_ident      = event.encoder or event.ident
 		local slot_ident_field = event.encoder and "encoder" or "ident"
-		local policy           = policies[event_ident]
+		local event_isa        = duffle.instr(event_ident)
+		local policy           = event_isa
+			and (event_isa.kind == "branch" or event_isa.kind == "jump" or event_isa.kind == "call")
+			and event_isa.delay_slot ~= false
+			and { family = event_isa.kind, suppress_arg1 = event_isa.suppress_arg1 }
 		if policy then
 			local arg1       = event.args and event.args[1] or nil
 			local suppressed = policy.suppress_arg1 and policy.suppress_arg1[arg1] or nil
@@ -1518,7 +1482,6 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 	local events = p.word_events or {}
 	if   #events == 0 then return end
 
-	local gpr_effects = duffle.INSTRUCTION_GPR_EFFECTS or {}
 	local read_positions = duffle.OPERAND_READ_POSITIONS or {}
 	-- volatile_until[reg] = 1-based word_events index; the slot AFTER which the register is safe.
 	-- `nil` means "not currently volatile".
@@ -1530,7 +1493,7 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 	-- and for genuine RMW ops like `add rt, rs, rt` where position 1 IS both read+written) is not a "read" for load-delay purposes:
 	-- The write shadows whatever value the register previously held. Only positions that are reads WITHOUT a co-occurring write to the same register count as net reads.
 	local function net_reads(event_ident, args)
-		local effect = gpr_effects[event_ident]
+		local effect = duffle.instr(event_ident)
 		local positions = read_positions[event_ident]
 		if not positions then return {} end
 		local writes_set = {}
@@ -1547,7 +1510,8 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 	for event_idx, event in ipairs(events) do
 		local event_ident = event.encoder or event.ident
 		local args        = event.args or {}
-		local is_load     = LOAD_INSTRUCTION_IDENTS[event_ident] == true
+		local event_isa   = duffle.instr(event_ident)
+		local is_load     = event_isa and event_isa.kind == "load"
 
 		-- (1) Is this event reading a register that's still volatile from a previous load?
 		-- Skip the load instruction itself (the load's own argument list may "read" its destination via `OPERAND_READ_POSITIONS`:
@@ -1577,7 +1541,7 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 		end
 
 		-- (2) Update the volatile set based on what this event writes.
-		local effect = gpr_effects[event_ident]
+		local effect = event_isa
 		if effect and effect.writes then
 			for _, pos in ipairs(effect.writes) do
 				local reg = gpr_identity(event, pos)
@@ -2168,7 +2132,9 @@ local function analyze_atom_paths(atom, pipe_ctx)
 				unknown_set[ident] = true
 			end
 		else
-			cost = duffle.INSTRUCTION_LATENCY[ident]
+			local isa = duffle.instr(ident)
+			local gte = duffle.gte(ident)
+			cost = (isa and isa.cycles) or (gte and gte.cycles)
 			if cost == nil then
 				cost = duffle.UNKNOWN_INSTRUCTION_CYCLES
 				unknown_set[ident] = true
@@ -2929,12 +2895,12 @@ end
 -- from duffle.lua. Only fires on parseable integer literals; register names,
 -- O_(...) offsets, atom_offset(...) markers, and enum tokens are skipped.
 local function check_immediate_field_width(atom, pipe_ctx, findings)
-	local widths = duffle.IMMEDIATE_FIELD_WIDTHS or {}
 	local events = atom.paths and atom.paths.word_events or {}
 	local line_for_word_event = pipe_ctx.line_for_word_event
 	for _, ev in ipairs(events) do
 		local ev_ident = ev.encoder or ev.ident or "?"
-		local rules = widths[ev_ident]
+		local isa = duffle.instr(ev_ident)
+		local rules = isa and isa.imm
 		if rules then
 			local ev_args = ev.args or {}
 			local ev_line = line_for_word_event and line_for_word_event(ev) or atom.line
@@ -3040,7 +3006,7 @@ local function collect_gpr_traffic(tokens)
 			and ident ~= "nop" and ident ~= "atom_label" and ident ~= "atom_offset"
 		then
 			local args = token_arg_list(tok)
-			local fx = (duffle.INSTRUCTION_GPR_EFFECTS or {})[ident]
+			local fx = duffle.instr(ident)
 			if fx then
 				for _, pos in ipairs(fx.reads or {}) do
 					local g = arg_as_gpr(args[pos])
@@ -3228,42 +3194,11 @@ local CHECK_RULES = {
 --- @param ctx PassCtx
 --- @return PipeCtx
 local function build_corpus_pipe_ctx(ctx)
-	local corpus = ctx.shared and ctx.shared.corpus
-	if not corpus then
-		error("static_analysis requires ctx.shared.corpus "
-			.. "(the canonical corpus is the source of truth; "
-			.. "no per-source fallback is supported)", 0)
-	end
-	-- The pipe_ctx views REFERENCE the corpus tables directly (no copies).
-	-- Every consumer observes mutations through the corpus tables directly.
-	return {
-		-- Cross-source lookup tables.
-		register_alias_registry = corpus.register_alias_registry or {},
-		type_name_registry      = corpus.type_name_registry      or {},
-		atom_views              = corpus.atom_views              or {},
-		atom_ctxs               = corpus.atom_ctxs               or {},
-		atom_phases             = corpus.atom_phases             or {},
-		binds_by_name           = corpus.binds_by_name           or {},
-		atoms_by_name           = corpus.atoms_by_name           or {},
-		-- Per-component metadata (cycle_cost + gp0_contrib) auto-derived from the original
-		-- `MipsAtomComp_` body by `passes/components.lua::compute_components_metadata`.
-		-- Keyed by bare name (e.g. `format_f3_color`, `gte_store_f3`); the `mac_` prefix at call sites is stripped before lookup.
-		components_by_name      = corpus.components              or {},
-		atoms_by_name           = corpus.atoms_by_name           or {},
-		tape_chains             = corpus.tape_chains             or {},
-		source_order            = corpus.source_order            or {},
-		component_atom_infos    = corpus.component_atom_infos    or {},
-		atom_infos              = corpus.atom_infos              or {},
-		-- Corpus-wide ordered list of atom_info records (source-order + duplicates).
-		atom_infos_list         = corpus.atom_infos              or {},
-		-- Corpus-wide collisions (recorded by scan_source.merge_corpus_registries).
-		collisions              = corpus.collisions              or {},
-		-- GTE control-register alias groups (from `duffle.GTE_CR_ALIAS_GROUPS`).
-		-- The three new per_atom checks (gte_cr_alias_writes, rtdiagonal_completeness,
-		-- gte_cr_TR_naming) read from this view. `duffle` is exposed alongside so
-		-- `find_alias_pair_for` can resolve alias → group without a separate registry.
-		gte_cr_alias_groups     = duffle.GTE_CR_ALIAS_GROUPS or {},
-	}
+	local view = duffle.corpus_view(ctx)
+	view.components_by_name  = view.components
+	view.atom_infos_list     = view.atom_infos
+	view.gte_cr_alias_groups = duffle.GTE_CR_ALIAS_GROUPS or {}
+	return view
 end
 
 local function validate(ctx, src, corpus_pipe_ctx)
@@ -3360,17 +3295,13 @@ local function validate(ctx, src, corpus_pipe_ctx)
 
 	-- Run all per-atom checks on this one atom via the CHECK_RULES data table.
 	-- Adding a new check = 1 row in CHECK_RULES; this loop never needs editing.
-		for _, rule in ipairs(CHECK_RULES) do
-			if rule.per_atom then rule.per_atom(a, pipe_ctx, findings) end
-		end
+		duffle.run_check_rules(CHECK_RULES, "per_atom", a, pipe_ctx, findings)
 	end
 
 	-- Per-source dispatch. Run once per source AFTER the per-atom loop;
 	-- consults pipe_ctx's cross-atom registries (register_alias_registry, type_name_registry).
 	-- Same CHECK_RULES table; no parallel dispatch table.
-	for _, rule in ipairs(CHECK_RULES) do
-		if rule.per_source then rule.per_source(src, pipe_ctx, findings) end
-	end
+	duffle.run_check_rules(CHECK_RULES, "per_source", src, pipe_ctx, findings)
 
 	-- Three-way severity binning: per-finding severity is set by the check via `f.kind`.
 	-- "error" / "warning" / "info" are all distinct; info findings are NEVER folded into warnings.
