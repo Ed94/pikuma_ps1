@@ -23,6 +23,8 @@ MipsAtomComp_Proc_( ab, {
 	shift_aright(dt_z, dt_z, shift_amount),	
 })
 
+FI_ Slice_MipsCode ac_shift_aright_v3s4_self(AtomBuilder_R ab, Reg_(V3_S4) dt, U2 shift) MipsAtomComp_ProcMap_(ab, mac_shift_aright_v3_self(dt.x, dt.y, dt.z, shift))
+
 FI_ Slice_MipsCode ac_shift_aright_var_v3(AtomBuilder_R ab
 	, Reg rd_v0, Reg rd_v1, Reg rd_v2
 	, Reg rs_v0, Reg rs_v1, Reg rs_v2
@@ -33,14 +35,14 @@ MipsAtomComp_Proc_(ab, {
 	shift_aright_var(rd_v2, rs_v2, r_shift),
 })
 
-FI_ Slice_MipsCode ac_shift_aright_var_v3_self(AtomBuilder_R ab
-	, Reg rds_v0, Reg rds_v1, Reg rds_v2
-	, Reg r_shift)
-MipsAtomComp_Proc_(ab, {
+FI_ Slice_MipsCode ac_shift_aright_var_v3_self(AtomBuilder_R ab, Reg rds_v0, Reg rds_v1, Reg rds_v2, Reg r_shift) 
+atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	shift_aright_var(rds_v0, rds_v0, r_shift),
 	shift_aright_var(rds_v1, rds_v1, r_shift),
 	shift_aright_var(rds_v2, rds_v2, r_shift),
 })
+
+FI_ Slice_MipsCode ac_shift_aright_var_v3s4_self(AtomBuilder_R ab, Reg_(V3_S4) ds, Reg shift) MipsAtomComp_ProcMap_(ab, mac_shift_aright_var_v3_self(ds.x, ds.y, ds.z, shift))
 
 #pragma endregion MACs (Mips Atom Components)
 

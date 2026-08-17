@@ -18,6 +18,18 @@ atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	load_half_u(r_i2, r_face_cusor, 2 * S_(S2)),
 })
 
+FI_ Slice_MipsCode ac_gte_mv_to_cr_diag_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) MipsAtomComp_Proc_(ab, {
+	gte_mv_to_ctrl_r(v.y, gte_cr_RT13),
+	gte_mv_to_ctrl_r(v.z, gte_cr_RT22),
+	gte_mv_to_ctrl_r(v.x, gte_cr_RT11),
+})
+
+FI_ Slice_MipsCode ac_gte_ld_ir123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) MipsAtomComp_Proc_(ab, {
+	gte_mv_to_data_r(v.x, C2_IR1),
+	gte_mv_to_data_r(v.y, C2_IR2),
+	gte_mv_to_data_r(v.z, C2_IR3),
+})
+
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
 FI_ Slice_MipsCode ac_gte_store_f3(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, {
@@ -315,6 +327,35 @@ MipsAtom_Proc_(aa, {
 	mac_shift_aright_var_v3_self(r.t4.mac2_scratch, r.recip_est, r.t5.src_z, r.shift),
 	/* Store result.x/y/z to r_dst_ptr (caller-determined dst address). */
 	mac_store_word_v3(r.t4.mac2_scratch, r.recip_est, r.t5.src_z, r.dst_ptr, 0),
+
+	mac_yield()
+})
+
+typedef Struct_(Binds_gte_cross_v3s4) { V3_S4* src_a; V3_S4* src_b; V3_S4* out; };
+typedef Struct_(RegUse_gte_cross_v3s4) {
+	Reg_(V3_S4) a;
+	Reg_(V3_S4) b;
+	union { Reg t0, out; };
+	union { Reg t1, src_a, rt11; };
+	union { Reg t2, src_b, rt22; };
+};
+internal MipsAtom* gte_cross_v3s4(AtomArena_R aa, RegUse_gte_cross_v3s4 r)
+atom_info(atom_bind(Binds_gte_cross_v3s4)) MipsAtom_Proc_(aa, {
+	load_word(r.src_a,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_a)),
+	load_word(r.src_b,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_b)),
+	load_word(r.out,    R_TapePtr, O_(Binds_gte_cross_v3s4,out)),
+	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_gte_cross_v3s4)),
+
+	mac_load_v3s4(r.a, r.src_a, 0), LdSlot_
+	mac_load_v3s4(r.b, r.src_b, 0), LdSlot_
+
+	mac_gte_mv_to_cr_diag_v3s4(r.a), GteDelay_ /* RT diagonal: D1 = a.x, D2 = a.y, D3 = a.z. */
+	mac_gte_ld_ir123_v3s4(r.b),      GteDelay_ /* IR: second operand. */
+	gte_cmdw_cross,  /* MAC1/2/3 = a × b */
+	mac_gte_mv_from_data_r_mac123(r.a.x, r.a.y, r.a.z), GteDelay_ //nop,
+
+	mac_shift_aright_v3s4_self(r.a, 12),
+	mac_store_v3s4(r.a, r.out, 0),
 
 	mac_yield()
 })

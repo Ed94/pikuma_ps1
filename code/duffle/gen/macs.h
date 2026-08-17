@@ -171,17 +171,26 @@ WORD_COUNT(mac_load_word_imm, 2)
 ,	shift_aright(dt_z, dt_z, shift_amount)
 WORD_COUNT(mac_shift_aright_v3_self, 3)
 
+#define mac_shift_aright_v3s4_self(dt, shift) \
+	mac_shift_aright_v3_self(dt.x, dt.y, dt.z, shift)
+WORD_COUNT(mac_shift_aright_v3s4_self, 3)
+
 #define mac_shift_aright_var_v3(rd_v0, rd_v1, rd_v2, rs_v0, rs_v1, rs_v2, r_shift) \
 	shift_aright_var(rd_v0, rs_v0, r_shift) \
 ,	shift_aright_var(rd_v1, rs_v1, r_shift) \
 ,	shift_aright_var(rd_v2, rs_v2, r_shift)
 WORD_COUNT(mac_shift_aright_var_v3, 3)
 
+/* atom_dbg_skip */
 #define mac_shift_aright_var_v3_self(rds_v0, rds_v1, rds_v2, r_shift) \
 	shift_aright_var(rds_v0, rds_v0, r_shift) \
 ,	shift_aright_var(rds_v1, rds_v1, r_shift) \
 ,	shift_aright_var(rds_v2, rds_v2, r_shift)
 WORD_COUNT(mac_shift_aright_var_v3_self, 3)
+
+#define mac_shift_aright_var_v3s4_self(ds, shift) \
+	mac_shift_aright_var_v3_self(ds.x, ds.y, ds.z, shift)
+WORD_COUNT(mac_shift_aright_var_v3s4_self, 3)
 
 /* atom_dbg_skip */
 #define mac_load_tri_indices(r_face_cusor, r_i0, r_i1, r_i2) \
@@ -189,6 +198,18 @@ WORD_COUNT(mac_shift_aright_var_v3_self, 3)
 ,	load_half_u(r_i1, r_face_cusor, 1 * S_(S2)) \
 ,	load_half_u(r_i2, r_face_cusor, 2 * S_(S2))
 WORD_COUNT(mac_load_tri_indices, 3)
+
+#define mac_gte_mv_to_cr_diag_v3s4(v) \
+	gte_mv_to_ctrl_r(v.y, gte_cr_RT13) \
+,	gte_mv_to_ctrl_r(v.z, gte_cr_RT22) \
+,	gte_mv_to_ctrl_r(v.x, gte_cr_RT11)
+WORD_COUNT(mac_gte_mv_to_cr_diag_v3s4, 3)
+
+#define mac_gte_ld_ir123_v3s4(v) \
+	gte_mv_to_data_r(v.x, C2_IR1) \
+,	gte_mv_to_data_r(v.y, C2_IR2) \
+,	gte_mv_to_data_r(v.z, C2_IR3)
+WORD_COUNT(mac_gte_ld_ir123_v3s4, 3)
 
 /* atom_dbg_skip */
 #define mac_gte_store_f3(r_primitive_cursor) \

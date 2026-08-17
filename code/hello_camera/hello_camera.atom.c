@@ -104,9 +104,9 @@ MipsAtomComp_Proc_(ab, {
 typedef AtomBundle_(resolve_look_at) { MipsAtom*
 	input_and_sub,
 	normalize_fwd_uz,
-	cross_uz_up_into_right,
+	cross_to_right,
 	normalize_right_ux,
-	cross_uz_ux_to_up,
+	cross_to_up,
 	normalize_up_uy,
 	populate,
 	set_gte_mt3s2s4,
@@ -178,141 +178,6 @@ atom_info(atom_bind(Binds_ResolveLookAtSub)) MipsAtom_Proc_(aa, {
 	mac_yield()
 })
 
-typedef Struct_(RegUse_resolve_look_at_cross_uz_up_into_right) {
-	Reg scratch;
-	Reg a; Reg b; Reg c; /* load a.x/y/z; result out.x/y/z */
-	Reg d; /* load b.x */
-	Reg f; /* r_f = &right (out ptr), r_g = &uz, r_h = &up_in */
-	
-	union { Reg t1, g, target0; };
-	union { Reg t2, h, target1; };
-	Reg t0;
-};
-/* Atom 2: cross uz × up_in → right. */
-// internal MipsAtom* AtomBundleEntry_(resolve_look_at, cross_uz_up_to_right)(AtomArena_R aa, 
-internal MipsAtom* resolve_look_at_cross_uz_up_into_right(AtomArena_R aa, 
-	RegUse_resolve_look_at_cross_uz_up_into_right r
-) MipsAtom_Proc_(aa, {
-	/* FIX: build packed RT22+RT33 with proper sign extension. */
-	add_si(r.g, r.scratch, O_(ResolveLookAtScratch,uz)),    /* r_g = &uz */
-	add_si(r.h, r.scratch, O_(ResolveLookAtScratch,up_in)), /* r_h = &up_in */
-	add_si(r.f, r.scratch, O_(ResolveLookAtScratch,right)), /* r_f = &right (out) */
-	nop,
-
-	/* Load a (uz).x/y/z into r_a/r_b/r_c. */
-	mac_load_word_v3(r.a, r.b, r.c, r.g, 0),   LdSlot_
-	/* Load b (up_in).x/y/z into r_d + R_AT/R_V0 (R_AT/R_V0 are hardcoded scratch). */
-	mac_load_word_v3(r.d, R_AT, r.t0, r.h, 0), LdSlot_ // (taken by gte_mv_from_ctrl_r)
-
-	/* Save the two RT control-register slots OP will clobber. We reuse r_g/r_h (scratch pointers, no longer needed) as the save targets. */
-	gte_mv_from_ctrl_r(r.target0, gte_cr_RT11),    /* r_g = C2 r0 (RT11|RT12) */
-	gte_mv_from_ctrl_r(r.target1, gte_cr_RT22),    /* r_h = C2 r4 (RT22|RT33) */
-	/* Load uz.x/uz.y/uz.z into COP2 control registers.
-	 * OP reads D1 = RT11 from $0.low, D2 = RT22 from $2.high, D3 = RT33 from $4.high.
-	 * RT22 is in BOTH $2.high AND $4.low (shared bit position). OP reads from $2.high.
-	 * So set RT22 via ctc2 r_b, $2 (sets $2.high = a.y.high = RT22, $2.low = a.y.low = RT13).
-	 * Then set RT33 via ctc2 r_c, $4 (sets $4.high = a.z.high = RT33, $4.low = a.z.low).
-	 * The $2 and $4 writes don't clobber each other (separate registers).
-	 * The 2nd ctc2 DOES clobber $4.low (becomes a.z.low, NOT a.y.high), but since OP
-	 * reads RT22 from $2.high (which the 2nd ctc2 doesn't touch), D2 is still a.y.high.
-	 * This is libpsyx's OuterProduct12 convention. */
-	gte_mv_to_ctrl_r(r.b, gte_cr_RT13),    /* $2 = r_b = a.y. RT13=a.y.low, RT22=a.y.high. */
-	gte_mv_to_ctrl_r(r.c, gte_cr_RT22),    /* $4 = r_c = a.z. RT22=a.z.low, RT33=a.z.high. */
-
-	/* Load uz into the RT diagonal. */
-	gte_mv_to_ctrl_r(r.a, gte_cr_RT11),   /* D1 = RT11 = uz.x. */
-	GteDelay_ nop2,                         /* CTC2 retirement */
-
-	/* Load up_in into IR (the second operand for OP). */
-	gte_mv_to_data_r(r.d,  C2_IR1),       /* IR1 = up_in.x */
-	gte_mv_to_data_r(R_AT, C2_IR2),       /* IR2 = up_in.y */
-	gte_mv_to_data_r(r.t0, C2_IR3),       /* IR3 = up_in.z */
-	GteDelay_ nop2,                         /* MTC2 retirement */
-
-	gte_cmdw_cross, /* OP: MAC1/2/3 = uz × up_in
-		*   MAC1 = IR3*D2 - IR2*D3 = up_in.z*uz.y.high - up_in.y*uz.z.high
-		*   MAC2 = IR1*D3 - IR3*D1 = up_in.x*uz.z.high - up_in.z*uz.x
-		*   MAC3 = IR2*D1 - IR1*D2 = up_in.y*uz.x      - up_in.x*uz.y.high
-		* For up_in = (0, -fp_one, 0):
-		*   MAC1 = 0 - (-fp_one)*uz.z.high = fp_one*uz.z.high
-		*   MAC2 = 0 - 0 = 0
-		*   MAC3 = (-fp_one)*uz.x - 0 = -fp_one*uz.x */
-
-	/* Restore the RT slots we clobbered. */
-	gte_mv_to_ctrl_r(r.target0, gte_cr_RT11),   /* restore C2 r0 (RT11|RT12) */
-	gte_mv_to_ctrl_r(r.target1, gte_cr_RT22),   /* restore C2 r4 (RT22|RT33) */
-
-	/* mfc2 MAC1/2/3 → r_a/r_b/r_c (out.x/y/z). */
-	mac_gte_mv_from_data_r_mac123(r.a, r.b, r.c),
-	GteDelay_ nop,  /* MFC2 retirement */
-
-	/* Right-shift MAC by 12 to convert from GTE's S12.20 fixed-point scale back to libpsyx OuterProduct12 convention (S12.0, fp_one=4096=1<<12).
-	 * Without this, MAC values (~16M for unit-vector cross products) overflow the GTE's 16-bit IR registers when atom 3 normalizes via mtc2. */
-	mac_shift_aright_v3_self(r.a, r.b, r.c, 12),
-	/* Store out.x/y/z to r_f (out ptr = scratch+32). */
-	mac_store_word_v3(r.a, r.b, r.c, r.f, 0),
-
-	mac_yield()
-})
-
-typedef Struct_(RegUse_resolve_look_at__cross_uz_ux_to_up_proc) {
-	Reg const   scratch;          /* pinned T4 */
-	Reg_(V3_S4) a;                /* uz components, then MAC / out */
-	Reg_(V3_S4) b;                /* ux components */
-	union { Reg t0, up; };        /* &up, dedicated */
-	union { Reg t1, uz, rt11; };  /* &uz, then RT11 save */
-	union { Reg t2, ux, rt22; };  /* &ux, then RT22 save */
-};
-/* Atom 4: cross uz × ux → up. */
-internal MipsAtom* resolve_look_at__cross_uz_ux_to_up_proc(AtomArena_R aa,
-	RegUse_resolve_look_at__cross_uz_ux_to_up_proc r
-) MipsAtom_Proc_(aa, {
-	add_si(r.uz, r.scratch, O_(ResolveLookAtScratch,uz)), /* r.uz = &uz */
-	add_si(r.ux, r.scratch, O_(ResolveLookAtScratch,ux)), /* r.ux = &ux */
-	add_si(r.up, r.scratch, O_(ResolveLookAtScratch,up)), /* r.up = &up (out) */
-
-	mac_load_v3s4(r.a, r.uz, 0), LdSlot_
-	mac_load_v3s4(r.b, r.ux, 0), LdSlot_ /* taken by gte_mv_from_ctrl_r */
-
-	/* OP reads D1/D2/D3 from RT11/RT22/RT33 ($0/$2/$4), not V0/V1/V2.
-	 * Mirror atom 1: cfc2 RT save, ctc2 RT diagonal from uz, mtc2 IR from ux, ctc2 RT restore. */
-
-	/* Save the two RT control-register slots OP will clobber (reusing r.uz/r.ux — they're no longer needed as scratch pointers). */
-	gte_mv_from_ctrl_r(r.rt11, gte_cr_RT11),    /* r.rt11 = C2 $0 (RT11|RT12) */
-	gte_mv_from_ctrl_r(r.rt22, gte_cr_RT22),    /* r.rt22 = C2 $4 (RT22|RT33) */
-
-	/* Load uz into the RT diagonal — same packing as atom 1.
-	 * OP reads D1 = RT11 from $0.low, D2 = RT22 from $2.high, D3 = RT33 from $4.high.
-	 * RT22 is shared between $2.high and $4.low — the ctc2 sequence to $2 then $4
-	 * sets RT22 to uz.y.high (via $2), then to uz.z.low (via $4). 
-	 * OP reads RT22 from $2.high which the second ctc2 doesn't touch, so D2 stays uz.y.high. */
-	gte_mv_to_ctrl_r(r.a.y, gte_cr_RT13),   /* $2 = uz.y. RT13=uz.y.low, RT22=uz.y.high. */
-	gte_mv_to_ctrl_r(r.a.z, gte_cr_RT22),   /* $4 = uz.z. RT22=uz.z.low, RT33=uz.z.high. */
-	gte_mv_to_ctrl_r(r.a.x, gte_cr_RT11),   /* $0 = uz.x. RT11=uz.x. */
-	GteDelay_ nop2,                         /* CTC2 retirement (CPU→COP2 2-slot delay) */
-
-	/* Load ux into the IR registers (the second operand for OP). */
-	gte_mv_to_data_r(r.b.x, C2_IR1),       /* IR1 = ux.x */
-	gte_mv_to_data_r(r.b.y, C2_IR2),       /* IR2 = ux.y */
-	gte_mv_to_data_r(r.b.z, C2_IR3),       /* IR3 = ux.z */
-	GteDelay_ nop2,                        /* MTC2 retirement (CPU→COP2 2-slot delay) */
-
-	gte_cmdw_cross,
-
-	/* Restore the RT slots we clobbered. */
-	gte_mv_to_ctrl_r(r.rt11, gte_cr_RT11),   /* restore C2 $0 (RT11|RT12) */
-	gte_mv_to_ctrl_r(r.rt22, gte_cr_RT22),   /* restore C2 $4 (RT22|RT33) */
-
-	mac_gte_mv_from_data_r_mac123(r.a.x, r.a.y, r.a.z),
-	GteDelay_ nop,
-
-	/* Right-shift MAC by 12 to convert from GTE's S12.20 scale back to libpsyx
-	 * OuterProduct12 convention (S12.0, fp_one=4096). See atom 1 for rationale. */
-	mac_shift_aright_v3_self(r.a.x, r.a.y, r.a.z, 12),
-	mac_store_v3s4(r.a, r.up, 0),
-
-	mac_yield()
-})
 
 typedef Struct_(Binds_ResolveLookAtPopAndTrans) {
 	U4 look_at;  /* U4 (MT3_S2S4* — destination matrix address) */
@@ -407,7 +272,7 @@ internal MipsAtom* resolve_look_at__matrix_vector_proc(AtomArena_R aa,
  *
  * Pool cost: r_look_at (1) + r_scratch (carrier) + r_off_ptr + 1 clobber = 4 GPRs.
  */
-I_ MipsAtom* resolve_look_at__trans_matrix_proc(AtomArena_R aa
+I_ MipsAtom* AtomBundleEntry_(resolve_look_at,trans_matrix)(AtomArena_R aa
 	,	U4 r_look_at,	U4 r_scratch,	U4 r_off_ptr
 	,	U4 r_tmp0, U4 r_tmp1, U4 r_tmp2
 ) MipsAtom_Proc_(aa, {

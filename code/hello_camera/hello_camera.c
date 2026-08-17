@@ -186,21 +186,16 @@ internal void compile_resolve_look_at(void) {
 		});
 	regfile_reset_to_mask(& rf, pin_mask);
 
-	/* === ATOM 2: cross uz×up_in→right === */
-	// smem.resolve_look_at_bundle[2] = AtomBundleEntry_(resolve_look_at,cross_uz_up_to_right)(& ab,
-	smem.resolve_look_at_bundle[2] = resolve_look_at_cross_uz_up_into_right(& ab,
-		RegUse_(resolve_look_at_cross_uz_up_into_right) {
-			.scratch = R_ResolveScratch,
-			.a  = ralloc(), 
-			.b  = ralloc(), 
-			.c  = ralloc(),
-			.d  = ralloc(),
-			.f  = ralloc(),
+	/* === ATOM 2: cross uz×up_in→right (Binds_gte_cross_v3s4) === */
+	smem.resolve_look_at_bundle[2] = gte_cross_v3s4(& ab,
+		RegUse_(gte_cross_v3s4) {
+			.a  = ralloc_v3(),
+			.b  = ralloc_v3(),
+			.t0 = ralloc(),
 			.t1 = ralloc(),
 			.t2 = ralloc(),
-			.t0 = ralloc(),
 		});
-	regfile_reset_to_mask(& rf, pin_mask);	
+	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 3: normalize right→ux === */
 	src_offset  = O_(ResolveLookAtScratch, right);
@@ -220,17 +215,16 @@ internal void compile_resolve_look_at(void) {
 		});
 	regfile_reset_to_mask(& rf, pin_mask);	
 
-	/* === ATOM 4: cross uz×ux→up === */
-	smem.resolve_look_at_bundle[4] = resolve_look_at__cross_uz_ux_to_up_proc(& ab,
-		RegUse_(resolve_look_at__cross_uz_ux_to_up_proc){
-			.scratch = R_ResolveScratch,
-			.a  = ralloc_v3(),   /* T0 T1 T2 */
-			.b  = ralloc_v3(),   /* T3 T5 T6 */
-			.t0 = ralloc(),      /* T7  = up */
-			.t1 = ralloc(),      /* V0  = uz / rt11 */
-			.t2 = ralloc(),      /* V1  = ux / rt22 */
+	/* === ATOM 4: cross uz×ux→up (Binds_gte_cross_v3s4) === */
+	smem.resolve_look_at_bundle[4] = gte_cross_v3s4(& ab,
+		RegUse_(gte_cross_v3s4) {
+			.a  = ralloc_v3(),
+			.b  = ralloc_v3(),
+			.t0 = ralloc(),
+			.t1 = ralloc(),
+			.t2 = ralloc(),
 		});
-	regfile_reset_to_mask(& rf, pin_mask);	
+	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 5: normalize up→uy === */
 	src_offset = O_(ResolveLookAtScratch, up);
@@ -280,8 +274,13 @@ internal void compile_resolve_look_at(void) {
 	U4 r_scratch_6c = R_ResolveScratch;
 	U4 r_off_ptr_6c = R_T1;  /* &scratch.eye (= off dst) */
 	U4 r_tmp0_6c    = R_T2;
-	smem.resolve_look_at_bundle[9] = resolve_look_at__trans_matrix_proc(& ab,
-		r_look_at_6c, r_scratch_6c, r_off_ptr_6c, r_tmp0_6c, R_T3, R_T4);
+	smem.resolve_look_at_bundle[9] = AtomBundleEntry_(resolve_look_at,trans_matrix)(& ab,
+		r_look_at_6c, 
+		r_scratch_6c, 
+		r_off_ptr_6c, 
+		r_tmp0_6c, 
+		R_T3, 
+		R_T4);
 
 	/* Sanity check: arena didn't overflow. */
 	assert(ab.used <= ResolveLookAtArena_Size);
@@ -295,6 +294,9 @@ I_ void resolve_look_at(TapeBuilder_R tb
 	,	P3_S4*    target
 	,	V3_S4*    up_in
 ){
+	/* Typed view of the scratchpad for field-address arithmetic. */
+	ResolveLookAtScratch* sp = C_scratch(ResolveLookAtScratch*);
+
 	tb_emit(tb, smem.resolve_look_at_bundle[0]); {
 		tb_data(tb, u4_(target));
 		tb_data(tb, u4_(eye));
@@ -302,15 +304,25 @@ I_ void resolve_look_at(TapeBuilder_R tb
 		tb_data(tb, u4_(smem.scratchpad));
 	}
 
-	tb_emit(tb, smem.resolve_look_at_bundle[1]); { 
+	tb_emit(tb, smem.resolve_look_at_bundle[1]); {
 		// tb_data(tb, u4_(Scratchpad_Loc));
 	}
-	tb_emit(tb, smem.resolve_look_at_bundle[2]); { }
-	tb_emit(tb, smem.resolve_look_at_bundle[3]); { 
+	tb_emit(tb, smem.resolve_look_at_bundle[2]); {
+		/* Binds_gte_cross_v3s4: src_a, src_b, out (3 pointers). */
+		tb_data(tb, u4_(& sp->uz));     /* src_a */
+		tb_data(tb, u4_(& sp->up_in));  /* src_b */
+		tb_data(tb, u4_(& sp->right));  /* out */
+	}
+	tb_emit(tb, smem.resolve_look_at_bundle[3]); {
 		// tb_data(tb, u4_(Scratchpad_Loc));
 	}
-	tb_emit(tb, smem.resolve_look_at_bundle[4]); { }
-	tb_emit(tb, smem.resolve_look_at_bundle[5]); { 
+	tb_emit(tb, smem.resolve_look_at_bundle[4]); {
+		/* Binds_gte_cross_v3s4: src_a, src_b, out (3 pointers). */
+		tb_data(tb, u4_(& sp->uz));  /* src_a */
+		tb_data(tb, u4_(& sp->ux));   /* src_b */
+		tb_data(tb, u4_(& sp->up));   /* out */
+	}
+	tb_emit(tb, smem.resolve_look_at_bundle[5]); {
 		// tb_data(tb, u4_(Scratchpad_Loc));
 	}
 

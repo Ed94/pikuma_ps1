@@ -110,7 +110,7 @@ typedef Slice_(MipsAtom);
 // Sometimes a user will define a bundle of atoms that represent a procedure of work as:
 //   MipsAtom* <identifier>[...];
 // Unfortuantely if using slice_from_array it will make the slice's pointer: MipsAtom** so this enforce its defined as MipsAtom*
-// TODO(Ed): Alternatively we can make the MipsAtom an opaque pointer to the atom... so that the blow returns 'MipsAtom'.
+// TODO(Ed): Alternatively we can make the MipsAtom an opaque pointer to the atom... so that the proc returns 'MipsAtom'.
 #define atombundle_from_array(array) (Slice_MipsAtom){.ptr=array[0],.len=Array_len(array)}
 
 // Underlying type to an ptr to an array of mips asm words that must terminate with an ac_yield.

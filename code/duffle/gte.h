@@ -101,20 +101,20 @@ enum {
 
 /* Semantic Aliases for GTE Data Registers */
 enum {
-	gte_in_v0_xy     = C2_VXY0, /* Input Vector 0 (X, Y) */
-	gte_in_v0_z      = C2_VZ0,  /* Input Vector 0 (Z) */
-	gte_in_v1_xy     = C2_VXY1, /* Input Vector 1 (X, Y) */
-	gte_in_v1_z      = C2_VZ1,  /* Input Vector 1 (Z) */
-	gte_in_v2_xy     = C2_VXY2, /* Input Vector 2 (X, Y) */
-	gte_in_v2_z      = C2_VZ2,  /* Input Vector 2 (Z) */
-	gte_in_rgb       = C2_RGB,  /* Input Color (R, G, B, MipsCode) */
-	gte_out_scr_xy0  = C2_SXY0, /* Output Screen Coord 0 (X, Y) */
-	gte_out_scr_xy1  = C2_SXY1, /* Output Screen Coord 1 (X, Y) */
-	gte_out_scr_xy2  = C2_SXY2, /* Output Screen Coord 2 (X, Y) */
-	gte_out_depth    = C2_OTZ,  /* Output Ordering Table Z (Depth) */
-	gte_math_accum0  = C2_MAC0, /* Math Accumulator 0 */
-	gte_math_accum1  = C2_MAC1, /* Math Accumulator 1 */
-	gte_math_accum2  = C2_MAC2, /* Math Accumulator 2 */
+	C2_InV0_XY    = C2_VXY0, /* Input Vector 0 (X, Y) */
+	C2_InV0_Z     = C2_VZ0,  /* Input Vector 0 (Z) */
+	C2_InV1_XY    = C2_VXY1, /* Input Vector 1 (X, Y) */
+	C2_InV1_Z     = C2_VZ1,  /* Input Vector 1 (Z) */
+	C2_InV2_XY    = C2_VXY2, /* Input Vector 2 (X, Y) */
+	C2_InV2_Z     = C2_VZ2,  /* Input Vector 2 (Z) */
+	C2_In_RGB     = C2_RGB,  /* Input Color (R, G, B, MipsCode) */
+	C2_OutSrc_XY0 = C2_SXY0, /* Output Screen Coord 0 (X, Y) */
+	C2_OutSrc_XY1 = C2_SXY1, /* Output Screen Coord 1 (X, Y) */
+	C2_OutSrc_XY2 = C2_SXY2, /* Output Screen Coord 2 (X, Y) */
+	C2_OutDepth   = C2_OTZ,  /* Output Ordering Table Z (Depth) */
+	C2_MathAccu0  = C2_MAC0, /* Math Accumulator 0 */
+	C2_MathAccu1  = C2_MAC1, /* Math Accumulator 1 */
+	C2_MathAccu2  = C2_MAC2, /* Math Accumulator 2 */
 };
 
 /* --- GTE Command Semantics (The Bitfield Meanings) --- 
