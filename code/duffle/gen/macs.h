@@ -212,6 +212,18 @@ WORD_COUNT(mac_gte_mv_to_cr_diag_v3s4, 3)
 WORD_COUNT(mac_gte_ld_ir123_v3s4, 3)
 
 /* atom_dbg_skip */
+#define mac_gte_op_cross_v3s4(a, b) \
+	mac_gte_mv_to_cr_diag_v3s4(a) \
+	GteDelay_  /* RT diagonal: D1 = a.x, D2 = a.y, D3 = a.z */ \
+,	mac_gte_ld_ir123_v3s4(b) \
+	GteDelay_  /* IR: second operand (b.xyz) */ \
+,	gte_cmdw_cross                           /* OP: MAC1/2/3 = a × b (S12.20) */ \
+,	mac_gte_mv_from_mac123_v3s4(a) \
+	GteDelay_  /* Read MAC1/2/3 → a.xyz (overwrites source-A's load targets) */ \
+,	mac_shift_aright_v3s4_self(a, 12) /* Right-shift MAC by 12 (S12.20 → S12.0 OuterProduct12) */
+WORD_COUNT(mac_gte_op_cross_v3s4, 16)
+
+/* atom_dbg_skip */
 #define mac_gte_store_f3(r_primitive_cursor) \
 	gte_sw(C2_SXY0, r_primitive_cursor, O_(Poly_F3,p0)) \
 ,	gte_sw(C2_SXY1, r_primitive_cursor, O_(Poly_F3,p1)) \
@@ -321,6 +333,10 @@ WORD_COUNT(mac_gte_general_purpose_interopolation, 10)
 ,	gte_mv_from_data_r(fr_mac2, C2_MAC2) \
 ,	gte_mv_from_data_r(fr_mac3, C2_MAC3)
 WORD_COUNT(mac_gte_mv_from_data_r_mac123, 3)
+
+#define mac_gte_mv_from_mac123_v3s4(v) \
+	mac_gte_mv_from_data_r_mac123(v.x, v.y, v.z)
+WORD_COUNT(mac_gte_mv_from_mac123_v3s4, 3)
 
 /* atom_dbg_skip */
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \

@@ -504,16 +504,103 @@ local function strip_trailing_continuation(lines)
 	end
 end
 
+--- Classify a token as a "pure delay marker token" (a delay-marker identifier
+--- with no following instruction — only whitespace and/or block comments).
+--- Examples that match:
+---   * `GteDelay_`                               → marker alone
+---   * `GteDelay_  /* RT diagonal: D1 = a.x... */` → marker + block comment
+---   * `GteDelay_  /* RT diagonal: ... */\n\t`    → marker + comment + trailing whitespace
+--- Examples that DO NOT match (these contain a real instruction after the marker
+--- and must be preserved verbatim so the instruction still gets emitted):
+---   * `GteDelay_ nop2`
+---   * `GteDelay_ add_si(r.dst_ptr, r.scratch, dst_offset)`
+---
+--- Why this classification matters: the metaprogram emits tokens separated by `,`
+--- and joins them with `\<newline>` line continuations. After C preprocessor
+--- phase 2 (line splicing), the macro body collapses to a single logical line.
+--- Each delay-marker identifier expands to empty (its definition
+--- `#define GteDelay_ // ...` consumes the `//` line comment during preprocessing
+--- of the definition itself, leaving an empty replacement list). When a token
+--- is purely a delay marker with only a trailing comment, the `,` the metaprogram
+--- normally adds before each token-after-the-first brackets empty content and
+--- produces the syntax error `,,` (`expected expression before ',' token`) at
+--- C compile. The metaprogram therefore emits such tokens WITHOUT the leading
+--- `,` (see `token_skips_leading_comma`) — but the marker + trailing comment
+--- are still emitted verbatim so the annotation is preserved in `gen/macs.h`.
+--- @param tok string  -- a single token from split_top_level_commas (already trimmed at the start, may contain trailing whitespace + block comment)
+--- @return boolean
+local function is_pure_delay_marker_token(tok)
+	local markers = duffle.DELAY_MARKERS
+	if type(markers) ~= "table" then return false end
+
+	-- Identify a leading delay-marker identifier (e.g. `GteDelay_`).
+	local ident_end = 1
+	while ident_end <= #tok do
+		local ch = tok:sub(ident_end, ident_end)
+		if ch:match("[%w_]") then
+			ident_end = ident_end + 1
+		else
+			break
+		end
+	end
+	local ident = tok:sub(1, ident_end - 1)
+	if not markers[ident] then return false end
+
+	-- Walk the remainder: only whitespace and block comments are allowed.
+	local scan = ident_end
+	while scan <= #tok do
+		local ch = tok:sub(scan, scan)
+		if    ch:match("%s") then
+			scan = scan + 1
+		elseif ch == "/" and tok:sub(scan + 1, scan + 1) == "*" then
+			local close = tok:find("*/", scan + 2, true)
+			if not close then return false end
+			scan = close + 2
+		else
+			-- Non-whitespace, non-block-comment content: a real instruction
+			-- follows the marker (e.g. `GteDelay_ nop2`); keep this token intact.
+			return false
+		end
+	end
+	return true
+end
+
+--- Classify a token's "leading comma requirement".
+--- Pure delay-marker tokens (`GteDelay_` / `LdSlot_` / `BdSlot_` / `DmaSlot_`
+--- followed by whitespace + optional block comment and NOTHING ELSE) expand
+--- to empty at C preprocessor time. Emitting them WITHOUT the leading `,`
+--- separator that the metaprogram normally adds before each token after the
+--- first keeps exactly one `,` between the surrounding real expressions in
+--- the spliced macro body:
+---
+---   * before this rule:  `<tok1> ,\t<gdelay> ,\t<tok3>` → after expansion
+---                        `<tok1> ,  /* comment */ , <tok3>` → `,,` syntax error.
+---   * after  this rule:  `<tok1> \t<gdelay> ,\t<tok3>` → after expansion
+---                        `<tok1>  /* comment */ , <tok3>` → `<tok1>, <tok3>` — valid.
+---
+--- Tokens like `GteDelay_ nop2` keep the leading `,` (the marker is followed
+--- by a real instruction, so the marker + instruction together need the
+--- separator on the LEFT to land between two real expressions).
+--- @param tok string
+--- @return boolean  -- true if the token needs NO leading `,` separator.
+local function token_skips_leading_comma(tok)
+	return is_pure_delay_marker_token(tok)
+end
+
 --- Emit the `#define mac_X(sig) \<newline>\t<tok1> \<newline>,\t<tok2> ...` block.
 --- Converts `//` line comments to `/* */` block comments in each token so they don't break the C macro `\` line continuations.
+---
+--- Pure delay-marker tokens (`GteDelay_` / `LdSlot_` / `BdSlot_` / `DmaSlot_` with only a trailing block comment, no real instruction) are emitted WITHOUT a leading `,` separator; the annotation IS preserved in the generated header (so the comment + marker remain visible to anyone reading `gen/macs.h`), but the C preprocessor expands the marker to empty, so leaving the `,` separator out is what stops the `,,` syntax error. See `token_skips_leading_comma` for the contract.
 local function emit_macro_body(lines, c, sig, tokens)
 	for tok_idx = 1, #tokens do
 		tokens[tok_idx] = convert_line_comments_to_block(tokens[tok_idx])
 	end
+	if #tokens == 0 then return end
 	lines[#lines + 1] = "#define mac_" .. c.name .. "(" .. sig .. ") \\"
 	lines[#lines + 1] = "\t" .. tokens[1] .. " \\"
 	for tok_idx = 2, #tokens do
-		lines[#lines + 1] = ",\t" .. tokens[tok_idx] .. " \\"
+		local sep = token_skips_leading_comma(tokens[tok_idx]) and "\t" or ",\t"
+		lines[#lines + 1] = sep .. tokens[tok_idx] .. " \\"
 	end
 	strip_trailing_continuation(lines)
 end

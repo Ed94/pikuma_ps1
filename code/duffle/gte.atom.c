@@ -30,6 +30,14 @@ FI_ Slice_MipsCode ac_gte_ld_ir123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) MipsAto
 	gte_mv_to_data_r(v.z, C2_IR3),
 })
 
+FI_ Slice_MipsCode ac_gte_op_cross_v3s4(AtomBuilder_R ab, Reg_(V3_S4) a, Reg_(V3_S4) b) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	mac_gte_mv_to_cr_diag_v3s4(a),  GteDelay_  /* RT diagonal: D1 = a.x, D2 = a.y, D3 = a.z */
+	mac_gte_ld_ir123_v3s4(b),       GteDelay_  /* IR: second operand (b.xyz) */
+	gte_cmdw_cross,                           /* OP: MAC1/2/3 = a × b (S12.20) */
+	mac_gte_mv_from_mac123_v3s4(a), GteDelay_  /* Read MAC1/2/3 → a.xyz (overwrites source-A's load targets) */
+	mac_shift_aright_v3s4_self(a, 12), /* Right-shift MAC by 12 (S12.20 → S12.0 OuterProduct12) */
+})
+
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices to the F3.
  * PIPELINE: post-RTPT (SXY0=v0.screen, SXY1=v1.screen, SXY2=v2.screen). */
 FI_ Slice_MipsCode ac_gte_store_f3(AtomBuilder_R ab, U4 r_primitive_cursor) atom_dbg_skip MipsAtomComp_Proc_(ab, {
@@ -172,6 +180,9 @@ MipsAtomComp_Proc_(ab, {
 	gte_mv_from_data_r(fr_mac2, C2_MAC2),
 	gte_mv_from_data_r(fr_mac3, C2_MAC3),
 })
+
+
+FI_ Slice_MipsCode ac_gte_mv_from_mac123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) MipsAtomComp_ProcMap_(ab, mac_gte_mv_from_data_r_mac123(v.x, v.y, v.z))
 
 #pragma endregion MACs (Mips Atom Components)
 
@@ -348,18 +359,11 @@ atom_info(atom_bind(Binds_gte_cross_v3s4)) MipsAtom_Proc_(aa, {
 
 	mac_load_v3s4(r.a, r.src_a, 0), LdSlot_
 	mac_load_v3s4(r.b, r.src_b, 0), LdSlot_
-
-	mac_gte_mv_to_cr_diag_v3s4(r.a), GteDelay_ /* RT diagonal: D1 = a.x, D2 = a.y, D3 = a.z. */
-	mac_gte_ld_ir123_v3s4(r.b),      GteDelay_ /* IR: second operand. */
-	gte_cmdw_cross,  /* MAC1/2/3 = a × b */
-	mac_gte_mv_from_data_r_mac123(r.a.x, r.a.y, r.a.z), GteDelay_ //nop,
-
-	mac_shift_aright_v3s4_self(r.a, 12),
+	mac_gte_op_cross_v3s4(r.a, r.b), /* RT diagonal + IR + OP + MAC read + shift (one component call). */
 	mac_store_v3s4(r.a, r.out, 0),
 
 	mac_yield()
 })
-
 #pragma endregion Atom Procs
 
 #pragma region Baked Atoms
