@@ -35,15 +35,11 @@
  *  These do NOT yield. They are expanded inline inside Tape Atoms.
  * ---------------------------------------------------------------------------*/
 // The 'Yield' sequence for Tape Atoms (mac_yield).
-//   - mac_yield() is the safe default for atom-endings: 4 words, BD-slot of jr is mandatory nop.
-//   - mac_yield_load() + mac_yield_tail():
-//     - unconditional branch: mac_yield_load fills the branch's BD-slot (replaces a nop);
-//     - mac_yield_tail runs at the branch target (does NOT re-load R_AtomJmp).
 #define mac_yield(...) \
 	load_word(R_AtomJmp, R_TapePtr, 0) \
 ,	add_ui_self(         R_TapePtr, S_(MipsCode)) \
 ,	jump_reg( R_AtomJmp) \
-,	nop
+,	BdSlot_ nop
 WORD_COUNT(mac_yield, 4)
 
 /* atom_dbg_skip */
@@ -54,8 +50,8 @@ WORD_COUNT(mac_yield_load, 1)
 /* atom_dbg_skip */
 #define mac_yield_tail(...) \
 	add_ui_self(R_TapePtr, S_(MipsCode)) \
-,	jump_reg(  R_AtomJmp) \
-,	nop
+,	jump_reg( R_AtomJmp) \
+,	BdSlot_ nop
 WORD_COUNT(mac_yield_tail, 3)
 
 /* atom_dbg_skip */
@@ -217,7 +213,7 @@ WORD_COUNT(mac_gte_ld_ir123_v3s4, 3)
 	GteDelay_  /* RT diagonal: D1 = a.x, D2 = a.y, D3 = a.z */ \
 ,	mac_gte_ld_ir123_v3s4(b) \
 	GteDelay_  /* IR: second operand (b.xyz) */ \
-,	gte_cmdw_cross                           /* OP: MAC1/2/3 = a × b (S12.20) */ \
+,	gte_cmdw_cross                            /* OP: MAC1/2/3 = a × b (S12.20) */ \
 ,	mac_gte_mv_from_mac123_v3s4(a) \
 	GteDelay_  /* Read MAC1/2/3 → a.xyz (overwrites source-A's load targets) */ \
 ,	mac_shift_aright_v3s4_self(a, 12) /* Right-shift MAC by 12 (S12.20 → S12.0 OuterProduct12) */

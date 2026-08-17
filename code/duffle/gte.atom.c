@@ -30,10 +30,26 @@ FI_ Slice_MipsCode ac_gte_ld_ir123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) MipsAto
 	gte_mv_to_data_r(v.z, C2_IR3),
 })
 
+/* ─── GTE OP cross product (a × b → a) ───
+ * Sets up RT diagonal from a.xyz, IR1/2/3 from b.xyz, fires OP,
+ * reads MAC1/2/3, shifts right 12 (S12.20 → S12.0 OuterProduct12), writes back to a.xyz.
+ * Composes the three sub-primitives (RT-load, IR-load, OP, MAC-read, shift)
+ * into one component for use by atoms that need the cross product inline.
+ *
+ * Output gpr (a) aliases source-A gpr; MAC read clobbers source-A's load targets,
+ * but by that point the RT load is complete and source A is dead.
+ * Pipeline: clobbers IR1..3, MAC1..3, RT11..33.
+ *
+ * The CPU→COP2 transfer chains (3 ctc2, 3 mtc2) require a 2-slot retirement gap,
+ * and the MFC2→GPR chain (3 mfc2) requires a 1-slot retirement gap, before the GPR can be read.
+ * The hazard nops are inlined below — same convention as ac_gte_gpf_scale — so any atom body inlining this component inherits them.
+ *
+ * Words: 18 (3 ctc2 + 2 nop + 3 mtc2 + 2 nop + 1 op + 3 mfc2 + 1 nop + 3 sra).
+ */
 FI_ Slice_MipsCode ac_gte_op_cross_v3s4(AtomBuilder_R ab, Reg_(V3_S4) a, Reg_(V3_S4) b) atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	mac_gte_mv_to_cr_diag_v3s4(a),  GteDelay_  /* RT diagonal: D1 = a.x, D2 = a.y, D3 = a.z */
 	mac_gte_ld_ir123_v3s4(b),       GteDelay_  /* IR: second operand (b.xyz) */
-	gte_cmdw_cross,                           /* OP: MAC1/2/3 = a × b (S12.20) */
+	gte_cmdw_cross,                            /* OP: MAC1/2/3 = a × b (S12.20) */
 	mac_gte_mv_from_mac123_v3s4(a), GteDelay_  /* Read MAC1/2/3 → a.xyz (overwrites source-A's load targets) */
 	mac_shift_aright_v3s4_self(a, 12), /* Right-shift MAC by 12 (S12.20 → S12.0 OuterProduct12) */
 })
@@ -226,7 +242,8 @@ FI_ Slice_MipsCode ac_gte_mv_from_mac123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) M
  * and the load upper_halves of the table bracket the input range.
  * The later 64 entries (octaves 2-3) are the `srav` branch when the magnitude's top bit is well above bit 24.
  *
- * 192-entry table is reproduced verbatim from libgte (verified against libpsn00b/psxgte/vector.s:100-123 — 24 rows × 8 halfwords, last entry 0x0804). */
+ * Reproduced verbatim from libgte (verified against libpsn00b/psxgte/vector.s:100-123 — 24 rows × 8 halfwords, last entry 0x0804).
+ * */
 internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x1000, 0x0fe0, 0x0fc1, 0x0fa3, 0x0f85, 0x0f68, 0x0f4c, 0x0f30,
 	0x0f15, 0x0efb, 0x0ee1, 0x0ec7, 0x0eae, 0x0e96, 0x0e7e, 0x0e66,
@@ -254,39 +271,40 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x0820, 0x081c, 0x0818, 0x0814, 0x0810, 0x080c, 0x0808, 0x0804,
 };
 
-typedef Struct_(Binds_build_normalize_v3s4) {
-	U4 scratch;
-	U2 src_offset;
-	U2 dst_offset;
+typedef Struct_(Binds_NormalizeV3S4) {
+	U2 src_offset;    /* offset of src V3_S4 within the BIOS scratchpad */
+	U2 dst_offset;    /* offset of dst V3_S4 within the BIOS scratchpad */
 };
 typedef Struct_(RegUse_build_normalize_v3s4) {
-	Reg scratch;
+	Reg scratch;                /* scratchpad base; loaded via load_word_imm below. */
 	Reg src_ptr;
 	Reg dst_ptr;
-	Reg recip_est; // |v|² sum + shift-input + sqrtbl[index]
+	Reg recip_est;              /* |v|² sum + shift-input + sqrtbl[index] */
 	Reg norm; Reg shift;
 	Reg src_x;
-	union { Reg mac1_scratch; } t3;
+	union { Reg mac1_scratch, dst_offset; } t3;
 	union { Reg mac2_scratch; } t4;
-	union { Reg btarget, shift_count, lookup_addr, src_z; } t5;
+	union { Reg btarget, shift_count, lookup_addr, src_z, src_offset; } t5;
 };
 /* ─── Full normalize (all 4 stages inline) ───
- * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav).
- *
- * Direct port of PSYQ libgte msc02.rel.text VectorNormal disassembly (0x800160a0..0x8001615c).
- * Words: ~59 (matches libgte 0x800160a0..0x8001615c at +/- 0-2 words for BD-slot reshuffling).
- * Sqrtbl: hardcoded to 0x800185B4 (libgte msc02.rel.data). Note: swapped to local.
- * Pipeline: clobbers IR0..3, MAC1..3, LZCS, LZCR.
- */
-internal MipsAtom* build_normalize_v3s4(AtomArena_R aa,	U2 src_offset, U2 dst_offset, RegUse_build_normalize_v3s4 r)
+ * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav). */
+internal MipsAtom* build_normalize_v3s4(AtomArena_R aa, RegUse_build_normalize_v3s4 r)
 MipsAtom_Proc_(aa, {
-	// load_word(r.scratch, R_TapePtr, O_(Binds_build_normalize_v3s4,scratch)),
-	// add_ui_self(R_TapePtr, S_(Binds_build_normalize_v3s4)),
-
-	add_si(r.src_ptr, r.scratch, src_offset), /* r_src_ptr = &src */
+	/* Load scratch base via immediate (always Scratchpad_Loc = 0x1F800000 — the BIOS
+	 * scratchpad, aliased by every consumer's ResolveLookAtScratch struct). */
+	mac_load_word_imm(r.scratch, Scratchpad_Loc),
+	/* Tape pop: src_offset, dst_offset = 4 bytes (packed into 1 U4: low16=src, high16=dst).
+	 * Loads back-to-back fill each other's load-delay slots; the subsequent add_u
+	 * (2 cycles after the matching load) sees a valid value. */
+	load_half(r.t5.src_offset, R_TapePtr, O_(Binds_NormalizeV3S4, src_offset)),
+	load_half(r.t3.dst_offset, R_TapePtr, O_(Binds_NormalizeV3S4, dst_offset)),
+	LdSlot_ add_u(r.src_ptr, r.scratch, r.t5.src_offset),
+	LdSlot_ add_u(r.dst_ptr, r.scratch, r.t3.dst_offset),
+	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_NormalizeV3S4)),
 
 	/* Load src.x/y/z from r_src_ptr (caller-determined address) into r_tmp/r_recip_est/r_branch_tmp.
-	 * r.rt1_src_x holds src.x throughout stages 1-2 — r_mac2_scratch is clobbered to MAC2 in stage 1.5 (line below). */
+	 * r.rt1_src_x holds src.x throughout stages 1-2 — r_mac2_scratch is clobbered to MAC2 in stage 1.5 (line below).
+	 * t5.src_offset/dst_offset are dead by here; t5 is reused for src.z in the mac_load_word_v3 below. */
 	mac_load_word_v3(r.src_x, r.recip_est, r.t5.src_z, r.src_ptr, 0),
 
 	/* Stage 1: mtc2 src → IR1/2/3, SQR fires. */
@@ -326,12 +344,12 @@ MipsAtom_Proc_(aa, {
 
 	/* Stage 4: GPF + srav finalize (r_shift = shift count, r_norm = 1/|v|). */
 	LdSlot_ mac_gte_general_purpose_interopolation(
-		r.norm, 
+		r.norm,
 		r.src_x,  /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */
-		r.recip_est, 
+		r.recip_est,
 		r.t5.src_z,  /* IR3 = src.z (reloaded) */
 		r.t4.mac2_scratch, r.recip_est, r.t5.src_z,
-		GteDelay_ add_si(r.dst_ptr, r.scratch, dst_offset), // pre-laoding destination to register here.
+		GteDelay_ nop,
 		GteDelay_ nop
 	),
 	/* sra by r_shift = (31-LZCR)/2 (saved before sqrtbl lookup) */
@@ -342,25 +360,28 @@ MipsAtom_Proc_(aa, {
 	mac_yield()
 })
 
+/* ─── GTE OP cross product (a × b → out) ───
+ * Generalized V3_S4 cross product via GTE OP (OuterProduct12 libpsyx convention).
+ * The >> 12 shift converts S12.20 → S12.0 OuterProduct12. */
 typedef Struct_(Binds_gte_cross_v3s4) { V3_S4* src_a; V3_S4* src_b; V3_S4* out; };
 typedef Struct_(RegUse_gte_cross_v3s4) {
 	Reg_(V3_S4) a;
 	Reg_(V3_S4) b;
-	union { Reg t0, out; };
-	union { Reg t1, src_a, rt11; };
-	union { Reg t2, src_b, rt22; };
+	union { Reg out, t0; } x;
+	union { Reg src_a, t1, rt11; } y;
+	union { Reg src_b, t2, rt22; } z;
 };
 internal MipsAtom* gte_cross_v3s4(AtomArena_R aa, RegUse_gte_cross_v3s4 r)
 atom_info(atom_bind(Binds_gte_cross_v3s4)) MipsAtom_Proc_(aa, {
-	load_word(r.src_a,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_a)),
-	load_word(r.src_b,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_b)),
-	load_word(r.out,    R_TapePtr, O_(Binds_gte_cross_v3s4,out)),
+	load_word(r.y.src_a,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_a)),
+	load_word(r.z.src_b,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_b)),
+	load_word(r.x.out,    R_TapePtr, O_(Binds_gte_cross_v3s4,out)),
 	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_gte_cross_v3s4)),
 
-	mac_load_v3s4(r.a, r.src_a, 0), LdSlot_
-	mac_load_v3s4(r.b, r.src_b, 0), LdSlot_
-	mac_gte_op_cross_v3s4(r.a, r.b), /* RT diagonal + IR + OP + MAC read + shift (one component call). */
-	mac_store_v3s4(r.a, r.out, 0),
+	mac_load_v3s4(r.a, r.y.src_a, 0), LdSlot_
+	mac_load_v3s4(r.b, r.z.src_b, 0), LdSlot_
+	mac_gte_op_cross_v3s4(r.a, r.b), /* RT diagonal + IR + OP + MAC read + shift */
+	mac_store_v3s4(r.a, r.x.out, 0),
 
 	mac_yield()
 })

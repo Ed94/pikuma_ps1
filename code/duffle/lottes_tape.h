@@ -82,7 +82,10 @@ enum {
 // - R_T8: Will be used as the atom jump register.
 
 // All allocatable registers for mips atoms:
+
+	// TODO(Ed): Make this the R_AtomJmp register since its better to clobber across atoms.
 	R_TScratchVolatile = R_AT, // This one is reserved for psuedo instructions, but you can technically use it.
+
 	R_TScratch0  = R_T0,
 	R_TScratch1  = R_T1,
 	R_TScratch2  = R_T2,
@@ -91,7 +94,7 @@ enum {
 	R_TScratch5  = R_T5,
 	R_TScratch6  = R_T6,
 	R_TScratch7  = R_T7,
-	R_TScratch8 =  R_T8,
+	R_TScratch8 =  R_T8, // Clobbered by the yield on a per-atom boundary.
 	R_TScratch10 = R_V0, // Tend to be used with gte DMAs
 	R_TScratch11 = R_V1, // Tend to be used with gte DMAs
 	// Note(Ed): We can technically clobber these, but don't unless we hit a bottleneck.
@@ -167,8 +170,8 @@ FI_ void tape_run(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape
 	asm_words(
 		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
 		, add_ui_self(R_TapePtr, S_(MipsAtom)) /* Advance tape */
-		, call_reg(   R_AtomJmp)               /* jalr $t9 */
-		, nop                                  /* Branch delay slot */
+		, call_reg(   R_AtomJmp)               /* jalr $t8 */
+		, BdSlot_ nop                          /* Branch delay slot */
 	)
 	asm_rpins, r_use(tape_ptr)
 	asm_clobber: 
@@ -184,8 +187,8 @@ FI_ void tape_run_a02_s07(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u
 	asm_words(
 		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
 		, add_ui_self(R_TapePtr, S_(MipsAtom)) /* Advance tape */
-		, call_reg(   R_AtomJmp)               /* jalr $t9 */
-		, nop                                  /* Branch delay slot */
+		, call_reg(   R_AtomJmp)               /* jalr $t8 */
+		, BdSlot_ nop                          /* Branch delay slot */
 	)
 	asm_rpins, r_use(tape_ptr)
 	asm_clobber: 
@@ -226,15 +229,11 @@ FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_
  * ---------------------------------------------------------------------------*/
 
 // The 'Yield' sequence for Tape Atoms (mac_yield).
-//   - mac_yield() is the safe default for atom-endings: 4 words, BD-slot of jr is mandatory nop.
-//   - mac_yield_load() + mac_yield_tail():
-//     - unconditional branch: mac_yield_load fills the branch's BD-slot (replaces a nop);
-//     - mac_yield_tail runs at the branch target (does NOT re-load R_AtomJmp).
 
 atom_dbg_skip MipsAtomComp_(ac_yield) {
 	load_word(R_AtomJmp, R_TapePtr, 0),
 	add_ui_self(         R_TapePtr, S_(MipsCode)),
-	jump_reg( R_AtomJmp), nop,
+	jump_reg( R_AtomJmp), BdSlot_ nop,
 };
 
 atom_dbg_skip MipsAtomComp_(ac_yield_load) {
@@ -243,7 +242,8 @@ atom_dbg_skip MipsAtomComp_(ac_yield_load) {
 
 atom_dbg_skip MipsAtomComp_(ac_yield_tail) {
 	add_ui_self(R_TapePtr, S_(MipsCode)),
-	jump_reg(  R_AtomJmp), nop,
+	jump_reg( R_AtomJmp),
+	BdSlot_ nop,
 };
 
 #pragma endregion Macro Atom Components

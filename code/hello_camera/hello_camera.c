@@ -53,11 +53,6 @@
 #pragma endregion Hello Joypad TUs
 
 enum {
-	Scratchpad_Loc = 0x1F800000,
-};
-#define C_scratch(type) C_(type, Scratchpad_Loc)
-
-enum {
 	Scratchpad_Len           = 1024,
 	MemTape_Len              = 512,
 
@@ -91,9 +86,11 @@ typedef Struct_(SMemory) {
 
 	U1 ct_init_atom_mem[CT_InitAtomMem_Size];
 	MipsAtom* normalize_v3s4;
-	// TODO(Ed): Convert normalize_v3s4 to a generic atom?
-	// This would allow us to reduce specializations with the loss being some cycles to loading registers.
-	// The cost would be 3 loads (scratch, src_ptr, dst_offset) from tape and 
+	MipsAtom* gte_cross_v3s4;  /* GTE OP OuterProduct12 (a × b → out).
+	                            * Baked once at init from compile_gte_cross_v3s4() into ct_init_atom_mem.
+	                            * One instance serves both cross call sites in resolve_look_at;
+	                            * per-frame tape emits push src_a/src_b/out (3 pointers = 12 bytes)
+	                            * for Binds_gte_cross_v3s4. */
 
 	U1        resolve_look_at_mem[ResolveLookAtArena_Size];
 	MipsAtom* resolve_look_at_bundle[AtomBundle_Len(resolve_look_at)];
@@ -143,6 +140,57 @@ FI_ void camera_look_at_c11(Camera* c, P3_S4* target, V3_S4* up_in) { resolve_lo
 
 
 
+internal void compile_init_atoms(void) {
+	/* Single shared arena: each compile_* function pushes its atom into the same
+	 * ct_init_atom_mem backing. If each function called atomarena_make() locally,
+	 * the second call would reset arena.used to 0 and overwrite the first atom.
+	 */
+	AtomArena ab = atomarena_make(slice_ut_arr(smem.ct_init_atom_mem));
+	RegFile   rf = regfile(regfile_abi_mask);
+
+	/* === gte_cross_v3s4 — GTE OP OuterProduct12 (a × b → out) ===
+	 * Reused by both cross call sites in resolve_look_at. No scratch carrier.
+	 * GPR pool: 9 allocatable (no carrier). Pool R_T0..R_T7, R_V0, R_V1 minus ABI = 9.
+	 * Fits exactly. */
+	{
+		smem.gte_cross_v3s4 = gte_cross_v3s4(& ab,
+			RegUse_(gte_cross_v3s4) {
+				.a  = { regfile_alloc(& rf), regfile_alloc(& rf), regfile_alloc(& rf) },
+				.b  = { regfile_alloc(& rf), regfile_alloc(& rf), regfile_alloc(& rf) },
+				.x  = regfile_alloc(& rf),   /* out / t0  shared */
+				.y  = regfile_alloc(& rf),   /* src_a / t1 / rt11  shared */
+				.z  = regfile_alloc(& rf),   /* src_b / t2 / rt22  shared */
+			});
+		regfile_reset(& rf);
+	}
+
+	/* === build_normalize_v3s4 — Generic 4-stage GTE normalize ===
+	 * Reused by all 3 normalize call sites in resolve_look_at. Reads scratch + src/dst
+	 * offsets from tape (no carrier — atom is fully self-contained per call).
+	 * GPR pool: no carrier, 10 allocatable (R_T0..R_T7, R_V0, R_V1 minus ABI pins).
+	 * 10 fields (scratch + src_ptr + dst_ptr + recip_est + norm + shift + src_x +
+	 * t3 + t4 + t5) → just fits. Union members t5.src_offset, t3.dst_offset, etc.
+	 * share GPRs via lifetime discipline. */
+	{
+		RegFile rf = regfile(regfile_abi_mask);
+		smem.normalize_v3s4 = build_normalize_v3s4(& ab,
+			RegUse_(build_normalize_v3s4) {
+				.scratch   = regfile_alloc(& rf),
+				.src_ptr   = regfile_alloc(& rf),
+				.dst_ptr   = regfile_alloc(& rf),
+				.recip_est = regfile_alloc(& rf),
+				.norm      = regfile_alloc(& rf),
+				.shift     = regfile_alloc(& rf),
+				.src_x     = regfile_alloc(& rf),
+				.t3        = regfile_alloc(& rf),
+				.t4        = regfile_alloc(& rf),
+				.t5        = regfile_alloc(& rf),
+			});
+	}
+
+	assert(ab.used <= CT_InitAtomMem_Size);
+}
+
 internal void compile_resolve_look_at(void) {
 	/* Wrap the static arena in a MipsAtomBuilder. */
 	AtomArena   ab = atomarena_make(slice_ut_arr(smem.resolve_look_at_mem));
@@ -169,118 +217,32 @@ internal void compile_resolve_look_at(void) {
 	regfile_reset_to_mask(& rf, pin_mask);
 
 	/* === ATOM 1: normalize fwd→uz === */
-	U2 src_offset  = O_(ResolveLookAtScratch, fwd);
-	U2 dst_offset  = O_(ResolveLookAtScratch, uz);
-	smem.resolve_look_at_bundle[1] = build_normalize_v3s4(& ab,
-		src_offset, dst_offset, RegUse_(build_normalize_v3s4){
-			.scratch   = R_ResolveScratch,
-			.src_ptr   = ralloc(), 
-			.dst_ptr   = ralloc(),
-			.recip_est = ralloc(), 
-			.norm      = ralloc(),
-			.shift     = ralloc(),
-			.src_x     = ralloc(),
-			.t3 = ralloc(),
-			.t4 = ralloc(),
-			.t5 = ralloc(),
-		});
-	regfile_reset_to_mask(& rf, pin_mask);
+	smem.resolve_look_at_bundle[1] = smem.normalize_v3s4;
 
-	/* === ATOM 2: cross uz×up_in→right (Binds_gte_cross_v3s4) === */
-	smem.resolve_look_at_bundle[2] = gte_cross_v3s4(& ab,
-		RegUse_(gte_cross_v3s4) {
-			.a  = ralloc_v3(),
-			.b  = ralloc_v3(),
-			.t0 = ralloc(),
-			.t1 = ralloc(),
-			.t2 = ralloc(),
-		});
-	regfile_reset_to_mask(& rf, pin_mask);
+	/* === ATOM 2: cross uz×up_in→right (reuses smem.gte_cross_v3s4) === */
+	smem.resolve_look_at_bundle[2] = smem.gte_cross_v3s4;
 
 	/* === ATOM 3: normalize right→ux === */
-	src_offset  = O_(ResolveLookAtScratch, right);
-	dst_offset  = O_(ResolveLookAtScratch, ux);
-	smem.resolve_look_at_bundle[3] = build_normalize_v3s4(& ab,
-		src_offset, dst_offset, RegUse_(build_normalize_v3s4){
-			.scratch   = R_ResolveScratch,
-			.src_ptr   = ralloc(),
-			.dst_ptr   = ralloc(),
-			.recip_est = ralloc(),
-			.norm      = ralloc(),
-			.shift     = ralloc(),
-			.src_x     = ralloc(),
-			.t3        = ralloc(),
-			.t4        = ralloc(),
-			.t5        = ralloc(),
-		});
-	regfile_reset_to_mask(& rf, pin_mask);	
+	smem.resolve_look_at_bundle[3] = smem.normalize_v3s4;
 
-	/* === ATOM 4: cross uz×ux→up (Binds_gte_cross_v3s4) === */
-	smem.resolve_look_at_bundle[4] = gte_cross_v3s4(& ab,
-		RegUse_(gte_cross_v3s4) {
-			.a  = ralloc_v3(),
-			.b  = ralloc_v3(),
-			.t0 = ralloc(),
-			.t1 = ralloc(),
-			.t2 = ralloc(),
-		});
-	regfile_reset_to_mask(& rf, pin_mask);
+	/* === ATOM 4: cross uz×ux→up (reuses smem.gte_cross_v3s4) === */
+	smem.resolve_look_at_bundle[4] = smem.gte_cross_v3s4;
 
 	/* === ATOM 5: normalize up→uy === */
-	src_offset = O_(ResolveLookAtScratch, up);
-	dst_offset = O_(ResolveLookAtScratch, uy);
-	smem.resolve_look_at_bundle[5] = build_normalize_v3s4(& ab,
-		src_offset, dst_offset,
-		RegUse_(build_normalize_v3s4){
-			.scratch   = R_ResolveScratch,
-			.src_ptr   = ralloc(),
-			.dst_ptr   = ralloc(),
-			.recip_est = ralloc(),
-			.norm      = ralloc(),
-			.shift     = ralloc(),
-			.src_x     = ralloc(),
-			.t3 = ralloc(),
-			.t4 = ralloc(),
-			.t5 = ralloc(),
-		});
-	regfile_reset_to_mask(& rf, pin_mask);
+	smem.resolve_look_at_bundle[5] = smem.normalize_v3s4;
 
-	/* === ATOM 6a: populate (m[][] from ux/uy/uz, t[]=0) === */
-	smem.resolve_look_at_bundle[6] = resolve_look_at__populate_proc(& ab,
-		RegUse_(resolve_look_at__populate_proc){
-			.scratch = R_ResolveScratch,
-			.look_at = ralloc(),     /* T0 */
-			.row     = ralloc_v3(),  /* T1 T2 T3 */
-			.ux      = ralloc(),     /* T5 = ux */
-			.uy      = ralloc(),     /* T6 = uy */
-			.uz      = ralloc(),     /* T7 = uz */
-		});
-	regfile_reset_to_mask(& rf, pin_mask);
-
-	/* === ATOM 6a.5: set_gte_mt3s2s4 (BAKED — ctc2 RT matrix) === */
-	smem.resolve_look_at_bundle[7] = (MipsAtom*) & set_gte_mt3s2s4;
-
-	/* === ATOM 6b: matrix_vector (RT * (-eye) >> 12) === */
-	smem.resolve_look_at_bundle[8] = resolve_look_at__matrix_vector_proc(& ab,
-		RegUse_(resolve_look_at__matrix_vector_proc){
-			.scratch = R_ResolveScratch,
-			.look_at = ralloc(),     /* T0 */
-			.eye     = ralloc(),     /* T1 */
-			.v       = ralloc_v3(),  /* T2 T3 T5 */
-		});
-
-	/* === ATOM 6c: trans_matrix (off → look_at->t[]) === */
-	U4 r_look_at_6c = R_T0;  /* tape pop → look_at* */
-	U4 r_scratch_6c = R_ResolveScratch;
-	U4 r_off_ptr_6c = R_T1;  /* &scratch.eye (= off dst) */
-	U4 r_tmp0_6c    = R_T2;
-	smem.resolve_look_at_bundle[9] = AtomBundleEntry_(resolve_look_at,trans_matrix)(& ab,
-		r_look_at_6c, 
-		r_scratch_6c, 
-		r_off_ptr_6c, 
-		r_tmp0_6c, 
-		R_T3, 
-		R_T4);
+	/* === ATOM 6 (FUSED): populate + ctc2 RT + MVMVA + trans_matrix → look_at === */
+		smem.resolve_look_at_bundle[6] = resolve_look_at__pop_mv_trans(& ab,
+			RegUse_(resolve_look_at__pop_mv_trans){
+				.scratch = R_ResolveScratch,
+				.look_at = ralloc(),     /* T0 */
+				.eye     = ralloc(),     /* T1 — allocated BEFORE row so it doesn't alias row.y */
+				.row     = ralloc_v3(),  /* T2 T3 T5 */
+				.t6      = ralloc(),     /* T6 = ux (populate) / v_x (matrix_vector) */
+				.t7      = ralloc(),     /* T7 = uy (populate) / v_y (matrix_vector) */
+				.t8      = ralloc(),     /* V0 = uz (populate) / v_z (matrix_vector) */
+			});
+	/* No regfile_reset between phases: the fused atom uses all 9 GPRs throughout. */
 
 	/* Sanity check: arena didn't overflow. */
 	assert(ab.used <= ResolveLookAtArena_Size);
@@ -305,7 +267,11 @@ I_ void resolve_look_at(TapeBuilder_R tb
 	}
 
 	tb_emit(tb, smem.resolve_look_at_bundle[1]); {
-		// tb_data(tb, u4_(Scratchpad_Loc));
+		/* Binds_NormalizeV3S4: src_offset (low 16) | dst_offset (high 16). Both U2s
+		 * packed into a single U4 because the atom body reads at byte offsets 0 and 2
+		 * from R_TapePtr. Scratch base is baked into the atom (load_word_imm of
+		 * Scratchpad_Loc). */
+		tb_data(tb, u4_(O_(ResolveLookAtScratch, fwd) | (O_(ResolveLookAtScratch, uz) << 16)));
 	}
 	tb_emit(tb, smem.resolve_look_at_bundle[2]); {
 		/* Binds_gte_cross_v3s4: src_a, src_b, out (3 pointers). */
@@ -314,7 +280,7 @@ I_ void resolve_look_at(TapeBuilder_R tb
 		tb_data(tb, u4_(& sp->right));  /* out */
 	}
 	tb_emit(tb, smem.resolve_look_at_bundle[3]); {
-		// tb_data(tb, u4_(Scratchpad_Loc));
+		tb_data(tb, u4_(O_(ResolveLookAtScratch, right) | (O_(ResolveLookAtScratch, ux) << 16)));
 	}
 	tb_emit(tb, smem.resolve_look_at_bundle[4]); {
 		/* Binds_gte_cross_v3s4: src_a, src_b, out (3 pointers). */
@@ -323,20 +289,12 @@ I_ void resolve_look_at(TapeBuilder_R tb
 		tb_data(tb, u4_(& sp->up));   /* out */
 	}
 	tb_emit(tb, smem.resolve_look_at_bundle[5]); {
-		// tb_data(tb, u4_(Scratchpad_Loc));
+		tb_data(tb, u4_(O_(ResolveLookAtScratch, up) | (O_(ResolveLookAtScratch, uy) << 16)));
 	}
 
+	/* === FUSED atom: populate + matrix_vector + trans_matrix (replaces 4 separate emits) === */
 	tb_emit(tb, smem.resolve_look_at_bundle[6]); {
 		tb_data(tb, u4_(look_at));
-	}
-	tb_emit(tb, smem.resolve_look_at_bundle[7]); {
-		tb_data(tb, u4_(look_at));
-	}
-	tb_emit(tb, smem.resolve_look_at_bundle[8]); {
-		tb_data(tb, u4_(look_at));
-	}
-	tb_emit(tb, smem.resolve_look_at_bundle[9]); {
-		// tb_data(tb, u4_(look_at));
 	}
 }
 
@@ -529,6 +487,7 @@ int main(void)
 		/* Direct BIOS: poll both ports during VBlank. */
 		pad_bios_init_start(& smem.pad_raw[0], & smem.pad_raw[1]);
 
+		compile_init_atoms();
 		compile_resolve_look_at();
 
 		/* Pinned registers for the GPU init atom. */

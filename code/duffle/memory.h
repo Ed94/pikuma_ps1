@@ -131,3 +131,13 @@ FI_ U4 farena_unused_start(FArena arena) { return arena.start + arena.used; }
 #define farena_push_array(arena, type, amount, ...) (tmpl(Slice,type)){ C_(type*, farena_push((arena), (amount), opt_(farena, .type_width=S_(type), __VA_ARGS__)).ptr), (amount) }
 
 #pragma endregion FArena
+
+#pragma region BIOS Scratchpad
+/* BIOS scratchpad location. 1 KB at 0x1F800000.
+ * The PS1 BIOS A-functions use this region for inter-call communication and as a temp storage area.
+ * The Tape runtime uses scratch region along with explicit data structures instead of the stack-based scratch from the C-Runtime. */
+enum {
+	Scratchpad_Loc = 0x1F800000,
+};
+#define C_scratch(type) C_(type, Scratchpad_Loc)
+#pragma endregion BIOS Scratchpad
