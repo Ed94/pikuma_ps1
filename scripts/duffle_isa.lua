@@ -20,870 +20,122 @@ M.DELAY_MARKERS = {
 
 -- One row per encoder. Old table names are load-time views (build_isa_views).
 M.INSTRUCTION = {
-
-	["BdSlot_"] = {
-		cycles = 0,
-		kind = "marker",
-	},
-	["LdSlot_"] = {
-		cycles = 0,
-		kind = "marker",
-	},
-	["add_s"] = {
-		cycles = 1,
-		kind = "alu",
-	},
-	["add_si"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["add_u"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["add_u_self"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		value = {
-			dest = 1,
-			op = "add_u",
-			sources = { 1, 2 },
-		},
-	},
-	["add_ui"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 3,
-			op = "add_ui",
-			source = 2,
-		},
-	},
-	["add_ui_self"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 2,
-				signed = true,
-				width = 16,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 2,
-			op = "add_ui",
-			source = 1,
-		},
-	},
-	["and"] = {
-		cycles = 1,
-		kind = "alu",
-	},
-	["and_i"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				width = 16,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 3,
-			op = "and_i",
-			source = 2,
-		},
-	},
-	["and_u"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["atom_bind"] = {
-		cycles = 0,
-		kind = "marker",
-		reads = {},
-		writes = {},
-	},
-	["atom_info"] = {
-		cycles = 0,
-		kind = "marker",
-		reads = {},
-		writes = {},
-	},
-	["atom_label"] = {
-		cycles = 0,
-		kind = "marker",
-		reads = {},
-		writes = {},
-	},
-	["atom_offset"] = {
-		cycles = 0,
-		kind = "marker",
-		reads = {},
-		writes = {},
-	},
-	["atom_reads"] = {
-		cycles = 0,
-		kind = "marker",
-		reads = {},
-		writes = {},
-	},
-	["atom_writes"] = {
-		cycles = 0,
-		kind = "marker",
-		reads = {},
-		writes = {},
-	},
-	["branch_equal"] = {
-		cycles = 2,
-		kind = "branch",
-		reads = { 1, 2 },
-		writes = {},
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["branch_ge_zero"] = {
-		cycles = 2,
-		kind = "branch",
-		reads = { 1 },
-		writes = {},
-		imm = {
-			{
-				arg = 2,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["branch_gt_zero"] = {
-		cycles = 2,
-		kind = "branch",
-		reads = { 1 },
-		writes = {},
-		imm = {
-			{
-				arg = 2,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["branch_le_zero"] = {
-		cycles = 2,
-		kind = "branch",
-		reads = { 1 },
-		writes = {},
-		imm = {
-			{
-				arg = 2,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["branch_lt_zero"] = {
-		cycles = 2,
-		kind = "branch",
-		reads = { 1 },
-		writes = {},
-		imm = {
-			{
-				arg = 2,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["branch_ne"] = {
-		cycles = 2,
-		kind = "branch",
-		reads = { 1, 2 },
-		writes = {},
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["call_addr"] = {
-		cycles = 2,
-		kind = "call",
-		reads = {},
-		writes = { 1 },
-	},
-	["call_reg"] = {
-		cycles = 2,
-		kind = "call",
-		reads = { 1 },
-		writes = { 2 },
-	},
-	["div_s"] = {
-		cycles = 35,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = {},
-	},
-	["div_u"] = {
-		cycles = 35,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = {},
-	},
-	["gte_load_v0"] = {
-		cycles = 2,
-		kind = "cop2_xfer",
-		reads = { 2 },
-		writes = {},
-	},
-	["gte_load_v0v1v2"] = {
-		cycles = 6,
-		kind = "cop2_xfer",
-		reads = { 2 },
-		writes = {},
-	},
-	["gte_load_v1"] = {
-		cycles = 2,
-		kind = "cop2_xfer",
-		reads = { 2 },
-		writes = {},
-	},
-	["gte_load_v2"] = {
-		cycles = 2,
-		kind = "cop2_xfer",
-		reads = { 2 },
-		writes = {},
-	},
-	["gte_lw"] = {
-		cycles = 1,
-		kind = "load",
-		reads = { 2 },
-		writes = {},
-	},
-	["gte_lwc2"] = {
-		cycles = 1,
-		kind = "load",
-	},
-	["gte_mv_from_ctrl_r"] = {
-		cycles = 1,
-		kind = "cop2_xfer",
-		reads = {},
-		writes = { 1 },
-	},
-	["gte_mv_from_data_r"] = {
-		cycles = 1,
-		kind = "cop2_xfer",
-		reads = {},
-		writes = { 1 },
-	},
-	["gte_mv_to_ctrl_r"] = {
-		cycles = 1,
-		kind = "cop2_xfer",
-		reads = { 1 },
-		writes = {},
-	},
-	["gte_mv_to_data_r"] = {
-		cycles = 1,
-		kind = "cop2_xfer",
-		reads = { 1 },
-		writes = {},
-	},
-	["gte_stotz"] = {
-		cycles = 1,
-		kind = "cop2_xfer",
-		reads = {},
-		writes = {},
-	},
-	["gte_stsxy3"] = {
-		cycles = 1,
-		kind = "cop2_xfer",
-		reads = {},
-		writes = {},
-	},
-	["gte_sw"] = {
-		cycles = 1,
-		kind = "store",
-		reads = { 2 },
-		writes = {},
-	},
-	["gte_swc2"] = {
-		cycles = 1,
-		kind = "store",
-	},
-	["jump"] = {
-		cycles = 2,
-		kind = "jump",
-		reads = {},
-		writes = {},
-	},
-	["jump_link"] = {
-		cycles = 2,
-		kind = "call",
-		reads = { 1 },
-		writes = { 2 },
-	},
-	["jump_reg"] = {
-		cycles = 2,
-		kind = "jump",
-		reads = { 1 },
-		writes = {},
-		suppress_arg1 = {
-			R_AtomJmp = "fixed mac_yield handshake",
-		},
-	},
-	["jump_rel"] = {
-		cycles = 2,
-		kind = "branch",
-		delay_slot = false,
-	},
-	["li_s"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		value = {
-			dest = 1,
-			immediate = 3,
-			op = "add_ui",
-			source = 2,
-		},
-	},
-	["load_byte"] = {
-		cycles = 1,
-		kind = "load",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["load_byte_u"] = {
-		cycles = 1,
-		kind = "load",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["load_half"] = {
-		cycles = 1,
-		kind = "load",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["load_half_u"] = {
-		cycles = 1,
-		kind = "load",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["load_imm"] = {
-		cycles = 2,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["load_imm_1w"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["load_imm_1w_s0"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["load_imm_2w"] = {
-		cycles = 2,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["load_imm_2w_addi_forced"] = {
-		cycles = 2,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["load_imm_2w_ori_forced"] = {
-		cycles = 2,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["load_ui"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["load_upper_i"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-		imm = {
-			{
-				arg = 2,
-				width = 16,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 2,
-			op = "load_upper_i",
-		},
-	},
-	["load_word"] = {
-		cycles = 1,
-		kind = "load",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["mac_yield"] = {
-		cycles = 0,
-		kind = "marker",
-		reads = {},
-		writes = {},
-	},
-	["mask_upper"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-	},
-	["mov_from_high"] = {
-		cycles = 2,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["mov_from_low"] = {
-		cycles = 2,
-		kind = "alu",
-		reads = {},
-		writes = { 1 },
-	},
-	["mov_to_high"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1 },
-		writes = {},
-	},
-	["mov_to_low"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1 },
-		writes = {},
-	},
-	["mult_s"] = {
-		cycles = 12,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = {},
-	},
-	["mult_u"] = {
-		cycles = 12,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = {},
-	},
-	["nop"] = {
-		cycles = 1,
-		kind = "nop",
-		reads = {},
-		writes = {},
-	},
-	["nop2"] = {
-		cycles = 2,
-		kind = "nop",
-		reads = {},
-		writes = {},
-	},
-	["nor_u"] = {
-		cycles = 1,
-		kind = "alu",
-	},
-	["or_i"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				width = 16,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 3,
-			op = "or_i",
-			source = 2,
-		},
-	},
-	["or_i_self"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 2,
-				width = 16,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 2,
-			op = "or_i",
-			source = 1,
-		},
-	},
-	["or_u"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["or_u_self"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		value = {
-			dest = 1,
-			op = "or",
-			sources = { 1, 2 },
-		},
-	},
-	["set_lt_s"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["set_lt_si"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-	},
-	["set_lt_u"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["set_lt_ui"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-	},
-	["shift_aright"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				width = 5,
-			},
-		},
-	},
-	["shift_aright_var"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				width = 5,
-			},
-		},
-	},
-	["shift_lleft"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				width = 5,
-			},
-		},
-	},
-	["shift_lleft_self"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 2,
-				width = 5,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 2,
-			op = "shift_lleft",
-			source = 1,
-		},
-	},
-	["shift_lleft_var"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["shift_lright"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				width = 5,
-			},
-		},
-	},
-	["slt_s"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["slt_si"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["slt_u"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["slt_ui"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["store_byte"] = {
-		cycles = 1,
-		kind = "store",
-		reads = { 1, 2 },
-		writes = {},
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["store_half"] = {
-		cycles = 1,
-		kind = "store",
-		reads = { 1, 2 },
-		writes = {},
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["store_word"] = {
-		cycles = 1,
-		kind = "store",
-		reads = { 1, 2 },
-		writes = {},
-		imm = {
-			{
-				arg = 3,
-				signed = true,
-				width = 16,
-			},
-		},
-	},
-	["sub_s"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["sub_u"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
-	["sys_mov_from_cop0"] = {
-		cycles = 1,
-		kind = "cop0_xfer",
-		reads = {},
-		writes = { 1 },
-	},
-	["sys_mov_to_cop0"] = {
-		cycles = 1,
-		kind = "cop0_xfer",
-		reads = { 1 },
-		writes = {},
-	},
-	["xor_i"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 1, 2 },
-		writes = { 1 },
-		imm = {
-			{
-				arg = 3,
-				width = 16,
-			},
-		},
-		value = {
-			dest = 1,
-			immediate = 3,
-			op = "xor_i",
-			source = 2,
-		},
-	},
-	["xor_u"] = {
-		cycles = 1,
-		kind = "alu",
-		reads = { 2, 3 },
-		writes = { 1 },
-	},
+	["BdSlot_"]            = { cycles = 0,  kind = "marker", },
+	["LdSlot_"]            = { cycles = 0,  kind = "marker", },
+	["add_s"]              = { cycles = 1,  kind = "alu", },
+	["add_si"]             = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, imm = { { arg = 3, signed = true, width  = 16, },}, },
+	["add_u"]              = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["add_u_self"]         = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 },                                                       value = { dest = 1, op = "add_u", sources = { 1, 2 }, }, },
+	["add_ui"]             = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, imm   = { { arg = 3, signed = true, width = 16, }, }, value = { dest = 1, immediate = 3, op = "add_ui", source = 2, }, },
+	["add_ui_self"]        = { cycles = 1,  kind = "alu",        reads = { 1 },    writes = { 1 }, imm   = { { arg = 2, signed = true, width = 16, }, }, value = { dest = 1, immediate = 2, op = "add_ui", source = 1, },  },
+	["and"]                = { cycles = 1,  kind = "alu", },
+	["and_i"]              = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, imm   = { { arg = 3, width = 16, }, },                value = { dest = 1, immediate = 3, op = "and_i", source = 2, }, },
+	["and_u"]              = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["atom_bind"]          = { cycles = 0,  kind = "marker",     reads = {},       writes = {}, },
+	["atom_info"]          = { cycles = 0,  kind = "marker",     reads = {},       writes = {}, },
+	["atom_label"]         = { cycles = 0,  kind = "marker",     reads = {},       writes = {}, },
+	["atom_offset"]        = { cycles = 0,  kind = "marker",     reads = {},       writes = {}, },
+	["atom_reads"]         = { cycles = 0,  kind = "marker",     reads = {},       writes = {}, },
+	["atom_writes"]        = { cycles = 0,  kind = "marker",     reads = {},       writes = {}, },
+	["branch_equal"]       = { cycles = 2,  kind = "branch",     reads = { 1, 2 }, writes = {}, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["branch_ge_zero"]     = { cycles = 2,  kind = "branch",     reads = { 1 },    writes = {}, imm = { { arg = 2, signed = true, width = 16, }, }, },
+	["branch_gt_zero"]     = { cycles = 2,  kind = "branch",     reads = { 1 },    writes = {}, imm = { { arg = 2, signed = true, width = 16, }, }, },
+	["branch_le_zero"]     = { cycles = 2,  kind = "branch",     reads = { 1 },    writes = {}, imm = { { arg = 2, signed = true, width = 16, }, }, },
+	["branch_lt_zero"]     = { cycles = 2,  kind = "branch",     reads = { 1 },    writes = {}, imm = { { arg = 2, signed = true, width = 16, }, }, },
+	["branch_ne"]          = { cycles = 2,  kind = "branch",     reads = { 1, 2 }, writes = {}, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["call_addr"]          = { cycles = 2,  kind = "call",       reads = {},       writes = { 1 }, },
+	["call_reg"]           = { cycles = 2,  kind = "call",       reads = { 1 },    writes = { 2 }, },
+	["div_s"]              = { cycles = 35, kind = "alu",        reads = { 1, 2 }, writes = {}, },
+	["div_u"]              = { cycles = 35, kind = "alu",        reads = { 1, 2 }, writes = {}, },
+	["gte_load_v0"]        = { cycles = 2,  kind = "cop2_xfer",  reads = { 2 },    writes = {}, },
+	["gte_load_v0v1v2"]    = { cycles = 6,  kind = "cop2_xfer",  reads = { 2 },    writes = {}, },
+	["gte_load_v1"]        = { cycles = 2,  kind = "cop2_xfer",  reads = { 2 },    writes = {}, },
+	["gte_load_v2"]        = { cycles = 2,  kind = "cop2_xfer",  reads = { 2 },    writes = {}, },
+	["gte_lw"]             = { cycles = 1,  kind = "load",       reads = { 2 },    writes = {}, },
+	["gte_lwc2"]           = { cycles = 1,  kind = "load", },
+	["gte_mv_from_ctrl_r"] = { cycles = 1,  kind = "cop2_xfer",  reads = {},       writes = { 1 }, },
+	["gte_mv_from_data_r"] = { cycles = 1,  kind = "cop2_xfer",  reads = {},       writes = { 1 }, },
+	["gte_mv_to_ctrl_r"]   = { cycles = 1,  kind = "cop2_xfer",  reads = { 1 },    writes = {}, },
+	["gte_mv_to_data_r"]   = { cycles = 1,  kind = "cop2_xfer",  reads = { 1 },    writes = {}, },
+	["gte_stotz"]          = { cycles = 1,  kind = "cop2_xfer",  reads = {},       writes = {}, },
+	["gte_stsxy3"]         = { cycles = 1,  kind = "cop2_xfer",  reads = {},       writes = {}, },
+	["gte_sw"]             = { cycles = 1,  kind = "store",      reads = { 2 },    writes = {}, },
+	["gte_swc2"]           = { cycles = 1,  kind = "store", },
+	["jump"]               = { cycles = 2,  kind = "jump",       reads = {},       writes = {}, },
+	["jump_link"]          = { cycles = 2,  kind = "call",       reads = { 1 },    writes = { 2 }, },
+	["jump_reg"]           = { cycles = 2,  kind = "jump",       reads = { 1 },    writes = {}, suppress_arg1 = { R_AtomJmp = "fixed mac_yield handshake", }, },
+	["jump_rel"]           = { cycles = 2,  kind = "branch", delay_slot = true, },
+	["li_s"]               = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, value = { dest = 1, immediate = 3, op = "add_ui", source = 2, }, },
+	["load_byte"]          = { cycles = 1,  kind = "load",       reads = { 2 },    writes = { 1 }, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["load_byte_u"]        = { cycles = 1,  kind = "load",       reads = { 2 },    writes = { 1 }, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["load_half"]          = { cycles = 1,  kind = "load",       reads = { 2 },    writes = { 1 }, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["load_half_u"]        = { cycles = 1,  kind = "load",       reads = { 2 },    writes = { 1 }, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["load_imm"]           = { cycles = 2,  kind = "alu",        reads = {},       writes = { 1 }, },
+	["load_ui"]            = { cycles = 1,  kind = "alu",        reads = {},       writes = { 1 }, },
+	["load_upper_i"]       = { cycles = 1,  kind = "alu",        reads = {},       writes = { 1 }, imm = { { arg = 2, width = 16, }, }, value = { dest = 1, immediate = 2, op = "load_upper_i", }, },
+	["load_word"]          = { cycles = 1,  kind = "load",       reads = { 2 },    writes = { 1 }, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["mac_yield"]          = { cycles = 0,  kind = "marker",     reads = {},       writes = {}, },
+	["mask_upper"]         = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, },
+	["mov_from_high"]      = { cycles = 2,  kind = "alu",        reads = {},       writes = { 1 }, },
+	["mov_from_low"]       = { cycles = 2,  kind = "alu",        reads = {},       writes = { 1 }, },
+	["mov_to_high"]        = { cycles = 1,  kind = "alu",        reads = { 1 },    writes = {}, },
+	["mov_to_low"]         = { cycles = 1,  kind = "alu",        reads = { 1 },    writes = {}, },
+	["mult_s"]             = { cycles = 12, kind = "alu",        reads = { 1, 2 }, writes = {}, },
+	["mult_u"]             = { cycles = 12, kind = "alu",        reads = { 1, 2 }, writes = {}, },
+	["nop"]                = { cycles = 1,  kind = "nop",        reads = {},       writes = {}, },
+	["nop2"]               = { cycles = 2,  kind = "nop",        reads = {},       writes = {}, },
+	["nor_u"]              = { cycles = 1,  kind = "alu", },
+	["or_i"]               = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, imm = { { arg = 3, width = 16, }, }, value = { dest = 1, immediate = 3, op = "or_i", source = 2, }, },
+	["or_i_self"]          = { cycles = 1,  kind = "alu",        reads = { 1 },    writes = { 1 }, imm = { { arg = 2, width = 16, }, }, value = { dest = 1, immediate = 2, op = "or_i", source = 1, }, },
+	["or_u"]               = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["or_u_self"]          = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, value = { dest = 1, op = "or", sources = { 1, 2 }, }, },
+	["set_lt_s"]           = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["set_lt_si"]          = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, },
+	["set_lt_u"]           = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["set_lt_ui"]          = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, },
+	["shift_aright"]       = { cycles = 1,  kind = "alu",        reads = { 2 },    writes = { 1 }, imm = { { arg = 3, width = 5, }, }, },
+	["shift_aright_var"]   = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, imm = { { arg = 3, width = 5, }, }, },
+	["shift_lleft"]        = { cycles = 1,  kind = "alu",        reads = { 2 },    writes = { 1 }, imm = { { arg = 3, width = 5, }, }, },
+	["shift_lleft_self"]   = { cycles = 1,  kind = "alu",        reads = { 1 },    writes = { 1 }, imm = { { arg = 2, width = 5, }, }, value = { dest = 1, immediate = 2, op = "shift_lleft", source = 1, }, },
+	["shift_lleft_var"]    = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["shift_lright"]       = { cycles = 1,  kind = "alu",        reads = { 2 },    writes = { 1 }, imm = { { arg = 3, width = 5, }, }, },
+	["slt_s"]              = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["slt_si"]             = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["slt_u"]              = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["slt_ui"]             = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, imm = { { arg = 3, signed = true, width = 16,}, }, },
+	["store_byte"]         = { cycles = 1,  kind = "store",      reads = { 1, 2 }, writes = {},    imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["store_half"]         = { cycles = 1,  kind = "store",      reads = { 1, 2 }, writes = {},    imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["store_word"]         = { cycles = 1,  kind = "store",      reads = { 1, 2 }, writes = {},    imm = { { arg = 3, signed = true, width = 16, }, }, },
+	["sub_s"]              = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["sub_u"]              = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
+	["sys_mov_from_cop0"]  = { cycles = 1,  kind = "cop0_xfer",  reads = {},       writes = { 1 }, },
+	["sys_mov_to_cop0"]    = { cycles = 1,  kind = "cop0_xfer",  reads = { 1 },    writes = {}, },
+	["xor_i"]              = { cycles = 1,  kind = "alu",        reads = { 1, 2 }, writes = { 1 }, imm = { { arg = 3, width = 16, }, }, value = { dest = 1, immediate = 3, op = "xor_i", source = 2, }, },
+	["xor_u"]              = { cycles = 1,  kind = "alu",        reads = { 2, 3 }, writes = { 1 }, },
 }
 
 -- One row per GTE command. Alias cycle numbers live here, not on INSTRUCTION.
 M.GTE_COMMAND = {
-
 	["gte_cmdw_avsz3"] = {
 		aliases = { "gte_avg_sort_z3", "gte_avsz3", "gte_cmdw_avg_sort_z3" },
-		cycles = 5,
-		inputs = { "C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3", "gte_cr_ZSF3" },
+		cycles  = 5,
+		inputs  = { "C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3", "gte_cr_ZSF3" },
 		outputs = {
-			{
-				register = "C2_OTZ",
-				role = "otz",
-			},
+			{ register = "C2_OTZ", role = "otz", },
 		},
 		latch = {
-			{
-				register = "C2_OTZ",
-				required = 4,
-			},
+			{ register = "C2_OTZ", required = 4, },
 		},
 	},
 	["gte_cmdw_avsz4"] = {
 		aliases = { "gte_avg_sort_z4", "gte_avsz4", "gte_cmdw_avg_sort_z4" },
-		cycles = 6,
-		inputs = { "C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3", "gte_cr_ZSF4" },
+		cycles  = 6,
+		inputs  = { "C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3", "gte_cr_ZSF4" },
 		outputs = {
-			{
-				register = "C2_OTZ",
-				role = "otz",
-			},
+			{ register = "C2_OTZ", role = "otz", },
 		},
 		latch = {
-			{
-				register = "C2_OTZ",
-				required = 4,
-			},
+			{ register = "C2_OTZ", required = 4, },
 		},
 	},
 	["gte_cmdw_gpf"] = {
@@ -891,301 +143,162 @@ M.GTE_COMMAND = {
 		cycles = 5,
 		inputs = { "C2_IR0", "C2_IR1", "C2_IR2", "C2_IR3" },
 		outputs = {
-			{
-				register = "C2_MAC1",
-				role = "mac_result",
-			},
-			{
-				register = "C2_MAC2",
-				role = "mac_result",
-			},
-			{
-				register = "C2_MAC3",
-				role = "mac_result",
-			},
-			{
-				register = "C2_IR1",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR2",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR3",
-				role = "latest_color",
-			},
+			{ register = "C2_MAC1", role = "mac_result", },
+			{ register = "C2_MAC2", role = "mac_result", },
+			{ register = "C2_MAC3", role = "mac_result", },
+			{ register = "C2_IR1", role = "latest_color", },
+			{ register = "C2_IR2", role = "latest_color", },
+			{ register = "C2_IR3", role = "latest_color", },
 		},
 		latch = {
-			{
-				register = "C2_MAC1",
-				required = 4,
-			},
-			{
-				register = "C2_MAC2",
-				required = 4,
-			},
-			{
-				register = "C2_MAC3",
-				required = 4,
-			},
-			{
-				register = "C2_IR1",
-				required = 4,
-			},
-			{
-				register = "C2_IR2",
-				required = 4,
-			},
-			{
-				register = "C2_IR3",
-				required = 4,
-			},
+			{ register = "C2_MAC1", required = 4, },
+			{ register = "C2_MAC2", required = 4, },
+			{ register = "C2_MAC3", required = 4, },
+			{ register = "C2_IR1",  required = 4, },
+			{ register = "C2_IR2",  required = 4, },
+			{ register = "C2_IR3",  required = 4, },
 		},
 	},
 	["gte_cmdw_mvmva"] = {
 		aliases = {},
 		cycles = 8,
-		inputs = { "C2_VXY0", "C2_VZ0", "C2_VXY1", "C2_VZ1", "C2_VXY2", "C2_VZ2", "C2_IR1", "C2_IR2", "C2_IR3", "gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13", "gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23", "gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33", "gte_cr_TRX", "gte_cr_TRY", "gte_cr_TRZ" },
+		inputs = { 
+			"C2_VXY0", "C2_VZ0",
+			"C2_VXY1", "C2_VZ1",
+			"C2_VXY2", "C2_VZ2",
+			"C2_IR1", "C2_IR2", "C2_IR3",
+			"gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13",
+			"gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23",
+			"gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33",
+			"gte_cr_TRX", "gte_cr_TRY", "gte_cr_TRZ"
+		},
 		outputs = {
-			{
-				register = "C2_IR1",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR2",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR3",
-				role = "latest_color",
-			},
+			{ register = "C2_IR1", role = "latest_color", },
+			{ register = "C2_IR2", role = "latest_color", },
+			{ register = "C2_IR3", role = "latest_color", },
 		},
 		latch = {
-			{
-				register = "C2_IR1",
-				required = 4,
-			},
-			{
-				register = "C2_IR2",
-				required = 4,
-			},
-			{
-				register = "C2_IR3",
-				required = 4,
-			},
+			{ register = "C2_IR1", required = 4, },
+			{ register = "C2_IR2", required = 4, },
+			{ register = "C2_IR3", required = 4, },
 		},
 	},
 	["gte_cmdw_nclip"] = {
 		aliases = { "gte_nclip" },
-		cycles = 8,
-		inputs = { "C2_SXY0", "C2_SXY1", "C2_SXY2" },
+		cycles  = 8,
+		inputs  = { "C2_SXY0", "C2_SXY1", "C2_SXY2" },
 		outputs = {
-			{
-				register = "C2_SZ3",
-				role = "mac_result",
-			},
+			{ register = "C2_SZ3", role = "mac_result", },
 		},
 		latch = {
-			{
-				register = "C2_SZ3",
-				required = 4,
-			},
+			{ register = "C2_SZ3", required = 4, },
 		},
 	},
 	["gte_cmdw_op"] = {
 		aliases = { "gte_cmdw_outer_product", "gte_cmdw_wedge" },
-		cycles = 6,
-		inputs = {},
+		cycles  = 6,
+		inputs  = {},
 		outputs = {
-			{
-				register = "C2_IR1",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR2",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR3",
-				role = "latest_color",
-			},
+			{ register = "C2_IR1", role = "latest_color", },
+			{ register = "C2_IR2", role = "latest_color", },
+			{ register = "C2_IR3", role = "latest_color", },
 		},
 		latch = {
-			{
-				register = "C2_IR1",
-				required = 4,
-			},
-			{
-				register = "C2_IR2",
-				required = 4,
-			},
-			{
-				register = "C2_IR3",
-				required = 4,
-			},
+			{ register = "C2_IR1", required = 4, },
+			{ register = "C2_IR2", required = 4, },
+			{ register = "C2_IR3", required = 4, },
 		},
 	},
 	["gte_cmdw_rtps"] = {
 		aliases = { "gte_cmdw_rotate_translate_perspective_single", "gte_rtps" },
 		cycles = 15,
-		inputs = { "C2_VXY0", "C2_VZ0", "C2_VXY1", "C2_VZ1", "C2_VXY2", "C2_VZ2", "C2_RGB", "C2_OTZ", "C2_IR0", "C2_IR1", "C2_IR2", "C2_IR3", "C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3", "gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13", "gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23", "gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33", "gte_cr_TRX", "gte_cr_TRY", "gte_cr_TRZ", "gte_cr_OFX", "gte_cr_OFY", "gte_cr_H", "gte_cr_DQA", "gte_cr_DQB" },
+		inputs = { 
+			"C2_VXY0", "C2_VZ0",
+			"C2_VXY1", "C2_VZ1",
+			"C2_VXY2", "C2_VZ2",
+			"C2_RGB", "C2_OTZ",
+			"C2_IR0", "C2_IR1", "C2_IR2", "C2_IR3",
+			"C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3",
+			"gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13",
+			"gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23",
+			"gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33",
+			"gte_cr_TRX", "gte_cr_TRY", "gte_cr_TRZ",
+			"gte_cr_OFX", "gte_cr_OFY",
+			"gte_cr_H",
+			"gte_cr_DQA", "gte_cr_DQB" 
+		},
 		outputs = {
-			{
-				register = "C2_SXY2",
-				role = "latest_screen_xy",
-			},
-			{
-				register = "C2_SZ2",
-				role = "latest_screen_z",
-			},
-			{
-				register = "C2_OTZ",
-				role = "otz",
-			},
-			{
-				register = "C2_IR0",
-				role = "latest_color",
-			},
+			{ register = "C2_SXY2", role = "latest_screen_xy", },
+			{ register = "C2_SZ2",  role = "latest_screen_z", },
+			{ register = "C2_OTZ",  role = "otz", },
+			{ register = "C2_IR0",  role = "latest_color", },
 		},
 		latch = {
-			{
-				register = "C2_SXY2",
-				required = 4,
-			},
-			{
-				register = "C2_SZ2",
-				required = 4,
-			},
-			{
-				register = "C2_OTZ",
-				required = 4,
-			},
-			{
-				register = "C2_IR0",
-				required = 4,
-			},
+			{ register = "C2_SXY2", required = 4, },
+			{ register = "C2_SZ2",  required = 4, },
+			{ register = "C2_OTZ",  required = 4, },
+			{ register = "C2_IR0",  required = 4, },
 		},
 	},
 	["gte_cmdw_rtpt"] = {
 		aliases = { "gte_cmdw_rotate_translate_perspective_triple", "gte_rtpt" },
 		cycles = 23,
-		inputs = { "C2_VXY0", "C2_VZ0", "C2_VXY1", "C2_VZ1", "C2_VXY2", "C2_VZ2", "C2_RGB", "C2_OTZ", "C2_IR0", "C2_IR1", "C2_IR2", "C2_IR3", "C2_SZ0", "C2_SZ1", "C2_SZ2", "C2_SZ3", "gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13", "gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23", "gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33", "gte_cr_TRX", "gte_cr_TRY", "gte_cr_TRZ", "gte_cr_OFX", "gte_cr_OFY", "gte_cr_H", "gte_cr_DQA", "gte_cr_DQB" },
+		inputs = { 
+			"C2_VXY0", "C2_VZ0",
+			"C2_VXY1", "C2_VZ1",
+			"C2_VXY2", "C2_VZ2",
+			"C2_RGB",  "C2_OTZ",
+			"C2_IR0",  "C2_IR1", "C2_IR2", "C2_IR3",
+			"C2_SZ0",  "C2_SZ1", "C2_SZ2", "C2_SZ3",
+			"gte_cr_RT11", "gte_cr_RT12", "gte_cr_RT13",
+			"gte_cr_RT21", "gte_cr_RT22", "gte_cr_RT23",
+			"gte_cr_RT31", "gte_cr_RT32", "gte_cr_RT33",
+			"gte_cr_TRX",  "gte_cr_TRY",  "gte_cr_TRZ",
+			"gte_cr_OFX",  "gte_cr_OFY",
+			"gte_cr_H",
+			"gte_cr_DQA", "gte_cr_DQB"
+		},
 		outputs = {
-			{
-				register = "C2_SXY0",
-				role = "screen_xy[0]",
-			},
-			{
-				register = "C2_SXY1",
-				role = "screen_xy[1]",
-			},
-			{
-				register = "C2_SXY2",
-				role = "latest_screen_xy",
-			},
-			{
-				register = "C2_SZ3",
-				role = "latest_screen_z",
-			},
-			{
-				register = "C2_OTZ",
-				role = "otz",
-			},
+			{ register = "C2_SXY0", role = "screen_xy[0]", },
+			{ register = "C2_SXY1", role = "screen_xy[1]", },
+			{ register = "C2_SXY2", role = "latest_screen_xy", },
+			{ register = "C2_SZ3",  role = "latest_screen_z", },
+			{ register = "C2_OTZ",  role = "otz", },
 		},
 		latch = {
-			{
-				register = "C2_SXY0",
-				required = 4,
-			},
-			{
-				register = "C2_SXY1",
-				required = 4,
-			},
-			{
-				register = "C2_SXY2",
-				required = 4,
-			},
-			{
-				register = "C2_SZ3",
-				required = 4,
-			},
-			{
-				register = "C2_OTZ",
-				required = 4,
-			},
+			{ register = "C2_SXY0", required = 4, },
+			{ register = "C2_SXY1", required = 4, },
+			{ register = "C2_SXY2", required = 4, },
+			{ register = "C2_SZ3",  required = 4, },
+			{ register = "C2_OTZ",  required = 4, },
 		},
 	},
 	["gte_cmdw_sqr"] = {
 		aliases = {},
-		cycles = 5,
-		inputs = { "C2_IR1", "C2_IR2", "C2_IR3" },
+		cycles  = 5,
+		inputs  = { "C2_IR1", "C2_IR2", "C2_IR3" },
 		outputs = {
-			{
-				register = "C2_MAC1",
-				role = "mac_result",
-			},
-			{
-				register = "C2_MAC2",
-				role = "mac_result",
-			},
-			{
-				register = "C2_MAC3",
-				role = "mac_result",
-			},
-			{
-				register = "C2_IR1",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR2",
-				role = "latest_color",
-			},
-			{
-				register = "C2_IR3",
-				role = "latest_color",
-			},
+			{ register = "C2_MAC1", role = "mac_result", },
+			{ register = "C2_MAC2", role = "mac_result", },
+			{ register = "C2_MAC3", role = "mac_result", },
+			{ register = "C2_IR1",  role = "latest_color", },
+			{ register = "C2_IR2",  role = "latest_color", },
+			{ register = "C2_IR3",  role = "latest_color", },
 		},
 		latch = {
-			{
-				register = "C2_MAC1",
-				required = 4,
-			},
-			{
-				register = "C2_MAC2",
-				required = 4,
-			},
-			{
-				register = "C2_MAC3",
-				required = 4,
-			},
-			{
-				register = "C2_IR1",
-				required = 4,
-			},
-			{
-				register = "C2_IR2",
-				required = 4,
-			},
-			{
-				register = "C2_IR3",
-				required = 4,
-			},
+			{ register = "C2_MAC1", required = 4, },
+			{ register = "C2_MAC2", required = 4, },
+			{ register = "C2_MAC3", required = 4, },
+			{ register = "C2_IR1",  required = 4, },
+			{ register = "C2_IR2",  required = 4, },
+			{ register = "C2_IR3",  required = 4, },
 		},
 	},
 }
 
-function M.instr(ident)
-	return M.INSTRUCTION[ident]
-end
-
-function M.gte_canon(ident)
-	return M.ALIAS_TO_CANONICAL[ident] or ident
-end
-
-function M.gte(ident)
-	return M.GTE_COMMAND[M.gte_canon(ident)]
-end
+function M.instr    (ident) return M.INSTRUCTION            [ident]          end
+function M.gte_canon(ident) return M.ALIAS_TO_CANONICAL     [ident] or ident end
+function M.gte      (ident) return M.GTE_COMMAND[M.gte_canon(ident)]         end
 
 local function build_isa_views()
 	M.ALIAS_TO_CANONICAL = {}
@@ -1195,10 +308,10 @@ local function build_isa_views()
 			M.ALIAS_TO_CANONICAL[alias] = canon
 		end
 	end
-	M.INSTRUCTION_LATENCY = {}
+	M.INSTRUCTION_LATENCY     = {}
 	M.INSTRUCTION_GPR_EFFECTS = {}
-	M.IMMEDIATE_FIELD_WIDTHS = {}
-	M.GPR_VALUE_RULES = {}
+	M.IMMEDIATE_FIELD_WIDTHS  = {}
+	M.GPR_VALUE_RULES         = {}
 	M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES = {}
 	for name, row in pairs(M.INSTRUCTION) do
 		M.INSTRUCTION_LATENCY[name] = row.cycles
@@ -1208,31 +321,31 @@ local function build_isa_views()
 				writes = row.writes or {},
 			}
 		end
-		if row.imm then M.IMMEDIATE_FIELD_WIDTHS[name] = row.imm end
-		if row.value then M.GPR_VALUE_RULES[name] = row.value end
+		if row.imm   then M.IMMEDIATE_FIELD_WIDTHS[name] = row.imm end
+		if row.value then M.GPR_VALUE_RULES       [name] = row.value end
 		if (row.kind == "branch" or row.kind == "jump" or row.kind == "call")
 			and row.delay_slot ~= false then
 			M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES[name] = {
-				family = row.kind,
+				family        = row.kind,
 				suppress_arg1 = row.suppress_arg1,
 			}
 		end
 	end
 	M.GTE_COMMAND_ALIASES = {}
-	M.GTE_COMMAND_INPUTS = {}
+	M.GTE_COMMAND_INPUTS  = {}
 	M.GTE_COMMAND_OUTPUTS = {}
 	M.GTE_COMMAND_LATCH_WINDOWS = {}
 	for canon, row in pairs(M.GTE_COMMAND) do
-		M.GTE_COMMAND_ALIASES[canon] = canon
-		M.INSTRUCTION_LATENCY[canon] = row.cycles
+		M.GTE_COMMAND_ALIASES    [canon] = canon
+		M.INSTRUCTION_LATENCY    [canon] = row.cycles
 		M.INSTRUCTION_GPR_EFFECTS[canon] = { reads = {}, writes = {} }
 		for _, alias in ipairs(row.aliases or {}) do
-			M.GTE_COMMAND_ALIASES[alias] = canon
-			M.INSTRUCTION_LATENCY[alias] = row.cycles
+			M.GTE_COMMAND_ALIASES    [alias] = canon
+			M.INSTRUCTION_LATENCY    [alias] = row.cycles
 			M.INSTRUCTION_GPR_EFFECTS[alias] = { reads = {}, writes = {} }
 		end
-		M.GTE_COMMAND_INPUTS[canon] = row.inputs
-		M.GTE_COMMAND_OUTPUTS[canon] = row.outputs
+		M.GTE_COMMAND_INPUTS       [canon] = row.inputs
+		M.GTE_COMMAND_OUTPUTS      [canon] = row.outputs
 		M.GTE_COMMAND_LATCH_WINDOWS[canon] = row.latch
 	end
 end
@@ -1240,22 +353,19 @@ build_isa_views()
 
 
 --- GTE control-register alias groups.
---- Aliases within a group write to the same C2 control-register slot on real silicon
---- (the silicon double-maps some C2 slots across multiple PSX SDK / libgte conventions).
+--- Aliases within a group write to the same C2 control-register slot (the HW double-maps some C2 slots across multiple PSX SDK / libgte conventions).
 --- Aliases across groups write to distinct C2 slots.
 ---
---- Cross-alias writes inside one atom body, or across the wave-context boundary,
---- silently clobber each other. The `check_gte_cr_alias_writes` check warns about
---- each pair per source. See `docs/gte_reference.md` §"Control-register alias table"
---- for the silicon rationale and the libgte outer-product convention.
+--- Cross-alias writes inside one atom body, or across the wave-context boundary, silently clobber each other.
+--- The `check_gte_cr_alias_writes` check warns about each pair per source. See `docs/gte_reference.md` §"Control-register alias table"
+--- for the HW rationale and the libgte outer-product convention.
 M.GTE_CR_ALIAS_GROUPS = {
 	{ 24, { "gte_cr_RBK", "gte_cr_OFX" } },   -- background R vs screen offset X
 	{ 25, { "gte_cr_GBK", "gte_cr_OFY" } },   -- background G vs screen offset Y
 	{ 26, { "gte_cr_BBK", "gte_cr_H"   } },   -- background B vs projection plane distance H
 }
 
--- Packed RT slots named by the gte.h packed-slot comment.
--- first must be written before second.
+-- Packed RT slots named by the gte.h packed-slot comment. First must be written before second.
 M.GTE_PACKED_SLOT_RELATIONS = {
 	{ slot = 2, first = "gte_cr_RT13", second = "gte_cr_RT22" },
 }
@@ -1265,8 +375,8 @@ M.GTE_PACKED_SLOT_RELATIONS = {
 -- Covers the current encoder vocabulary (`code/duffle/mips.h` + `code/duffle/gte.h`); add rows here as new encoders land.
 --
 -- Semantics:
---   * A "GPR operand position" is the textual slot in the macro's argument list, 1-based; e.g. `load_word(rt, base, off)` has
---     positional operands 1 (rt), 2 (base), 3 (off). The table reads operands 1 + 2 + 3 to find what GPRs the macro touches.
+--   * A "GPR operand position" is the textual slot in the macro's argument list, 1-based; e.g. `load_word(rt, base, off)` has positional operands 1 (rt), 2 (base), 3 (off).
+--     The table reads operands 1 + 2 + 3 to find what GPRs the macro touches.
 --   * The check tracks one entry per destination GPR per MFC2 / CFC2 event.
 --     A subsequent event counts as a "use" iff any of its read operand positions reference that destination GPR's ident (e.g. `R_T0`).
 --   * Branch delay slots are out of scope (MIPS control-flow; tracked separately).
@@ -1405,9 +515,9 @@ M.UNKNOWN_INSTRUCTION_CYCLES = 1
 --
 -- Visibility semantics:
 --   * `kind = "post_producer_words"` means the consumer observes the producer's effect after `required` independent emitted words that are
---     strictly between the producer and the consumer. The producer's own emitted slot is implicit (it counts as the slot of issue, not toward
---     `required`) — per the PSX-SPX rule: "Store delays are counted in numbers of clock cycles (not in numbers of opcodes). For 3 cycle delay,
---     one must usually insert 3 cached opcodes (or one uncached opcode)."
+--     strictly between the producer and the consumer. The producer's own emitted slot is implicit (it counts as the slot of issue, not toward `required`) 
+--     per the PSX-SPX rule: "Store delays are counted in numbers of clock cycles (not in numbers of opcodes).
+--     For 3 cycle delay, one must usually insert 3 cached opcodes (or one uncached opcode)."
 --   * `required` is the minimum count of intervening emitted words between producer and consumer.
 --     `required = 0` permits the consumer on the very next slot; `required < 0` would place the consumer on the same slot as the producer
 --     and is reserved for future "self-retires" relations.

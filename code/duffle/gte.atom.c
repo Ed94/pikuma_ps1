@@ -118,7 +118,7 @@ atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	gte_mv_to_data_r(r_sx,        C2_IR1),
 	gte_mv_to_data_r(r_sy,        C2_IR2),
 	gte_mv_to_data_r(r_sz,        C2_IR3),
-	nop2, /* retire IR0..IR3 → GPF input pre-fill (matches libgte 0x80016134..0x80016138) */
+	GteDelay_ nop2, /* retire IR0..IR3 → GPF input pre-fill (matches libgte 0x80016134..0x80016138) */
 	gte_cmdw_gpf,
 	gte_mv_from_data_r(r_dx, C2_MAC1),
 	gte_mv_from_data_r(r_dy, C2_MAC2),
@@ -137,29 +137,26 @@ FI_ Slice_MipsCode ac_trans_mt3s3s4(AtomBuilder_R ab
 	,	U4 r_mtx, U4 r_off
 	,	U4 r_t0, U4 r_t1, U4 r_t2
 ) MipsAtomComp_Proc_(ab, {
-	load_word(r_t0, r_off, O_(V3_S4,x)),
-	load_word(r_t1, r_off, O_(V3_S4,y)),
-	load_word(r_t2, r_off, O_(V3_S4,z)),
+	load_word( r_t0, r_off, O_(V3_S4,x)),
+	load_word( r_t1, r_off, O_(V3_S4,y)),
+	load_word( r_t2, r_off, O_(V3_S4,z)),
 	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])),
 	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])),
 	store_word(r_t2, r_mtx, O_(MT3_S2S4,t[2])),
 })
 
 /* ─── LZCR ROUND EVEN + HALF-SHIFT ───
- * Takes the raw LZCR leading-zero/ones count (from mfc2 C2_LZCR, range 1..32
- * per PSX-SPX cop2r31) and the |v|² sum (in r_mag_sq from the MAC1+MAC2+MAC3
- * add). Produces:
+ * Takes the raw LZCR leading-zero/ones count (from mfc2 C2_LZCR, range 1..32 per PSX-SPX cop2r31) and the |v|² sum (in r_mag_sq from the MAC1+MAC2+MAC3 add).
+ * Produces:
  *   r_shift        ← LZCR rounded down to even (clear bit 0)
  *   r_mag_sq_copy  ← |v|² sum (moved out of r_mag_sq before it's overwritten)
  *   r_mag_sq       ← (31 - even_LZCR) / 2 = the final srav/GPF shift amount
  *
- * Rounding to even ensures (31 - LZCR) is always odd, so the >> 1 division
- * is consistent — no 0.5 loss. The caller branches on LZCR < 24 to decide
- * left-shift vs right-shift of r_mag_sq_copy, then saves the shift count.
+ * Rounding to even ensures (31 - LZCR) is always odd, so the >> 1 division is consistent — no 0.5 loss.
+ * The caller branches on LZCR < 24 to decide left-shift vs right-shift of r_mag_sq_copy, then saves the shift count.
  *
- * Note: C2_LZCR (cop2r31) is a fixed read-only C2 data register — the caller
- * must read it via mfc2 from C2_LZCR; there is no register choice at the
- * hardware level. Only the GPR that holds the result is caller-determined. */
+ * Note: C2_LZCR (cop2r31) is a fixed read-only C2 data register — the caller must read it via mfc2 from C2_LZCR;
+ * there is no register choice at the hardware level. Only the GPR that holds the result is caller-determined. */
 FI_ Slice_MipsCode ac_lzcr_round_even_half_shift(AtomBuilder_R ab,
 	U4 r_shift,
 	U4 r_mag_sq,
@@ -167,8 +164,8 @@ FI_ Slice_MipsCode ac_lzcr_round_even_half_shift(AtomBuilder_R ab,
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	and_i(r_shift, r_shift, gte_lzcr_even_mask),
 	or_u(r_mag_sq_copy, r_mag_sq, 0),
-	li_s(r_mag_sq, 31),
-	sub_s(r_mag_sq, r_mag_sq, r_shift),
+	li_s(        r_mag_sq, 31),
+	sub_s(       r_mag_sq, r_mag_sq, r_shift),
 	shift_aright(r_mag_sq, r_mag_sq, 1),
 })
 
@@ -206,8 +203,7 @@ FI_ Slice_MipsCode ac_gte_mv_from_mac123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) M
 
 /* ─── Local copy of PSYQ's sqrtbl (1/sqrt lookup table for VectorNormal). ───
  * Source: PSYQ 4.7 libgte sqrtbl at 0x800185B4 in hello_camera.elf.
- *   objdump -s --start-address=0x800185B4 --stop-address=0x800185F4 hello_camera.elf
- *   → 192 entries × 16-bit signed, in 1.12 fixed-point (max value 0x1000 = 1.0).
+ *   objdump -s --start-address=0x800185B4 --stop-address=0x800185F4 hello_camera.elf → 192 entries × 16-bit signed, in 1.12 fixed-point (max value 0x1000 = 1.0).
  *
  * Data is identical to the libgte original (byte-for-byte verified).
  * 
@@ -400,12 +396,22 @@ internal MipsAtom_(set_gte_mt3s2s4) atom_info(
 	load_word(R_T3, R_TapePtr, O_(Binds_SetGteMT3S2S4,transform)),
 	add_ui_self(    R_TapePtr, S_(Binds_SetGteMT3S2S4)),
 	/* Load 3x3 Rotation + 3x1 Translation from R_T3 into GTE CONTROL Regs (ctc2) */
-	load_word(R_T0, R_T3, 0),  load_word(R_T1, R_T3,  4), 
-	gte_mv_to_ctrl_r(R_T0, gte_cr_RT11), gte_mv_to_ctrl_r(R_T1, gte_cr_RT12),
-	load_word(R_T0, R_T3, 8),  load_word(R_T1, R_T3, 12), load_word(R_T2, R_T3, 16),
-	gte_mv_to_ctrl_r(R_T0, gte_cr_RT13), gte_mv_to_ctrl_r(R_T1, gte_cr_RT21), gte_mv_to_ctrl_r(R_T2, gte_cr_RT22),
-	load_word(R_T0, R_T3, 20), load_word(R_T1, R_T3, 24), load_word(R_T2, R_T3, 28),
-	gte_mv_to_ctrl_r(R_T0, gte_cr_TRX),  gte_mv_to_ctrl_r(R_T1, gte_cr_TRY),  gte_mv_to_ctrl_r(R_T2, gte_cr_TRZ),
+	load_word(R_T0, R_T3, 0), 
+	load_word(R_T1, R_T3, 4), 
+	gte_mv_to_ctrl_r(R_T0, gte_cr_RT11),
+	gte_mv_to_ctrl_r(R_T1, gte_cr_RT12),
+	load_word(R_T0, R_T3,  8),
+	load_word(R_T1, R_T3, 12),
+	load_word(R_T2, R_T3, 16),
+	gte_mv_to_ctrl_r(R_T0, gte_cr_RT13),
+	gte_mv_to_ctrl_r(R_T1, gte_cr_RT21),
+	gte_mv_to_ctrl_r(R_T2, gte_cr_RT22),
+	load_word(R_T0, R_T3, 20),
+	load_word(R_T1, R_T3, 24),
+	load_word(R_T2, R_T3, 28),
+	gte_mv_to_ctrl_r(R_T0, gte_cr_TRX),
+	gte_mv_to_ctrl_r(R_T1, gte_cr_TRY),
+	gte_mv_to_ctrl_r(R_T2, gte_cr_TRZ),
 	mac_yield()
 };
 

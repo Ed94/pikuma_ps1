@@ -283,7 +283,7 @@ WORD_COUNT(mac_gte_sqr_v3s4, 5)
 ,	gte_mv_to_data_r(r_sx,        C2_IR1) \
 ,	gte_mv_to_data_r(r_sy,        C2_IR2) \
 ,	gte_mv_to_data_r(r_sz,        C2_IR3) \
-,	nop2 /* retire IR0..IR3 → GPF input pre-fill (matches libgte 0x80016134..0x80016138) */ \
+,	GteDelay_ nop2 /* retire IR0..IR3 → GPF input pre-fill (matches libgte 0x80016134..0x80016138) */ \
 ,	gte_cmdw_gpf \
 ,	gte_mv_from_data_r(r_dx, C2_MAC1) \
 ,	gte_mv_from_data_r(r_dy, C2_MAC2) \
@@ -291,12 +291,12 @@ WORD_COUNT(mac_gte_sqr_v3s4, 5)
 ,	shift_aright_var(r_dx, r_dx, r_shift) \
 ,	shift_aright_var(r_dy, r_dy, r_shift) \
 ,	shift_aright_var(r_dz, r_dz, r_shift)
-WORD_COUNT(mac_gte_gpf_scale, 13)
+WORD_COUNT(mac_gte_gpf_scale, 12)
 
 #define mac_trans_mt3s3s4(r_mtx, r_off, r_t0, r_t1, r_t2) \
-	load_word(r_t0, r_off, O_(V3_S4,x)) \
-,	load_word(r_t1, r_off, O_(V3_S4,y)) \
-,	load_word(r_t2, r_off, O_(V3_S4,z)) \
+	load_word( r_t0, r_off, O_(V3_S4,x)) \
+,	load_word( r_t1, r_off, O_(V3_S4,y)) \
+,	load_word( r_t2, r_off, O_(V3_S4,z)) \
 ,	store_word(r_t0, r_mtx, O_(MT3_S2S4,t[0])) \
 ,	store_word(r_t1, r_mtx, O_(MT3_S2S4,t[1])) \
 ,	store_word(r_t2, r_mtx, O_(MT3_S2S4,t[2]))
@@ -306,8 +306,8 @@ WORD_COUNT(mac_trans_mt3s3s4, 6)
 #define mac_lzcr_round_even_half_shift(r_shift, r_mag_sq, r_mag_sq_copy) \
 	and_i(r_shift, r_shift, gte_lzcr_even_mask) \
 ,	or_u(r_mag_sq_copy, r_mag_sq, 0) \
-,	li_s(r_mag_sq, 31) \
-,	sub_s(r_mag_sq, r_mag_sq, r_shift) \
+,	li_s(        r_mag_sq, 31) \
+,	sub_s(       r_mag_sq, r_mag_sq, r_shift) \
 ,	shift_aright(r_mag_sq, r_mag_sq, 1)
 WORD_COUNT(mac_lzcr_round_even_half_shift, 5)
 
@@ -337,7 +337,7 @@ WORD_COUNT(mac_gte_mv_from_mac123_v3s4, 3)
 /* atom_dbg_skip */
 #define mac_gcmd_push(cmd, reg_transfer, reg_base, port) \
 	mac_load_word_imm(reg_transfer, cmd) \
-,	store_word(  reg_transfer, reg_base, port)
+,	store_word(       reg_transfer, reg_base, port)
 WORD_COUNT(mac_gcmd_push, 3)
 
 /* atom_dbg_skip */
@@ -383,8 +383,8 @@ WORD_COUNT(mac_insert_ot_tag, 11)
 /* atom_dbg_skip */
 #define mac_pad_set_centered_axes(state, scratch) \
 	load_upper_i(scratch, (PadAxis_Centered >> 16) & 0xFFFF) \
-,	or_i_self(   scratch,  PadAxis_Centered        & 0xFFFF)		/* mac_load_word_imm(scratch, PadAxis_Centered), */ \
-,	store_word(       scratch, state, O_(PadState,axes))
+,	or_i_self(   scratch,  PadAxis_Centered        & 0xFFFF) /* mac_load_word_imm(scratch, PadAxis_Centered), */ \
+,	store_word(  scratch, state, O_(PadState,axes))
 WORD_COUNT(mac_pad_set_centered_axes, 3)
 
 /* atom_dbg_skip */
@@ -401,7 +401,7 @@ WORD_COUNT(mac_pad_set_status, 2)
 
 /* atom_dbg_skip */
 #define mac_pad_store_inverted_buttons(r_buttons, r_pad_state) \
-	nor_u(       r_buttons, r_buttons, R_0) \
-,	store_half(  r_buttons, r_pad_state, O_(PadState,buttons))
+	nor_u(     r_buttons, r_buttons, R_0) \
+,	store_half(r_buttons, r_pad_state, O_(PadState,buttons))
 WORD_COUNT(mac_pad_store_inverted_buttons, 2)
 

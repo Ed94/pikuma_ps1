@@ -74,11 +74,11 @@ end
 --- @param tok string
 --- @return string, string[]
 local function token_ident_and_args(tok)
-	local ident, after = M.read_ident(tok, 1)
+	local  ident, after = M.read_ident(tok, 1)
 	if not ident then return "?", {} end
 	local paren_pos = M.skip_ws_and_cmt(tok, after)
 	if tok:sub(paren_pos, paren_pos) ~= "(" then return ident, {} end
-	local inner = M.read_parens(tok, paren_pos)
+	local  inner = M.read_parens(tok, paren_pos)
 	if not inner then return ident, {} end
 	return ident, split_call_args(inner)
 end
@@ -104,9 +104,9 @@ local E_MAC_PREFIX_LEN = 4
 ---
 --- Pure: reads `body_entry` / `component_index` / `word_counts`. Memoization is the caller's responsibility.
 --- Callers wanting `word_events` / `word_event_errors` precomputed for many atoms should memoize them per atom.
---- @param body_entry       table        -- `{body_tokens, body_off, line_of, source, declaration}` (declaration = root atom's atom.line)
---- @param component_index  table        -- the bare-name → ComponentBodyEntry map from M.get_component_body_index
---- @param word_counts      table        -- macro name → emitted-word count (from `ctx.shared.word_counts`)
+--- @param body_entry       table -- `{body_tokens, body_off, line_of, source, declaration}` (declaration = root atom's atom.line)
+--- @param component_index  table -- the bare-name → ComponentBodyEntry map from M.get_component_body_index
+--- @param word_counts      table -- macro name → emitted-word count (from `ctx.shared.word_counts`)
 --- @return WordEvent[], WordEventError[]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -775,18 +775,16 @@ end
 -------------------------------------------------------------------------------
 -- find_function_decl_for — backward walk for MipsAtomComp_Proc_ name extraction.
 --
--- After the `sym` arg was dropped from MipsAtomComp_Proc_, the component name
--- is derived from the preceding `FI_ Slice_MipsCode ac_X(args)` function
--- declaration. This function walks backward from `before_pos` to find it.
+-- After the `sym` arg was dropped from MipsAtomComp_Proc_, the component name is derived from the preceding
+-- `FI_ Slice_MipsCode ac_X(args)` function declaration. This function walks backward from `before_pos` to find it.
 --
 -- Returns (raw_name, args_inner) or (nil, nil).
 --   raw_name   — e.g. "ac_load_word_imm"
 --   args_inner — e.g. "AtomBuilder_R ab, Reg dst, U4 imm"
 --
--- The walk finds the LAST "Slice_MipsCode" before before_pos, then skips
--- whitespace + qualifiers (FI_, atom_dbg_skip, comments) until it finds an
--- ident followed by "(". That ident is the function name; the parens contents
--- are the args.
+-- The walk finds the LAST "Slice_MipsCode" before before_pos, then skips whitespace + qualifiers
+-- (FI_, atom_dbg_skip, comments) until it finds an ident followed by "(".
+-- That ident is the function name; the parens contents are the args.
 -------------------------------------------------------------------------------
 function M.find_function_decl_for(source, before_pos, slice_mips_code_len)
 	local search_pos = 1
@@ -819,13 +817,13 @@ function M.find_function_decl_for(source, before_pos, slice_mips_code_len)
 		end
 		-- skip block comments
 		if source:sub(pos, pos + 1) == "/*" then
-			local close = source:find("*/", pos + 2, true)
+			local  close = source:find("*/", pos + 2, true)
 			if not close then break end
 			pos = close + 2
 			goto continue
 		end
 		-- try to read an ident
-		local ident, ident_end = M.read_ident(source, pos)
+		local  ident, ident_end = M.read_ident(source, pos)
 		if not ident then break end
 		-- check if the next non-ws char after ident is "("
 		local next_pos = M.skip_ws_and_cmt(source, ident_end)
@@ -853,16 +851,15 @@ end
 --   args_inner  — e.g. "AtomArena_R aa, U4 r_scratch, ..."
 --   after_paren — source position after the function `)`
 --
--- The walk finds the LAST "MipsAtom*" before before_pos, then skips
--- whitespace + qualifiers (internal, I_, FI_, comments) until it finds an
--- ident followed by "(". That ident is the name. The parens contents are the args.
+-- The walk finds the LAST "MipsAtom*" before before_pos, then skips whitespace + qualifiers (internal, I_, FI_, comments)
+-- until it finds an ident followed by "(".
 -------------------------------------------------------------------------------
 function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 	local search_pos = 1
 	local last_match = nil
 	while true do
 		-- plain=true: "*" is literal, no escaping needed
-		local found = source:find("MipsAtom*", search_pos, true)
+		local  found = source:find("MipsAtom*", search_pos, true)
 		if not found or found >= before_pos then break end
 		last_match = found
 		search_pos = found + mips_atom_ptr_len
@@ -889,13 +886,13 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 		end
 		-- skip block comments
 		if source:sub(pos, pos + 1) == "/*" then
-			local close = source:find("*/", pos + 2, true)
+			local  close = source:find("*/", pos + 2, true)
 			if not close then break end
 			pos = close + 2
 			goto continue
 		end
 		-- try to read an ident
-		local ident, ident_end = M.read_ident(source, pos)
+		local  ident, ident_end = M.read_ident(source, pos)
 		if not ident then break end
 		-- check if the next non-ws char after ident is "("
 		local next_pos = M.skip_ws_and_cmt(source, ident_end)
@@ -912,4 +909,4 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 	return nil, nil
 end
 
-	return M
+return M

@@ -16,9 +16,6 @@
  *            gte_mv_to_data_r   (gte + mv + to + data + register)
  *            gte_lw_v0_xy(base) (gte + lw + v0 + xy)
  *            load_upper_i       (load-upper + immediate, unique verb)
- *
- *  Vendor mnemonics (gte_mtc2, gte_mfc2, gte_lwc2, gte_swc2, etc.) are NOT in this header.
- *  They are in the opt-in `gte_vendor_sym.h` for users who prefer the textbook MIPS assembly mnemonics.
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -442,9 +439,8 @@ enum { _C2_TX_SUBS_ = 0
 /* MVMVA: sf=1 (>>12), mx=0 (RT matrix), v=0 (V0), cv=3 (no TR). */
 #define gte_cmdw_mvmva_sf1_mx0_v0_cv3  (gte_cmd_base | enc_gte_sf(1) | enc_gte_cv(3) | enc_gte_v(0) | enc_gte_mx(0) | enc_gte_cmd(gte_cmd_mvmva))
 
-/* RTPS with sf=1 (12-bit shift, no translation): matches the output of libgte's
- * ApplyMatrixLV when the GTE pipeline expects R*pos >> 12. The shift produces
- * values like (-270, 710, 1713) which match the C11 reference path. */
+/* RTPS with sf=1 (12-bit shift, no translation): matches the output of libgte's ApplyMatrixLV when the GTE pipeline expects R*pos >> 12. 
+ * The shift produces values like (-270, 710, 1713) which match the C11 reference path. */
 #define gte_cmdw_rtps_sf1   (gte_cmd_base | enc_gte_sf(1) | enc_gte_cv(3) | enc_gte_cmd(gte_cmd_rtps))
 
 /* SQR / GPF cosmetic-bits compat helpers.
@@ -477,10 +473,8 @@ enum { _C2_TX_SUBS_ = 0
  *   bits 24-20 = 0x19 (libgte "nonsense SDK command number" signature) */
 #define gte_cmdw_gpf   (gte_cmd_base | enc_gte_cmd(gte_cmd_gpf) | gte_cmdw_gpf_fake_sig)
 
-/* Mask to round LZCR (leading-zero/ones count, range 1..32 per PSX-SPX cop2r31)
- * down to even. The normalize_v3s4 half-shift logic computes (31 - LZCR) >> 1;
- * clearing bit 0 ensures the subtraction result is always odd,
- * so the >> 1 division is consistent (no 0.5 loss). */
+/* Mask to round LZCR (leading-zero/ones count, range 1..32 per PSX-SPX cop2r31) down to even.
+ * The normalize_v3s4 half-shift logic computes (31 - LZCR) >> 1; clearing bit 0 ensures the subtraction result is always odd, so the >> 1 division is consistent (no 0.5 loss). */
 enum {
 	gte_lzcr_even_mask = 0xFFFE, /* all bits except bit 0 */
 };
@@ -587,8 +581,8 @@ enum {
 
 /* gte_load_v0v1v2(p0, p1, p2, b0, b1, b2) — prelude to gte_cmd_rtpt.
  *
- * Loads all three GTE input vectors (6 words) from three separate pointers, one per GTE vector register,
- * each loaded from its own base GPR. Caller must bind each `pN` to `bN` via a register variable.
+ * Loads all three GTE input vectors (6 words) from three separate pointers, one per GTE vector register, each loaded from its own base GPR.
+ * Caller must bind each `pN` to `bN` via a register variable.
  *   register V3_S2* p0 rgcc(R_T4) = verts[0].ptr;  // → __asm__("$12")
  *   register V3_S2* p1 rgcc(R_T5) = verts[1].ptr;  // → __asm__("$13")
  *   register V3_S2* p2 rgcc(R_T6) = verts[2].ptr;  // → __asm__("$14")
@@ -682,8 +676,7 @@ enum {
  * Loads the 3x3 rotation matrix at `r0` into the GTE's rotation-matrix control registers (RT11..RT22, indices 0..4) via ctc2.
  *
  * Memory layout at r0: five contiguous 32-bit words (offsets 0..16), each holding two packed 16-bit matrix elements.
- * The first 1.5 rows of a standard PSX SDK MATRIX struct (where each row is laid out as
- * [RT_xx, RT_xy] | [RT_xz, pad] | ...).
+ * The first 1.5 rows of a standard PSX SDK MATRIX struct (where each row is laid out as [RT_xx, RT_xy] | [RT_xz, pad] | ...).
  *
  * Generated MIPS (mirrors the source macro):
  *   lw   $12,  0( %0 )    ; word 0

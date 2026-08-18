@@ -66,40 +66,53 @@
  * */
 /* Register Allocation Info */
 enum {
-	R_AtomJmp  = R_T8 atom_reg,  /* debug-visible; tape yield handshake scratch */
-	R_TapePtr  = R_T9 atom_reg,  /* The Instruction Stream Pointer */
+	R_ScratchBase = R_SP atom_reg, /* Scratchpad base address (host frame top) */
+	R_AtomJmp     = R_FP atom_reg, /* Next atom target (yield handshake scratch) */
+	R_TapePtr     = R_RA atom_reg, /* The Instruction Stream Pointer */
 /* Stringification codes for the GCC inline assembler clobber lists. */
-#define R_AtomJmp_Code R_T8_Code
-#define R_TapePtr_Code R_T9_Code
+#define R_ScratchBase_Code R_SP_Code
+#define R_AtomJmp_Code     R_FP_Code
+#define R_TapePtr_Code     R_RA_Code
 
 // R_InCursor = R_T4,
 // #define R_InCursor_Code    R_T4_Code
 
-// Reserved Registers (Callee-saved):
-// - R_T9: Holds the Tape Ptr which we need to increment
-// - R_RA: Return address register
-// Needed by ac_yield but can be used as atom scratch:
-// - R_T8: Will be used as the atom jump register.
+// Reserved Registers (Callee-saved across the host ABI transition):
+// - R_SP: Holds the scratchpad base while tape code executes.
+// - R_FP: Holds the next atom target.
+// - R_RA: Holds the tape cursor.
+// All atom-body allocations must stay out of these.
+// Atom bodies may freely use R2-R25.
 
-// All allocatable registers for mips atoms:
+// All allocatable registers for atom bodies (R2-R25, 24 registers):
 
-	// TODO(Ed): Make this the R_AtomJmp register since its better to clobber across atoms.
-	R_TScratchVolatile = R_AT, // This one is reserved for psuedo instructions, but you can technically use it.
+	R_PsuedoVolatile = R_AT, // Assembler temporary; never allocate.
 
-	R_TScratch0  = R_T0,
-	R_TScratch1  = R_T1,
-	R_TScratch2  = R_T2,
-	R_TScratch3  = R_T3,
-	R_TScratch4  = R_T4,
-	R_TScratch5  = R_T5,
-	R_TScratch6  = R_T6,
-	R_TScratch7  = R_T7,
-	R_TScratch8 =  R_T8, // Clobbered by the yield on a per-atom boundary.
-	R_TScratch10 = R_V0, // Tend to be used with gte DMAs
-	R_TScratch11 = R_V1, // Tend to be used with gte DMAs
-	// Note(Ed): We can technically clobber these, but don't unless we hit a bottleneck.
-	// A 0-2
-	// S 0-7
+	// Atom Allocation Pool
+	R_Atom0  = R_T0,
+	R_Atom1  = R_T1,
+	R_Atom2  = R_T2,
+	R_Atom3  = R_T3,
+	R_Atom4  = R_T4,
+	R_Atom5  = R_T5,
+	R_Atom6  = R_T6,
+	R_Atom7  = R_T7,
+	R_Atom8 =  R_T8,
+	R_Atom9 =  R_T9,
+	R_Atom10 = R_V0, // Tend to be used with gte DMAs
+	R_Atom11 = R_V1, // Tend to be used with gte DMAs
+	R_Atom12 = R_A0,
+	R_Atom13 = R_A1,
+	R_Atom14 = R_A2,
+	R_Atom15 = R_A3,
+	R_Atom16 = R_S0,
+	R_Atom17 = R_S1,
+	R_Atom18 = R_S2,
+	R_Atom19 = R_S3,
+	R_Atom20 = R_S4,
+	R_Atom21 = R_S5,
+	R_Atom22 = R_S6,
+	R_Atom23 = R_S7,
 };
 
 typedef U2 Reg; // Register parameter used with atom or atom component procedures
@@ -109,7 +122,8 @@ typedef U4 const MipsCode; // Underlying type to mips asm words.
 typedef Slice_(MipsCode);
 
 typedef U4 const MipsAtom; // Underlying type to a mips atom defnition 
-typedef Slice_(MipsAtom); 
+typedef Slice_(MipsAtom);
+
 // Sometimes a user will define a bundle of atoms that represent a procedure of work as:
 //   MipsAtom* <identifier>[...];
 // Unfortuantely if using slice_from_array it will make the slice's pointer: MipsAtom** so this enforce its defined as MipsAtom*
@@ -153,53 +167,71 @@ typedef Slice_(MipsAtom);
 	Files containing only atoms and atom components.
    Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
 	 Macro expands to a file-scope `internal U4 const` declaration keeps the file in the line table.
-	 The constant is in `.rodata` so the linker may eliminate it.
-	 Two-level concat + `__LINE__` suffix makes the identifier unique per call site
-	 (identifier embeds the source line, so duplicates across `#include`d files don't collide). */
+	 The constant is in `.rodata` so the linker may eliminate it. */
 #define ATOM_FILE_DEBUGGER_LINE_MARKER(file_name) internal U4 const tmpl(atom_file_debugger_line_marker,file_name) = 0
 
 typedef Slice_MipsAtom Tape;
 
-/* The 'Exit' Atom */
-atom_dbg_skip MipsAtom_(tape_exit) { jump_reg(R_RA), nop };
+typedef Struct_(TapeHostFrame) {
+	U4 s0;
+	U4 s1;
+	U4 s2;
+	U4 s3;
+	U4 s4;
+	U4 s5;
+	U4 s6;
+	U4 s7;
+	U4 fp;
+	U4 sp;
+	U4 ra;
+};
 
-// TODO(Ed): When we have a substantial workload/throughput, profile each of these to see impact at ABI boundaries.
+enum {
+	TapeHostFrame_Loc = Scratchpad_End - S_(TapeHostFrame),
+	TapeScratch_Len   = TapeHostFrame_Loc - Scratchpad_Loc,
+};
+static_assert(S_(TapeHostFrame) == 11 * S_(U4));
+static_assert(TapeHostFrame_Loc == 0x1F8003D4);
 
-/* Tape Runner (Default) */
-FI_ void tape_run(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
-	asm_words(
-		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
-		, add_ui_self(R_TapePtr, S_(MipsAtom)) /* Advance tape */
-		, call_reg(   R_AtomJmp)               /* jalr $t8 */
-		, BdSlot_ nop                          /* Branch delay slot */
-	)
-	asm_rpins, r_use(tape_ptr)
-	asm_clobber: 
-		rlit(R_AT),
-		rlit(R_V0), rlit(R_V1), // We clobber these for GTE ACs (that don't expose register selection, might expose them in the future...)
-		rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
-		rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8),
-		clb_mem_drain 
-); }
+atom_dbg_skip MipsAtom_(tape_enter) {
+	mac_load_word_imm(R_V0, u4_(TapeHostFrame_Loc)),
+	store_word(R_S0, R_V0, O_(TapeHostFrame,s0)),
+	store_word(R_S1, R_V0, O_(TapeHostFrame,s1)),
+	store_word(R_S2, R_V0, O_(TapeHostFrame,s2)),
+	store_word(R_S3, R_V0, O_(TapeHostFrame,s3)),
+	store_word(R_S4, R_V0, O_(TapeHostFrame,s4)),
+	store_word(R_S5, R_V0, O_(TapeHostFrame,s5)),
+	store_word(R_S6, R_V0, O_(TapeHostFrame,s6)),
+	store_word(R_S7, R_V0, O_(TapeHostFrame,s7)),
+	store_word(R_FP, R_V0, O_(TapeHostFrame,fp)),
+	store_word(R_SP, R_V0, O_(TapeHostFrame,sp)),
+	store_word(R_RA, R_V0, O_(TapeHostFrame,ra)),
+	add_ui(R_TapePtr, R_A0, 0),
+	load_upper_i(R_ScratchBase, u4_hi(Scratchpad_Loc)),
+	load_word(R_AtomJmp, R_TapePtr, 0),
+	add_ui_self(         R_TapePtr, S_(MipsAtom)),
+	jump_reg(R_AtomJmp), BdSlot_ nop,
+};
 
-/* Tape Runner (Static and Arg Clobbers) */
-FI_ void tape_run_a02_s07(Tape tape) { register U4* tape_ptr rgcc(R_TapePtr) = u4_r(tape.ptr); asm volatile(
-	asm_words(
-		  load_word(  R_AtomJmp, R_TapePtr, 0) /* Bootstrap the first jump */
-		, add_ui_self(R_TapePtr, S_(MipsAtom)) /* Advance tape */
-		, call_reg(   R_AtomJmp)               /* jalr $t8 */
-		, BdSlot_ nop                          /* Branch delay slot */
-	)
-	asm_rpins, r_use(tape_ptr)
-	asm_clobber: 
-		rlit(R_AT),
-		rlit(R_V0), rlit(R_V1), rlit(R_A0), rlit(R_A1), rlit(R_A2),
-		rlit(R_T0), rlit(R_T1), rlit(R_T2), rlit(R_T3), rlit(R_T4),
-		rlit(R_T5), rlit(R_T6), rlit(R_T7), rlit(R_T8),
-		rlit(R_S0), rlit(R_S1), rlit(R_S2), rlit(R_S3), rlit(R_S4),
-		rlit(R_S5), rlit(R_S6), rlit(R_S7),
-		clb_mem_drain 
-); }
+atom_dbg_skip MipsAtom_(tape_exit) {
+	mac_load_word_imm(R_V0, u4_(TapeHostFrame_Loc)),
+	load_word(R_S0, R_V0, O_(TapeHostFrame,s0)),
+	load_word(R_S1, R_V0, O_(TapeHostFrame,s1)),
+	load_word(R_S2, R_V0, O_(TapeHostFrame,s2)),
+	load_word(R_S3, R_V0, O_(TapeHostFrame,s3)),
+	load_word(R_S4, R_V0, O_(TapeHostFrame,s4)),
+	load_word(R_S5, R_V0, O_(TapeHostFrame,s5)),
+	load_word(R_S6, R_V0, O_(TapeHostFrame,s6)),
+	load_word(R_S7, R_V0, O_(TapeHostFrame,s7)),
+	load_word(R_RA, R_V0, O_(TapeHostFrame,ra)),
+	load_word(R_FP, R_V0, O_(TapeHostFrame,fp)),
+	load_word(R_SP, R_V0, O_(TapeHostFrame,sp)),
+	jump_reg(R_RA), BdSlot_ nop,
+};
+
+typedef void Proc_(TapeEntryFn)(MipsAtom* tape_ptr);
+
+FI_ void tape_run(Tape tape) { C_(TapeEntryFn*, tape_enter)(tape.ptr); }
 
 // Procedural authoring of tapes:
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
@@ -242,18 +274,13 @@ atom_dbg_skip MipsAtomComp_(ac_yield_load) {
 
 atom_dbg_skip MipsAtomComp_(ac_yield_tail) {
 	add_ui_self(R_TapePtr, S_(MipsCode)),
-	jump_reg( R_AtomJmp),
-	BdSlot_ nop,
+	jump_reg( R_AtomJmp), BdSlot_ nop,
 };
 
 #pragma endregion Macro Atom Components
 
 #pragma region Atom Builder
 // This helps with runtime procedural authoring of mips atoms.
-
-typedef Struct_(FMipsAtom512) { U4 data[512]; U4 used; };
-
-// FArena Related
 typedef Relative_(FArena) Struct_(AtomBuilder) { U4 start; U4 capacity; U4 used; };
 
 // Usual way to resolve an atom after the bulder is done.
@@ -274,7 +301,6 @@ FI_ void tb_emit_atombuilder(TapeBuilder_R tb, AtomBuilder_R ab) { tb_emit(tb, a
 
 #pragma region Atom Arena
 // Just a dedicated FArena that is meant to mem_copy and return atom definitions made with MipsAtom_Proc_
-
 typedef Relative_(FArena) Struct_(AtomArena) { U4 start; U4 capacity; U4 used; };
 
 #define atomarena_unused_start(ab) ((ab).start + (ab).used)
@@ -299,13 +325,24 @@ FI_ void atomarena_reset(AtomArena_R aa) { aa->used = 0; }
 // TODO(Ed): Technically we can do this at comp-time with the metaprogram, but we may have namespace conflicts.
 // Unless we follow a convention for #define <Scope_Prefix> or something per register allocation boundary.
 
-/* ABI + tape reserves that are never handed out by alloc. */
+/* ABI reserves that are never handed out by alloc.
+ * R_AT is the assembler temporary (per the MIPS O32 ABI). 
+ * R_K0/K1 are kernel reserves.
+ * R_GP stays the host global pointer.
+ * R_SP/R_FP/R_RA are tape runtime carriers between tape_enter and tape_exit. */
 U4 const regfile_abi_mask =
-	(1u << R_0)  | (1u << R_AT)  |
-	(1u << R_K0) | (1u << R_K1)  |
-	(1u << R_GP) | (1u << R_SP)  |
-	(1u << R_FP) | (1u << R_RA)  |
-	(1u << R_T8) | (1u << R_T9); /* AtomJmp + TapePtr */
+	(1u << R_0)  | (1u << R_AT) |
+	(1u << R_K0) | (1u << R_K1) |
+	(1u << R_GP) | (1u << R_SP) |
+	(1u << R_FP) | (1u << R_RA);
+
+internal Reg const regfile_alloc_order[] = {
+	R_V0, R_V1,
+	R_A0, R_A1, R_A2, R_A3,
+	R_T0, R_T1, R_T2, R_T3, R_T4, R_T5, R_T6, R_T7,
+	R_S0, R_S1, R_S2, R_S3, R_S4, R_S5, R_S6, R_S7,
+	R_T8, R_T9,
+};
 
 typedef Struct_(RegFile) {
 	A2_U2 GPR;
@@ -336,17 +373,20 @@ FI_ Reg regfile__alloc_helper(A2_U2 file, Reg r_id) {
 	Reg result = 0; RegFile_RInfo info = regfile_rinfo(file, r_id);
 	if (info.occupied == false) {
 		info.section[0] |= info.mask;
-		result = r_id;
+		result           = r_id;
 	}
 	return result; 
 }
+/* regfile_alloc picks the next free GPR from regfile_alloc_order.
+ * The table is the first-fit allocation order: T0..T7, V0..V1, A0..A3,
+ * S0..S7, T8..T9. The 24 entries leave room for the tape program to use
+ * any of them while R0, R1, R26-R31 remain reserved. */
 I_ Reg regfile_alloc(RegFile_R rf) {
-	U2 allocated = 0;
-	for index_iter(Reg, r_id, R_T0, <=, R_T7) {
-		allocated = regfile__alloc_helper(rf->GPR, r_id); Jmp_nZero_(allocated,resolved);
+	Reg allocated = 0;
+	for index_iter(U4, idx, 0, <, Array_len(regfile_alloc_order)) {
+		allocated = regfile__alloc_helper(rf->GPR, idx);
+		Jmp_nZero_(allocated,resolved);
 	}
-	allocated = regfile__alloc_helper(rf->GPR, R_V0); Jmp_nZero_(allocated,resolved);
-	allocated = regfile__alloc_helper(rf->GPR, R_V1);
 	assert(allocated != 0);
 resolved: return allocated;
 }
@@ -383,9 +423,7 @@ FI_ void regfile_reset_to_mask(RegFile_R rf, U4 mask) {
 
 #pragma region Mips Atom Procs
 /* RegUse structs are a convention to organize register allocations for a mips atom procedure.
-	Unlike the usual enum-based declarations, they provide a namespaced scope 
-	and have view types via union declarations.
-*/
+	Unlike the usual enum-based declarations, they provide a namespaced scope and have view types via union declarations. */
 #define RegUse_(proc_name) (tmpl(RegUse,proc_name))
 
 	typedef Struct_(RegUse_example_atom_proc) {

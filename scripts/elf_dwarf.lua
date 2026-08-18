@@ -422,10 +422,10 @@ end
 --- should use this directly rather than going through `read_form_value`,
 --- which only exposes the low 4 bytes to preserve its existing (value, next_pos) return shape.
 --- @param buf string
---- @param pos integer  -- zero-based wire offset
---- @return integer  -- low 4 bytes (LE), the type signature
---- @return integer  -- high 4 bytes (LE), the offset within the matching type unit
---- @return integer  -- cursor after the 8-byte value
+--- @param pos integer -- zero-based wire offset
+--- @return integer -- low 4 bytes (LE), the type signature
+--- @return integer -- high 4 bytes (LE), the offset within the matching type unit
+--- @return integer -- cursor after the 8-byte value
 function M.read_ref_sig8(buf, pos)
 	return M.read_u32_le(buf, pos), M.read_u32_le(buf, pos + 4), pos + 8
 end
@@ -440,10 +440,10 @@ end
 ---   unit_length(4) + version(2) + unit_type(1) + address_size(1) + debug_abbrev_offset(4)
 ---   followed by type_unit_specific fields: type_signature(8) + type_offset(4)
 --- The type_signature is at byte offset 8 of the body (right after debug_abbrev_offset).
---- @param info          string   -- the .debug_info section bytes
---- @param target_sig_lo integer  -- low 4 bytes (LE) of the desired signature
---- @param target_sig_hi integer  -- high 4 bytes (LE) of the desired signature
---- @return integer|nil, integer|nil  -- unit offset, type_offset within the unit
+--- @param info          string      -- the .debug_info section bytes
+--- @param target_sig_lo integer     -- low 4 bytes (LE) of the desired signature
+--- @param target_sig_hi integer     -- high 4 bytes (LE) of the desired signature
+--- @return integer|nil, integer|nil -- unit offset, type_offset within the unit
 function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
 	local pos         = 0
 	local section_len = #info
@@ -459,24 +459,23 @@ function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
 			return nil, nil  -- malformed
 		end
 		-- Per DWARF5 §7.5.6, the type_unit (DW_UT_type = 0x02) body layout is:
-		--   0:  version (2)
-		--   2:  unit_type (1) -- DW_UT_type = 0x02
-		--   3:  address_size (1)
-		--   4:  debug_abbrev_offset (4)
-		--   8:  type_signature (8)
-		--   16: type_offset (4)
-		--   20: <children>
+		--  0:  version (2)
+		--  2:  unit_type (1) -- DW_UT_type = 0x02
+		--  3:  address_size (1)
+		--  4:  debug_abbrev_offset (4)
+		--  8:  type_signature (8)
+		--  16: type_offset (4)
+		--  20: <children>
 		if body_end - body_start >= 20 then
 			-- read_ref_sig8 / write_u32_le / etc. are 1-indexed (string:byte);
-			-- pos / body_start / body_end are 0-based wire offsets, so the
-			-- 1-indexed byte at 0-based wire offset X is string:byte(X + 1).
+			-- pos / body_start / body_end are 0-based wire offsets, so the 1-indexed byte at 0-based wire offset X is string:byte(X + 1).
 			-- Per DWARF5 §7.5.6, the type_unit body is laid out as:
-			--   byte 0-1: version (2)
-			--   byte 2:   unit_type (1) -- DW_UT_type = 0x02
-			--   byte 3:   address_size (1)
-			--   byte 4-7: debug_abbrev_offset (4)
-			--   byte 8-15: type_signature (8)
-			--   byte 16-19: type_offset (4)
+			--  byte 0-1:   version (2)
+			--  byte 2:     unit_type (1) -- DW_UT_type = 0x02
+			--  byte 3:     address_size (1)
+			--  byte 4-7:   debug_abbrev_offset (4)
+			--  byte 8-15:  type_signature (8)
+			--  byte 16-19: type_offset (4)
 			local unit_type = info:byte(body_start + 2 + 1)  -- 0-based +2 = unit_type in 1-indexed
 			if    unit_type == 0x02 then  -- DW_UT_type
 				local sig_lo, sig_hi, _ = M.read_ref_sig8(info, body_start + 8)  -- 0-based +8 = type_signature in 1-indexed

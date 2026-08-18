@@ -2465,8 +2465,8 @@ local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 				local body_line  = a.line + (line_in_body[tokens[ti].rel] or 0)
 
 				local type_entry = resolve_type_with_fields(type_name, type_registry, 1)
-				local no_fields = not type_entry or not type_entry.fields or #type_entry.fields == 0
-				local raw_entry = type_registry[type_name]
+				local no_fields  = not type_entry or not type_entry.fields or #type_entry.fields == 0
+				local raw_entry  = type_registry[type_name]
 				local is_typedef_to_struct = raw_entry
 					and raw_entry.kind == "typedef"
 					and raw_entry.underlying_type
@@ -2507,12 +2507,10 @@ end
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- ════════════════════════════════════════════════════════════════════════════
 -- GTE control-register alias + RT-diagonal + TR-naming helpers and checks
 -- ════════════════════════════════════════════════════════════════════════════
 
---- Resolve a `gte_cr_<Alias>` ident to its alias-group entry, or nil if the alias
---- is in a distinct-slot group (or the alias name is not a known C2 control-register alias).
+--- Resolve a `gte_cr_<Alias>` ident to its alias-group entry, or nil if the alias is in a distinct-slot group (or the alias name is not a known C2 control-register alias).
 --- Reads `M.GTE_CR_ALIAS_GROUPS` from `duffle.lua`.
 local function find_alias_pair_for(alias_name, duffle)
 	local groups = (duffle and duffle.GTE_CR_ALIAS_GROUPS) or {}
@@ -2531,11 +2529,9 @@ local function is_ctrl_r_transfer(c)
 	return c.ident == "gte_mv_to_ctrl_r" or c.ident == "gte_mv_from_ctrl_r"
 end
 
--- Resolve a token's source line. The per-token `line` is the body-relative
--- line; `atom.line` is the source line of the atom declaration; `line_in_body`
--- (atom.paths) maps a body-relative line to its source line. The arithmetic
--- `atom.line + line_in_body[tok.rel] - 1` matches the convention used by
--- check_abi_handoff and check_control_transfer_delay_slot_use elsewhere.
+-- Resolve a token's source line.
+-- The per-token `line` is the body-relative line; `atom.line` is the source line of the atom declaration; `line_in_body` (atom.paths) maps a body-relative line to its source line.
+-- The arithmetic `atom.line + line_in_body[tok.rel] - 1` matches the convention used by check_abi_handoff and check_control_transfer_delay_slot_use elsewhere.
 local function atom_body_token_source_line(atom, token, line_in_body)
 	if line_in_body == nil or token == nil or token.rel == nil then
 		return atom.line or 0
@@ -2584,14 +2580,11 @@ local function ctrl_writes_in_atom(atom)
 end
 
 -- Check #N: gte_cr_alias_writes
--- Fires one warning per atom per alias-group when the atom body touches two
--- distinct aliases from the same group. Aliases within a group write to the
--- same C2 control-register slot on real silicon; cross-alias writes inside
--- one atom body silently clobber each other.
+-- Fires one warning per atom per alias-group when the atom body touches two distinct aliases from the same group.
+-- Aliases within a group write to the same C2 control-register slot on real silicon; cross-alias writes inside one atom body silently clobber each other.
 --
--- Severity: warning. Build continues. The libgte outer-product convention
--- uses only RT-row aliases (which are NOT in `M.GTE_CR_ALIAS_GROUPS`), so
--- the canonical convention does not trigger this check.
+-- Severity: warning. Build continues.
+-- The libgte outer-product convention uses only RT-row aliases (which are NOT in `M.GTE_CR_ALIAS_GROUPS`), so the canonical convention does not trigger this check.
 local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 	local groups = pipe_ctx.gte_cr_alias_groups or {}
 	if not next(groups) then return end
@@ -2650,14 +2643,11 @@ end
 
 -- Check #N+1: rtdiagonal_completeness
 -- Fires one info per atom body when the bare `gte_cmdw_mvmva` macro is used.
--- The bare macro encodes only the cmd field; the canonical libgte-2-pass
--- shape uses `gte_cmdw_mvmva_c11_pass2_exact = 0x4A49E012` (gte.h:430).
+-- The bare macro encodes only the cmd field; the canonical libgte-2-pass shape uses `gte_cmdw_mvmva_c11_pass2_exact = 0x4A49E012` (gte.h:430).
 --
--- Severity: info by default. Escalates to warning when
--- `GTE_RT_DIAGONAL_STRICT=1` env var is set (CI / production builds).
+-- Severity: info by default. Escalates to warning when `GTE_RT_DIAGONAL_STRICT=1` env var is set (CI / production builds).
 --
--- The bare macro IS the right call for the canonical libgte outer-product
--- convention, so this is an opt-out hint rather than a hard warning.
+-- The bare macro IS the right call for the canonical libgte outer-product convention, so this is an opt-out hint rather than a hard warning.
 local function check_rtdiagonal_completeness(atom, _pipe_ctx, findings)
 	local tokens = atom.paths and atom.paths.tokens or {}
 	local tc     = atom.paths and atom.paths.tok_class or {}

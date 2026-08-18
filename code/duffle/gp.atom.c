@@ -11,7 +11,7 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(gp_atom_c);
 FI_ Slice_MipsCode ac_gcmd_push(AtomBuilder_R ab, U4 cmd, U4 reg_transfer, U4 reg_base, U2 port)
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	mac_load_word_imm(reg_transfer, cmd),
-	store_word(  reg_transfer, reg_base, port),
+	store_word(       reg_transfer, reg_base, port),
 })
 
 FI_ Slice_MipsCode ac_store_rgb8(AtomBuilder_R ab, U1 rr, U1 rg, U1 rb, U4 base, U4 offset) 

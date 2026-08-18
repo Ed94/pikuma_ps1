@@ -134,10 +134,12 @@ FI_ U4 farena_unused_start(FArena arena) { return arena.start + arena.used; }
 
 #pragma region BIOS Scratchpad
 /* BIOS scratchpad location. 1 KB at 0x1F800000.
- * The PS1 BIOS A-functions use this region for inter-call communication and as a temp storage area.
- * The Tape runtime uses scratch region along with explicit data structures instead of the stack-based scratch from the C-Runtime. */
+ * TapeHostFrame occupies the final 44 bytes while tape code executes.
+ * Atom scratch is bounded by the TapeHostFrame_Loc declaration in lottes_tape.h. */
 enum {
 	Scratchpad_Loc = 0x1F800000,
+	Scratchpad_Len = 0x400,                             /* 1 KB */
+	Scratchpad_End = Scratchpad_Loc + Scratchpad_Len,   /* 0x1F800400 */
 };
 #define C_scratch(type) C_(type, Scratchpad_Loc)
 #pragma endregion BIOS Scratchpad

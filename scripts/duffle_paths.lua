@@ -22,12 +22,10 @@ local M = {}
 local CACHE_KEY = "__duffle_repo_root__"
 
 --- Resolve the repo root from this script's own path. Zero shell spawn.
---- `duffle_paths.lua` always lives at `<repo>/scripts/duffle_paths.lua`, so the repo root is the
---- parent of the directory containing this script. We derive it directly from `debug.getinfo(1, "S").source`
---- (returns `@<path>` for the currently-running chunk).
+--- `duffle_paths.lua` always lives at `<repo>/scripts/duffle_paths.lua`, so the repo root is the parent of the directory containing this script.
+--- We derive it directly from `debug.getinfo(1, "S").source` (returns `@<path>` for the currently-running chunk).
 ---
---- If `debug.getinfo` can't parse this script's path (shouldn't happen — dofile always populates source),
---- return nil and let `M.setup()` fail loud.
+--- If `debug.getinfo` can't parse this script's path (shouldn't happen — dofile always populates source), return nil and let `M.setup()` fail loud.
 --- @return string|nil
 local function find_repo_root()
 	if package.loaded[CACHE_KEY] then return package.loaded[CACHE_KEY] end
@@ -51,17 +49,13 @@ end
 ---
 --- This script does NOT touch the OS environment: no `os.setenv`, no `os.putenv`, no `$PATH` mods. 
 --- It just sets `package.path` and `package.cpath` (the standard Lua way to register module search dirs). 
---- lpeg is built by `update_deps.ps1` to `toolchain/lpeg/`, 
---- which we wire into `package.cpath` here (so `require("lpeg")` from `duffle.lua` resolves without any global state).
+--- lpeg is built by `update_deps.ps1` to `toolchain/lpeg/`, which we wire into `package.cpath` here (so `require("lpeg")` from `duffle.lua` resolves without any global state).
 function M.setup()
 	local  repo_root = find_repo_root()
 	if not repo_root then
-		-- Unreachable in practice: find_repo_root() derives the repo root from this script's
-		-- own source path via debug.getinfo(1, "S").source (no subprocess, no git CLI, <1ms).
-		-- A nil return means the source path did not match the expected
-		-- <repo>/scripts/duffle_paths.lua layout — a packaging bug, not a "missing git repo"
-		-- condition. os.exit(2) is retained so a real failure surfaces loud rather than
-		-- silently producing an unconfigured module table.
+		-- Unreachable in practice: find_repo_root() derives the repo root from this script's own source path via debug.getinfo(1, "S").source (no subprocess, no git CLI, <1ms).
+		-- A nil return means the source path did not match the expected <repo>/scripts/duffle_paths.lua layout — a packaging bug, not a "missing git repo" condition.
+		-- os.exit(2) is retained so a real failure surfaces loud rather than silently producing an unconfigured module table.
 		os.exit(2)
 	end
 
@@ -86,6 +80,6 @@ end
 -- Run the setup as a side effect.
 M.setup()
 
--- Now that package.path includes scripts/, `require("duffle")` resolves. Return the duffle module
--- so callers can do `local duffle = dofile(...duffle_paths.lua)` in one line.
+-- Now that package.path includes scripts/, `require("duffle")` resolves.
+-- Return the duffle module so callers can do `local duffle = dofile(...duffle_paths.lua)` in one line.
 return require("duffle")

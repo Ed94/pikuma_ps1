@@ -91,11 +91,9 @@ if (-not (Test-Path -LiteralPath $path_pcsx_packages)) {
     New-Item -ItemType Directory -Path $path_pcsx_packages -Force | Out-Null
 }
 
-# Download anything missing. Skip the package entirely if its dir already has
-# any contents (the legacy packages.config style means the targets file
-# location varies per package — `luajit.native` puts it at build/native/,
-# `glfw` puts it elsewhere — so we can't probe a specific path; just check
-# whether the dir is non-empty).
+# Download anything missing.
+# Skip the package entirely if its dir already has any contents (the legacy packages.config style means the targets file location varies per package 
+# — `luajit.native` puts it at build/native/, `glfw` puts it elsewhere — so we can't probe a specific path; just check whether the dir is non-empty).
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($pkg in $required_packages.Values) {
     $pkgDir = Join-Path $path_pcsx_packages ('{0}.{1}' -f $pkg.id, $pkg.version)
@@ -122,24 +120,18 @@ foreach ($pkg in $required_packages.Values) {
     }
 }
 
-# ════════════════════════════════════════════════════════════════════════════
-# isoffi.lua size guard — `core.vcxproj` #includes src/core/isoffi.lua into
-# luaiso.cc via the `-- lualoader, R"EOF(...)EOF"` trick. The raw string
-# literal between R"EOF(-- and -- )EOF" must stay under ~16,379 bytes or
-# MSVC (19.44) fails with C2026 (its actual raw-string limit is 16,384,
-# minus 5 bytes for the `-- lualoader, ` prefix). If the upstream file
-# grows past that, trim it: remove license header, trailing whitespace,
-# blank separators, inline comments, and shrink 4-space indent to 2-space.
+# ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+# isoffi.lua size guard — `core.vcxproj` #includes src/core/isoffi.lua into luaiso.cc via the `-- lualoader, R"EOF(...)EOF"` trick.
+# The raw string literal between R"EOF(-- and -- )EOF" must stay under ~16,379 bytes or MSVC (19.44) fails with C2026 (its actual raw-string limit is 16,384, minus 5 bytes for the `-- lualoader, ` prefix).
+# If the upstream file grows past that, trim it: remove license header, trailing whitespace, blank separators, inline comments, and shrink 4-space indent to 2-space.
 # Idempotent — only writes when the raw string exceeds the limit.
-# ════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 $path_isoffi = join-path $path_pcsx_redux 'src\core\isoffi.lua'
 if (Test-Path -LiteralPath $path_isoffi) {
     $content = Get-Content -LiteralPath $path_isoffi -Raw -Encoding utf8
     $startMarker = $content.IndexOf('R"EOF(--')
     $endMarker   = $content.IndexOf('-- )EOF"')
-    $literalLen  = if ($startMarker -ge 0 -and $endMarker -gt $startMarker) {
-        $endMarker - ($startMarker + 8)
-    } else { -1 }
+    $literalLen  = if ($startMarker -ge 0 -and $endMarker -gt $startMarker) { $endMarker - ($startMarker + 8) } else { -1 }
     # Effective MSVC raw-string limit for the lualoader prefix is 16379 bytes.
     if ($literalLen -gt 16379) {
         Write-Host "isoffi.lua raw string is $literalLen bytes (>16379); trimming for MSVC C2026 limit."
@@ -168,8 +160,7 @@ if (Test-Path -LiteralPath $path_isoffi) {
             $newLines += $line
         }
         ($newLines -join "`n") | Out-File -LiteralPath $path_isoffi -Encoding utf8 -NoNewline
-        $newLen = ((Get-Content -LiteralPath $path_isoffi -Raw -Encoding utf8) `
-            -replace '.*R"EOF\(--', '' -replace '-- \)EOF".*', '').Length
+        $newLen = ((Get-Content -LiteralPath $path_isoffi -Raw -Encoding utf8) -replace '.*R"EOF\(--', '' -replace '-- \)EOF".*', '').Length
         Write-Host "isoffi.lua trimmed: $literalLen -> $newLen bytes of raw string content."
     }
 }
@@ -231,13 +222,11 @@ $lfs_dll_import = join-path $luajit_lib_dir 'libluajit-5.1.dll.a'
 
 $path_openbios = join-path $path_pcsx_redux 'src\mips\openbios'
 
-# Wipe stale *.dep files across src\mips. These cache absolute paths to the
-# GCC headers directory; if the toolchain was upgraded (e.g. v14.2.0 → v16.1.0)
+# Wipe stale *.dep files across src\mips.
+# These cache absolute paths to the GCC headers directory; if the toolchain was upgraded (e.g. v14.2.0 → v16.1.0)
 # Make reads the stale paths and aborts with "no rule to make target .../stddef.h".
-# `make clean` in openbios only clears its own dir — subdirs like
-# common/crt0/, modplayer/, and shell/ keep their stale .dep files. Easier to
-# just delete the lot before each build than to teach every Makefile about
-# deepclean recursion.
+# `make clean` in openbios only clears its own dir — subdirs like common/crt0/, modplayer/, and shell/ keep their stale .dep files.
+# Easier to just delete the lot before each build than to teach every Makefile about deepclean recursion.
 Get-ChildItem -Path (join-path $path_pcsx_redux 'src\mips') -Recurse -Filter '*.dep' -ErrorAction SilentlyContinue |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
 

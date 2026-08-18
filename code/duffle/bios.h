@@ -1,6 +1,7 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	pragma once
 #endif
+
 enum {
 	bios_init_pad_2  = 0x12,
 	bios_start_pad_2 = 0x13,

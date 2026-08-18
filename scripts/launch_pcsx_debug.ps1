@@ -1,10 +1,9 @@
 # scripts/launch_pcsx_debug.ps1
 #
-# One-shot launcher for debug sessions: starts pcsx-redux with the .ps-exe
-# loaded, the gdb stub enabled, AND the pcsx_debug_helper Lua plugin loaded
-# so external CLI tools (gdb's `shell` command, etc.)
-# can read GTE state via http://localhost:8080/api/v1/lua/gte
-# (the gdb stub doesn't expose COP2 at all).
+# One-shot launcher for debug sessions:
+# Starts pcsx-redux with the .ps-exe loaded, the gdb stub enabled, 
+# AND the pcsx_debug_helper Lua plugin loaded so external CLI tools (gdb's `shell` command, etc.)
+# can read GTE state via http://localhost:8080/api/v1/lua/gte (the gdb stub doesn't expose COP2 at all).
 #
 # usage:
 #   .\scripts\launch_pcsx_debug.ps1
@@ -19,11 +18,11 @@
 
 [CmdletBinding()]
 param(
-    [string]$PcsxPath = (Join-Path $PSScriptRoot '..\toolchain\pcsx-redux\vsprojects\x64\Release\pcsx-redux.exe'),
-    [string]$ExePath  = (Join-Path $PSScriptRoot '..\build\hello_gte.ps-exe'),
+    [string]$PcsxPath  = (Join-Path $PSScriptRoot '..\toolchain\pcsx-redux\vsprojects\x64\Release\pcsx-redux.exe'),
+    [string]$ExePath   = (Join-Path $PSScriptRoot '..\build\hello_gte.ps-exe'),
     [string]$HelperZip = (Join-Path $PSScriptRoot 'pcsx_debug_helper.zip'),
-    [int]   $GdbPort  = 3333,
-    [int]   $WebPort  = 8080
+    [int]   $GdbPort   = 3333,
+    [int]   $WebPort   = 8080
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,7 +83,8 @@ try {
     $r = Invoke-WebRequest -Uri "http://localhost:$WebPort/api/v1/lua/gte" -UseBasicParsing -TimeoutSec 5
     $firstLine = ([System.Text.Encoding]::UTF8.GetString($r.Content) -split "`n")[0]
     Write-Host "GTE handler OK: $firstLine" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Warning "GTE handler NOT responding: $_"
     Write-Host "Check the pcsx-redux Lua Console for debug cli messages." -ForegroundColor Yellow
 }

@@ -101,14 +101,14 @@ MipsAtomComp_Proc_(ab, {
 #pragma region resolve_look_at
 /* ─── resolve_look_at bundle chain atoms ──────────────────────────── */
 
-typedef AtomBundle_(resolve_look_at) { MipsAtom*
-	input_and_sub,
-	normalize_fwd_uz,
-	cross_to_right,
-	normalize_right_ux,
-	cross_to_up,
-	normalize_up_uy,
-	pop_mv_trans;
+typedef AtomBundle_(resolve_look_at) { MipsAtom
+	*input_and_sub,
+	*normalize_fwd_uz,
+	*cross_to_right,
+	*normalize_right_ux,
+	*cross_to_up,
+	*normalize_up_uy,
+	*pop_mv_trans;
 };
 
 enum {
