@@ -97,8 +97,8 @@ enum {
 	R_Atom5  = R_T5,
 	R_Atom6  = R_T6,
 	R_Atom7  = R_T7,
-	R_Atom8 =  R_T8,
-	R_Atom9 =  R_T9,
+	R_Atom8  = R_T8,
+	R_Atom9  = R_T9,
 	R_Atom10 = R_V0, // Tend to be used with gte DMAs
 	R_Atom11 = R_V1, // Tend to be used with gte DMAs
 	R_Atom12 = R_A0,
@@ -383,8 +383,8 @@ FI_ Reg regfile__alloc_helper(A2_U2 file, Reg r_id) {
  * any of them while R0, R1, R26-R31 remain reserved. */
 I_ Reg regfile_alloc(RegFile_R rf) {
 	Reg allocated = 0;
-	for index_iter(U4, idx, 0, <, Array_len(regfile_alloc_order)) {
-		allocated = regfile__alloc_helper(rf->GPR, idx);
+	for index_iter(U4, r_id, R_V0, <, R_T9) {
+		allocated = regfile__alloc_helper(rf->GPR, r_id);
 		Jmp_nZero_(allocated,resolved);
 	}
 	assert(allocated != 0);

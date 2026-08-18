@@ -130,6 +130,60 @@ local function extract_arg_names(args_str)
 	for _, tok in ipairs(tokens) do
 		local trimmed = duffle.trim(tok)
 		if trimmed ~= "" then
+			-- Strip trailing block comment (/* ... */) from the token, if present.
+			-- split_top_level_commas only skips block comments at TOP LEVEL (between commas),
+			-- not block comments embedded WITHIN a token between a parameter and a trailing comma.
+			-- Without this strip, the identifier-walk below stops at the `/` of `*/` and returns
+			-- the wrong name (or nothing). See `test_extract_arg_names_handles_trailing_block_comments`.
+			local trimmed_end = #trimmed
+			if trimmed_end >= 2 and trimmed:sub(trimmed_end - 1, trimmed_end) == "*/" then
+				-- Find the matching `/*` that opens the trailing comment.
+				-- Walk back from the `*/` looking for `/*` (whitespace + `/*`).
+				local close_pos = trimmed_end - 1   -- position of the second-to-last char
+				-- Walk back: skip trailing whitespace, then look for the `/*` opener.
+				while close_pos > 1 do
+					local ch = trimmed:sub(close_pos, close_pos)
+					if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" then
+						close_pos = close_pos - 1
+					else
+						break
+					end
+				end
+				-- Now scan back from close_pos for the `/*` opener (slashes are at close_pos-1 and close_pos-2).
+				local opener_pos = nil
+				local scan = close_pos - 3
+				while scan >= 1 do
+					if trimmed:sub(scan, scan + 1) == "/*" then
+						opener_pos = scan
+						break
+					end
+					scan = scan - 1
+				end
+				if opener_pos then
+					-- Truncate everything from opener_pos onwards.
+					trimmed = duffle.trim(trimmed:sub(1, opener_pos - 1))
+				end
+			end
+			if trimmed == "" then goto continue end
+			-- Strip trailing array suffix `[N]` if present.
+			-- Example: `Reg r_data[4]` → identifier is `r_data`, not `4`.
+			trimmed_end = #trimmed
+			if trimmed_end >= 4 and trimmed:sub(trimmed_end, trimmed_end) == "]" then
+				-- Walk back: skip digits, expect `[`.
+				local bracket_pos = trimmed_end - 1
+				while bracket_pos > 1 do
+					local ch = trimmed:sub(bracket_pos, bracket_pos)
+					if ch >= "0" and ch <= "9" then
+						bracket_pos = bracket_pos - 1
+					else
+						break
+					end
+				end
+				if bracket_pos >= 1 and trimmed:sub(bracket_pos, bracket_pos) == "[" then
+					trimmed = duffle.trim(trimmed:sub(1, bracket_pos - 1))
+				end
+			end
+			if trimmed == "" then goto continue end
 			-- Find the identifier at the end: walk back over trailers (whitespace + `*` + `[]`),
 			-- then walk back over the identifier chars (alnum + `_`).
 			local ident_end = #trimmed
@@ -153,6 +207,7 @@ local function extract_arg_names(args_str)
 			ident_start = ident_start + 1
 			local name = trimmed:sub(ident_start, ident_end)
 			if name ~= "" then names[#names + 1] = name end
+			::continue::
 		end
 	end
 	if #names == 0 then return nil end

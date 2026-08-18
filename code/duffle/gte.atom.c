@@ -275,7 +275,7 @@ typedef Struct_(RegUse_build_normalize_v3s4) {
 	Reg scratch;                /* scratchpad base; loaded via load_word_imm below. */
 	Reg src_ptr;
 	Reg dst_ptr;
-	Reg recip_est;              /* |v|² sum + shift-input + sqrtbl[index] */
+	Reg recip_est;                /* |v|² sum + shift-input + sqrtbl[index] */
 	Reg norm; Reg shift;
 	Reg src_x;
 	union { Reg mac1_scratch, dst_offset; } t3;
@@ -372,7 +372,7 @@ atom_info(atom_bind(Binds_gte_cross_v3s4)) MipsAtom_Proc_(aa, {
 	load_word(r.y.src_a,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_a)),
 	load_word(r.z.src_b,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_b)),
 	load_word(r.x.out,    R_TapePtr, O_(Binds_gte_cross_v3s4,out)),
-	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_gte_cross_v3s4)),
+	LdSlot_ add_ui_self(  R_TapePtr, S_(Binds_gte_cross_v3s4)),
 
 	mac_load_v3s4(r.a, r.y.src_a, 0), LdSlot_
 	mac_load_v3s4(r.b, r.z.src_b, 0), LdSlot_

@@ -111,66 +111,59 @@ typedef AtomBundle_(resolve_look_at) { MipsAtom
 	*pop_mv_trans;
 };
 
-enum {
-	// TODO(Ed): We can resolve scratch at anytime its fixed to a specific address.
-	R_ResolveScratch = R_T4 atom_reg atom_type(U4*),
-#define R_ResolveScratch_Code R_T4_Code
+typedef Struct_(ResolveLookAtScratch) {
+	V3_S4 fwd;
+	V3_S4 uz;
+	V3_S4 right;
+	V3_S4 ux;
+	V3_S4 up;
+	V3_S4 uy;
+	P3_S4 eye;
+	P3_S4 target;
+	V3_S4 up_in;
 };
+
+/* Binds_ResolveLookAtSub — what the C side pushes onto the tape before input_and_sub.
+ * The scratchpad base is no longer pushed because R_ScratchBase (= R_SP) is a tape carrier
+ * preserved across atoms; the atom body reads 0x1F800000 directly from R_SP. */
 typedef Struct_(Binds_ResolveLookAt) {
 	MT3_S2S4* look_at;
 	P3_S4*    eye;
 	P3_S4*    target;
 	V3_S4*    up_in;
 };
-
-/* ─── ResolveLookAtScratch — offset schema for the resolve_look_at bundle's */
-typedef Struct_(ResolveLookAtScratch) {
-	V3_S4 fwd;       /* offset  +0  (16 bytes — 4 S4 fields incl. internal pad) */
-	V3_S4 uz;        /* offset +16 (16 bytes) */
-	V3_S4 right;     /* offset +32 (16 bytes) */
-	V3_S4 ux;        /* offset +48 (16 bytes) */
-	V3_S4 up;        /* offset +64 (16 bytes) */
-	V3_S4 uy;        /* offset +80 (16 bytes) */
-	P3_S4 eye;       /* offset +96 (16 bytes; storage alias of V3_S4) */
-	P3_S4 target;    /* offset +112 (16 bytes; storage alias of V3_S4) */
-	V3_S4 up_in;     /* offset +128 (16 bytes) */
-};
-
 typedef Struct_(Binds_ResolveLookAtSub) {
 	P3_S4* target;
-	P3_S4* eye;   
+	P3_S4* eye;
 	V3_S4* up_in;
-	ResolveLookAtScratch* scratchpad;
 };
 typedef Struct_(RegUse_resolve_look_at_input_and_sub) {
-	Reg scratch;
 	Reg target; Reg eye; Reg up_in;
 	Reg t0; Reg t1; Reg t2; Reg t3; Reg t4;
 };
 /* Atom 0 in the bundle: input_and_sub. Stages C-side inputs into the scratchpad and computes fwd = target - eye. */
-internal MipsAtom* AtomBundleEntry_(resolve_look_at,input_and_sub)(AtomArena_R aa, RegUse_resolve_look_at_input_and_sub r) 
+internal MipsAtom* AtomBundleEntry_(resolve_look_at,input_and_sub)(AtomArena_R aa, RegUse_resolve_look_at_input_and_sub r)
 atom_info(atom_bind(Binds_ResolveLookAtSub)) MipsAtom_Proc_(aa, {
-	load_word(r.target,  R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
-	load_word(r.eye,     R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
-	load_word(r.up_in,   R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
-	load_word(r.scratch, R_TapePtr, O_(Binds_ResolveLookAtSub,scratchpad)),
-	LdSlot_ add_ui_self( R_TapePtr, S_(Binds_ResolveLookAtSub)),
+	load_word(r.target, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
+	load_word(r.eye,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
+	load_word(r.up_in,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
+	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_ResolveLookAtSub)),
 
-	/* Stage up_in.x/y/z into the scratchpad. */
+	/* Stage up_in.x/y/z into the scratchpad. R_ScratchBase = R_SP = 0x1F800000. */
 	mac_load_word_v3( r.t0, r.t1, r.t2, r.up_in,   0), LdSlot_
-	mac_store_word_v3(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,up_in)),
+	mac_store_word_v3(r.t0, r.t1, r.t2, R_ScratchBase, O_(ResolveLookAtScratch,up_in)),
 
 	// Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation column).
 	mac_load_word_v3( r.t0, r.t1, r.t2, r.eye,      0), LdSlot_
-	mac_store_word_v3(r.t0, r.t1, r.t2, r.scratch, O_(ResolveLookAtScratch,eye)),
+	mac_store_word_v3(r.t0, r.t1, r.t2, R_ScratchBase, O_(ResolveLookAtScratch,eye)),
 
 	/* Compute fwd = target - eye. */
 	// mac_load_p3s4(t3, R_AT, t4, r.eye,    0),
-	mac_load_word_v3(r.t3, R_AT, r.t4, r.target, 0), LdSlot_ 
+	mac_load_word_v3(r.t3, R_AT, r.t4, r.target, 0), LdSlot_
 	mac_sub_s_v3_self(
 		r.t3, R_AT, r.t4,
 		r.t0, r.t1, r.t2),
-	mac_store_word_v3(r.t3, R_AT, r.t4, r.scratch, O_(ResolveLookAtScratch,fwd)),
+	mac_store_word_v3(r.t3, R_AT, r.t4, R_ScratchBase, O_(ResolveLookAtScratch,fwd)),
 
 	mac_yield()
 })
@@ -180,8 +173,6 @@ typedef Struct_(Binds_ResolveLookAtPopMvTrans) {
 	U4 look_at;  /* MT3_S2S4* — destination matrix address */
 };
 typedef Struct_(RegUse_resolve_look_at__pop_mv_trans) {
-	Reg         scratch;          /* loaded via load_word_imm below — can't rely on
-	                              * R_T4 surviving across the tape_run boundary */
 	Reg         look_at;
 	Reg_(V3_S4) row;             /* populate phase: load ux/uy/uz */
 	union { Reg ux, v_x; } t6;   /* populate addr (canonical) → matrix_vector v_x */
@@ -236,17 +227,13 @@ internal MipsAtom* resolve_look_at__pop_mv_trans(AtomArena_R aa,
 	load_word(r.look_at, R_TapePtr, O_(Binds_ResolveLookAtPopMvTrans,look_at)),
 	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_ResolveLookAtPopMvTrans)),
 
-	/* Load scratch base via immediate (Scratchpad_Loc = 0x1F800000). We can't rely on
-	 * R_T4 (= R_ResolveScratch) surviving across the tape_run boundary — the compiler
-	 * treats it as clobberable per the tape_run asm_clobber list. Baking the scratch
-	 * address via load_word_imm is robust. */
-	mac_load_word_imm(r.scratch, Scratchpad_Loc),
-
-	/* --- Scratch addresses for ux/uy/uz/eye (populate phase; t6/t7/t8 alias ux/uy/uz) --- */
-	add_si(r.t6.ux, r.scratch, O_(ResolveLookAtScratch, ux)),  LdSlot_
-	add_si(r.t7.uy, r.scratch, O_(ResolveLookAtScratch, uy)),
-	add_si(r.t8.uz, r.scratch, O_(ResolveLookAtScratch, uz)),
-	add_si(r.eye,   r.scratch, O_(ResolveLookAtScratch, eye)),
+	/* --- Scratch addresses for ux/uy/uz/eye (populate phase; t6/t7/t8 alias ux/uy/uz).
+	 * R_ScratchBase (= R_SP) holds 0x1F800000; no per-atom bake is required because
+	 * R_SP is a tape carrier preserved across atoms. --- */
+	add_si(r.t6.ux, R_ScratchBase, O_(ResolveLookAtScratch, ux)),  LdSlot_
+	add_si(r.t7.uy, R_ScratchBase, O_(ResolveLookAtScratch, uy)),
+	add_si(r.t8.uz, R_ScratchBase, O_(ResolveLookAtScratch, uz)),
+	add_si(r.eye,   R_ScratchBase, O_(ResolveLookAtScratch, eye)),
 
 	/* --- POPULATE phase: write look_at->m[][] from ux/uy/uz as packed S2 --- */
 	mac_load_v3s4(r.row, r.t6.ux, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4, m[0])),

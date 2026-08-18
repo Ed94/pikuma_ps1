@@ -151,16 +151,17 @@ internal void compile_init_atoms(void) {
 
 	smem.normalize_v3s4 = build_normalize_v3s4(& ab,
 		RegUse_(build_normalize_v3s4) {
-			.scratch   = ralloc(),
-			.src_ptr   = ralloc(),
-			.dst_ptr   = ralloc(),
-			.recip_est = ralloc(),
-			.norm      = ralloc(),
-			.shift     = ralloc(),
-			.src_x     = ralloc(),
-			.t3        = ralloc(),
-			.t4        = ralloc(),
-			.t5        = ralloc(),
+			.scratch     = ralloc(),
+			.src_ptr     = ralloc(),
+			.dst_ptr     = ralloc(),
+			.recip_est   = ralloc(),
+			.norm        = ralloc(),
+			.shift       = ralloc(),
+			.src_x       = ralloc(),
+			// .shift_count = ralloc(),    /* dedicated slot for stage-3 → stage-4 shift count */
+			.t3          = ralloc(),
+			.t4          = ralloc(),
+			.t5          = ralloc(),
 		});
 	regfile_reset(& rf);
 
@@ -173,14 +174,14 @@ internal void compile_resolve_look_at(void) {
 	AtomArena ab = atomarena_make(slice_ut_arr(smem.resolve_look_at_mem));
 	AtomBundle_resolve_look_at_R bundle = C_(void*, smem.resolve_look_at_bundle);
 
-	U4 pin_mask = regfile_abi_mask | (1 << R_ResolveScratch);
-	RegFile rf  = regfile(pin_mask);
+	/* R_ScratchBase (= R_SP) is a tape carrier preserved across atoms; no carrier
+	 * pin is needed in the regfile. The standard 24-register pool is sufficient. */
+	RegFile rf = regfile(regfile_abi_mask);
 #define ralloc() regfile_alloc(& rf)
 #define ralloc_v3() { ralloc(), ralloc(), ralloc() }
 
 	bundle->input_and_sub = AtomBundleEntry_(resolve_look_at, input_and_sub)(& ab,
 		RegUse_(resolve_look_at_input_and_sub) {
-			.scratch = R_ResolveScratch,
 			.target  = ralloc(),
 			.eye     = ralloc(),
 			.up_in   = ralloc(),
@@ -190,7 +191,7 @@ internal void compile_resolve_look_at(void) {
 			.t3      = ralloc(),
 			.t4      = ralloc(),
 		});
-	regfile_reset_to_mask(& rf, pin_mask);
+	regfile_reset(& rf);
 
 	bundle->normalize_fwd_uz   = smem.normalize_v3s4;
 	bundle->cross_to_right     = smem.gte_cross_v3s4;
@@ -200,7 +201,6 @@ internal void compile_resolve_look_at(void) {
 
 	bundle->pop_mv_trans = resolve_look_at__pop_mv_trans(& ab,
 		RegUse_(resolve_look_at__pop_mv_trans){
-			.scratch = R_ResolveScratch,
 			.look_at = ralloc(),
 			.eye     = ralloc(),
 			.row     = ralloc_v3(),
@@ -229,7 +229,6 @@ I_ void resolve_look_at(TapeBuilder_R tb
 		tb_data(tb, u4_(target));
 		tb_data(tb, u4_(eye));
 		tb_data(tb, u4_(up_in));
-		tb_data(tb, u4_(smem.scratchpad));
 	}
 	tb_emit(tb, bundle->normalize_fwd_uz); {
 		tb_data(tb, u4_(O_(ResolveLookAtScratch, fwd) | (O_(ResolveLookAtScratch, uz) << 16)));
