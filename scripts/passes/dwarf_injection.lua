@@ -104,6 +104,67 @@ local ABBREV_BIND_VAR_LOCLIST = 0x6D   -- 109: DW_TAG_variable no children + DW_
 -- (a pointer_type that carries DW_AT_byte_size + DW_AT_type), so gdb misparses our 4-byte ref4 as (byte_size, type[0..2]) and lands the cursor mid-attribute.
 local ABBREV_TYPED_VIEW_POINTER = 0x6E   -- 110: DW_TAG_pointer_type no children + DW_AT_type = ref4 (typed-view / U4 / void chain)
 
+-- One row per DIE kind build_inserted_children emits.
+-- attrs list form + the value key filled from the atom / registry / local table.
+local DIE_SCHEMA = {
+	base_type = {
+		abbrev = ABBREV_BASE_TYPE,
+		attrs  = {
+			{ form = "string", key = "name" },
+			{ form = "data1",  key = "byte_size" },
+			{ form = "data1",  key = "encoding" },
+		},
+	},
+	abstract_subprogram = {
+		abbrev = ABBREV_ABSTRACT_SUBPROGRAM,
+		attrs  = {
+			{ form = "string", key = "name" },
+			{ form = "data1",  key = "inline" },
+			{ form = "data1",  key = "external" },
+			{ form = "udata",  key = "decl_file" },
+			{ form = "udata",  key = "decl_line" },
+		},
+	},
+	subprogram = {
+		abbrev = ABBREV_SUBPROGRAM,
+		attrs  = {
+			{ form = "string", key = "name" },
+			{ form = "addr",   key = "low_pc" },
+			{ form = "addr",   key = "high_pc" },
+			{ form = "string", key = "linkage_name" },
+		},
+	},
+	variable = {
+		abbrev = ABBREV_VARIABLE,
+		attrs  = {
+			{ form = "string",     key = "name" },
+			{ form = "ref4",       key = "type" },
+			{ form = "exprloc",    key = "location" },
+		},
+	},
+	structure_type = {
+		abbrev = ABBREV_STRUCT_TYPE,
+		attrs  = {
+			{ form = "string", key = "name" },
+			{ form = "data1",  key = "byte_size" },
+		},
+	},
+	member = {
+		abbrev = ABBREV_MEMBER,
+		attrs  = {
+			{ form = "string", key = "name" },
+			{ form = "data2",  key = "data_member_location" },
+			{ form = "ref4",   key = "type" },
+		},
+	},
+	pointer_type = {
+		abbrev = ABBREV_TYPED_VIEW_POINTER,
+		attrs  = {
+			{ form = "ref4", key = "type" },
+		},
+	},
+}
+
 -- DWARF5 §7.7.3 loclist opcodes.
 local DW_LLE_end_of_list    = 0x00
 local DW_LLE_start_length   = 0x08
@@ -1581,6 +1642,26 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		S.bytes[#S.bytes + 1] = s
 		S.next_offset       = S.next_offset + #s
 	end
+	local function emit_die(schema_name, values)
+		local row = DIE_SCHEMA[schema_name]
+		emit(uleb128(row.abbrev))
+		for _, attr in ipairs(row.attrs) do
+			local v = values[attr.key]
+			if attr.form == "string" then
+				emit(v .. "\0")
+			elseif attr.form == "data1" then
+				emit(string.char(v))
+			elseif attr.form == "udata" then
+				emit(uleb128(v))
+			elseif attr.form == "addr" or attr.form == "ref4" then
+				emit(elf_dwarf.write_u32_le(v))
+			elseif attr.form == "data2" then
+				emit(elf_dwarf.write_u16_le(v))
+			elseif attr.form == "exprloc" then
+				emit(v)
+			end
+		end
+	end
 	local function ref4_of(section_offset)
 		if section_offset == nil then return 0 end
 		return section_offset - main_cu_offset
@@ -1589,10 +1670,11 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 
 	-- 1) Emit the base_type DIE first (member ref4s reference it).
 	local base_type_section_offset = S.next_offset
-	emit(uleb128(ABBREV_BASE_TYPE))
-	emit("unsigned int\0")                   -- DW_FORM_string (DW_AT_name)
-	emit(string.char(4))                     -- DW_FORM_data1  (DW_AT_byte_size)
-	emit(string.char(DW_ATE_unsigned))       -- DW_FORM_data1  (DW_AT_encoding)
+	emit_die("base_type", {
+		name      = "unsigned int",
+		byte_size = 4,
+		encoding  = DW_ATE_unsigned,
+	})
 	-- The function body below reads S.next_offset directly via the `next_offset` function;
 	-- this keeps offsets synchronized with emitted data.
 	local function next_offset() return S.next_offset end
@@ -1847,13 +1929,13 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	for _, comp_name in ipairs(sorted_comp_names) do
 		local def = component_defs[comp_name]
 		abstract_offsets[comp_name] = next_offset()
-		emit(uleb128(ABBREV_ABSTRACT_SUBPROGRAM))
-		emit("mac_" .. comp_name .. "\0") -- DW_FORM_string (DW_AT_name)
-		emit(string.char(DW_INL_inlined)) -- DW_FORM_data1 (DW_AT_inline)
-		emit(string.char(0x01))           -- DW_FORM_data1 (DW_AT_external=1)
-		-- decl_file + decl_line resolve the abstract origin back to its definition site even when no inlined_subroutine instance maps to it.
-		emit(uleb128(resolve_provenance_file_index(def.def_file)))  -- DW_FORM_udata (DW_AT_decl_file)
-		emit(uleb128(def.def_line))                                 -- DW_FORM_udata (DW_AT_decl_line)
+		emit_die("abstract_subprogram", {
+			name      = "mac_" .. comp_name,
+			inline    = DW_INL_inlined,
+			external  = 0x01,
+			decl_file = resolve_provenance_file_index(def.def_file),
+			decl_line = def.def_line,
+		})
 	end
 
 	-- 4) Emit per-atom DW_TAG_subprograms (children of main CU).
@@ -1861,11 +1943,12 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	--    The gcc global `<name>[]` is a DW_TAG_variable without children; our subprogram has the wave-context var children.
 	--    gdb's symbol resolution picks our subprogram (it has low_pc/high_pc + children) over the gcc global for function-context lookups.
 	for _, atom in ipairs(atom_table) do
-		emit(uleb128(ABBREV_SUBPROGRAM))
-		emit(atom.name .. "\0") -- DW_FORM_string (DW_AT_name)
-		emit(elf_dwarf.write_u32_le(atom.addr))
-		emit(elf_dwarf.write_u32_le(atom.addr + atom.size_bytes))
-		emit(atom.name .. "\0") -- DW_FORM_string (DW_AT_linkage_name; same as DW_AT_name for non-mangled C)
+		emit_die("subprogram", {
+			name          = atom.name,
+			low_pc        = atom.addr,
+			high_pc       = atom.addr + atom.size_bytes,
+			linkage_name  = atom.name,
+		})
 
 	-- Per debug-visible R_ alias (filtered to GPR 0..31 in `by_alias`): DW_TAG_variable.
 	-- Precedence chain (per atom, per RR_<R_Name>):

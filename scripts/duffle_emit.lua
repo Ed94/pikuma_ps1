@@ -268,6 +268,13 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		if not reg_use_schema then
 			gpr_keys = nil
 		end
+		local isa = M.instr(encoder)
+		local isa_kind = isa and isa.kind or "unknown"
+		local nop_words = (encoder == "nop" and 1) or (encoder == "nop2" and 2) or 0
+		local is_yield = (encoder == "mac_yield" or encoder == "mac_yield_tail")
+		local gp0_shape = type(encoder) == "string"
+			and encoder:match("^mac_format_([%w_]+)_color$")
+			or nil
 		items[#items + 1] = {
 			kind                     = "word",
 			encoder                  = encoder,
@@ -280,6 +287,11 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			invocation_ids           = inv_ids,
 			outermost_invocation_id  = outermost,
 			gpr_keys                 = gpr_keys,
+			ident                    = encoder,
+			isa_kind                 = isa_kind,
+			nop_words                = nop_words,
+			is_yield                 = is_yield,
+			gp0_shape                = gp0_shape,
 		}
 		word_events[#word_events + 1] = {
 			i                        = word_idx,
@@ -293,6 +305,11 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			outermost_invocation_id  = outermost,
 			word_count               = 1,
 			gpr_keys                 = gpr_keys,
+			ident                    = encoder,
+			kind                     = isa_kind,
+			nop_words                = nop_words,
+			is_yield                 = is_yield,
+			gp0_shape                = gp0_shape,
 		}
 		word_idx = word_idx + 1
 	end

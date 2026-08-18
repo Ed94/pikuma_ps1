@@ -245,7 +245,7 @@ local BRANCH_PATTERN          = "^branch_[%w_]+%s*%("
 -- This keeps `consuming_encoder` canonical for any downstream tooling that consults the metadata field.
 local JUMP_REL_PATTERN      = "^jump_rel%s*%("
 
-local function classify_tokens(tokens)
+local function tok_class_view(tokens)
 	local n       = #tokens
 	local tc      = {}
 	local nop_run = 0  -- running count of consecutive nop words (forward pass)
@@ -811,6 +811,7 @@ local function analyze_hardware_relations(atom)
 		pending            = {},
 		cu2_state          = "unobserved",
 		cu2_transition     = nil,
+		c2_ctrl_writes     = {},
 		_analysis_complete = false,
 	}
 	-- The architectural zero register is always a known U4 zero and cannot be invalidated by an emitted writer.
@@ -847,44 +848,62 @@ local function analyze_hardware_relations(atom)
 		-- Both operations are part of this one event walk.
 		stage_cu2_transition(ev_ident, ev_args, ev_word, ev_line, ev_source, forward)
 		consume_cu2_transition(atom, ev, ev_word, forward)
+		if ev_ident == "gte_mv_to_ctrl_r" then
+			forward.c2_ctrl_writes = forward.c2_ctrl_writes or {}
+			local alias = ev_args[2]
+			if type(alias) ~= "string" or not alias:match("^gte_cr_") then
+				alias = tostring(ev.call_text or ""):match("gte_cr_[%w_]+")
+					or tostring(ev.root_call_text or ""):match("gte_cr_[%w_]+")
+			end
+			local src = ev_args[1]
+			if type(src) == "string" then src = src:match("[%w_]+") end
+			if alias then
+				forward.c2_ctrl_writes[#forward.c2_ctrl_writes + 1] = {
+					alias = alias,
+					src   = src,
+					line  = ev_line or atom.line,
+				}
+			end
+		end
 
 		-- ── 1. Inspect pending relations against the event as CONSUMER. ──
 		-- Walk pending in REVERSE so `table.remove` doesn't shift indexes still to be inspected.
+		local CONSUMER = {
+			cop2_input = function(ev, prod)
+				local relation = prod.relation
+				if relation.id == "lwc2_to_gte_command" then
+					return is_gte_command(ev) and is_cop2_consumer_of(ev, prod.destination, relation)
+				end
+				if relation.id == "lwc2_to_other_consumer" then
+					return (not is_gte_command(ev)) and is_cop2_consumer_of(ev, prod.destination, relation)
+				end
+				return is_cop2_consumer_of(ev, prod.destination, relation)
+			end,
+			gpr_read = function(ev, prod)
+				return is_gpr_consumer_of(ev, prod.destination)
+			end,
+			overwrite_same_dest = function(ev, prod)
+				local ident = ev.encoder or ev.ident
+				local args = ev.args or {}
+				return (ident == "gte_mv_to_data_r" or ident == "gte_mv_to_ctrl_r")
+					and args[2] == prod.destination
+			end,
+		}
 		for pending_idx = #pending, 1, -1 do
 			local prod     = pending[pending_idx]
 			local relation = prod.relation
-			local semantic = relation.semantic
-			local is_match = false
-			if semantic == "MTC2" or semantic == "CTC2" or semantic == "LWC2_to_GTE" or semantic == "LWC2_to_other" then
-				-- Consumer is a GTE command whose input set contains the producer's COP2 destination (or a fan-out target).
-				-- LWC2_to_GTE   — GTE-command consumer: gap = 0 OK (the pipeline latches the LWC2 result).
-				-- LWC2_to_other — non-GTE consumer:     standard load delay applies.
-				if relation.id == "lwc2_to_gte_command" then
-					is_match = is_gte_command(ev) and is_cop2_consumer_of(ev, prod.destination, relation)
-				elseif relation.id == "lwc2_to_other_consumer" then
-					is_match = (not is_gte_command(ev)) and is_cop2_consumer_of(ev, prod.destination, relation)
-				else
-					is_match = is_cop2_consumer_of(ev, prod.destination, relation)
-				end
-			elseif semantic == "MFC2" or semantic == "CFC2" or semantic == "MFC0" then
-				-- Consumer is any encoder that reads the producer's GPR destination as an operand.
-				is_match = is_gpr_consumer_of(ev, prod.destination)
-			elseif semantic == "command_latch" then
-				-- Consumer is a subsequent MTC2/CTC2 overwrite of the same C2 destination.
-				-- The semantic is the post-command latch direction (command -> register);
-				-- This is intentionally separate from the preceding MTC2 -> command relation.
-				is_match = (ev_ident == "gte_mv_to_data_r" or ev_ident == "gte_mv_to_ctrl_r")
-					and ev_args[1] ~= nil
-					and ev_args[2] == prod.destination
-			end
+			local match_fn = CONSUMER[relation.consumer]
+			local is_match = match_fn and match_fn(ev, prod)
 			if is_match then
 				local gap                = ev_word - prod.word - 1
 				local required           = prod.required
 				-- A following COP2 command waits at the transfer boundary.
 				-- Software nops are not required for that consumer class.
 				if is_gte_command(ev)
-					and (semantic == "MTC2" or semantic == "CTC2")
-					and relation.id ~= "mtc2_irgb_visibility" then
+					and relation.consumer == "cop2_input"
+					and relation.id ~= "mtc2_irgb_visibility"
+					and relation.id ~= "lwc2_to_gte_command"
+					and relation.id ~= "lwc2_to_other_consumer" then
 					required = 0
 				end
 				local unknown_visibility = relation.visibility and relation.visibility.kind == "unknown_consumer"
@@ -1049,6 +1068,7 @@ local function analyze_hardware_relations(atom)
 								relation = {
 									id        = "command_latch_input",
 									semantic  = "command_latch",
+									consumer  = "overwrite_same_dest",
 									direction = "gte_command_to_cop2_register",
 									token     = canonical,
 									evidence  = {
@@ -1383,8 +1403,9 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 					if latch.register and latch.required then
 						pending_snapshot[#pending_snapshot + 1] = {
 							relation    = {
-								id    = "command_latch_input",
+								id       = "command_latch_input",
 								semantic = "command_latch",
+								consumer = "overwrite_same_dest",
 							},
 							destination = latch.register,
 							word        = ev_word,
@@ -2098,7 +2119,7 @@ end
 ---                    plus `mac_*` idents whose bare name is missing from `pipe_ctx.components_by_name` (i.e. no `MipsAtomComp_` for it).
 local function analyze_atom_paths(atom, pipe_ctx)
 	local tokens = atom.paths.tokens or duffle.tokenize_body(atom.body)
-	local tc     = atom.paths.tok_class or classify_tokens(tokens)
+	local tc     = atom.paths.tok_class or tok_class_view(tokens)
 	local n      = #tokens
 
 	-- Build label + branch maps from the pre-computed classification (no re-scan).
@@ -2554,6 +2575,8 @@ local function ctrl_alias_from_text(text)
 end
 
 local function ctrl_writes_in_atom(atom)
+	local fs = atom.paths and atom.paths.forward_state
+	if fs and fs.c2_ctrl_writes then return fs.c2_ctrl_writes end
 	local out = {}
 	for _, ev in ipairs((atom.paths and atom.paths.word_events) or {}) do
 		if (ev.encoder or "") == "gte_mv_to_ctrl_r" then
@@ -2569,18 +2592,6 @@ local function ctrl_writes_in_atom(atom)
 					src   = src,
 					line  = ev.line or atom.line,
 				}
-			end
-		end
-	end
-	if #out == 0 then
-		for _, t in ipairs((atom.paths and atom.paths.tokens) or {}) do
-			local tok = t.tok or ""
-			if tok:match("^gte_mv_to_ctrl_r") then
-				local alias = ctrl_alias_from_text(tok)
-				local src = tok:match("%(%s*([%w_]+)")
-				if alias then
-					out[#out + 1] = { alias = alias, src = src, line = atom.line }
-				end
 			end
 		end
 	end
@@ -2994,16 +3005,16 @@ local function arg_as_gpr(arg)
 	return arg:match("^R_[%w_]+$")
 end
 
-local function collect_gpr_traffic(tokens)
+local function collect_gpr_traffic(atom)
 	local reads, writes = {}, {}
-	for _, t in ipairs(tokens or {}) do
-		local tok = t.tok or t
-		local ident = (tok or ""):match("^([%w_]+)") or ""
+	local events = (atom and atom.paths and atom.paths.word_events) or {}
+	for _, ev in ipairs(events) do
+		local ident = ev.encoder or ev.ident or ""
 		if ident:sub(1, 4) ~= "mac_"
 			and not (duffle.DELAY_MARKERS and duffle.DELAY_MARKERS[ident])
 			and ident ~= "nop" and ident ~= "atom_label" and ident ~= "atom_offset"
 		then
-			local args = token_arg_list(tok)
+			local args = ev.args or {}
 			local fx = duffle.instr(ident)
 			if fx then
 				for _, pos in ipairs(fx.reads or {}) do
@@ -3057,7 +3068,7 @@ local function check_atom_calls_inferred_traffic(atom, pipe_ctx, findings)
 	if #(info.reads or {}) == 0 and #(info.writes or {}) == 0 then return end
 
 	local tokens = (atom.paths and atom.paths.tokens) or atom.body_tokens
-	local reads, writes = collect_gpr_traffic(tokens)
+	local reads, writes = collect_gpr_traffic(atom)
 	for _, t in ipairs(tokens or {}) do
 		local ident = ((t.tok or t) or ""):match("^([%w_]+)") or ""
 		if ident:sub(1, 4) == "mac_" then
@@ -3280,7 +3291,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		-- `paths.tokens` / `paths.line_in_body` / `paths.items` / `paths.word_events` are populated by `passes/emission_model.lua`.
 		-- Supply tokens when no emission projection is present.
 		if a.paths.tokens == nil then a.paths.tokens = a.body_tokens end
-		a.paths.tok_class = classify_tokens(a.paths.tokens)
+		a.paths.tok_class = tok_class_view(a.paths.tokens)
 
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a, pipe_ctx)

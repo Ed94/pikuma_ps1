@@ -536,6 +536,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "mtc2_gpr_visibility",
 		semantic       = "MTC2",
+		consumer       = "cop2_input",
 		token          = "gte_mv_to_data_r",
 		direction      = "gpr_to_cop2_data",
 		reads          = { domain = "gpr",       arg = 1 },
@@ -554,6 +555,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id              = "mtc2_irgb_visibility",
 		semantic        = "MTC2",
+		consumer        = "cop2_input",
 		token           = "gte_mv_to_data_r",
 		direction       = "gpr_to_cop2_data",
 		reads           = { domain = "gpr",       arg = 1 },
@@ -572,6 +574,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "ctc2_gpr_visibility",
 		semantic       = "CTC2",
+		consumer       = "cop2_input",
 		token          = "gte_mv_to_ctrl_r",
 		direction      = "gpr_to_cop2_control",
 		reads          = { domain = "gpr",        arg = 1 },
@@ -588,6 +591,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "mfc2_gpr_visibility",
 		semantic       = "MFC2",
+		consumer       = "gpr_read",
 		token          = "gte_mv_from_data_r",
 		direction      = "cop2_data_to_gpr",
 		reads          = { domain = "cop2.data",  arg = 2 },
@@ -603,6 +607,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "cfc2_gpr_visibility",
 		semantic       = "CFC2",
+		consumer       = "gpr_read",
 		token          = "gte_mv_from_ctrl_r",
 		direction      = "cop2_control_to_gpr",
 		reads          = { domain = "cop2.ctrl",  arg = 2 },
@@ -621,6 +626,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "mfc0_gpr_visibility",
 		semantic       = "MFC0",
+		consumer       = "gpr_read",
 		token          = "sys_mov_from_cop0",
 		direction      = "cop0_control_to_gpr",
 		reads          = { domain = "cop0.ctrl",  arg = 2 },
@@ -643,6 +649,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "lwc2_to_gte_command",
 		semantic       = "LWC2_to_GTE",
+		consumer       = "cop2_input",
 		token          = "gte_lw",
 		direction      = "memory_to_cop2_data",
 		reads          = { domain = "memory",    arg = 2 },
@@ -658,6 +665,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "lwc2_to_other_consumer",
 		semantic       = "LWC2_to_other",
+		consumer       = "cop2_input",
 		token          = "gte_lw",
 		direction      = "memory_to_cop2_data",
 		reads          = { domain = "memory",    arg = 2 },
@@ -675,6 +683,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "swc2_memory_write",
 		semantic       = "SWC2",
+		consumer       = "gpr_read",
 		token          = "gte_sw",
 		direction      = "cop2_data_to_memory",
 		reads          = { domain = "cop2.data", arg = 1 },
@@ -692,6 +701,7 @@ M.HARDWARE_RELATIONS = {
 	{
 		id             = "mtc0_cu2_visibility",
 		semantic       = "MTC0",
+		consumer       = "gpr_read",
 		token          = "sys_mov_to_cop0",
 		direction      = "gpr_to_cop0_status",
 		reads          = { domain = "gpr",          arg = 1 },

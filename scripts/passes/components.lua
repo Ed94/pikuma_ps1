@@ -942,7 +942,7 @@ function M.run(ctx)
 				aggregated_components[#aggregated_components + 1] = c
 			end
 			if #per_source > 0 then
-				metadata_per_source[src] = compute_components_metadata(per_source, duffle.INSTRUCTION_LATENCY)
+				metadata_per_source[src] = compute_components_metadata(per_source, {})
 			end
 		end
 		if #aggregated_components > 0 then
