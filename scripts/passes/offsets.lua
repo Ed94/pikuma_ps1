@@ -129,32 +129,38 @@ end
 --- This preserves backward compatibility for any top-level marker that may exist outside a control-transfer instruction.
 --- @param labels   table<string, integer>
 --- @param branches table[]
+--- @param errors   table[]
 --- @return BranchOffset[]
-local function compute_offsets(labels, branches)
+local function compute_offsets(labels, branches, errors)
 	local results = {}
 	for _, br in ipairs(branches) do
 		local target = labels[br.target]
 		if not target then
-			error("Branch target '" .. br.target .. "' has no atom_label (at word " .. br.branch_word .. ")")
+			errors[#errors + 1] = {
+				line = br.line or 0,
+				msg  = "Branch target '" .. br.target .. "' has no atom_label (at word " .. br.branch_word .. ")",
+			}
+		else
+			local consuming = br.consuming_encoder
+			if consuming == "jump_reg" or consuming == "call_reg" or consuming == "jump_link" then
+				errors[#errors + 1] = {
+					line = br.line or 0,
+					msg  = "atom_offset cannot be used with " .. consuming
+						.. " (register-form jumps have no offset field); at word " .. br.branch_word,
+				}
+			else
+				-- All other consuming instructions (including `branch_*`, `jump`, `call_addr`, and nil for top-level markers) use the same relative offset value.
+				-- The MIPS encoding differs per opcode but the duffle `enc_i` macro handles the truncation to the immediate-field width.
+				results[#results + 1] = {
+					target             = br.target,
+					tag                = br.tag,
+					branch_word        = br.branch_word,
+					offset             = target - br.branch_word - 1,
+					consuming_encoder  = br.consuming_encoder,
+					consuming_arg_pos  = br.consuming_arg_pos,
+				}
+			end
 		end
-		local consuming = br.consuming_encoder
-		local offset
-		if consuming == "jump_reg" or consuming == "call_reg" or consuming == "jump_link" then
-			-- Register-form jumps have no offset field. `atom_offset` cannot be used here.
-			error("atom_offset cannot be used with " .. consuming
-				.. " (register-form jumps have no offset field); at word " .. br.branch_word)
-		end
-		-- All other consuming instructions (including `branch_*`, `jump`, `call_addr`, and nil for top-level markers) use the same relative offset value.
-		-- The MIPS encoding differs per opcode but the duffle `enc_i` macro handles the truncation to the immediate-field width.
-		offset = target - br.branch_word - 1
-		results[#results + 1] = {
-			target             = br.target,
-			tag                = br.tag,
-			branch_word        = br.branch_word,
-			offset             = offset,
-			consuming_encoder  = br.consuming_encoder,
-			consuming_arg_pos  = br.consuming_arg_pos,
-		}
 	end
 	return results
 end
@@ -237,8 +243,9 @@ local M = {}
 --- @param ctx     PassCtx
 --- @param dir     string       -- the absolute source directory
 --- @param sources SourceFile[] -- sources in this directory
+--- @param errors  table[]
 --- @return string|nil  -- the offsets_h path
-local function process_directory(ctx, dir, sources)
+local function process_directory(ctx, dir, sources, errors)
 	local atoms_data = {}
 
 	local function append_atom(atom)
@@ -248,7 +255,7 @@ local function process_directory(ctx, dir, sources)
 		atoms_data[#atoms_data + 1] = {
 			name        = atom.raw_name or atom.name,
 			total_words = #(paths.word_events or {}),
-			offsets     = compute_offsets(labels, branches),
+			offsets     = compute_offsets(labels, branches, errors),
 		}
 	end
 
@@ -286,7 +293,7 @@ function M.run(ctx)
 	-- Per-directory aggregation: every source in the same directory contributes to one `gen/offsets.h`.
 	local sources_by_dir = corpus.sources_by_dir or duffle.group_sources_by_dir(corpus.source_order)
 	for dir, sources in pairs(sources_by_dir) do
-		local out_path = process_directory(ctx, dir, sources)
+		local out_path = process_directory(ctx, dir, sources, errors)
 		if out_path then
 			outputs[#outputs + 1] = { offsets_h = out_path }
 		end

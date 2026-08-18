@@ -7,7 +7,7 @@
 --- Public boundary:
 ---   * `M.run(ctx)` is the only entry point.
 ---   * The pass returns `{outputs = {}, errors = ..., warnings = ...}`.
----     Pass kind = `validation` → `PASS_KIND_STOP_ON_ERROR.validation` preserves the existing build-stopping policy.
+---     Pass kind = `validation`. Findings record on the result; the orchestrator does not exit non-zero.
 ---
 --- Source-order discipline:
 ---   * `corpus.source_order` sets the source-record order.

@@ -142,8 +142,7 @@ local PASSES = {
 	},
 	["static-analysis"] = {
 		module = "passes.static_analysis",
-		-- "diagnostic" — every `error`/`warning` finding is written to the report file;
-		-- The orchestrator does NOT exit non-zero on these findings (see PASS_KIND_STOP_ON_ERROR).
+		-- "diagnostic" — every `error`/`warning` finding is written to the report file.
 		-- Report severity is independent from process exit policy.
 		kind   = "diagnostic",
 		deps   = {"scan-source", "word-counts", "components", "emission-model"},
@@ -206,16 +205,13 @@ local function request_roots_for_group(args, group_name)
 	end
 end
 
--- Pass-kind taxonomy: Which kinds stop the build on errors?
---
+-- Pass-kind taxonomy: findings always print. No pass kind stops the build.
 -- Report severity is independent from process exit policy.
--- A "diagnostic" pass still writes every `error`/`warning` finding into its report file,
--- but `report_validation_errors` returns early for non-stopping kinds, so nothing is printed to stderr and the orchestrator does not exit non-zero.
--- Adding a new pass kind requires listing it here explicitly; An unknown kind must not silently fall back to "true".
+-- Adding a new pass kind requires listing it here explicitly; an unknown kind must not silently fall back to "true".
 local PASS_KIND_STOP_ON_ERROR = {
 	["shared"]        = false,
-	["header-output"] = true,
-	["validation"]    = true,
+	["header-output"] = false,
+	["validation"]    = false,
 	["diagnostic"]    = false,
 	["report"]        = false,
 }
@@ -693,19 +689,19 @@ end
 -- Main Orchestrator
 -- ════════════════════════════════════════════════════════════════════════════
 
---- (internal) If the pass's kind is in PASS_KIND_STOP_ON_ERROR and it reported errors, write each error to stderr.
---- Returns true if any validation errors were reported.
+--- (internal) Write every pass error to stderr.
+--- Returns true only when the pass kind still stops the build.
 --- @param pass_name string
 --- @param pass      PassDescriptor
 --- @param result    PassResult
 --- @return boolean
 local function report_validation_errors(pass_name, pass, result)
-	local   has_errors = result.errors and #result.errors > 0
-	if not (has_errors and PASS_KIND_STOP_ON_ERROR[pass.kind]) then return false end
+	local has_errors = result.errors and #result.errors > 0
+	if not has_errors then return false end
 	for _, e in ipairs(result.errors) do
 		io.stderr:write(string.format("[%s] line %d: %s\n", pass_name, e.line or 0, e.msg or ""))
 	end
-	return true
+	return PASS_KIND_STOP_ON_ERROR[pass.kind] == true
 end
 
 --- (internal) Run each pass in `order` in topological sequence.

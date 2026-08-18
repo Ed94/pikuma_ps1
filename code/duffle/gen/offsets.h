@@ -33,7 +33,7 @@ enum {
     atom_offset_example_atom_proc_skip = _atom_offset_example_atom_proc_skip,
 };
 
-// --- atom: build_normalize_v3s4 (65 words) ---
+// --- atom: build_normalize_v3s4 (63 words) ---
 
 #define _atom_offset_aligned_done_srav_path           3
 #define _atom_offset_srav_path_aligned_done           4

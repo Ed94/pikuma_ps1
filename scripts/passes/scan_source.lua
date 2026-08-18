@@ -1674,9 +1674,20 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 				errors[#errors + 1] = { kind = "reguse_malformed" }
 				return nil, errors
 			end
-			local members = {}
+			local views = {}
 			local union_readonly = nil
 			local inner_pos = 1
+
+			local function note_readonly(flag)
+				if union_readonly == nil then
+					union_readonly = flag
+				elseif union_readonly ~= flag then
+					errors[#errors + 1] = { kind = "reguse_mixed_const" }
+					return false
+				end
+				return true
+			end
+
 			while inner_pos <= #inner do
 				inner_pos = duffle.skip_ws_and_cmt(inner, inner_pos)
 				if inner_pos > #inner then break end
@@ -1689,56 +1700,228 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 					errors[#errors + 1] = { kind = "reguse_const_reg_spelling" }
 					return nil, errors
 				end
-				if m_type ~= "Reg" then
+
+				if m_type == "Reg_" then
+					local after_ty = duffle.skip_ws_and_cmt(inner, m_type_end)
+					if inner:sub(after_ty, after_ty) ~= "(" then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					local type_inner, after_paren = duffle.read_parens(inner, after_ty)
+					if not type_inner then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					local typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry)
+					after_paren = duffle.skip_ws_and_cmt(inner, after_paren)
+					local inst_names, new_inner = parse_reg_names(inner, after_paren)
+					if not inst_names or #inst_names == 0 then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					if not note_readonly(false) then return nil, errors end
+					if not typed_fields then
+						if require_types then
+							errors[#errors + 1] = { kind = "reguse_unknown_reg_type", type_name = duffle.trim(type_inner) }
+							return nil, errors
+						end
+						pending = true
+					else
+						for _, inst in ipairs(inst_names) do
+							local names = {}
+							for _, field in ipairs(typed_fields) do
+								names[#names + 1] = inst .. "." .. field
+							end
+							views[#views + 1] = { names = names, lanes = true }
+						end
+					end
+					inner_pos = new_inner
+
+				elseif m_type == "struct" then
+					local after_struct = duffle.skip_ws_and_cmt(inner, m_type_end)
+					if inner:sub(after_struct, after_struct) ~= "{" then
+						local _, tag_end = duffle.read_ident(inner, after_struct)
+						if not tag_end then
+							errors[#errors + 1] = { kind = "reguse_malformed" }
+							return nil, errors
+						end
+						after_struct = duffle.skip_ws_and_cmt(inner, tag_end)
+					end
+					if inner:sub(after_struct, after_struct) ~= "{" then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					local struct_inner, after_struct_braces = duffle.read_braces(inner, after_struct)
+					if not struct_inner then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					local lane_names = {}
+					local s_pos = 1
+					while s_pos <= #struct_inner do
+						s_pos = duffle.skip_ws_and_cmt(struct_inner, s_pos)
+						if s_pos > #struct_inner then break end
+						local s_ty, s_ty_end = duffle.read_ident(struct_inner, s_pos)
+						if not s_ty then
+							s_pos = s_pos + 1
+							goto continue_struct
+						end
+						if s_ty == "Reg_" then
+							local after_ty = duffle.skip_ws_and_cmt(struct_inner, s_ty_end)
+							if struct_inner:sub(after_ty, after_ty) ~= "(" then
+								errors[#errors + 1] = { kind = "reguse_malformed" }
+								return nil, errors
+							end
+							local type_inner, after_paren = duffle.read_parens(struct_inner, after_ty)
+							if not type_inner then
+								errors[#errors + 1] = { kind = "reguse_malformed" }
+								return nil, errors
+							end
+							local typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry)
+							after_paren = duffle.skip_ws_and_cmt(struct_inner, after_paren)
+							local inst_names, new_s = parse_reg_names(struct_inner, after_paren)
+							if not inst_names or #inst_names == 0 then
+								errors[#errors + 1] = { kind = "reguse_malformed" }
+								return nil, errors
+							end
+							if not note_readonly(false) then return nil, errors end
+							if not typed_fields then
+								if require_types then
+									errors[#errors + 1] = { kind = "reguse_unknown_reg_type", type_name = duffle.trim(type_inner) }
+									return nil, errors
+								end
+								pending = true
+							else
+								for _, inst in ipairs(inst_names) do
+									for _, field in ipairs(typed_fields) do
+										lane_names[#lane_names + 1] = inst .. "." .. field
+									end
+								end
+							end
+							s_pos = new_s
+						elseif s_ty == "Reg" then
+							local s_after = duffle.skip_ws_and_cmt(struct_inner, s_ty_end)
+							local s_readonly = false
+							local maybe_const, maybe_end = duffle.read_ident(struct_inner, s_after)
+							if maybe_const == "const" then
+								s_readonly = true
+								s_after = duffle.skip_ws_and_cmt(struct_inner, maybe_end)
+							end
+							if not note_readonly(s_readonly) then return nil, errors end
+							local names, new_s = parse_reg_names(struct_inner, s_after)
+							if not names or #names == 0 then
+								errors[#errors + 1] = { kind = "reguse_malformed" }
+								return nil, errors
+							end
+							for _, n in ipairs(names) do lane_names[#lane_names + 1] = n end
+							s_pos = new_s
+						else
+							errors[#errors + 1] = { kind = "reguse_malformed" }
+							return nil, errors
+						end
+						::continue_struct::
+					end
+					if #lane_names == 0 and not pending then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					if #lane_names > 0 then
+						views[#views + 1] = { names = lane_names, lanes = true }
+					end
+					inner_pos = duffle.skip_ws_and_cmt(inner, after_struct_braces)
+					if inner:sub(inner_pos, inner_pos) == ";" then inner_pos = inner_pos + 1 end
+
+				elseif m_type == "Reg" then
+					local m_after = duffle.skip_ws_and_cmt(inner, m_type_end)
+					local m_readonly = false
+					local maybe_const, maybe_end = duffle.read_ident(inner, m_after)
+					if maybe_const == "const" then
+						m_readonly = true
+						m_after = duffle.skip_ws_and_cmt(inner, maybe_end)
+					end
+					if not note_readonly(m_readonly) then return nil, errors end
+					local names, new_inner = parse_reg_names(inner, m_after)
+					if not names or #names == 0 then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					views[#views + 1] = { names = names, lanes = false }
+					inner_pos = new_inner
+				else
 					errors[#errors + 1] = { kind = "reguse_malformed" }
 					return nil, errors
 				end
-				local m_after = duffle.skip_ws_and_cmt(inner, m_type_end)
-				local m_readonly = false
-				local maybe_const, maybe_end = duffle.read_ident(inner, m_after)
-				if maybe_const == "const" then
-					m_readonly = true
-					m_after = duffle.skip_ws_and_cmt(inner, maybe_end)
-				end
-				if union_readonly == nil then
-					union_readonly = m_readonly
-				elseif union_readonly ~= m_readonly then
-					errors[#errors + 1] = { kind = "reguse_mixed_const" }
-					return nil, errors
-				end
-				local names, new_inner = parse_reg_names(inner, m_after)
-				if not names or #names == 0 then
-					errors[#errors + 1] = { kind = "reguse_malformed" }
-					return nil, errors
-				end
-				for _, n in ipairs(names) do members[#members + 1] = n end
-				inner_pos = new_inner
 				::continue_inner::
 			end
-			if #members == 0 then
-				errors[#errors + 1] = { kind = "reguse_malformed" }
-				return nil, errors
-			end
+
 			local after_close = duffle.skip_ws_and_cmt(body, after_braces)
 			local inst_name, inst_end = duffle.read_ident(body, after_close)
-			local aliases = {}
-			local slot_name
-			if inst_name then
-				slot_name = inst_name
-				for _, m in ipairs(members) do
-					local path = inst_name .. "." .. m
-					if not add_alias(path, slot_name) then return nil, errors end
-					aliases[#aliases + 1] = path
+
+			if #views == 0 then
+				if not pending then
+					errors[#errors + 1] = { kind = "reguse_malformed" }
+					return nil, errors
 				end
-				after_close = inst_end
 			else
-				slot_name = members[1]
-				for _, m in ipairs(members) do
-					if not add_alias(m, slot_name) then return nil, errors end
-					aliases[#aliases + 1] = m
-				end
+			local has_lanes = false
+			for _, v in ipairs(views) do
+				if v.lanes then has_lanes = true end
 			end
-			if not add_slot(slot_name, aliases, union_readonly) then return nil, errors end
+
+			if has_lanes then
+				local width = nil
+				for _, v in ipairs(views) do
+					if not v.lanes then
+						errors[#errors + 1] = { kind = "reguse_malformed" }
+						return nil, errors
+					end
+					if width == nil then
+						width = #v.names
+					elseif #v.names ~= width then
+						errors[#errors + 1] = { kind = "reguse_union_width" }
+						return nil, errors
+					end
+				end
+				if width then
+					for i = 1, width do
+						local slot_name = views[1].names[i]
+						if inst_name then slot_name = inst_name .. "." .. slot_name end
+						local aliases = {}
+						for _, v in ipairs(views) do
+							local n = v.names[i]
+							if inst_name then n = inst_name .. "." .. n end
+							if not add_alias(n, slot_name) then return nil, errors end
+							aliases[#aliases + 1] = n
+						end
+						if not add_slot(slot_name, aliases, union_readonly) then return nil, errors end
+					end
+				end
+			else
+				local members = {}
+				for _, v in ipairs(views) do
+					for _, n in ipairs(v.names) do members[#members + 1] = n end
+				end
+				local aliases = {}
+				local slot_name
+				if inst_name then
+					slot_name = inst_name
+					for _, m in ipairs(members) do
+						local path = inst_name .. "." .. m
+						if not add_alias(path, slot_name) then return nil, errors end
+						aliases[#aliases + 1] = path
+					end
+				else
+					slot_name = members[1]
+					for _, m in ipairs(members) do
+						if not add_alias(m, slot_name) then return nil, errors end
+						aliases[#aliases + 1] = m
+					end
+				end
+				if not add_slot(slot_name, aliases, union_readonly) then return nil, errors end
+			end
+			end
+
+			if inst_name then after_close = inst_end end
 			after_close = duffle.skip_ws_and_cmt(body, after_close)
 			if body:sub(after_close, after_close) == ";" then after_close = after_close + 1 end
 			pos = after_close
@@ -2801,6 +2984,7 @@ local SCHEMA_BODY_ERROR = {
 	reguse_duplicate_slot     = true,
 	reguse_const_reg_spelling = true,
 	reguse_mixed_const        = true,
+	reguse_union_width        = true,
 }
 
 -- Re-parse every RegUse_* body against the merged type_name_registry.

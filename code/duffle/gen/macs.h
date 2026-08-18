@@ -37,6 +37,7 @@
 // The 'Yield' sequence for Tape Atoms (mac_yield).
 #define mac_yield(...) \
 	load_word(R_AtomJmp, R_TapePtr, 0) \
+	LdSlot_ \
 ,	add_ui_self(         R_TapePtr, S_(MipsCode)) \
 ,	jump_reg( R_AtomJmp) \
 ,	BdSlot_ nop
@@ -217,7 +218,7 @@ WORD_COUNT(mac_gte_ld_ir123_v3s4, 3)
 ,	mac_gte_mv_from_mac123_v3s4(a) \
 	GteDelay_  /* Read MAC1/2/3 → a.xyz (overwrites source-A's load targets) */ \
 ,	mac_shift_aright_v3s4_self(a, 12) /* Right-shift MAC by 12 (S12.20 → S12.0 OuterProduct12) */
-WORD_COUNT(mac_gte_op_cross_v3s4, 16)
+WORD_COUNT(mac_gte_op_cross_v3s4, 13)
 
 /* atom_dbg_skip */
 #define mac_gte_store_f3(r_primitive_cursor) \
@@ -291,7 +292,7 @@ WORD_COUNT(mac_gte_sqr_v3s4, 5)
 ,	shift_aright_var(r_dx, r_dx, r_shift) \
 ,	shift_aright_var(r_dy, r_dy, r_shift) \
 ,	shift_aright_var(r_dz, r_dz, r_shift)
-WORD_COUNT(mac_gte_gpf_scale, 12)
+WORD_COUNT(mac_gte_gpf_scale, 13)
 
 #define mac_trans_mt3s3s4(r_mtx, r_off, r_t0, r_t1, r_t2) \
 	load_word( r_t0, r_off, O_(V3_S4,x)) \

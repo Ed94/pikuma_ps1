@@ -151,17 +151,13 @@ internal void compile_init_atoms(void) {
 
 	smem.normalize_v3s4 = build_normalize_v3s4(& ab,
 		RegUse_(build_normalize_v3s4) {
-			.src_ptr     = ralloc(),
-			.dst_ptr     = ralloc(),
-			.recip_est   = ralloc(),
-			.norm        = ralloc(),
-			.shift       = ralloc(),
-			.src_x       = ralloc(),
-			.src_z       = ralloc(),
-			// .shift_count = ralloc(),    /* dedicated slot for stage-3 → stage-4 shift count */
-			.t3          = ralloc(),
-			.t4          = ralloc(),
-			.t5          = ralloc(),
+			.res = ralloc_v3(),
+			.t0     = ralloc(),
+			.t1     = ralloc(),
+			.t2     = ralloc(),
+			.t3     = ralloc(),
+			.t4     = ralloc(),
+			.t5     = ralloc(),
 		});
 	regfile_reset(& rf);
 

@@ -263,7 +263,7 @@ FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_
 // The 'Yield' sequence for Tape Atoms (mac_yield).
 
 atom_dbg_skip MipsAtomComp_(ac_yield) {
-	load_word(R_AtomJmp, R_TapePtr, 0),
+	load_word(R_AtomJmp, R_TapePtr, 0), LdSlot_
 	add_ui_self(         R_TapePtr, S_(MipsCode)),
 	jump_reg( R_AtomJmp), BdSlot_ nop,
 };

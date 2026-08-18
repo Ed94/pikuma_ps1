@@ -550,7 +550,14 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			local tok_line = line_of(body_off + bt.rel) or 0
 			if M.DELAY_MARKERS[ident] then
 				emit_marker("delay", ident, nil, tok_line)
-				local rest = M.trim(tok:sub(after or (#tok + 1)))
+				local rest = tok:sub(after or (#tok + 1))
+				while true do
+					rest = M.trim(rest)
+					if rest:sub(1, 2) ~= "/*" then break end
+					local close = rest:find("*/", 3, true)
+					if not close then rest = ""; break end
+					rest = rest:sub(close + 2)
+				end
 				if rest ~= "" then
 					process_token({ tok = rest, rel = bt.rel })
 				end

@@ -879,6 +879,14 @@ local function analyze_hardware_relations(atom)
 			end
 			if is_match then
 				local gap                = ev_word - prod.word - 1
+				local required           = prod.required
+				-- A following COP2 command waits at the transfer boundary.
+				-- Software nops are not required for that consumer class.
+				if is_gte_command(ev)
+					and (semantic == "MTC2" or semantic == "CTC2")
+					and relation.id ~= "mtc2_irgb_visibility" then
+					required = 0
+				end
 				local unknown_visibility = relation.visibility and relation.visibility.kind == "unknown_consumer"
 				if unknown_visibility then
 					hazards[#hazards + 1] = {
@@ -906,7 +914,7 @@ local function analyze_hardware_relations(atom)
 							, (relation.evidence and relation.evidence.confidence or "unknown")
 						),
 					}
-				elseif prod.required ~= nil and gap < prod.required then
+				elseif required ~= nil and gap < required then
 					local payload = {
 						check                = "transfer_hazards",
 						kind                 = prod.violation_kind or "error",
@@ -923,7 +931,7 @@ local function analyze_hardware_relations(atom)
 						consumer_word        = ev_word,
 						consumer_token       = ev_ident,
 						gap                  = gap,
-						required             = prod.required,
+						required             = required,
 						evidence_confidence  = relation.evidence and relation.evidence.confidence or "unknown",
 						evidence_source      = relation.evidence and relation.evidence.source or "",
 						msg = string.format("%s at line %d: %s relation %s (producer %s at word %d, %s:%d) violated: consumer at word %d (gap=%d, required=%d) [%s]"
@@ -941,7 +949,7 @@ local function analyze_hardware_relations(atom)
 					hazards[#hazards + 1] = payload
 				end
 				local satisfied = nil
-				if not unknown_visibility then satisfied = gap >= prod.required end
+				if not unknown_visibility then satisfied = gap >= required end
 				-- Record the relation touch on `paths.relations` even when the gap is satisfied.
 				-- Unknown relations are informational, not numeric pass/fail measurements.
 				relations[#relations + 1] = {
@@ -951,7 +959,7 @@ local function analyze_hardware_relations(atom)
 					consumer_word = ev_word,
 					destination   = prod.destination,
 					gap           = gap,
-					required      = prod.required,
+					required      = required,
 					satisfied     = satisfied,
 				}
 				table.remove(pending, pending_idx)

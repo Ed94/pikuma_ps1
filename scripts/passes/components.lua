@@ -329,6 +329,24 @@ local function strip_mac_prefix(ident)
 	return ident
 end
 
+--- Strip a leading delay marker (`LdSlot_` / `BdSlot_` / `GteDelay_` / `DmaSlot_`)
+--- plus following whitespace and block comments. Returns the remainder, or ""
+--- when the token is only the marker.
+--- `BdSlot_ nop` becomes `nop`. Bare `LdSlot_` becomes "".
+--- @param tok string
+--- @return string
+local function strip_leading_delay_marker(tok)
+	local ident = duffle.read_ident(tok, 1)
+	if not ident or not duffle.DELAY_MARKERS[ident] then return tok end
+	local rest = tok:sub(#ident + 1):match("^%s*(.*)$") or ""
+	while rest:sub(1, 2) == "/*" do
+		local close = rest:find("*/", 3, true)
+		if not close then return "" end
+		rest = rest:sub(close + 2):match("^%s*(.*)$") or ""
+	end
+	return rest
+end
+
 --- (internal) Recursive word-count lookup. `cache` is the memoization table shared across all components
 --- in a single source's `count_all_components` pass; the in-progress -1 sentinel detects cycles (A -> B -> A).
 --- @param name         string -- the component name (without `mac_`)
@@ -347,18 +365,30 @@ local function word_count_rec(name, comp_by_name, wc, cache)
 		for _, t in ipairs(tokens) do
 			local trimmed = t.tok
 			if trimmed ~= "" then
-				local lookup = strip_mac_prefix(duffle.read_ident(trimmed, 1))
-				if lookup == "atom_label" or lookup == "atom_offset" then
-					-- Pure metaprogram anchors; emit zero words.
-				elseif lookup and comp_by_name[lookup] then
-					-- It's a `mac_X(...)` call. Recurse.
-					n = n + word_count_rec(lookup, comp_by_name, wc, cache)
-				elseif lookup and wc and wc[lookup] then
-					-- Encoding macro or pseudo-instruction (e.g. mask_upper = 2, nop2 = 2).
-					n = n + wc[lookup]
-				else
-					-- Unrecognized token. Fall back to 1 word.
-					n = n + 1
+				local work = trimmed
+				while true do
+					local marker = duffle.read_ident(work, 1)
+					if marker and duffle.DELAY_MARKERS[marker] then
+						work = strip_leading_delay_marker(work)
+						if work == "" then break end
+					else
+						break
+					end
+				end
+				if work ~= "" then
+					local lookup = strip_mac_prefix(duffle.read_ident(work, 1))
+					if lookup == "atom_label" or lookup == "atom_offset" then
+						-- Pure metaprogram anchors; emit zero words.
+					elseif lookup and comp_by_name[lookup] then
+						-- It's a `mac_X(...)` call. Recurse.
+						n = n + word_count_rec(lookup, comp_by_name, wc, cache)
+					elseif lookup and wc and wc[lookup] then
+						-- Encoding macro or pseudo-instruction (e.g. mask_upper = 2, nop2 = 2).
+						n = n + wc[lookup]
+					else
+						-- Unrecognized token. Fall back to 1 word.
+						n = n + 1
+					end
 				end
 			end
 		end
