@@ -272,86 +272,80 @@ typedef Struct_(Binds_NormalizeV3S4) {
 	U2 dst_offset;    /* offset of dst V3_S4 within the BIOS scratchpad */
 };
 typedef Struct_(RegUse_build_normalize_v3s4) {
-	Reg scratch;                /* scratchpad base; loaded via load_word_imm below. */
 	Reg src_ptr;
 	Reg dst_ptr;
-	Reg recip_est;                /* |v|² sum + shift-input + sqrtbl[index] */
-	Reg norm; Reg shift;
 	Reg src_x;
-	union { Reg mac1_scratch, dst_offset; } t3;
-	union { Reg mac2_scratch; } t4;
-	union { Reg btarget, shift_count, lookup_addr, src_z, src_offset; } t5;
+	Reg src_z;
+	Reg recip_est;
+	Reg norm;
+	Reg shift;
+	union {
+		Reg v_sqr_aligned, dst_offset;
+	} t3;
+	union { Reg mac2; } t4;
+	union { Reg btarget, shift_count, sqrtbl_index, src_offset; } t5;
 };
 /* ─── Full normalize (all 4 stages inline) ───
  * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav). */
 internal MipsAtom* build_normalize_v3s4(AtomArena_R aa, RegUse_build_normalize_v3s4 r)
 MipsAtom_Proc_(aa, {
-	/* Load scratch base via immediate (always Scratchpad_Loc = 0x1F800000 — the BIOS
-	 * scratchpad, aliased by every consumer's ResolveLookAtScratch struct). */
-	mac_load_word_imm(r.scratch, Scratchpad_Loc),
-	/* Tape pop: src_offset, dst_offset = 4 bytes (packed into 1 U4: low16=src, high16=dst).
-	 * Loads back-to-back fill each other's load-delay slots; the subsequent add_u
-	 * (2 cycles after the matching load) sees a valid value. */
 	load_half(r.t5.src_offset, R_TapePtr, O_(Binds_NormalizeV3S4, src_offset)),
 	load_half(r.t3.dst_offset, R_TapePtr, O_(Binds_NormalizeV3S4, dst_offset)),
-	LdSlot_ add_u(r.src_ptr, r.scratch, r.t5.src_offset),
-	LdSlot_ add_u(r.dst_ptr, r.scratch, r.t3.dst_offset),
+	LdSlot_ add_u(r.src_ptr, R_ScratchBase, r.t5.src_offset),
+	LdSlot_ add_u(r.dst_ptr, R_ScratchBase, r.t3.dst_offset),
 	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_NormalizeV3S4)),
 
-	/* Load src.x/y/z from r_src_ptr (caller-determined address) into r_tmp/r_recip_est/r_branch_tmp.
-	 * r.rt1_src_x holds src.x throughout stages 1-2 — r_mac2_scratch is clobbered to MAC2 in stage 1.5 (line below).
-	 * t5.src_offset/dst_offset are dead by here; t5 is reused for src.z in the mac_load_word_v3 below. */
-	mac_load_word_v3(r.src_x, r.recip_est, r.t5.src_z, r.src_ptr, 0),
+	/* Load src.x/y/z from r_src_ptr (caller-determined address) into r_src_x / r_recip_est / r_src_z.
+	 * r_src_x holds src.x throughout stages 1-2; r_recip_est (which is src.y during this phase) is reused as MAC2 in stage 4. */
+	mac_load_word_v3(r.src_x, r.recip_est, r.src_z, r.src_ptr, 0),
 
 	/* Stage 1: mtc2 src → IR1/2/3, SQR fires. */
-	LdSlot_ mac_gte_sqr_v3s4(r.src_x, r.recip_est, r.t5.src_z, LdSlot_ nop),
+	LdSlot_ mac_gte_sqr_v3s4(r.src_x, r.recip_est, r.src_z, LdSlot_ nop),
 
 	/* Stage 2: mfc2 MAC1/2/3, sum, mtc2 LZCS. */
-	mac_gte_mv_from_data_r_mac123(r.t3.mac1_scratch, r.t4.mac2_scratch, r.norm), LdSlot_ nop,
-	add_u_self(        r.norm, r.t3.mac1_scratch),
-	add_u_self(        r.norm, r.t4.mac2_scratch),
+	mac_gte_mv_from_data_r_mac123(r.t3.v_sqr_aligned, r.t4.mac2, r.norm), LdSlot_ nop,
+	add_u_self(        r.norm, r.t3.v_sqr_aligned),
+	add_u_self(        r.norm, r.t4.mac2),
 	gte_mv_to_data_r(  r.norm,  C2_LZCS), GteDelay_ nop2,
 	gte_mv_from_data_r(r.shift, C2_LZCR), GteDelay_ nop,
 
 	/* Stage 3: round LZCR to even, compute half-shift, align |v|² to bit 24.
 	 * r_norm holds |v|² sum; r_shift holds the LZCR count from mfc2.
-	 * After the component: r_shift = even(LZCR), r_norm = half-shift, r_mac1_scratch = |v|². */
-	mac_lzcr_round_even_half_shift(r.shift, r.norm, r.t3.mac1_scratch),
-	/* r_branch_tmp = LZCR - 24 (overwrites r_branch_tmp; src.z no longer needed after SQR) */
+	 * After the component: r_shift = even(LZCR), r_norm = half-shift, r_t3.v_sqr_aligned = |v|². */
+	mac_lzcr_round_even_half_shift(r.shift, r.norm, r.t3.v_sqr_aligned),
 	add_si(        r.t5.btarget, r.shift, -24),
 	branch_lt_zero(r.t5.btarget, atom_offset(aligned_done, srav_path)), BdSlot_ nop, /* bltz → srav_path (LZCR <  24 path) */
 		jump_rel(atom_offset(srav_path, aligned_done)),                                /* b → aligned_done (LZCR >= 24 path) */
-		BdSlot_ shift_lleft_var(r.t3.mac1_scratch, r.t3.mac1_scratch, r.t5.btarget),   /* src=sum (r_mac1_scratch), dst=same */
+		BdSlot_ shift_lleft_var(r.t3.v_sqr_aligned, r.t3.v_sqr_aligned, r.t5.btarget),
 		atom_label(srav_path)
 			li_s( r.t5.shift_count, 24),
 			sub_s(r.t5.shift_count, r.t5.shift_count, r.shift),
-			shift_aright_var(r.t3.mac1_scratch, r.t3.mac1_scratch, r.t5.shift_count), /* src=sum (r_mac1_scratch), dst=same */
+			shift_aright_var(r.t3.v_sqr_aligned, r.t3.v_sqr_aligned, r.t5.shift_count),
 	atom_label(aligned_done)
 		// Save the shift count to r_shift before the next 5 instructions overwrite r_norm (the sqrtbl lookup loads 1/|v| into r_norm, which becomes IR0 in stage 4).
 		or_u(r.shift, r.norm, 0), /* r_shift ← shift count (preserved through stage 4) */
-		/* r_mac1_scratch holds |v|² aligned (top bit at bit 7). */
-		add_si(     r.t3.mac1_scratch, r.t3.mac1_scratch, -64),
-		shift_lleft(r.t3.mac1_scratch, r.t3.mac1_scratch, 1),
-		mac_load_word_imm(r.t5.lookup_addr, & gte_normalize_sqr_tbl), add_u_self(r.t5.lookup_addr, r.t3.mac1_scratch),
-		load_half(r.norm, r.t5.lookup_addr, 0), /* r_norm = sqrtbl[aligned-64] = 1/|v| (IR0 in stage 4) */
+		add_si(     r.t3.v_sqr_aligned, r.t3.v_sqr_aligned, -64), /* r_t3.v_sqr_aligned holds |v|² aligned (top bit at bit 7). */
+		shift_lleft(r.t3.v_sqr_aligned, r.t3.v_sqr_aligned, 1),
+		mac_load_word_imm(r.t5.sqrtbl_index, & gte_normalize_sqr_tbl), add_u_self(r.t5.sqrtbl_index, r.t3.v_sqr_aligned),
+		load_half(r.norm, r.t5.sqrtbl_index, 0), /* r_norm = sqrtbl[aligned-64] = 1/|v| (IR0 in stage 4) */
+		LdSlot_ nop,
 
-	/* r_branch_tmp held the sqrtbl base+index, NOT src.z. Reload src.z from scratch now that r_branch_tmp is free. */
-	LdSlot_ load_word(r.t5.src_z, r.src_ptr, O_(V3_S4,z)), /* r_branch_tmp = src.z (for IR3 in stage 4) */
-
-	/* Stage 4: GPF + srav finalize (r_shift = shift count, r_norm = 1/|v|). */
-	LdSlot_ mac_gte_general_purpose_interopolation(
+	/* r.src_z holds src.z from the initial load (r.src_z is a dedicated slot,
+	 * never clobbered between the load at body start and the stage-4 GPF use below).
+	 * Stage 4: GPF + srav finalize (r_shift = shift count, r_norm = 1/|v|). */
+	mac_gte_general_purpose_interopolation(
 		r.norm,
 		r.src_x,  /* IR1 = src.x (preserved in r_tmp — r_mac2_scratch was clobbered to MAC2 in stage 1.5) */
 		r.recip_est,
-		r.t5.src_z,  /* IR3 = src.z (reloaded) */
-		r.t4.mac2_scratch, r.recip_est, r.t5.src_z,
+		r.src_z,  /* IR3 = src.z (reloaded) */
+		r.t4.mac2, r.recip_est, r.src_z,
 		GteDelay_ nop,
 		GteDelay_ nop
 	),
 	/* sra by r_shift = (31-LZCR)/2 (saved before sqrtbl lookup) */
-	mac_shift_aright_var_v3_self(r.t4.mac2_scratch, r.recip_est, r.t5.src_z, r.shift),
+	mac_shift_aright_var_v3_self(r.t4.mac2, r.recip_est, r.src_z, r.shift),
 	/* Store result.x/y/z to r_dst_ptr (caller-determined dst address). */
-	mac_store_word_v3(r.t4.mac2_scratch, r.recip_est, r.t5.src_z, r.dst_ptr, 0),
+	mac_store_word_v3(r.t4.mac2, r.recip_est, r.src_z, r.dst_ptr, 0),
 
 	mac_yield()
 })
