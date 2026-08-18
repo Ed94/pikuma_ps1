@@ -55,9 +55,15 @@ FI_ Slice_MipsCode ac_shift_aright_var_v3s4_self(AtomBuilder_R ab, Reg_(V3_S4) d
  *   3. $t0 = bios_table_addr           ; t0 = &BIOS A-function table
  *   4. jalr $t0, $ra                   ; call BIOS(flushcache)
  *      nop                             ; branch delay slot
- *   5. lw $ra, 4($sp);  jr $ra         ; restore & return
- *   6. sp += 8
+ *   5. lw $ra, 4($sp)
+ *   6. sp += 8                         ; load-delay
+ *   7. jr $ra
+ *      nop                             ; BD
  */
+
+#if 0
+// Note: Can't do this without having a way to do C-Runtime frame call from Tape ABI.
+// Don't support this without adjusting scratchpad to save tape frame in some way.
 internal MipsAtom_(mips_flush_icache) {
 	add_ui(R_SP, R_SP, -MipsStackAlignment), // sp -= 8
 	store_word(R_RA, R_SP, S_(U4)),           // sw  $ra,   4($sp) 
@@ -65,9 +71,10 @@ internal MipsAtom_(mips_flush_icache) {
 	add_ui(R_T0, R_0, bios_table_addr),           // addiu $t0, $0, 0xA0 
 	jump_link(R_T0, R_RA), nop,                   // jalr  $t0, $ra, BD slot
 	load_word(R_RA, R_SP, S_(U4)),            // lw   $ra, 4($sp) 
-	jump_reg(R_RA),                                 // jr   $ra 
-	add_ui(R_SP, R_SP, MipsStackAlignment),  // sp += 8 (BD) 
-	mac_yield(),
+	add_ui(R_SP, R_SP, MipsStackAlignment),  // sp += 8 (load-delay)
+	jump_reg(R_RA), nop,                          // jr   $ra, BD slot
+	// mac_yield(),
 };
+#endif
 
 #pragma endregion Baked Atoms

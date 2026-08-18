@@ -586,6 +586,7 @@ enum { _BitOffsets = 0
 	, jump_link(rtmp_0, rret_addr)              \
 	, nop                                       \
 	, load_word(rret_addr, rstack_ptr, 4)       \
-	, jump_reg(rret_addr)                       \
 	, add_ui(rstack_ptr, rstack_ptr, MipsStackAlignment) \
+	, jump_reg(rret_addr)                       \
+	, nop                                       \
 ) asm_clobber: clbr_volatile_gprs )
