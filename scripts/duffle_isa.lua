@@ -18,7 +18,7 @@ M.DELAY_MARKERS = {
 	["DmaSlot_"]  = true,
 }
 
--- One row per encoder. Old table names are load-time views (build_isa_views).
+-- One row per encoder. Read through duffle.instr.
 M.INSTRUCTION = {
 	["BdSlot_"]            = { cycles = 0,  kind = "marker", },
 	["LdSlot_"]            = { cycles = 0,  kind = "marker", },
@@ -300,7 +300,7 @@ function M.instr    (ident) return M.INSTRUCTION            [ident]          end
 function M.gte_canon(ident) return M.ALIAS_TO_CANONICAL     [ident] or ident end
 function M.gte      (ident) return M.GTE_COMMAND[M.gte_canon(ident)]         end
 
-local function build_isa_views()
+local function build_alias_map()
 	M.ALIAS_TO_CANONICAL = {}
 	for canon, row in pairs(M.GTE_COMMAND) do
 		M.ALIAS_TO_CANONICAL[canon] = canon
@@ -308,48 +308,8 @@ local function build_isa_views()
 			M.ALIAS_TO_CANONICAL[alias] = canon
 		end
 	end
-	M.INSTRUCTION_LATENCY     = {}
-	M.INSTRUCTION_GPR_EFFECTS = {}
-	M.IMMEDIATE_FIELD_WIDTHS  = {}
-	M.GPR_VALUE_RULES         = {}
-	M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES = {}
-	for name, row in pairs(M.INSTRUCTION) do
-		M.INSTRUCTION_LATENCY[name] = row.cycles
-		if row.reads or row.writes then
-			M.INSTRUCTION_GPR_EFFECTS[name] = {
-				reads  = row.reads or {},
-				writes = row.writes or {},
-			}
-		end
-		if row.imm   then M.IMMEDIATE_FIELD_WIDTHS[name] = row.imm end
-		if row.value then M.GPR_VALUE_RULES       [name] = row.value end
-		if (row.kind == "branch" or row.kind == "jump" or row.kind == "call")
-			and row.delay_slot ~= false then
-			M.CONTROL_TRANSFER_DELAY_SLOT_POLICIES[name] = {
-				family        = row.kind,
-				suppress_arg1 = row.suppress_arg1,
-			}
-		end
-	end
-	M.GTE_COMMAND_ALIASES = {}
-	M.GTE_COMMAND_INPUTS  = {}
-	M.GTE_COMMAND_OUTPUTS = {}
-	M.GTE_COMMAND_LATCH_WINDOWS = {}
-	for canon, row in pairs(M.GTE_COMMAND) do
-		M.GTE_COMMAND_ALIASES    [canon] = canon
-		M.INSTRUCTION_LATENCY    [canon] = row.cycles
-		M.INSTRUCTION_GPR_EFFECTS[canon] = { reads = {}, writes = {} }
-		for _, alias in ipairs(row.aliases or {}) do
-			M.GTE_COMMAND_ALIASES    [alias] = canon
-			M.INSTRUCTION_LATENCY    [alias] = row.cycles
-			M.INSTRUCTION_GPR_EFFECTS[alias] = { reads = {}, writes = {} }
-		end
-		M.GTE_COMMAND_INPUTS       [canon] = row.inputs
-		M.GTE_COMMAND_OUTPUTS      [canon] = row.outputs
-		M.GTE_COMMAND_LATCH_WINDOWS[canon] = row.latch
-	end
 end
-build_isa_views()
+build_alias_map()
 
 
 --- GTE control-register alias groups.

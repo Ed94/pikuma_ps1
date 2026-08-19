@@ -186,8 +186,8 @@ end
 -- ONE forward pass over the token list produces a flat table of per-token classifications. 
 -- Every check + analyze_atom_paths reads from this table instead of re-scanning the token strings. 
 --
--- The classification is stored on `atom.paths.tok_class` as an array indexed by token index (1..#tokens). 
--- Each entry has:
+-- Classification fields are stamped onto each `atom.paths.tokens[i]` record.
+-- Each token has:
 --   ident                 — the leading identifier (e.g. "load_word", "gte_cmdw_rtpt", "nop", "mac_yield")
 --   nop_words             — 0 / 1 / 2 (for "nop" / "nop2" / anything else)
 --   nop_prefix            — consecutive nop words ending just BEFORE this token (forward-pass pre-compute; makes preceding-nop lookup O(N))
@@ -202,8 +202,8 @@ end
 --                           load_byte_u, gte_lw, gte_lwc2. These all have MIPS load-delay semantics (the destination register is volatile for 1 word after the load).
 --   is_store_word         — true if this token starts with `store_word(`
 --
--- Checks that need the leading ident use `tok_class.ident` instead of re-matching the token string.
--- Checks that need "how many nops before token i" use `tok_class.nop_prefix` instead of walking backwards.
+-- Checks that need the leading ident use `token.ident` instead of re-matching the token string.
+-- Checks that need "how many nops before token i" use `token.nop_prefix` instead of walking backwards.
 
 --- @class TokClass
 --- @field ident              string           -- lLading identifier
@@ -245,12 +245,10 @@ local BRANCH_PATTERN          = "^branch_[%w_]+%s*%("
 -- This keeps `consuming_encoder` canonical for any downstream tooling that consults the metadata field.
 local JUMP_REL_PATTERN      = "^jump_rel%s*%("
 
-local function tok_class_view(tokens)
-	local n       = #tokens
-	local tc      = {}
+local function stamp_token_fields(tokens)
 	local nop_run = 0  -- running count of consecutive nop words (forward pass)
-	for tok_idx, t in ipairs(tokens) do
-		local tok   = t.tok
+	for _, t in ipairs(tokens) do
+		local tok   = t.tok or ""
 		local ident = tok:match("^([%w_]+)") or "?"
 		local is_delay_marker = false
 		local delay_marker    = nil
@@ -327,36 +325,33 @@ local function tok_class_view(tokens)
 		if tok:find("R_TapePtr", 1, true) then reads_r_tape_ptr = true end
 		if is_store_word and tok:find("R_PrimCursor", 1, true) then writes_r_prim_cursor = true end
 
-		tc[tok_idx] = {
-			ident                  = ident,
-			is_delay_marker        = is_delay_marker,
-			delay_marker           = delay_marker,
-			nop_words              = nop_words,
-			nop_prefix             = nop_run,
-			is_yield               = is_yield,
-			is_atom_label          = is_atom_label,
-			label_name             = label_name,
-			is_branch              = is_branch,
-			is_unconditional_jump  = is_unconditional_jump,
-			is_terminal_jump       = is_terminal_jump,
-			branch_label           = branch_label,
-			is_load                = is_load,
-			is_store_word          = is_store_word,
-			mac_format_shape       = mac_format_shape,
-			is_gte_store           = is_gte_store,
-			is_ot_tag              = is_ot_tag,
-			writes_r_prim_cursor   = writes_r_prim_cursor,
-			reads_r_tape_ptr       = reads_r_tape_ptr,
-			o_arg1                 = o_arg1,
-			o_arg2                 = o_arg2,
-			s_arg1                 = s_arg1,
-		}
+		t.ident                  = ident
+		t.is_delay_marker        = is_delay_marker
+		t.delay_marker           = delay_marker
+		t.nop_words              = nop_words
+		t.nop_prefix             = nop_run
+		t.is_yield               = is_yield
+		t.is_atom_label          = is_atom_label
+		t.label_name             = label_name
+		t.is_branch              = is_branch
+		t.is_unconditional_jump  = is_unconditional_jump
+		t.is_terminal_jump       = is_terminal_jump
+		t.branch_label           = branch_label
+		t.is_load                = is_load
+		t.is_store_word          = is_store_word
+		t.mac_format_shape       = mac_format_shape
+		t.is_gte_store           = is_gte_store
+		t.is_ot_tag              = is_ot_tag
+		t.writes_r_prim_cursor   = writes_r_prim_cursor
+		t.reads_r_tape_ptr       = reads_r_tape_ptr
+		t.o_arg1                 = o_arg1
+		t.o_arg2                 = o_arg2
+		t.s_arg1                 = s_arg1
 		-- Advance the nop run for the NEXT token.
 		if nop_words > 0 then nop_run = nop_run + nop_words
 		else                  nop_run = 0
 		end
 	end
-	return tc
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1622,7 +1617,7 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	-- The GTE pipeline-fill check applies to all 3 kinds (see check_gte_pipeline_fill). Only the mac_yield rule branches on kind.
 	local tokens       = atom.paths.tokens
 	local line_in_body = atom.paths.line_in_body
-	local tc           = atom.paths.tok_class
+	local tc           = tokens
 	local n            = #tokens
 
 	local count    = 0
@@ -1720,7 +1715,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 
 	local tokens       = atom.paths.tokens
 	local line_in_body = atom.paths.line_in_body
-	local tc           = atom.paths.tok_class
+	local tc           = tokens
 	local n            = #tokens
 
 	local function line_for(idx)
@@ -1913,7 +1908,7 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 	end
 	local tokens         = atom.paths.tokens
 	local line_in_body   = atom.paths.line_in_body
-	local tc             = atom.paths.tok_class
+	local tc             = tokens
 	local found_field_set = {}
 	local found_advance   = false
 
@@ -1982,7 +1977,7 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" and atom.kind ~= "atom_proc" then return end
 	local tokens         = atom.paths.tokens
 	local line_in_body   = atom.paths.line_in_body
-	local tc             = atom.paths.tok_class
+	local tc             = tokens
 	local cmd_byte       = nil
 	local cmd_line       = nil
 	local contrib        = 0
@@ -2119,7 +2114,8 @@ end
 ---                    plus `mac_*` idents whose bare name is missing from `pipe_ctx.components_by_name` (i.e. no `MipsAtomComp_` for it).
 local function analyze_atom_paths(atom, pipe_ctx)
 	local tokens = atom.paths.tokens or duffle.tokenize_body(atom.body)
-	local tc     = atom.paths.tok_class or tok_class_view(tokens)
+	if tokens[1] and tokens[1].ident == nil then stamp_token_fields(tokens) end
+	local tc     = tokens
 	local n      = #tokens
 
 	-- Build label + branch maps from the pre-computed classification (no re-scan).
@@ -2437,8 +2433,8 @@ end
 -- The check also flags fields whose Type has no `fields` table (typedefs and enums don't have fields — any Field reference against them is bogus)
 -- and fields whose name doesn't appear in the resolved Type's fields array.
 --
--- Walks every atom's pre-computed `paths.tok_class`
--- (set by `classify_tokens` once per atom in validate()) and uses the `o_arg1` / `o_arg2` captures instead of re-matching the token string.
+-- Walks every atom's stamped `paths.tokens`
+-- and uses the `o_arg1` / `o_arg2` captures instead of re-matching the token string.
 -- Resolution consults `pipe_ctx.type_name_registry`
 -- (Binds_* structs are registered there by scan_source's `register_struct_type`, so a unified lookup works for both Binds_* and non-Binds structs).
 --
@@ -2482,8 +2478,8 @@ end
 local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 	local type_registry = pipe_ctx.type_name_registry or {}
 	for _, a in ipairs(pipe_ctx.atoms or {}) do
-		local tc           = a.paths and a.paths.tok_class or {}
 		local tokens       = a.paths and a.paths.tokens or {}
+		local tc           = tokens
 		local line_in_body = a.paths and a.paths.line_in_body or {}
 		for ti = 1, #tokens do
 			local tc_entry = tc[ti]
@@ -2609,7 +2605,7 @@ local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 	if not next(groups) then return end
 
 	local tokens = atom.paths and atom.paths.tokens or {}
-	local tc     = atom.paths and atom.paths.tok_class or {}
+	local tc     = tokens
 	local line_in_body = atom.paths and atom.paths.line_in_body
 	if not next(tokens) then return end
 
@@ -2669,7 +2665,7 @@ end
 -- The bare macro IS the right call for the canonical libgte outer-product convention, so this is an opt-out hint rather than a hard warning.
 local function check_rtdiagonal_completeness(atom, _pipe_ctx, findings)
 	local tokens = atom.paths and atom.paths.tokens or {}
-	local tc     = atom.paths and atom.paths.tok_class or {}
+	local tc     = tokens
 	local line_in_body = atom.paths and atom.paths.line_in_body
 	if not next(tokens) then return end
 	local strict = os.getenv("GTE_RT_DIAGONAL_STRICT") == "1"
@@ -2702,7 +2698,7 @@ end
 -- Severity: info. The convention is correct; this is a documentation-pointer check.
 local function check_gte_cr_TR_naming(atom, _pipe_ctx, findings)
 	local tokens = atom.paths and atom.paths.tokens or {}
-	local tc     = atom.paths and atom.paths.tok_class or {}
+	local tc     = tokens
 	local line_in_body = atom.paths and atom.paths.line_in_body
 	if not next(tokens) then return end
 	local touched = false
@@ -3275,7 +3271,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	--- Body, token, and emission projections come from here (`paths.tokens = body_tokens`, `paths.line_in_body = build_body_line_index` `paths.word_events`
 	--- and related fields are owned by `passes/emission_model.lua` pass (per-atom emission projection).
 	--- This pass reads: `paths.tokens`, `paths.line_in_body`, `paths.items`, `paths.word_events` from the emitted projection,
-	--- then computes `paths.tok_class`, `paths.cycles_min/max`, `paths.branches`, `paths.paths`, `paths.has_loops`, `paths.unknown_macros` via `classify_tokens` + `analyze_atom_paths`.
+	--- then stamps token fields and computes `paths.cycles_min/max`, `paths.branches`, `paths.paths`, `paths.has_loops`, `paths.unknown_macros` via `stamp_token_fields` + `analyze_atom_paths`.
 	--- No re-walk of body text or body_tokens happens here.
 	---
 	--- Canonical contract: `atom.paths` and `atom.paths.word_events` MUST be populated by `passes/emission_model.run(ctx)` before this pass runs.
@@ -3291,7 +3287,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		-- `paths.tokens` / `paths.line_in_body` / `paths.items` / `paths.word_events` are populated by `passes/emission_model.lua`.
 		-- Supply tokens when no emission projection is present.
 		if a.paths.tokens == nil then a.paths.tokens = a.body_tokens end
-		a.paths.tok_class = tok_class_view(a.paths.tokens)
+		stamp_token_fields(a.paths.tokens)
 
 		-- analyze_atom_paths fills the *cycles / branches / has_loops / unknown_macros* fields of a.paths.
 		analyze_atom_paths(a, pipe_ctx)

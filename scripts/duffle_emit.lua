@@ -275,6 +275,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		local gp0_shape = type(encoder) == "string"
 			and encoder:match("^mac_format_([%w_]+)_color$")
 			or nil
+		local is_load = (isa_kind == "load")
+		local is_branch = (isa_kind == "branch")
+		local is_unconditional_jump = (encoder == "jump" or encoder == "call_addr")
+		local is_terminal_jump = (encoder == "jump_reg" or encoder == "call_reg" or encoder == "jump_link")
 		items[#items + 1] = {
 			kind                     = "word",
 			encoder                  = encoder,
@@ -291,6 +295,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			isa_kind                 = isa_kind,
 			nop_words                = nop_words,
 			is_yield                 = is_yield,
+			is_load                  = is_load,
+			is_branch                = is_branch,
+			is_unconditional_jump    = is_unconditional_jump,
+			is_terminal_jump         = is_terminal_jump,
 			gp0_shape                = gp0_shape,
 		}
 		word_events[#word_events + 1] = {
@@ -309,6 +317,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			kind                     = isa_kind,
 			nop_words                = nop_words,
 			is_yield                 = is_yield,
+			is_load                  = is_load,
+			is_branch                = is_branch,
+			is_unconditional_jump    = is_unconditional_jump,
+			is_terminal_jump         = is_terminal_jump,
 			gp0_shape                = gp0_shape,
 		}
 		word_idx = word_idx + 1

@@ -2357,11 +2357,64 @@ local function parse_enum(source, pos, ident_end, line_of, out)
 	return after_brace
 end
 
+local function parse_addrs_assign(source, pos, ident_end, line_of, out)
+	local after = duffle.skip_ws_and_cmt(source, ident_end)
+	if source:sub(after, after) ~= "[" then return ident_end end
+	local inner, after_br = duffle.read_brackets(source, after)
+	local idx = inner and tonumber(duffle.trim(inner))
+	after_br = duffle.skip_ws_and_cmt(source, after_br or after)
+	if not (idx and source:sub(after_br, after_br) == "=") then
+		return after_br or (after + 1)
+	end
+	local rhs = duffle.skip_ws_and_cmt(source, after_br + 1)
+	local rhs_ident = duffle.read_ident(source, rhs)
+	if rhs_ident then out._addrs[idx] = rhs_ident end
+	return rhs
+end
+
+local function parse_tb_emit_(source, pos, ident_end, line_of, out)
+	local after = duffle.skip_ws_and_cmt(source, ident_end)
+	if source:sub(after, after) ~= "(" then return ident_end end
+	local inner, after_p = duffle.read_parens(source, after)
+	local name = duffle.trim(inner or ""):match("^([%w_]+)")
+	if name then
+		out._chain = out._chain or {}
+		out._chain[#out._chain + 1] = name
+	end
+	return after_p or (after + 1)
+end
+
+local function parse_tb_emit(source, pos, ident_end, line_of, out)
+	local after = duffle.skip_ws_and_cmt(source, ident_end)
+	if source:sub(after, after) ~= "(" then return ident_end end
+	local inner, after_p = duffle.read_parens(source, after)
+	local args = duffle.split_top_level_commas(inner or "")
+	local last = duffle.trim(args[#args] or "")
+	local idx = last:match("^addrs%s*%[%s*(%d+)%s*%]$")
+	local name
+	if idx then
+		name = out._addrs[tonumber(idx)]
+	else
+		name = last:match("([%w_]+)$")
+	end
+	if name then
+		out._chain = out._chain or {}
+		out._chain[#out._chain + 1] = name
+	end
+	return after_p or (after + 1)
+end
+
+local C_STMT_PARSERS = {
+	tb_emit_ = parse_tb_emit_,
+	tb_emit  = parse_tb_emit,
+	addrs    = parse_addrs_assign,
+}
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- DECL_PARSERS — data-driven construct dispatch (the plex pattern)
 -- ════════════════════════════════════════════════════════════════════════════
 -- Each entry maps a leading ident to its parser function. The main scan_source() loop is one line of dispatch:
---   local parser = DECL_PARSERS[ident]; if parser then pos = parser(...) end
+--   local parser = DECL_PARSERS[ident] or C_STMT_PARSERS[ident]; if parser then pos = parser(...) end
 --
 -- Adding a new construct = 1 row here + 1 parser function above.
 
@@ -2469,51 +2522,9 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 			if pos <= src_len then
 				local ident, ident_end = duffle.read_ident(source, pos)
 				if ident then
-					local parser = DECL_PARSERS[ident]
+					local parser = DECL_PARSERS[ident] or C_STMT_PARSERS[ident]
 					if parser then
 						pos = parser(source, pos, ident_end, line_of, out)
-					elseif ident == "addrs" then
-						local after = duffle.skip_ws_and_cmt(source, ident_end)
-						if source:sub(after, after) == "[" then
-							local inner, after_br = duffle.read_brackets(source, after)
-							local idx = inner and tonumber(duffle.trim(inner))
-							after_br = duffle.skip_ws_and_cmt(source, after_br or after)
-							if idx and source:sub(after_br, after_br) == "=" then
-								local rhs = duffle.skip_ws_and_cmt(source, after_br + 1)
-								local rhs_ident = duffle.read_ident(source, rhs)
-								if rhs_ident then out._addrs[idx] = rhs_ident end
-								pos = rhs
-							else
-								pos = after_br or (after + 1)
-							end
-						else
-							pos = ident_end
-						end
-					elseif ident == "tb_emit_" or ident == "tb_emit" then
-						local after = duffle.skip_ws_and_cmt(source, ident_end)
-						if source:sub(after, after) == "(" then
-							local inner, after_p = duffle.read_parens(source, after)
-							local name
-							if ident == "tb_emit_" then
-								name = duffle.trim(inner or ""):match("^([%w_]+)")
-							else
-								local args = duffle.split_top_level_commas(inner or "")
-								local last = duffle.trim(args[#args] or "")
-								local idx = last:match("^addrs%s*%[%s*(%d+)%s*%]$")
-								if idx then
-									name = out._addrs[tonumber(idx)]
-								else
-									name = last:match("([%w_]+)$")
-								end
-							end
-							if name then
-								out._chain = out._chain or {}
-								out._chain[#out._chain + 1] = name
-							end
-							pos = after_p or (after + 1)
-						else
-							pos = ident_end
-						end
 					else
 						-- Unsupported identifiers follow the unrelated-token path. If a
 						-- pending marker is still open, consume it so it cannot drift to a
