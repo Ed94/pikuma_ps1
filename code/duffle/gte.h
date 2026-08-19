@@ -170,20 +170,20 @@ enum {
  *   +------------+--+-----+------+------+------+------+---+--------+----------+
  *                                    \_____ GTE_PAYLOAD _____/       \__ GTE_CMD __/
  *
- * Shifts/masks below are the *bit positions* and *bit widths* of each configurable field, used by the ENC_GTE_CMD encoder. 
- * Mirrors the OPCODE_SHIFT / RS_SHIFT convention used in mips.h.
+ * Offset position & masks below are the *bit positions* and *bit widths* of each configurable field, used by the ENC_GTE_CMD encoder. 
+ * Mirrors the OPCODE_POS / RS_POS convention used in mips.h.
  */
 
-	gte_shift_sf  = 19,  gte_width_sf  = 1,
-	gte_shift_mx  = 17,  gte_width_mx  = 2,
-	gte_shift_v   = 15,  gte_width_v   = 2,
-	gte_shift_cv  = 13,  gte_width_cv  = 2,
-	gte_shift_lm  = 10,  gte_width_lm  = 1,
-	gte_shift_cmd =  0,  gte_width_cmd = 6,
+	gte_pos_sf  = 19,  gte_width_sf  = 1,
+	gte_pos_mx  = 17,  gte_width_mx  = 2,
+	gte_pos_v   = 15,  gte_width_v   = 2,
+	gte_pos_cv  = 13,  gte_width_cv  = 2,
+	gte_pos_lm  = 10,  gte_width_lm  = 1,
+	gte_pos_cmd =  0,  gte_width_cmd = 6,
 
 	/* Fake command number (bits 24-20) — IGNORED by the GTE hardware per PSX-SPX `geometrytransformationenginegte.md` line 48.
 	 * libgte's compiler emits non-zero values in this field as a disassembly signature. */
-	gte_shift_fake_cmd = 20,
+	gte_pos_fake_cmd   = 20,
 	gte_width_fake_cmd = 5,
 };
 
@@ -340,13 +340,13 @@ enum { _C2_TX_SUBS_ = 0
 #define gte_cmd_base (enc_op(op_cop2) | (1 << 25))
 
 /* Per-field encoders. Each one does (value & mask) << shift on its own. */
-#define enc_gte_sf(sf)      ((sf)  << gte_shift_sf )
-#define enc_gte_mx(mx)      ((mx)  << gte_shift_mx )
-#define enc_gte_v(v)        ((v)   << gte_shift_v  )
-#define enc_gte_cv(cv)      ((cv)  << gte_shift_cv )
-#define enc_gte_lm(lm)      ((lm)  << gte_shift_lm )
-#define enc_gte_cmd(cmd)    ((cmd) << gte_shift_cmd )
-#define enc_gte_fake_cmd(x) ((x)   << gte_shift_fake_cmd)
+#define enc_gte_sf(sf)      ((sf)  << gte_pos_sf )
+#define enc_gte_mx(mx)      ((mx)  << gte_pos_mx )
+#define enc_gte_v(v)        ((v)   << gte_pos_v  )
+#define enc_gte_cv(cv)      ((cv)  << gte_pos_cv )
+#define enc_gte_lm(lm)      ((lm)  << gte_pos_lm )
+#define enc_gte_cmd(cmd)    ((cmd) << gte_pos_cmd )
+#define enc_gte_fake_cmd(x) ((x)   << gte_pos_fake_cmd)
 
 /* Composite: all six GTE fields + the COP2/CO base. */
 #define enc_gte_cmdw(sf, mx, v, cv, lm, cmd) ( \

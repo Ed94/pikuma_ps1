@@ -21,7 +21,7 @@
  *    4. Semantic encoders      gp0_word_poly_f3(r,g,b)
  *    3. Composite encoders     enc_color_word(cmd, r, g, b)
  *    2. Per-field encoders     enc_gp0_color_r(r), enc_gp0_color_g(g), ...
- *    1. Bitfield layout consts gp0_color_red_shift = 0, gp0_color_red_width = 8
+ *    1. Bitfield layout consts gp0_color_red_pos = 0, gp0_color_red_width = 8
  *    0. Opcode IDs             gp0_cmd_poly_f3 = 0x20
  *
  *  Vendor mnemonics (gte_mtc2, gte_mfc2, etc.) are NOT in this header.
@@ -75,7 +75,7 @@ enum {
  *  ============================================================================
  *  8-bit GP0 opcodes (the upper byte of a primitive's first word). These are the BYTE only.
  *  NO macro body past this point uses a raw shift or raw mask.
- *  Mirrors the OPCODE_SHIFT / RS_SHIFT convention from mips.h.
+ *  Mirrors the OPCODE_POS / RS_POS convention from mips.h.
  * ============================================================================ */
 enum {
 	gp0_cmd_Nop             = 0x00,
@@ -117,9 +117,9 @@ enum {
 	gp0_cmd_SetDrawOffset        = 0xE5,
 	gp0_cmd_SetMaskBit           = 0xE6,
 
-	/* bitfield shifts / widths ----
+	/* bitfield offset pos / widths ----
 		* Generic GP0/GP1 command byte (upper 8 bits of every word sent to either port). */
-	gp0_cmd_shift = 24,
+	gp0_cmd_pos   = 24,
 	gp0_cmd_width =  8,
 
 	/* Color word layout (lives in Poly_F3.color, Poly_G4.c0..c3, etc.):
@@ -127,10 +127,10 @@ enum {
 		*   bits 23..16 = BLUE
 		*   bits 15..08 = GREEN
 		*   bits 07..00 = RED     (PSX GPU is BGR, NOT RGB) */
-	gp0_color_cmd_shift   = 24, gp0_color_cmd_width   = 8,
-	gp0_color_blue_shift  = 16, gp0_color_blue_width  = 8,
-	gp0_color_green_shift =  8, gp0_color_green_width = 8,
-	gp0_color_red_shift   =  0, gp0_color_red_width   = 8,
+	gp0_color_cmd_pos   = 24, gp0_color_cmd_width   = 8,
+	gp0_color_blue_pos  = 16, gp0_color_blue_width  = 8,
+	gp0_color_green_pos =  8, gp0_color_green_width = 8,
+	gp0_color_red_pos   =  0, gp0_color_red_width   = 8,
 };
 
 /* ============================================================================
@@ -143,12 +143,12 @@ enum {
  * ============================================================================ */
 
 /* ---- Layer 1.5: per-field encoders ---- */
-#define enc_gp0_cmd(cmd)       ((cmd) << gp0_cmd_shift)
+#define enc_gp0_cmd(cmd)       ((cmd) << gp0_cmd_pos)
 
-#define enc_gp0_color_cmd(cmd) ((cmd) << gp0_color_cmd_shift)
-#define enc_gp0_color_r(r)     ((r)   << gp0_color_red_shift)
-#define enc_gp0_color_g(g)     ((g)   << gp0_color_green_shift)
-#define enc_gp0_color_b(b)     ((b)   << gp0_color_blue_shift)
+#define enc_gp0_color_cmd(cmd) ((cmd) << gp0_color_cmd_pos)
+#define enc_gp0_color_r(r)     ((r)   << gp0_color_red_pos)
+#define enc_gp0_color_g(g)     ((g)   << gp0_color_green_pos)
+#define enc_gp0_color_b(b)     ((b)   << gp0_color_blue_pos)
 
 /* ---- Layer 2: composite encoders ---- */
 #define enc_color_word(cmd, r, g, b) (enc_gp0_color_cmd(cmd) | enc_gp0_color_r(r) | enc_gp0_color_g(g) | enc_gp0_color_b(b))
@@ -212,37 +212,37 @@ enum {
 	gp1_disp_VInterlace = 0x1,
 
 	/* ---- Layer 1: GP1 display-mode + range + draw-area shifts/widths ---- */
-	gp1_disp_hres_shift      =  0, gp1_disp_hres_width      = 2,
-	gp1_disp_vres_shift      =  2, gp1_disp_vres_width      = 1,
-	gp1_disp_color_shift     =  4, gp1_disp_color_width     = 1,
-	gp1_disp_interlace_shift =  5, gp1_disp_interlace_width = 1,
+	gp1_disp_hres_pos      =  0, gp1_disp_hres_width      = 2,
+	gp1_disp_vres_pos      =  2, gp1_disp_vres_width      = 1,
+	gp1_disp_color_pos     =  4, gp1_disp_color_width     = 1,
+	gp1_disp_interlace_pos =  5, gp1_disp_interlace_width = 1,
 
 	/* GP1 horizontal display range: bits 0..11 = X2, bits 12..23 = X1 */
-	gp1_hrange_x1_shift = 12, gp1_hrange_x1_width = 12,
-	gp1_hrange_x2_shift =  0, gp1_hrange_x2_width = 12,
+	gp1_hrange_x1_pos = 12, gp1_hrange_x1_width = 12,
+	gp1_hrange_x2_pos =  0, gp1_hrange_x2_width = 12,
 
 	/* GP1 vertical display range: bits 0..9 = Y2, bits 10..19 = Y1 */
-	gp1_vrange_y1_shift = 10, gp1_vrange_y1_width = 10,
-	gp1_vrange_y2_shift =  0, gp1_vrange_y2_width = 10,
+	gp1_vrange_y1_pos = 10, gp1_vrange_y1_width = 10,
+	gp1_vrange_y2_pos =  0, gp1_vrange_y2_width = 10,
 
 	/* GP1 draw area (top-left or bottom-right): bits 0..9 = X, bits 10..19 = Y
 		* (10-bit signed — caller pre-signs) */
-	gp1_draw_x_shift =  0, gp1_draw_x_width = 10,
-	gp1_draw_y_shift = 10, gp1_draw_y_width = 10,
+	gp1_draw_x_pos =  0, gp1_draw_x_width = 10,
+	gp1_draw_y_pos = 10, gp1_draw_y_width = 10,
 };
 
 /* ---- Layer 1.5: GP1 per-field encoders ---- */
-#define enc_gp1_disp_hres(h)      ((h) << gp1_disp_hres_shift)
-#define enc_gp1_disp_vres(v)      ((v) << gp1_disp_vres_shift)
-#define enc_gp1_disp_color(c)     ((c) << gp1_disp_color_shift)
-#define enc_gp1_disp_interlace(i) ((i) << gp1_disp_interlace_shift)
+#define enc_gp1_disp_hres(h)      ((h) << gp1_disp_hres_pos)
+#define enc_gp1_disp_vres(v)      ((v) << gp1_disp_vres_pos)
+#define enc_gp1_disp_color(c)     ((c) << gp1_disp_color_pos)
+#define enc_gp1_disp_interlace(i) ((i) << gp1_disp_interlace_pos)
 
-#define enc_gp1_hrange_x1(x1) ((x1) << gp1_hrange_x1_shift)
-#define enc_gp1_hrange_x2(x2) ((x2) << gp1_hrange_x2_shift)
-#define enc_gp1_vrange_y1(y1) ((y1) << gp1_vrange_y1_shift)
-#define enc_gp1_vrange_y2(y2) ((y2) << gp1_vrange_y2_shift)
-#define enc_gp1_draw_x(x)     ((x)  << gp1_draw_x_shift)
-#define enc_gp1_draw_y(y)     ((y)  << gp1_draw_y_shift)
+#define enc_gp1_hrange_x1(x1) ((x1) << gp1_hrange_x1_pos)
+#define enc_gp1_hrange_x2(x2) ((x2) << gp1_hrange_x2_pos)
+#define enc_gp1_vrange_y1(y1) ((y1) << gp1_vrange_y1_pos)
+#define enc_gp1_vrange_y2(y2) ((y2) << gp1_vrange_y2_pos)
+#define enc_gp1_draw_x(x)     ((x)  << gp1_draw_x_pos)
+#define enc_gp1_draw_y(y)     ((y)  << gp1_draw_y_pos)
 
 /* ---- Layer 2: GP1 composite encoders ---- */
 #define enc_gp1_disp_mode_word(h, v, c, i) (enc_gp0_cmd(gp1_cmd_DisplayMode)            | enc_gp1_disp_hres(h)  | enc_gp1_disp_vres(v) | enc_gp1_disp_color(c) | enc_gp1_disp_interlace(i))
@@ -553,16 +553,16 @@ typedef Struct_(Poly_GT4) {
  * ============================================================================ */
 enum {
 	/* ---- Layer 1: TPage bitfield shifts / widths ---- */
-	gp0_tpage_x_shift            =  0, gp0_tpage_x_width            =  4,
-	gp0_tpage_y_shift            =  4, gp0_tpage_y_width            =  1,
-	gp0_tpage_semi_trans_shift   =  5, gp0_tpage_semi_trans_width   =  2,
-	gp0_tpage_color_depth_shift  =  7, gp0_tpage_color_depth_width  =  2,
-	gp0_tpage_dither_shift       =  9, gp0_tpage_dither_width       =  1,
-	gp0_tpage_draw_to_disp_shift = 10, gp0_tpage_draw_to_disp_width =  1,
-	gp0_tpage_tex_disable_shift  = 11, gp0_tpage_tex_disable_width  =  1,
+	gp0_tpage_x_pos            =  0, gp0_tpage_x_width            =  4,
+	gp0_tpage_y_pos            =  4, gp0_tpage_y_width            =  1,
+	gp0_tpage_semi_trans_pos   =  5, gp0_tpage_semi_trans_width   =  2,
+	gp0_tpage_color_depth_pos  =  7, gp0_tpage_color_depth_width  =  2,
+	gp0_tpage_dither_pos       =  9, gp0_tpage_dither_width       =  1,
+	gp0_tpage_draw_to_disp_pos = 10, gp0_tpage_draw_to_disp_width =  1,
+	gp0_tpage_tex_disable_pos  = 11, gp0_tpage_tex_disable_width  =  1,
 
 	/* TPage color-depth payload values (NOT bit positions — these go in
-	 * the 2-bit field at gp0_tpage_color_depth_shift). */
+	 * the 2-bit field at gp0_tpage_color_depth_pos). */
 	gp0_tpage_color_4bpp  = 0x0,
 	gp0_tpage_color_8bpp  = 0x1,
 	gp0_tpage_color_16bpp = 0x2,
@@ -578,13 +578,13 @@ enum {
 };
 
 /* ---- Layer 1.5: TPage per-field encoders. Mirrors enc_gte_sf/mx/v in gte.h. ---- */
-#define enc_gp0_tpage_x(x)            ((x) << gp0_tpage_x_shift)
-#define enc_gp0_tpage_y(y)            ((y) << gp0_tpage_y_shift)
-#define enc_gp0_tpage_semi_trans(s)   ((s) << gp0_tpage_semi_trans_shift)
-#define enc_gp0_tpage_color_depth(c)  ((c) << gp0_tpage_color_depth_shift)
-#define enc_gp0_tpage_dither(d)       ((d) << gp0_tpage_dither_shift)
-#define enc_gp0_tpage_draw_to_disp(d) ((d) << gp0_tpage_draw_to_disp_shift)
-#define enc_gp0_tpage_tex_disable(t)  ((t) << gp0_tpage_tex_disable_shift)
+#define enc_gp0_tpage_x(x)            ((x) << gp0_tpage_x_pos)
+#define enc_gp0_tpage_y(y)            ((y) << gp0_tpage_y_pos)
+#define enc_gp0_tpage_semi_trans(s)   ((s) << gp0_tpage_semi_trans_pos)
+#define enc_gp0_tpage_color_depth(c)  ((c) << gp0_tpage_color_depth_pos)
+#define enc_gp0_tpage_dither(d)       ((d) << gp0_tpage_dither_pos)
+#define enc_gp0_tpage_draw_to_disp(d) ((d) << gp0_tpage_draw_to_disp_pos)
+#define enc_gp0_tpage_tex_disable(t)  ((t) << gp0_tpage_tex_disable_pos)
 
 /* ---- Layer 2: TPage composite encoder. Mirrors enc_gte_cmdw in gte.h ---- */
 #define enc_gp0_tpage_word(x, y, semi_trans, color_depth, dither, draw_to_disp, tex_disable) \
@@ -615,16 +615,16 @@ typedef Struct_(TexturePage) { U4 raw; };
  * ============================================================================ */
 enum {
 	/* ---- Layer 1: CLUT bitfield shifts / widths ---- */
-	gp0_clut_y_shift = 0, gp0_clut_y_width = 6,
-	gp0_clut_x_shift = 6, gp0_clut_x_width = 9,
+	gp0_clut_y_pos = 0, gp0_clut_y_width = 6,
+	gp0_clut_x_pos = 6, gp0_clut_x_width = 9,
 	/* CLUT-load cmd-byte variants — the upper byte of the GP0 word. */
 	gp0_clut_cmd_Load4bpp = 0x20,
 	gp0_clut_cmd_Load8bpp = 0x25,
 };
 
 /* ---- Layer 1.5: CLUT per-field encoders ---- */
-#define enc_gp0_clut_x(x) ((x) << gp0_clut_x_shift)
-#define enc_gp0_clut_y(y) ((y) << gp0_clut_y_shift)
+#define enc_gp0_clut_x(x) ((x) << gp0_clut_x_pos)
+#define enc_gp0_clut_y(y) ((y) << gp0_clut_y_pos)
 
 /* ---- Layer 2: CLUT composite encoder ---- */
 #define enc_gp0_clut_word(cmd, x, y) (enc_gp0_cmd(cmd) | enc_gp0_clut_x(x) | enc_gp0_clut_y(y))

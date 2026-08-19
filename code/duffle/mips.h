@@ -252,12 +252,12 @@ enum {
 enum { _BitOffsets = 0
 /* Bit Offsets for MIPS Instruction Fields */
 
-	, OPCODE_SHIFT = 26
-	, RS_SHIFT     = 21
-	, RT_SHIFT     = 16
-	, RD_SHIFT     = 11
-	, SHAMT_SHIFT  = 6  /* Shift Amount */
-	, FC_SHIFT     = 0
+	, OPCODE_POS = 26
+	, RS_POS     = 21
+	, RT_POS     = 16
+	, RD_POS     = 11
+	, SHAMT_POS  = 6  /* Shift Amount: Offset Position */
+	, FC_POS     = 0
 
 /* IMM_MASK is the 16-bit two's-complement truncation for the immediate field.
  * It is NOT a range guard — it is load-bearing for negative branch offsets
@@ -268,12 +268,12 @@ enum { _BitOffsets = 0
 	, IMM_MASK     = 0xFFFF
 };
 
-#define enc_op(op)       ((op)    << OPCODE_SHIFT)
-#define enc_rs(rs)       ((rs)    << RS_SHIFT)
-#define enc_rt(rt)       ((rt)    << RT_SHIFT)
-#define enc_rd(rd)       ((rd)    << RD_SHIFT)
-#define enc_shamt(shamt) ((shamt) << SHAMT_SHIFT)
-#define enc_fc(fc)       ((fc)    << FC_SHIFT)
+#define enc_op(op)       ((op)    << OPCODE_POS)
+#define enc_rs(rs)       ((rs)    << RS_POS)
+#define enc_rt(rt)       ((rt)    << RT_POS)
+#define enc_rd(rd)       ((rd)    << RD_POS)
+#define enc_shamt(shamt) ((shamt) << SHAMT_POS)
+#define enc_fc(fc)       ((fc)    << FC_POS)
 #define enc_imm(imm)     ((imm) & IMM_MASK)
 
 /* MIPS R-Type Instruction Format (Register-to-Register) */
