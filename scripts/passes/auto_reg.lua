@@ -334,4 +334,6 @@ function M.run(ctx)
 	return { outputs = outputs, errors = errors, warnings = warnings }
 end
 
+M.POOL = POOL
+
 return M

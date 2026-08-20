@@ -3274,11 +3274,16 @@ local function check_immediate_field_width(atom, pipe_ctx, findings)
 	end
 end
 
--- TODO(Ed): Review this, if its still being used it needs to be re-evaluated for the current tape runtime.
-local SCRATCH_GPRS = {
-	R_T0 = true, R_T1 = true, R_T2 = true, R_T3 = true,
-	R_AT = true, R_V0 = true, R_V1 = true,
-}
+-- Atom-body temps may be omitted from atom_reads / atom_writes.
+-- Physical names come from auto_reg.POOL (R2-R25). R_AT is never allocated.
+-- R_TapePtr / R_AtomJmp are reserved carriers; yield always touches them,
+-- so they are optional in the contract unless the atom listed them.
+-- R_ScratchBase stays required when used.
+local auto_reg = require("passes.auto_reg")
+local OPTIONAL_CONTRACT_GPRS = { R_AT = true, R_TapePtr = true, R_AtomJmp = true }
+for _, name in ipairs(auto_reg.POOL) do
+	OPTIONAL_CONTRACT_GPRS[name] = true
+end
 
 local function token_arg_list(tok)
 	local  inner = (tok or ""):match("%b()")
@@ -3291,17 +3296,34 @@ local function arg_as_gpr(arg)
 	return arg:match("^R_[%w_]+$")
 end
 
-local function collect_gpr_traffic(atom)
+local function traffic_ident_args(ev)
+	if type(ev) == "table" and (ev.encoder or ev.ident) then
+		return ev.encoder or ev.ident or "", ev.args or {}
+	end
+	local tok = (type(ev) == "table" and ev.tok) or ev
+	if type(tok) ~= "string" then return "", {} end
+	return tok:match("^([%w_]+)") or "", token_arg_list(tok)
+end
+
+local function collect_gpr_traffic(atom_or_tokens)
 	local reads, writes = {}, {}
-	local events        = (atom and atom.paths and atom.paths.word_events) or {}
+	local events = {}
+	if type(atom_or_tokens) == "table" then
+		if atom_or_tokens.paths and atom_or_tokens.paths.word_events then
+			events = atom_or_tokens.paths.word_events
+		elseif atom_or_tokens.word_events then
+			events = atom_or_tokens.word_events
+		else
+			events = atom_or_tokens
+		end
+	end
 	for _, ev in ipairs(events) do
-		local ident = ev.encoder or ev.ident or ""
+		local ident, args = traffic_ident_args(ev)
 		if    ident:sub(1, 4) ~= "mac_"
 			and not (duffle.DELAY_MARKERS and duffle.DELAY_MARKERS[ident])
 			and ident ~= "nop" and ident ~= "atom_label" and ident ~= "atom_offset"
 		then
-			local args = ev.args or {}
-			local fx   = duffle.instr(ident)
+			local fx = duffle.instr(ident)
 			if fx then
 				for _, pos in ipairs(fx.reads or {}) do
 					local g = arg_as_gpr(args[pos])
@@ -3373,10 +3395,7 @@ local function check_atom_calls_inferred_traffic(atom, pipe_ctx, findings)
 	local function keep_inferred(inferred, declared)
 		local out = {}
 		for k in pairs(inferred) do
-			if k == "R_0" then
-				if declared[k] then out[k] = true end
-			-- TODO(Ed): Review usage of this array, this may be outdated and not representattive of the current tape runtime.
-			elseif SCRATCH_GPRS[k] then
+			if k == "R_0" or OPTIONAL_CONTRACT_GPRS[k] then
 				if declared[k] then out[k] = true end
 			else
 				out[k] = true
