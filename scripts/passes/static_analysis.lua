@@ -201,26 +201,26 @@ end
 --   is_store_word         — true if ident is `store_word`
 
 --- @class TokClass
---- @field ident              string           -- lLading identifier
---- @field nop_words          integer          -- 0 / 1 / 2
---- @field nop_prefix         integer          -- Consecutive nop words before this token
---- @field is_yield           boolean
---- @field is_atom_label      boolean
---- @field label_name         string|nil       -- For atom_label(name)
---- @field is_branch          boolean          -- Conditional branch OR unconditional-jump-with-offset
---- @field is_unconditional_jump boolean       -- `jump` / `call_addr` only
---- @field is_terminal_jump   boolean          -- `jump_reg` / `call_reg` / `jump_link` only
---- @field branch_label       string|false|nil -- For branch_*(..., atom_offset(F, label)) OR jump/call_addr
---- @field is_load            boolean          -- load_word | load_half | load_half_u | load_byte | load_byte_u | gte_lw | gte_lwc2
---- @field is_store_word      boolean
---- @field mac_format_shape   string|nil       -- "f3" / "g4" etc. for mac_format_X_color; nil otherwise
---- @field is_gte_store       boolean          -- Ident matches `mac_gte_store_<shape>`
---- @field is_ot_tag          boolean          -- Ident matches `mac_insert_ot_tag_<shape>`
---- @field writes_r_prim_cursor boolean        -- store_word targeting R_PrimCursor
---- @field reads_r_tape_ptr   boolean          -- Any token referencing R_TapePtr
---- @field o_arg1             string|nil       -- First arg of O_(<a>, <b>) captures; nil for non-O_ tokens
---- @field o_arg2             string|nil       -- Second arg of O_(<a>, <b>) captures
---- @field s_arg1             string|nil       -- Arg of S_(<a>) captures; nil for non-S_ tokens
+--- @field ident                 string           -- lLading identifier
+--- @field nop_words             integer          -- 0 / 1 / 2
+--- @field nop_prefix            integer          -- Consecutive nop words before this token
+--- @field is_yield              boolean
+--- @field is_atom_label         boolean
+--- @field label_name            string|nil       -- For atom_label(name)
+--- @field is_branch             boolean          -- Conditional branch OR unconditional-jump-with-offset
+--- @field is_unconditional_jump boolean          -- `jump` / `call_addr` only
+--- @field is_terminal_jump      boolean          -- `jump_reg` / `call_reg` / `jump_link` only
+--- @field branch_label          string|false|nil -- For branch_*(..., atom_offset(F, label)) OR jump/call_addr
+--- @field is_load               boolean          -- load_word | load_half | load_half_u | load_byte | load_byte_u | gte_lw | gte_lwc2
+--- @field is_store_word         boolean
+--- @field mac_format_shape      string|nil       -- "f3" / "g4" etc. for mac_format_X_color; nil otherwise
+--- @field is_gte_store          boolean          -- Ident matches `mac_gte_store_<shape>`
+--- @field is_ot_tag             boolean          -- Ident matches `mac_insert_ot_tag_<shape>`
+--- @field writes_r_prim_cursor  boolean          -- store_word targeting R_PrimCursor
+--- @field reads_r_tape_ptr      boolean          -- Any token referencing R_TapePtr
+--- @field o_arg1                string|nil       -- First arg of O_(<a>, <b>) captures; nil for non-O_ tokens
+--- @field o_arg2                string|nil       -- Second arg of O_(<a>, <b>) captures
+--- @field s_arg1                string|nil       -- Arg of S_(<a>) captures; nil for non-S_ tokens
 
 -- Load-delay idents are M.INSTRUCTION rows with kind == "load".
 
@@ -235,8 +235,8 @@ local S_PATTERN = "S_%(([%w_]+)%s*%)"
 local function stamp_event_fields(events)
 	local nop_run = 0
 	for _, ev in ipairs(events or {}) do
-		local ident = ev.encoder or ev.ident or ""
-		local haystack = (ev.call_text or "") .. " " .. table.concat(ev.args or {}, ",")
+		local ident           = ev.encoder or ev.ident or ""
+		local haystack        = (ev.call_text or "") .. " " .. table.concat(ev.args or {}, ",")
 		local is_delay_marker = false
 		local delay_marker    = nil
 		if duffle.DELAY_MARKERS and duffle.DELAY_MARKERS[ident] then
@@ -249,16 +249,16 @@ local function stamp_event_fields(events)
 
 		-- mac_yield_tail is the lego-split terminator (addiu_self; jr R_AtomJmp; nop).
 		-- Treat it as a yield for the mac_yield_uniformity check.
-		local is_yield      = ident == "mac_yield" or ident == "mac_yield_tail"
-		local is_atom_label = false
-		local label_name    = nil
-		local is_branch     = false
+		local is_yield              = ident == "mac_yield" or ident == "mac_yield_tail"
+		local is_atom_label         = false
+		local label_name            = nil
+		local is_branch             = false
 		local is_unconditional_jump = false
-		local is_terminal_jump   = false
-		local branch_label  = nil
-		local isa           = duffle.instr(ident)
-		local is_load       = isa and isa.kind == "load"
-		local is_store_word = ident == "store_word"
+		local is_terminal_jump      = false
+		local branch_label          = nil
+		local isa                   = duffle.instr(ident)
+		local is_load               = isa and isa.kind == "load"
+		local is_store_word         = ident == "store_word"
 
 		local mac_format_shape     = nil
 		local is_gte_store         = false
@@ -275,16 +275,21 @@ local function stamp_event_fields(events)
 			is_branch    = true
 			branch_label = haystack:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
 		elseif ident == "jump" or ident == "call_addr" then
-			is_branch              = true
+			is_branch = true
 			is_unconditional_jump = true
-			branch_label           = haystack:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
+			branch_label = haystack:match("atom_offset%s*%([^,]+,%s*([%w_]+)%s*%)") or false
 		elseif ident == "jump_reg" or ident == "call_reg" or ident == "jump_link" then
 			is_terminal_jump = true
 		end
 
 		local shape = ident:match("^mac_format_([%w_]+)_color$")
-		if shape then mac_format_shape = shape end
-		if ident:match("^mac_gte_store_[%w_]+$")  then is_gte_store = true end
+		if shape then 
+			mac_format_shape = shape 
+		end
+		if ident:match("^mac_gte_store_[%w_]+$") 
+		then 
+			is_gte_store = true 
+		end
 		if ident == "mac_insert_ot_tag" or ident:match("^mac_insert_ot_tag_[%w_]+$") then
 			is_ot_tag = true
 		end
@@ -295,28 +300,28 @@ local function stamp_event_fields(events)
 		if haystack:find("R_TapePtr", 1, true) then reads_r_tape_ptr = true end
 		if is_store_word and haystack:find("R_PrimCursor", 1, true) then writes_r_prim_cursor = true end
 
-		ev.ident                  = ident
-		ev.is_delay_marker        = is_delay_marker
-		ev.delay_marker           = delay_marker
-		ev.nop_words              = nop_words
-		ev.nop_prefix             = nop_run
-		ev.is_yield               = is_yield
-		ev.is_atom_label          = is_atom_label
-		ev.label_name             = label_name
-		ev.is_branch              = is_branch
-		ev.is_unconditional_jump  = is_unconditional_jump
-		ev.is_terminal_jump       = is_terminal_jump
-		ev.branch_label           = branch_label
-		ev.is_load                = is_load
-		ev.is_store_word          = is_store_word
-		ev.mac_format_shape       = mac_format_shape
-		ev.is_gte_store           = is_gte_store
-		ev.is_ot_tag              = is_ot_tag
-		ev.writes_r_prim_cursor   = writes_r_prim_cursor
-		ev.reads_r_tape_ptr       = reads_r_tape_ptr
-		ev.o_arg1                 = o_arg1
-		ev.o_arg2                 = o_arg2
-		ev.s_arg1                 = s_arg1
+		ev.ident                 = ident
+		ev.is_delay_marker       = is_delay_marker
+		ev.delay_marker          = delay_marker
+		ev.nop_words             = nop_words
+		ev.nop_prefix            = nop_run
+		ev.is_yield              = is_yield
+		ev.is_atom_label         = is_atom_label
+		ev.label_name            = label_name
+		ev.is_branch             = is_branch
+		ev.is_unconditional_jump = is_unconditional_jump
+		ev.is_terminal_jump      = is_terminal_jump
+		ev.branch_label          = branch_label
+		ev.is_load               = is_load
+		ev.is_store_word         = is_store_word
+		ev.mac_format_shape      = mac_format_shape
+		ev.is_gte_store          = is_gte_store
+		ev.is_ot_tag             = is_ot_tag
+		ev.writes_r_prim_cursor  = writes_r_prim_cursor
+		ev.reads_r_tape_ptr      = reads_r_tape_ptr
+		ev.o_arg1                = o_arg1
+		ev.o_arg2                = o_arg2
+		ev.s_arg1                = s_arg1
 		-- is_raw_yield_load / is_raw_yield_tail stamped after items are walked.
 		if nop_words > 0 then nop_run = nop_run + nop_words
 		else                  nop_run = 0
@@ -435,7 +440,7 @@ end
 
 local function gpr_identity(event, pos)
 	local keys = event and event.gpr_keys
-	if keys and keys[pos] then return keys[pos] end
+	if    keys and keys[pos] then return keys[pos] end
 	local arg = event and event.args and event.args[pos]
 	if type(arg) == "string" and arg:sub(1, 2) == "R_" then return arg end
 	return nil
@@ -456,7 +461,7 @@ end
 
 -- Bounded U4 arithmetic for the GPR-value lattice. LuaJIT supplies the `bit` module;
 -- the arithmetic fallback keeps this pass Lua 5.3-compatible without adding a dependency to the metaprogram.
-local bit_ok, bit = pcall(require, "bit")
+local  bit_ok, bit = pcall(require, "bit")
 if not bit_ok then bit = nil end
 
 local U4_MODULUS = 0x100000000
@@ -537,14 +542,9 @@ local function sign_extend_i16(value)
 	return value
 end
 
-local function is_gpr_operand(operand)
-	return type(operand) == "string" and operand:sub(1, 2) == "R_"
-end
+local function is_gpr_operand(operand) return type(operand) == "string" and operand:sub(1, 2) == "R_" end
 
-local function is_tracked_gpr(operand)
-	return is_gpr_operand(operand)
-		or (type(operand) == "string" and operand:sub(1, 7) == "reguse:")
-end
+local function is_tracked_gpr(operand) return is_gpr_operand(operand) or (type(operand) == "string" and operand:sub(1, 7) == "reguse:") end
 
 local function constant_for_operand(gpr_values, operand)
 	if operand == "R_0" then return 0 end
@@ -672,8 +672,7 @@ local function is_cop2_use(ident)
 	return canonical:sub(1, 9) == "gte_cmdw_" or ident:sub(1, 4) == "gte_"
 end
 
-local function append_cu2_finding(atom, event, forward, transition,
-	gap, kind, confidence, message)
+local function append_cu2_finding(atom, event, forward, transition, gap, kind, confidence, message)
 	local event_ident = event.encoder or event.ident or "?"
 	local policy      = duffle.CU2_TRANSITION_POLICY or {}
 	local evidence    = policy.evidence or {}
@@ -706,12 +705,11 @@ end
 
 -- Read `sys_mov_to_cop0(source, 12)` before applying any writes from the current event.
 -- A known source stages a target transition; an unknown source stages an ambiguity that is reported only if a later COP2 use reaches it.
-local function stage_cu2_transition(ev_ident, ev_args, ev_word, ev_line,
-	ev_source, forward)
+local function stage_cu2_transition(ev_ident, ev_args, ev_word, ev_line, ev_source, forward)
 	if ev_ident ~= "sys_mov_to_cop0" then return end
 	local  policy = duffle.CU2_TRANSITION_POLICY
 	if not policy then return end
-	local status_register = parse_integer_literal(ev_args[2])
+	local status_register  = parse_integer_literal(ev_args[2])
 	if    status_register ~= policy.status_register then return end
 
 	local status_value   = constant_for_operand(forward.gpr_values, ev_args[1])
@@ -776,8 +774,7 @@ local function consume_cu2_transition(atom, event, ev_word, forward)
 	if target == "enabled" then
 		forward.cu2_state = "enabled"
 	else
-		append_cu2_finding(atom, event, forward, transition, gap,
-			"error", "exact",
+		append_cu2_finding(atom, event, forward, transition, gap, "error", "exact",
 			string.format("%s at line %d: COP2 unavailable after SR.CU2 was disabled"
 				.. " (gap=%d, required=%d)",
 				atom.name, event_line,
@@ -851,8 +848,7 @@ local function analyze_hardware_relations(atom)
 			forward.c2_ctrl_writes = forward.c2_ctrl_writes or {}
 			local alias = ev_args[2]
 			if type(alias) ~= "string" or not alias:match("^gte_cr_") then
-				alias = tostring(ev.call_text or ""):match("gte_cr_[%w_]+")
-					or tostring(ev.root_call_text or ""):match("gte_cr_[%w_]+")
+				alias = tostring(ev.call_text or ""):match("gte_cr_[%w_]+") or tostring(ev.root_call_text or ""):match("gte_cr_[%w_]+")
 			end
 			local src = ev_args[1]
 			if type(src) == "string" then src = src:match("[%w_]+") end
@@ -883,7 +879,7 @@ local function analyze_hardware_relations(atom)
 			end,
 			overwrite_same_dest = function(ev, prod)
 				local ident = ev.encoder or ev.ident
-				local args = ev.args or {}
+				local args  = ev.args or {}
 				return (ident == "gte_mv_to_data_r" or ident == "gte_mv_to_ctrl_r")
 					and args[2] == prod.destination
 			end,
@@ -894,19 +890,20 @@ local function analyze_hardware_relations(atom)
 			local match_fn = CONSUMER[relation.consumer]
 			local is_match = match_fn and match_fn(ev, prod)
 			if is_match then
-				local gap                = ev_word - prod.word - 1
-				local required           = prod.required
+				local gap      = ev_word - prod.word - 1
+				local required = prod.required
 				-- A following COP2 command waits at the transfer boundary.
 				-- Software nops are not required for that consumer class.
 				if is_gte_command(ev)
 					and relation.consumer == "cop2_input"
 					and relation.id ~= "mtc2_irgb_visibility"
 					and relation.id ~= "lwc2_to_gte_command"
-					and relation.id ~= "lwc2_to_other_consumer" then
+					and relation.id ~= "lwc2_to_other_consumer"
+				then
 					required = 0
 				end
 				local unknown_visibility = relation.visibility and relation.visibility.kind == "unknown_consumer"
-				if unknown_visibility then
+				if    unknown_visibility then
 					hazards[#hazards + 1] = {
 						check                = "transfer_hazards",
 						kind                 = "info",
@@ -1039,9 +1036,9 @@ local function analyze_hardware_relations(atom)
 			-- Not a GTE command; skip.
 		else
 			local canonical = canonical_command(ev_ident)
-			if canonical:sub(1, 9) == "gte_cmdw_" then
+			if    canonical:sub(1, 9) == "gte_cmdw_" then
 				-- Update the post-command role state.
-				local gte_row = duffle.gte(canonical)
+				local gte_row     = duffle.gte(canonical)
 				local cmd_outputs = gte_row and gte_row.outputs
 				if cmd_outputs then
 					for _, out in ipairs(cmd_outputs) do
@@ -1061,7 +1058,7 @@ local function analyze_hardware_relations(atom)
 				local cmd_latches = gte_row and gte_row.latch
 				if cmd_latches then
 					for _, latch in ipairs(cmd_latches) do
-						if latch.register and latch.required then
+						if   latch.register and latch.required then
 							-- A later MTC2/CTC2 overwrite of the same register before the measured boundary is the consumer of this relation.
 							pending[#pending + 1] = {
 								relation = {
@@ -1187,19 +1184,19 @@ local function check_gte_role_mismatch(atom, _pipe_ctx, findings)
 					and (reg == "C2_SXY0" or reg == "C2_SXY1") then
 					local ev_line = line_for_word_event(ev)
 					findings[#findings + 1] = {
-						check       = "gte_role_mismatch",
-						kind        = "warning",
-						atom        = atom.name,
-						line        = ev_line,
-						source      = ev.def_path or ev.source or "",
-						relation_id = "result_role_mismatch",
-						semantic    = "result_position",
-						command     = latest_screen_xy_entry.command,
-						role        = latest_screen_xy_entry.role,
+						check             = "gte_role_mismatch",
+						kind              = "warning",
+						atom              = atom.name,
+						line              = ev_line,
+						source            = ev.def_path or ev.source or "",
+						relation_id       = "result_role_mismatch",
+						semantic          = "result_position",
+						command           = latest_screen_xy_entry.command,
+						role              = latest_screen_xy_entry.role,
 						actual_register   = reg,
 						expected_register = "C2_SXY2",
-						producer_word = latest_screen_xy_entry.producer_word,
-						producer_line = latest_screen_xy_entry.producer_line,
+						producer_word     = latest_screen_xy_entry.producer_word,
+						producer_line     = latest_screen_xy_entry.producer_line,
 						msg = string.format("%s at line %d: reading %s after %s but the %s role is C2_SXY2 (not %s)"
 							, atom.name, ev_line
 							, reg, latest_screen_xy_entry.command
@@ -1330,7 +1327,7 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 						local dest_pos    = prev_writes[1]
 						local load_dest   = dest_pos and (gpr_identity(prev_ev, dest_pos) or (prev_ev.args or {})[dest_pos]) or "<load-destination>"
 						local authored    = dest_pos and (prev_ev.args or {})[dest_pos] or load_dest
-						local shown      = authored
+						local shown       = authored
 						if type(load_dest) == "string" and load_dest:sub(1, 7) == "reguse:" then
 							local slot = load_dest:match("([^:]+)$")
 							if slot then shown = authored .. " (slot " .. slot .. ")" end
@@ -1521,7 +1518,7 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 	-- and for genuine RMW ops like `add rt, rs, rt` where position 1 IS both read+written) is not a "read" for load-delay purposes:
 	-- The write shadows whatever value the register previously held. Only positions that are reads WITHOUT a co-occurring write to the same register count as net reads.
 	local function net_reads(event_ident, args)
-		local effect = duffle.instr(event_ident)
+		local effect    = duffle.instr(event_ident)
 		local positions = read_positions[event_ident]
 		if not positions then return {} end
 		local writes_set = {}
@@ -1627,9 +1624,8 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	local function event_is_yield(ev)
 		if ev.is_yield or ev.is_raw_yield_tail then return true end
 		local ident = ev.encoder or ev.ident or ""
-		if ident == "mac_yield" or ident == "mac_yield_tail" then return true end
-		local lead = tostring(ev.call_text or ""):match("^([%w_]+)")
-			or tostring(ev.root_call_text or ""):match("^([%w_]+)")
+		if    ident == "mac_yield" or ident == "mac_yield_tail" then return true end
+		local  lead = tostring(ev.call_text or ""):match("^([%w_]+)") or tostring(ev.root_call_text or ""):match("^([%w_]+)")
 		return lead == "mac_yield" or lead == "mac_yield_tail"
 	end
 
@@ -1640,19 +1636,19 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 		local ev = events[ev_idx]
 		if event_is_yield(ev) then
 			local inv_id = ev.outermost_invocation_id
-			if inv_id == nil or inv_id == 0 then
+			if    inv_id == nil or inv_id == 0 then
 				inv_id = "w" .. tostring(ev.i or ev_idx)
 			end
 			if not seen_inv[inv_id] then
 				seen_inv[inv_id] = true
-				count = count + 1
+				count            = count + 1
 			end
 			last_idx = ev_idx
 		end
 	end
 	local function line_for(idx)
 		local ev = events[idx]
-		if ev and ev.line then return ev.line end
+		if    ev and ev.line then return ev.line end
 		return atom.line
 	end
 
@@ -1743,7 +1739,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 	if is_runtime_helper(atom) then return end
 
 	local events  = atom.paths.word_events or {}
-	local invs   = atom.paths.invocations or {}
+	local invs    = atom.paths.invocations or {}
 	local markers = atom.paths.markers or {}
 	local n       = #events
 	local inv_n   = #invs
@@ -1770,7 +1766,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		end
 	end
 	for _, m in ipairs(markers) do
-		if m.kind == "label" and m.name and m.position ~= nil and label_pos[m.name] == nil then
+		if   m.kind == "label" and m.name and m.position ~= nil and label_pos[m.name] == nil then
 			label_pos[m.name] = m.position
 		end
 	end
@@ -1792,7 +1788,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		local bare = name:gsub("^mac_", "")
 		if enc == bare then return true end
 		local inv = inv_by_id[ev.outermost_invocation_id or 0]
-		if inv and (inv.component_name == name or inv.component_name == bare) then
+		if    inv and (inv.component_name == name or inv.component_name == bare) then
 			return (ev.i or 0) == (inv.start_pos or 0)
 		end
 		return false
@@ -1804,7 +1800,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		if not call_names(ev, name) then return false end
 		if ev_idx and ev_idx > 1 then
 			local prev = events[ev_idx - 1]
-			if prev and call_names(prev, name) then return false end
+			if    prev and call_names(prev, name) then return false end
 		end
 		return true
 	end
@@ -1813,7 +1809,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		if ev.is_raw_yield_load then return true end
 		if ev.is_load or ev.kind == "load" then
 			local rct = ev.root_call_text or ev.call_text or ""
-			if rct:sub(1, #"mac_yield_load") == "mac_yield_load" then
+			if    rct:sub(1, #"mac_yield_load") == "mac_yield_load" then
 				return is_named_call_first(ev, ev_idx, "mac_yield_load")
 			end
 		end
@@ -1862,7 +1858,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		-- Raw handshake load may sit in a GTE delay, not a BD slot or label pair.
 		if ev.is_raw_yield_load then goto continue_rule1 end
 
-		local natural_fallthrough = prev_label and (next_label_pos ~= nil)
+		local  natural_fallthrough = prev_label and (next_label_pos ~= nil)
 		if not natural_fallthrough then
 			local prev_ev = prev_i and events[prev_i]
 			local prev_is_branch = prev_ev and ((prev_ev.kind == "branch") or (prev_ev.is_unconditional_jump == true))
@@ -1874,8 +1870,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 					line  = line_for(ev),
 					check = "yield_load_tail_pairing",
 					kind  = "error",
-					msg   = string.format(
-						"%s at line %d has `mac_yield_load()` at word %d but the previous event is `%s`, not a branch; and the next label is `%s`. `mac_yield_load()` must fill a branch BD-slot or sit between two `atom_label`s for the natural fall-through load."
+					msg   = string.format("%s at line %d has `mac_yield_load()` at word %d but the previous event is `%s`, not a branch; and the next label is `%s`. `mac_yield_load()` must fill a branch BD-slot or sit between two `atom_label`s for the natural fall-through load."
 						, atom.name, line_for(ev), event_idx, prev_ident, next_ident),
 				}
 			end
@@ -1888,20 +1883,20 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 	local offset_map = {}
 	for _, m in ipairs(markers) do
 		if m.kind == "offset" and m.consuming_encoder and m.target then
-			offset_map[m.consuming_encoder] = offset_map[m.consuming_encoder] or {}
+			offset_map[m.consuming_encoder]           = offset_map[m.consuming_encoder] or {}
 			offset_map[m.consuming_encoder][m.target] = m.position
 		end
 	end
 
 	-- Resolve branch target to 0-based word index.
 	local function resolve_target(ev)
-		local enc  = ev.encoder or ev.ident or ""
+		local enc     = ev.encoder or ev.ident or ""
 		local off_map = offset_map[enc]
-		local args = ev.args or {}
+		local args    = ev.args or {}
 		-- Find the last non-register arg as the target name.
 		local target_name = nil
 		for i = #args, 1, -1 do
-			local a = tostring(args[i] or "")
+			local a       = tostring(args[i] or "")
 			local off_tgt = a:match("atom_offset%s*%([^,]+,%s*([%w_]+)")
 			if off_tgt then
 				target_name = off_tgt
@@ -1914,7 +1909,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		end
 		if off_map and target_name then
 			local pos = off_map[target_name]
-			if pos ~= nil then return pos end
+			if    pos ~= nil then return pos end
 		end
 		-- Fallback: label marker by name.
 		if target_name then
@@ -1938,9 +1933,9 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 	-- DFS to check if all paths to tail_idx have seen a load.
 	local function load_covers_tail(tail_event_idx)
 		local reached_without = false
-		local reached_any = false
-		local path_n = 0
-		local MAX_PATHS = 64
+		local reached_any     = false
+		local path_n          = 0
+		local MAX_PATHS       = 64
 
 		local function dfs(ev_idx, saw_load, visited)
 			if path_n >= MAX_PATHS then return end
@@ -2408,7 +2403,7 @@ local function analyze_atom_paths(atom, pipe_ctx)
 			return {}, true  -- path ends here
 		end
 		if is_branch(event_idx) then
-			local succ = {}
+			local succ       = {}
 			local target_pos = resolve_target(event_idx)
 			if is_unconditional_jump(event_idx) then
 				-- Unconditional absolute jump: BD slot absorbed; single successor — the taken path.
@@ -2669,7 +2664,7 @@ end
 -- Walk typedef aliases to the struct that owns the fields table. Depth matches propagate_type_sizes.
 local function resolve_type_with_fields(type_name, type_registry, depth)
 	if depth > 8 then return nil end
-	local entry = type_registry[type_name]
+	local  entry = type_registry[type_name]
 	if not entry then return nil end
 	if entry.fields then return entry end
 	if entry.kind == "typedef" and entry.underlying_type and entry.underlying_type ~= "" then
@@ -2772,7 +2767,7 @@ local function atom_body_token_source_line(atom, token, line_in_body)
 		return atom.line or 0
 	end
 	local body_line = line_in_body[token.rel]
-	if body_line == nil then return atom.line or 0 end
+	if    body_line == nil then return atom.line or 0 end
 	return (atom.line or 0) + body_line - 1
 end
 
@@ -2826,8 +2821,8 @@ local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 			local alias = ev.args and ev.args[2]
 			if type(alias) ~= "string" or not alias:match("^gte_cr_") then
 				alias = ctrl_alias_from_text(ev.call_text)
-					or ctrl_alias_from_text(ev.root_call_text)
-					or ctrl_alias_from_text(table.concat(ev.args or {}, ","))
+					or    ctrl_alias_from_text(ev.root_call_text)
+					or    ctrl_alias_from_text(table.concat(ev.args or {}, ","))
 			end
 			local group = alias and find_alias_pair_for(alias, pipe_ctx.duffle)
 			if group then
@@ -2842,11 +2837,11 @@ local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 
 	-- Fire one warning per group touched with 2+ distinct aliases.
 	for slot, hits in pairs(touched) do
-		local seen = {}
+		local seen     = {}
 		local distinct = {}
 		for _, h in ipairs(hits) do
 			if not seen[h.alias] then
-				seen[h.alias] = true
+				seen[h.alias]           = true
 				distinct[#distinct + 1] = h
 			end
 		end
@@ -2858,8 +2853,7 @@ local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 				line  = distinct[1].line,
 				check = "gte_cr_alias_writes",
 				kind  = "warning",
-				msg   = string.format(
-					"atom '%s' touches %d aliases that share C2[%d]: %s; verify the intent"
+				msg   = string.format("atom '%s' touches %d aliases that share C2[%d]: %s; verify the intent"
 					, atom.name or "", #distinct, slot, table.concat(aliases, ", ")),
 			}
 		end
@@ -2871,10 +2865,9 @@ end
 -- The bare macro encodes only the cmd field; the canonical libgte-2-pass shape uses `gte_cmdw_mvmva_c11_pass2_exact = 0x4A49E012` (gte.h:430).
 --
 -- Severity: info by default. Escalates to warning when `GTE_RT_DIAGONAL_STRICT=1` env var is set (CI / production builds).
---
 -- The bare macro IS the right call for the canonical libgte outer-product convention, so this is an opt-out hint rather than a hard warning.
 local function check_rtdiagonal_completeness(atom, _pipe_ctx, findings)
-	local tokens = atom.paths and atom.paths.tokens or {}
+	local tokens       = atom.paths and atom.paths.tokens or {}
 	local line_in_body = atom.paths and atom.paths.line_in_body
 	if not next(tokens) then return end
 	local strict = os.getenv("GTE_RT_DIAGONAL_STRICT") == "1"
@@ -2886,8 +2879,7 @@ local function check_rtdiagonal_completeness(atom, _pipe_ctx, findings)
 				line  = atom_body_token_source_line(atom, token, line_in_body),
 				check = "rtdiagonal_completeness",
 				kind  = strict and "warning" or "info",
-				msg   = string.format(
-					"atom '%s' uses the bare gte_cmdw_mvmva macro; "
+				msg   = string.format("atom '%s' uses the bare gte_cmdw_mvmva macro; "
 					.. "the canonical libgte-2-pass shape is gte_cmdw_mvmva_c11_pass2_exact = 0x4A49E012 "
 					.. "(gte.h:430). The bare macro does not encode RT23/RT31/RT32/RT33; "
 					.. "for a full 3x3 matrix, use the dedicated literal or hand-build via enc_gte_*()."
@@ -2899,21 +2891,19 @@ end
 
 -- Check #N+2: gte_cr_TR_naming
 -- Fires one info per atom body when a `gte_cr_TR[XYZ]` alias is used.
--- Translation-vector registers are the only 3-letter-suffix C2 aliases
--- (`TRX/TRY/TRZ`); an agent who reads `TRX` might typo it as `RT_X` or
--- `RTX0` and either get a compile error (best case) or a build that
--- links but routes the `ctc2` write to the wrong C2 slot.
+-- Translation-vector registers are the only 3-letter-suffix C2 aliases (`TRX/TRY/TRZ`); an agent who reads `TRX` might typo it as `RT_X` or
+-- `RTX0` and either get a compile error (best case) or a build that links but routes the `ctc2` write to the wrong C2 slot.
 --
 -- Severity: info. The convention is correct; this is a documentation-pointer check.
 local function check_gte_cr_TR_naming(atom, _pipe_ctx, findings)
-	local tokens = atom.paths and atom.paths.tokens or {}
+	local tokens       = atom.paths and atom.paths.tokens or {}
 	local line_in_body = atom.paths and atom.paths.line_in_body
 	if not next(tokens) then return end
-	local touched = false
+	local touched    = false
 	local first_line = 0
 	for _, token in ipairs(tokens) do
 		local ident = (token.tok or ""):match("^([%w_]+)")
-		if ident and ident:match("^gte_cr_TR[XYZ]$") then
+		if    ident and ident:match("^gte_cr_TR[XYZ]$") then
 			touched = true
 			if first_line == 0 then
 				first_line = atom_body_token_source_line(atom, token, line_in_body)
@@ -2939,14 +2929,14 @@ end
 local function check_gte_cr_alias_writes_xatom(src, pipe_ctx, findings)
 	-- Walk tape chains once (first source only). Atoms in no chain stay per-atom.
 	local first = pipe_ctx.source_order and pipe_ctx.source_order[1]
-	if first and src ~= first then return end
+	if    first and src ~= first then return end
 	local atoms_by_name = pipe_ctx.atoms_by_name or {}
 	for _, chain in ipairs(pipe_ctx.tape_chains or {}) do
 		local slot_state = {}
 		for _, name in ipairs(chain) do
 			local atom = atoms_by_name[name]
 			if atom then
-				atom.paths = atom.paths or {}
+				atom.paths               = atom.paths or {}
 				atom.paths.forward_state = atom.paths.forward_state or {}
 				local outgoing = {}
 				for slot, prev in pairs(slot_state) do
@@ -2963,8 +2953,7 @@ local function check_gte_cr_alias_writes_xatom(src, pipe_ctx, findings)
 								line  = w.line,
 								check = "gte_cr_alias_writes_xatom",
 								kind  = "warning",
-								msg   = string.format(
-									"atom '%s' writes %s to C2[%d]; atom '%s' already wrote %s"
+								msg   = string.format("atom '%s' writes %s to C2[%d]; atom '%s' already wrote %s"
 									, atom.name or "", w.alias, slot, prev.atom, prev.alias),
 							}
 						end
@@ -3003,8 +2992,7 @@ local function emit_packed_finding(atom, writes, rel, findings)
 		line  = line,
 		check = "gte_packed_writes",
 		kind  = "warning",
-		msg   = string.format(
-			"atom '%s' writes %s before %s on packed C2[%d]"
+		msg   = string.format("atom '%s' writes %s before %s on packed C2[%d]"
 			, atom.name or "", rel.second, rel.first, rel.slot),
 	}
 end
@@ -3013,13 +3001,13 @@ end
 -- between the two halves of a packed slot still sees the earlier write.
 local function check_gte_packed_writes(src, pipe_ctx, findings)
 	local first = pipe_ctx.source_order and pipe_ctx.source_order[1]
-	if first and src ~= first then return end
+	if    first and src ~= first then return end
 	local atoms_by_name = pipe_ctx.atoms_by_name or {}
-	local relations = duffle.GTE_PACKED_SLOT_RELATIONS or {}
+	local relations     = duffle.GTE_PACKED_SLOT_RELATIONS or {}
 	local seen = {}
 
 	local function ingest_atom(atom, first_idx, idx)
-		atom.paths = atom.paths or {}
+		atom.paths               = atom.paths or {}
 		atom.paths.forward_state = atom.paths.forward_state or {}
 		local writes = ctrl_writes_in_atom(atom)
 		local before = copy_forward_map(first_idx)
@@ -3038,12 +3026,12 @@ local function check_gte_packed_writes(src, pipe_ctx, findings)
 
 	for _, chain in ipairs(pipe_ctx.tape_chains or {}) do
 		local first_idx = {}
-		local idx = 0
+		local idx       = 0
 		for _, name in ipairs(chain) do
 			local atom = atoms_by_name[name]
 			if atom then
 				seen[name] = true
-				idx = ingest_atom(atom, first_idx, idx)
+				idx        = ingest_atom(atom, first_idx, idx)
 			end
 		end
 	end
@@ -3075,19 +3063,18 @@ local function emit_ctc2_finding(atom, line, dest, findings)
 		line  = line or atom.line,
 		check = "ctc2_chain_source_preservation",
 		kind  = "warning",
-		msg   = string.format(
-			"atom '%s' reloads %s before a later ctc2 that still names it"
+		msg   = string.format("atom '%s' reloads %s before a later ctc2 that still names it"
 			, atom.name or "", dest),
 	}
 end
 
 local function later_rt_ctc2_names(events, start_i, dest)
 	for j = start_i, #events do
-		local later = events[j]
+		local later     = events[j]
 		local later_enc = later.encoder or ""
 		if later_enc:match("^gte_cmdw_") then return false end
 		if later_enc == "gte_mv_to_ctrl_r" then
-			local later_src = ctc2_event_src(later)
+			local later_src   = ctc2_event_src(later)
 			local later_alias = ctc2_event_alias(later)
 			if later_src == dest and later_alias and later_alias:match("^gte_cr_RT") then
 				return true
@@ -3110,21 +3097,21 @@ end
 -- Cross-atom: load of a GPR whose RT write is still live after a yield.
 -- A load after the last RT ctc2 in the same atom, before the command, is a legal reload.
 local function walk_ctc2_atom(atom, live, findings)
-	atom.paths = atom.paths or {}
+	atom.paths               = atom.paths or {}
 	atom.paths.forward_state = atom.paths.forward_state or {}
 	local events = atom.paths.word_events or {}
-	if #events > 0 then
+	if   #events > 0 then
 		for i, ev in ipairs(events) do
 			local enc = ev.encoder or ""
 			if enc == "gte_mv_to_ctrl_r" then
-				local src = ctc2_event_src(ev)
+				local src   = ctc2_event_src(ev)
 				local alias = ctc2_event_alias(ev)
 				if src and alias and alias:match("^gte_cr_RT") then
 					live[src] = { gpr = src, alias = alias, atom = atom.name }
 				end
 			elseif enc == "load_word" then
 				local dest = ctc2_event_src(ev)
-				local rec = dest and live[dest]
+				local rec  = dest and live[dest]
 				if rec then
 					local from_other = rec.atom ~= atom.name
 					if from_other or later_rt_ctc2_names(events, i + 1, dest) then
@@ -3139,26 +3126,26 @@ local function walk_ctc2_atom(atom, live, findings)
 	else
 		local tokens = atom.paths.tokens or {}
 		for i, t in ipairs(tokens) do
-			local tok = t.tok or ""
+			local tok   = t.tok or ""
 			local ident = tok:match("^([%w_]+)") or ""
 			if ident == "gte_mv_to_ctrl_r" then
-				local src = tok:match("%(%s*([%w_]+)")
+				local src   = tok:match("%(%s*([%w_]+)")
 				local alias = ctrl_alias_from_text(tok)
 				if src and alias and alias:match("^gte_cr_RT") then
 					live[src] = { gpr = src, alias = alias, atom = atom.name }
 				end
 			elseif ident == "load_word" then
 				local dest = tok:match("%(%s*([%w_]+)")
-				local rec = dest and live[dest]
+				local rec  = dest and live[dest]
 				if rec then
 					local from_other = rec.atom ~= atom.name
-					local later = false
+					local later      = false
 					for j = i + 1, #tokens do
-						local later_tok = tokens[j].tok or ""
+						local later_tok   = tokens[j].tok or ""
 						local later_ident = later_tok:match("^([%w_]+)") or ""
 						if later_ident:match("^gte_cmdw_") then break end
 						if later_ident == "gte_mv_to_ctrl_r" then
-							local later_src = later_tok:match("%(%s*([%w_]+)")
+							local later_src   = later_tok:match("%(%s*([%w_]+)")
 							local later_alias = ctrl_alias_from_text(later_tok)
 							if later_src == dest and later_alias and later_alias:match("^gte_cr_RT") then
 								later = true
@@ -3183,7 +3170,7 @@ local function check_ctc2_chain_source_preservation(src, pipe_ctx, findings)
 	local first = pipe_ctx.source_order and pipe_ctx.source_order[1]
 	if first and src ~= first then return end
 	local atoms_by_name = pipe_ctx.atoms_by_name or {}
-	local seen = {}
+	local seen          = {}
 	for _, chain in ipairs(pipe_ctx.tape_chains or {}) do
 		local live = {}
 		for _, name in ipairs(chain) do
@@ -3206,12 +3193,12 @@ end
 -- from duffle.lua. Only fires on parseable integer literals; register names,
 -- O_(...) offsets, atom_offset(...) markers, and enum tokens are skipped.
 local function check_immediate_field_width(atom, pipe_ctx, findings)
-	local events = atom.paths and atom.paths.word_events or {}
+	local events              = atom.paths and atom.paths.word_events or {}
 	local line_for_word_event = pipe_ctx.line_for_word_event
 	for _, ev in ipairs(events) do
 		local ev_ident = ev.encoder or ev.ident or "?"
-		local isa = duffle.instr(ev_ident)
-		local rules = isa and isa.imm
+		local isa      = duffle.instr(ev_ident)
+		local rules    = isa and isa.imm
 		if rules then
 			local ev_args = ev.args or {}
 			local ev_line = line_for_word_event and line_for_word_event(ev) or atom.line
@@ -3220,7 +3207,7 @@ local function check_immediate_field_width(atom, pipe_ctx, findings)
 				if arg_str then
 					local value = parse_integer_literal(arg_str)
 					if value then
-						local width = rule.width
+						local width     = rule.width
 						local is_signed = rule.signed == true
 						-- parse_integer_literal returns a U4-wrapped value in [0, 2^32).
 						-- For signed fields, re-interpret the high bit as the sign.
@@ -3239,8 +3226,8 @@ local function check_immediate_field_width(atom, pipe_ctx, findings)
 						-- For unsigned fields, a negative C literal (high bit set in U4)
 						-- is valid if the low `width` bits fit — IMM_MASK truncates it.
 						-- Flag as a warning (code smell), not an error.
-						local check_value = is_signed and signed_value or value
-						local field_max = bit.lshift(1, width) - 1
+						local check_value  = is_signed and signed_value or value
+						local field_max    = bit.lshift(1, width) - 1
 						local low_bits_fit = (value % (bit.lshift(1, width))) == value or (is_signed and signed_value >= lo and signed_value <= hi)
 						if is_signed then
 							if signed_value < lo or signed_value > hi then
@@ -3249,10 +3236,8 @@ local function check_immediate_field_width(atom, pipe_ctx, findings)
 									kind  = "error",
 									atom  = atom.name,
 									line  = ev_line,
-									msg   = string.format(
-										"%s: immediate %d at arg %d overflows %d-bit %s field (valid %d..%d)",
-										ev_ident, signed_value, rule.arg, width,
-										"signed", lo, hi),
+									msg   = string.format("%s: immediate %d at arg %d overflows %d-bit %s field (valid %d..%d)"
+									, ev_ident, signed_value, rule.arg, width, "signed", lo, hi),
 								}
 							end
 						else
@@ -3267,9 +3252,8 @@ local function check_immediate_field_width(atom, pipe_ctx, findings)
 										kind  = "warning",
 										atom  = atom.name,
 										line  = ev_line,
-										msg   = string.format(
-											"%s: negative immediate %d at arg %d on unsigned %d-bit field (truncated to %d by IMM_MASK)",
-											ev_ident, signed_value, rule.arg, width, low_bits),
+										msg   = string.format("%s: negative immediate %d at arg %d on unsigned %d-bit field (truncated to %d by IMM_MASK)"
+											, ev_ident, signed_value, rule.arg, width, low_bits),
 									}
 								else
 									findings[#findings + 1] = {
@@ -3277,27 +3261,27 @@ local function check_immediate_field_width(atom, pipe_ctx, findings)
 										kind  = "error",
 										atom  = atom.name,
 										line  = ev_line,
-										msg   = string.format(
-											"%s: immediate %d at arg %d overflows %d-bit unsigned field (valid 0..%d)",
-											ev_ident, value, rule.arg, width, field_max),
+										msg   = string.format("%s: immediate %d at arg %d overflows %d-bit unsigned field (valid 0..%d)"
+											, ev_ident, value, rule.arg, width, field_max),
 									}
+								end
+							end
+						end
 					end
 				end
 			end
 		end
 	end
 end
-		end
-	end
-end
 
+-- TODO(Ed): Review this, if its still being used it needs to be re-evaluated for the current tape runtime.
 local SCRATCH_GPRS = {
 	R_T0 = true, R_T1 = true, R_T2 = true, R_T3 = true,
 	R_AT = true, R_V0 = true, R_V1 = true,
 }
 
 local function token_arg_list(tok)
-	local inner = (tok or ""):match("%b()")
+	local  inner = (tok or ""):match("%b()")
 	if not inner then return {} end
 	return duffle.split_top_level_commas(inner:sub(2, -2))
 end
@@ -3309,29 +3293,29 @@ end
 
 local function collect_gpr_traffic(atom)
 	local reads, writes = {}, {}
-	local events = (atom and atom.paths and atom.paths.word_events) or {}
+	local events        = (atom and atom.paths and atom.paths.word_events) or {}
 	for _, ev in ipairs(events) do
 		local ident = ev.encoder or ev.ident or ""
-		if ident:sub(1, 4) ~= "mac_"
+		if    ident:sub(1, 4) ~= "mac_"
 			and not (duffle.DELAY_MARKERS and duffle.DELAY_MARKERS[ident])
 			and ident ~= "nop" and ident ~= "atom_label" and ident ~= "atom_offset"
 		then
 			local args = ev.args or {}
-			local fx = duffle.instr(ident)
+			local fx   = duffle.instr(ident)
 			if fx then
 				for _, pos in ipairs(fx.reads or {}) do
 					local g = arg_as_gpr(args[pos])
-					if g then reads[g] = true end
+					if    g then reads[g] = true end
 				end
 				for _, pos in ipairs(fx.writes or {}) do
 					local g = arg_as_gpr(args[pos])
-					if g then writes[g] = true end
+					if    g then writes[g] = true end
 				end
 			else
 				for _, arg in ipairs(args) do
 					local g = arg_as_gpr(arg)
-					if g then
-						reads[g] = true
+					if    g then
+						reads [g] = true
 						writes[g] = true
 					end
 				end
@@ -3365,23 +3349,21 @@ end
 local function check_atom_calls_inferred_traffic(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" and atom.kind ~= "atom_proc" then return end
 	if is_runtime_helper(atom) then return end
-	local info = pipe_ctx.info_by_atom and pipe_ctx.info_by_atom[atom.name]
+	local  info = pipe_ctx.info_by_atom and pipe_ctx.info_by_atom[atom.name]
 	if not info then return end
 	if #(info.reads or {}) == 0 and #(info.writes or {}) == 0 then return end
 
-	local tokens = (atom.paths and atom.paths.tokens) or atom.body_tokens
+	local tokens        = (atom.paths and atom.paths.tokens) or atom.body_tokens
 	local reads, writes = collect_gpr_traffic(atom)
 	for _, t in ipairs(tokens or {}) do
 		local ident = ((t.tok or t) or ""):match("^([%w_]+)") or ""
 		if ident:sub(1, 4) == "mac_" then
-			local bare = ident:sub(5)
-			local idx = pipe_ctx.component_body_index and pipe_ctx.component_body_index[bare]
-			local comp = (pipe_ctx.components_by_name or {})[bare]
-				or (pipe_ctx.atoms_by_name or {})[bare]
-			local body_toks = (idx and idx.body_tokens)
-				or (comp and (comp.body_tokens or (comp.paths and comp.paths.tokens)))
-			local cr, cw = collect_gpr_traffic(body_toks)
-			for k in pairs(cr) do reads[k] = true end
+			local bare      = ident:sub(5)
+			local idx       = pipe_ctx.component_body_index and pipe_ctx.component_body_index[bare]
+			local comp      = (pipe_ctx.components_by_name or {})[bare] or (pipe_ctx.atoms_by_name or {})[bare]
+			local body_toks = (idx and idx.body_tokens) or (comp and (comp.body_tokens or (comp.paths and comp.paths.tokens)))
+			local cr, cw    = collect_gpr_traffic(body_toks)
+			for k in pairs(cr) do reads [k] = true end
 			for k in pairs(cw) do writes[k] = true end
 		end
 	end
@@ -3393,6 +3375,7 @@ local function check_atom_calls_inferred_traffic(atom, pipe_ctx, findings)
 		for k in pairs(inferred) do
 			if k == "R_0" then
 				if declared[k] then out[k] = true end
+			-- TODO(Ed): Review usage of this array, this may be outdated and not representattive of the current tape runtime.
 			elseif SCRATCH_GPRS[k] then
 				if declared[k] then out[k] = true end
 			else
@@ -3401,7 +3384,7 @@ local function check_atom_calls_inferred_traffic(atom, pipe_ctx, findings)
 		end
 		return out
 	end
-	reads = keep_inferred(reads, decl_r)
+	reads  = keep_inferred(reads, decl_r)
 	writes = keep_inferred(writes, decl_w)
 	if not gpr_set_eq(decl_r, reads) or not gpr_set_eq(decl_w, writes) then
 		findings[#findings + 1] = {
@@ -3409,43 +3392,41 @@ local function check_atom_calls_inferred_traffic(atom, pipe_ctx, findings)
 			line  = info.info_line or atom.line,
 			check = "atom_calls_inferred_traffic",
 			kind  = "warning",
-			msg   = string.format(
-				"atom '%s' declared [%s]/[%s] != inferred [%s]/[%s]",
-				atom.name,
-				table.concat(gpr_set_keys(decl_r), ","),
-				table.concat(gpr_set_keys(decl_w), ","),
-				table.concat(gpr_set_keys(reads), ","),
-				table.concat(gpr_set_keys(writes), ",")),
+			msg   = string.format("atom '%s' declared [%s]/[%s] != inferred [%s]/[%s]"
+				, atom.name
+				, table.concat(gpr_set_keys(decl_r), ",")
+				, table.concat(gpr_set_keys(decl_w), ",")
+				, table.concat(gpr_set_keys(reads),  ",")
+				, table.concat(gpr_set_keys(writes), ","))
 		}
 	end
 end
 
 local function check_component_self_consistency(src, pipe_ctx, findings)
 	local first = pipe_ctx.source_order and pipe_ctx.source_order[1]
-	if first and src ~= first then return end
-	local infos = pipe_ctx.component_atom_infos or {}
-	local atoms_by_name = pipe_ctx.atoms_by_name or {}
+	if    first and src ~= first then return end
+	local infos         = pipe_ctx.component_atom_infos or {}
+	local atoms_by_name = pipe_ctx.atoms_by_name        or {}
 	for _, ai in ipairs(infos) do
 		local name = ai.atom_name or ai.name
 		local atom = name and atoms_by_name[name]
 		if atom and not atom.debug_skip then
-			local tokens = (atom.paths and atom.paths.tokens) or atom.body_tokens
+			local tokens        = (atom.paths and atom.paths.tokens) or atom.body_tokens
 			local reads, writes = collect_gpr_traffic(tokens)
-			local decl_r = gpr_set_from_list(ai.reads)
-			local decl_w = gpr_set_from_list(ai.writes)
+			local decl_r        = gpr_set_from_list(ai.reads)
+			local decl_w        = gpr_set_from_list(ai.writes)
 			if not gpr_set_eq(decl_r, reads) or not gpr_set_eq(decl_w, writes) then
 				findings[#findings + 1] = {
 					atom  = name,
 					line  = ai.info_line or atom.line,
 					check = "component_self_consistency",
 					kind  = "warning",
-					msg   = string.format(
-						"component '%s' atom_reads/atom_writes [%s]/[%s] != body [%s]/[%s]",
-						name,
-						table.concat(gpr_set_keys(decl_r), ","),
-						table.concat(gpr_set_keys(decl_w), ","),
-						table.concat(gpr_set_keys(reads), ","),
-						table.concat(gpr_set_keys(writes), ",")),
+					msg   = string.format("component '%s' atom_reads/atom_writes [%s]/[%s] != body [%s]/[%s]"
+						, name
+						, table.concat(gpr_set_keys(decl_r), ",")
+						, table.concat(gpr_set_keys(decl_w), ",")
+						, table.concat(gpr_set_keys(reads), ",")
+						, table.concat(gpr_set_keys(writes), ","))
 				}
 			end
 		end
@@ -3521,7 +3502,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 
 	-- Read atoms + binds + atom_infos from the pre-scanned SourceScan payload.
 	-- The scan was done once upstream by duffle.scan_source(); this pass is pure.
-	local atoms = scan.atoms
+	local atoms      = scan.atoms
 	local atom_infos = scan.atom_infos
 
 	-- Build per-source Binds_* index. Local to validate() — no cross-source sharing.
@@ -3684,7 +3665,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		local max_atom_cyc  = 0
 		local max_atom_name = nil
 		for _, a in ipairs(atoms) do
-			local p = a.paths or {}
+			local p   = a.paths or {}
 			total_min = total_min + (p.cycles_min or 0)
 			total_max = total_max + (p.cycles_max or 0)
 			if (p.cycles_max or 0) > max_atom_cyc then
@@ -3694,8 +3675,8 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		end
 		summaries[#summaries + 1] = {
 			line = 0,
-			msg  = string.format("cycles: path-aware min=%d max=%d across %d atoms; worst atom=%s (%d); best-case, no stalls; BD-slot nops absorbed into branch costs",
-				total_min, total_max, #atoms, max_atom_name or "?", max_atom_cyc),
+			msg  = string.format("cycles: path-aware min=%d max=%d across %d atoms; worst atom=%s (%d); best-case, no stalls; BD-slot nops absorbed into branch costs"
+				, total_min, total_max, #atoms, max_atom_name or "?", max_atom_cyc),
 		}
 	end
 
@@ -3743,25 +3724,25 @@ function M.run(ctx)
 		-- Run validate() against every source in this directory; accumulate atoms / findings / errors / warnings.
 		-- The validate() function does its own per-source analysis (Binds indexing, atom discovery, all checks)
 		-- and attaches path-aware cycle data to each atom it finds.
-		local all_atoms    = {}
-		local all_findings = {}
-		local dir_errors   = {}
-		local dir_warnings = {}
-		local dir_info     = {}
+		local all_atoms     = {}
+		local all_findings  = {}
+		local dir_errors    = {}
+		local dir_warnings  = {}
+		local dir_info      = {}
 		local dir_summaries = {}
 		for _, src in ipairs(dir_sources) do
 			local result = validate(ctx, src, corpus_pipe_ctx)
 			-- Tag each atom with its source so the render step can prefix the atom line with "<filename>:"
 			-- when atoms from multiple sources live in the same module (e.g. lottes_tape.h + atom_dsl.h both declaring atoms).
 			for _, a in ipairs(result.atoms) do
-				a.source_path = src.path
+				a.source_path             = src.path
 				all_atoms[#all_atoms + 1] = a
 			end
-			for _, f  in ipairs(result.findings) do all_findings[#all_findings + 1] = f  end
-			for _, e  in ipairs(result.errors)    do dir_errors    [#dir_errors    + 1] = e  end
-			for _, w  in ipairs(result.warnings)  do dir_warnings  [#dir_warnings  + 1] = w  end
-			for _, i_ in ipairs(result.info)      do dir_info      [#dir_info      + 1] = i_ end
-			for _, s  in ipairs(result.summaries or {}) do dir_summaries[#dir_summaries + 1] = s end
+			for _, f  in ipairs(result.findings)        do all_findings  [#all_findings + 1] = f   end
+			for _, e  in ipairs(result.errors)          do dir_errors    [#dir_errors    + 1] = e  end
+			for _, w  in ipairs(result.warnings)        do dir_warnings  [#dir_warnings  + 1] = w  end
+			for _, i_ in ipairs(result.info)            do dir_info      [#dir_info      + 1] = i_ end
+			for _, s  in ipairs(result.summaries or {}) do dir_summaries [#dir_summaries + 1] = s  end
 		end
 
 		-- Stash per-module results on the corpus for `report.lua` to consume.
@@ -3783,8 +3764,8 @@ function M.run(ctx)
 
 		-- Aggregate per-dir errors/warnings/info into the orchestrator totals.
 		-- Hoisted out of any per-dir file-emit so `report.lua` can drop the on-disk file emitter without losing the cross-module rollup.
-		for _, e  in ipairs(dir_errors)   do errors  [#errors   + 1] = e end
-		for _, w  in ipairs(dir_warnings) do warnings[#warnings + 1] = w end
+		for _, e  in ipairs(dir_errors)   do errors  [#errors   + 1] = e  end
+		for _, w  in ipairs(dir_warnings) do warnings[#warnings + 1] = w  end
 		for _, i_ in ipairs(dir_info)     do info    [#info     + 1] = i_ end
 		-- (No per-dir emit: per-module findings are stashed on `corpus.static_analysis_results` above. 
 		-- `report.lua` reads that projection to render `<module>.atom_meta_report.md` without re-running validate().)
