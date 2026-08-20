@@ -152,12 +152,12 @@ internal void compile_init_atoms(void) {
 	smem.normalize_v3s4 = build_normalize_v3s4(& ab,
 		RegUse_(build_normalize_v3s4) {
 			.res = ralloc_v3(),
-			.t0     = ralloc(),
-			.t1     = ralloc(),
-			.t2     = ralloc(),
-			.t3     = ralloc(),
-			.t4     = ralloc(),
-			.t5     = ralloc(),
+			.r0     = ralloc(),
+			.r1     = ralloc(),
+			.r2     = ralloc(),
+			.r3     = ralloc(),
+			.r4     = ralloc(),
+			.r5     = ralloc(),
 		});
 	regfile_reset(& rf);
 
@@ -178,15 +178,13 @@ internal void compile_resolve_look_at(void) {
 
 	bundle->input_and_sub = AtomBundleEntry_(resolve_look_at, input_and_sub)(& ab,
 		RegUse_(resolve_look_at_input_and_sub) {
-			.target  = ralloc(),
-			.eye     = ralloc(),
-			.up_in   = ralloc(),
-			.t0      = ralloc(),
-			.t1      = ralloc(),
-			.t2      = ralloc(),
-			.t3      = ralloc(),
-			.t4      = ralloc(),
-		});
+			.target_ptr = ralloc(),
+			.eye_ptr    = ralloc(),
+			.up_in_ptr  = ralloc(),
+			.up_in      = ralloc_v3(),
+			.r012       = ralloc_v3(),
+			.r345       = {ralloc(), R_AT, ralloc() },
+	});
 	regfile_reset(& rf);
 
 	bundle->normalize_fwd_uz   = smem.normalize_v3s4;
@@ -195,14 +193,14 @@ internal void compile_resolve_look_at(void) {
 	bundle->cross_to_up        = smem.gte_cross_v3s4;
 	bundle->normalize_up_uy    = smem.normalize_v3s4;
 
-	bundle->pop_mv_trans = resolve_look_at__pop_mv_trans(& ab,
-		RegUse_(resolve_look_at__pop_mv_trans){
+	bundle->populate_mt3s4s2 = AtomBundleEntry_(resolve_look_at,populate_mt3s4s2)(& ab,
+		RegUse_(resolve_look_at_populate_mt3s4s2){
 			.look_at = ralloc(),
 			.eye     = ralloc(),
 			.row     = ralloc_v3(),
-			.t6      = ralloc(),
-			.t7      = ralloc(),
-			.t8      = ralloc(),
+			.r0      = ralloc(),
+			.r1      = ralloc(),
+			.r2      = ralloc(),
 		});
 
 	/* Sanity check: arena didn't overflow. */
@@ -245,7 +243,7 @@ I_ void resolve_look_at(TapeBuilder_R tb
 	tb_emit(tb, bundle->normalize_up_uy); {
 		tb_data(tb, u4_(O_(ResolveLookAtScratch, up) | (O_(ResolveLookAtScratch, uy) << 16)));
 	}
-	tb_emit(tb, bundle->pop_mv_trans); {
+	tb_emit(tb, bundle->populate_mt3s4s2); {
 		tb_data(tb, u4_(look_at));
 	}
 }

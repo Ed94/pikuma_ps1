@@ -92,11 +92,6 @@ MipsAtomComp_Proc_(ab, {
 #pragma endregion MACs
 
 #pragma region Atom Procs
-// Modular Atoms
-
-#define AtomBundle_(name)              Struct_(tmpl(AtomBundle,name))
-#define AtomBundle_Len(name)           S_(tmpl(AtomBundle,name))/S_(MipsAtom*)
-#define AtomBundleEntry_(bundle,entry) tmpl(bundle,entry)
 
 #pragma region resolve_look_at
 /* ─── resolve_look_at bundle chain atoms ──────────────────────────── */
@@ -108,7 +103,7 @@ typedef AtomBundle_(resolve_look_at) { MipsAtom
 	*normalize_right_ux,
 	*cross_to_up,
 	*normalize_up_uy,
-	*pop_mv_trans;
+	*populate_mt3s4s2;
 };
 
 typedef Struct_(ResolveLookAtScratch) {
@@ -123,71 +118,56 @@ typedef Struct_(ResolveLookAtScratch) {
 	V3_S4 up_in;
 };
 
-/* Binds_ResolveLookAtSub — what the C side pushes onto the tape before input_and_sub.
- * The scratchpad base is no longer pushed because R_ScratchBase (= R_SP) is a tape carrier
- * preserved across atoms; the atom body reads 0x1F800000 directly from R_SP. */
-typedef Struct_(Binds_ResolveLookAt) {
-	MT3_S2S4* look_at;
-	P3_S4*    eye;
-	P3_S4*    target;
-	V3_S4*    up_in;
-};
 typedef Struct_(Binds_ResolveLookAtSub) {
 	P3_S4* target;
 	P3_S4* eye;
 	V3_S4* up_in;
 };
 typedef Struct_(RegUse_resolve_look_at_input_and_sub) {
-	Reg target; Reg eye; Reg up_in;
-	Reg t0; Reg t1; Reg t2; Reg t3; Reg t4;
+	Reg target_ptr;
+	Reg eye_ptr;
+	Reg up_in_ptr;
+	union { Reg_(V3_S4) r012, up_in,  eye; };
+	union { Reg_(V3_S4) r345, target, fwd; };
 };
 /* Atom 0 in the bundle: input_and_sub. Stages C-side inputs into the scratchpad and computes fwd = target - eye. */
 internal MipsAtom* AtomBundleEntry_(resolve_look_at,input_and_sub)(AtomArena_R aa, RegUse_resolve_look_at_input_and_sub r)
 atom_info(atom_bind(Binds_ResolveLookAtSub)) MipsAtom_Proc_(aa, {
-	load_word(r.target, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
-	load_word(r.eye,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
-	load_word(r.up_in,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
+	load_word(r.target_ptr, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
+	load_word(r.eye_ptr,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
+	load_word(r.up_in_ptr,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
 	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_ResolveLookAtSub)),
 
 	/* Stage up_in.x/y/z into the scratchpad. R_ScratchBase = R_SP = 0x1F800000. */
-	mac_load_word_v3( r.t0, r.t1, r.t2, r.up_in,   0), LdSlot_
-	mac_store_word_v3(r.t0, r.t1, r.t2, R_ScratchBase, O_(ResolveLookAtScratch,up_in)),
+	mac_load_v3s4( r.up_in, r.up_in_ptr, 0), LdSlot_
+	mac_store_v3s4(r.up_in, R_ScratchBase, O_(ResolveLookAtScratch,up_in)),
 
 	// Stage eye.x/y/z into the scratchpad (atom 6 reads these for the translation column).
-	mac_load_word_v3( r.t0, r.t1, r.t2, r.eye,      0), LdSlot_
-	mac_store_word_v3(r.t0, r.t1, r.t2, R_ScratchBase, O_(ResolveLookAtScratch,eye)),
+	mac_load_v3s4( r.eye, r.eye_ptr, 0), LdSlot_
+	mac_store_v3s4(r.eye, R_ScratchBase, O_(ResolveLookAtScratch,eye)),
 
 	/* Compute fwd = target - eye. */
-	// mac_load_p3s4(t3, R_AT, t4, r.eye,    0),
-	mac_load_word_v3(r.t3, R_AT, r.t4, r.target, 0), LdSlot_
-	mac_sub_s_v3_self(
-		r.t3, R_AT, r.t4,
-		r.t0, r.t1, r.t2),
-	mac_store_word_v3(r.t3, R_AT, r.t4, R_ScratchBase, O_(ResolveLookAtScratch,fwd)),
+	mac_load_v3s4(    r.target, r.target_ptr, 0), LdSlot_
+	mac_sub_v3s4_self(r.fwd, r.eye),
+	mac_store_v3s4(   r.fwd, R_ScratchBase, O_(ResolveLookAtScratch,fwd)),
 
 	mac_yield()
 })
 
-
-typedef Struct_(Binds_ResolveLookAtPopMvTrans) {
+typedef Struct_(Binds_ResolveLookAt_PopulateMT3S4S2) {
 	U4 look_at;  /* MT3_S2S4* — destination matrix address */
 };
-typedef Struct_(RegUse_resolve_look_at__pop_mv_trans) {
+typedef Struct_(RegUse_resolve_look_at_populate_mt3s4s2) {
 	Reg         look_at;
-	Reg_(V3_S4) row;             /* populate phase: load ux/uy/uz */
-	union { Reg ux, v_x; } t6;   /* populate addr (canonical) → matrix_vector v_x */
-	union { Reg uy, v_y; } t7;   /* populate uy → matrix_vector v_y */
-	union { Reg uz, v_z; } t8;   /* populate uz → matrix_vector v_z */
-	Reg         eye;             /* matrix_vector phase: load -eye */
+	Reg         eye;            /* matrix_vector phase: load -eye */
+	Reg_(V3_S4) row;            /* populate phase: load ux/uy/uz */
+	union { Reg r0, ux, vx; }; /* populate addr → matrix_vector v_x */
+	union { Reg r1, uy, vy; }; /* populate uy   → matrix_vector v_y */
+	union { Reg r2, uz, vz; }; /* populate uz   → matrix_vector v_z */
 };
-/* Atom 6 (fused): write look_at->m[][] from ux/uy/uz as packed S2 (populate),
+/* write look_at->m[][] from ux/uy/uz as packed S2 (populate),
  * ctc2 RT chain into C2[0..4] (matrix_vector), MVMVA RT*(-eye)>>12, store off
- * directly to look_at->t[] (trans_matrix). Replaces the previous 3 separate atoms
- * (populate + matrix_vector + trans_matrix).
- *
- * MT3_S2S4 { A3x3_S2 m; A3_S4 t; }
- *   m[][] is S2 packed (9 × 2 = 18 bytes at offset 0)
- *   t[0..2]   is S4       (3 × 4 = 12 bytes at offset 18)
+ * directly to look_at->t[] (trans_matrix).
  *
  * C11 ApplyMatrixLV semantics (gte.atom.c ac_apply_matrix_lv; libgte reference):
  *   1. ctc2 RT matrix (5 ctc2s to C2[0..4])
@@ -197,82 +177,51 @@ typedef Struct_(RegUse_resolve_look_at__pop_mv_trans) {
  *   4. mtc2 to IR1/2/3, nop2, MVMVA pass2 (sf=1, mx=0, v=3, cv=3)
  *   5. mfc2 MACs → off
  *   6. store off to look_at->t[] (skip scratch.eye intermediate)
- *
- * GPR codes (assigned by resolve_look_at_init):
- *   r_scratch : R_ResolveScratch (R_T4 carrier)
- *   r_look_at : ralloc() — also serves as the off-dst in the trans_matrix phase
- *   r_row     : V3_S4, reused for ux/uy/uz loads in populate phase
- *   r_eye     : ralloc() — &scratch.eye, used for -eye load in matrix_vector phase
- *   r_v_x/v_y/v_z : ralloc() — populate scratch addrs (ux/uy/uz), reused as
- *                    ctc2 transfer + MVMVA -eye temp in matrix_vector phase
- *   (v_x/v_y/v_z alias ux/uy/uz via the union; lifetime ends for ux/uy/uz after
- *    populate's mac_load_v3s4, so reusing for v.x/v.y/v.z is safe)
- * Pool cost: 1 carrier + 1 look_at + 3 row + 1 eye + 3 aliased = 9 GPRs
- *
- * Net word savings vs the previous 3-atom flow: ~15 words + 2 mac_yields + 1 tape pop.
- *   - 2 mac_yields (trans_matrix's + matrix_vector's) → fused into one yield
- *   - 1 redundant tb_data (look_at was pushed 2x; now once)
- *   - mac_trans_mt3s3s4 (6 words) → replaced by direct mac_store_v3s4
- *   - mac_store_v3s4 to scratch.eye (3 words intermediate) → eliminated
- *   - add_si for r_off_ptr (2 words) → eliminated
- *   - mac_store_v3s4 zero-store of t[] (3 words) → eliminated (matrix_vector writes
- *     off directly; no consumer needed the zero first)
- *   - 1 set_gte_mt3s2s4 ctc2 chain (13 baked words) → eliminated (matrix_vector
- *     has its own ctc2 RT chain; cube rendering atoms reload C2 state themselves)
  */
-internal MipsAtom* resolve_look_at__pop_mv_trans(AtomArena_R aa,
-	RegUse_resolve_look_at__pop_mv_trans r
-) MipsAtom_Proc_(aa, {
+internal MipsAtom* AtomBundleEntry_(resolve_look_at,populate_mt3s4s2)(AtomArena_R aa, RegUse_resolve_look_at_populate_mt3s4s2 r)
+atom_info(atom_bind(Binds_ResolveLookAt_PopulateMT3S4S2)) MipsAtom_Proc_(aa, {
 	/* --- Tape pop: look_at pointer --- */
-	load_word(r.look_at, R_TapePtr, O_(Binds_ResolveLookAtPopMvTrans,look_at)),
-	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_ResolveLookAtPopMvTrans)),
+	load_word(r.look_at, R_TapePtr, O_(Binds_ResolveLookAt_PopulateMT3S4S2,look_at)),
+	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_ResolveLookAt_PopulateMT3S4S2)),
 
-	/* --- Scratch addresses for ux/uy/uz/eye (populate phase; t6/t7/t8 alias ux/uy/uz).
-	 * R_ScratchBase (= R_SP) holds 0x1F800000; no per-atom bake is required because
-	 * R_SP is a tape carrier preserved across atoms. --- */
-	add_si(r.t6.ux, R_ScratchBase, O_(ResolveLookAtScratch, ux)),  LdSlot_
-	add_si(r.t7.uy, R_ScratchBase, O_(ResolveLookAtScratch, uy)),
-	add_si(r.t8.uz, R_ScratchBase, O_(ResolveLookAtScratch, uz)),
-	add_si(r.eye,   R_ScratchBase, O_(ResolveLookAtScratch, eye)),
+	add_si(r.ux,  R_ScratchBase, O_(ResolveLookAtScratch, ux)), LdSlot_
+	add_si(r.uy,  R_ScratchBase, O_(ResolveLookAtScratch, uy)),
+	add_si(r.uz,  R_ScratchBase, O_(ResolveLookAtScratch, uz)),
+	add_si(r.eye, R_ScratchBase, O_(ResolveLookAtScratch, eye)),
 
-	/* --- POPULATE phase: write look_at->m[][] from ux/uy/uz as packed S2 --- */
-	mac_load_v3s4(r.row, r.t6.ux, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4, m[0])),
-	mac_load_v3s4(r.row, r.t7.uy, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4, m[1])),
-	mac_load_v3s4(r.row, r.t8.uz, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4, m[2])),
+	/* write look_at->m[][] from ux/uy/uz as packed S2 */
+	mac_load_v3s4(r.row, r.ux, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4, m[0])),
+	mac_load_v3s4(r.row, r.uy, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4, m[1])),
+	mac_load_v3s4(r.row, r.uz, 0), LdSlot_ mac_store_v3s2(r.row, r.look_at, O_(MT3_S2S4, m[2])),
 
-	/* --- MATRIX-VECTOR phase: ctc2 RT chain + MVMVA RT*(-eye)>>12 --- */
-	/* RT packing (per libgte ApplyMatrixLV convention; see gte.h:217-220 +
-	 * atom_6b_disasm_comparison.md:28-32):
-	 *   C2[0] = (RT12<<16)|RT11  ← ctc2 RT11 from m[0][0..1] packed word
-	 *   C2[1] = (RT21<<16)|RT13  ← ctc2 RT12 from m[0][2..3] packed word
-	 *   C2[2] = (RT23<<16)|RT22  ← ctc2 RT13 from m[1][1..2] packed word
-	 *   C2[3] = (RT32<<16)|RT31  ← ctc2 RT21 from m[2][0..1] packed word
-	 *   C2[4] = (RT33<<16)|junk  ← ctc2 RT22 from m[2][2] (half)
-	 * Each ctc2 writes a WHOLE 32-bit C2 slot; the "macro name" identifies
-	 * which C2 register, not which 16-bit half. */
-	load_word(  r.t6.v_x, r.look_at, O_(MT3_S2S4, m[0][0])), /* RT11|RT12 */ LdSlot_
-	load_word(  r.t7.v_y, r.look_at, O_(MT3_S2S4, m[0][2])), /* RT13|RT21 */ LdSlot_ gte_mv_to_ctrl_r(r.t6.v_x, gte_cr_RT11),
-	load_word(  r.t8.v_z, r.look_at, O_(MT3_S2S4, m[1][1])), /* RT22|RT23 */ LdSlot_ gte_mv_to_ctrl_r(r.t7.v_y, gte_cr_RT12),
-	load_word(  r.t6.v_x, r.look_at, O_(MT3_S2S4, m[2][0])), /* RT31|RT32 */ LdSlot_ gte_mv_to_ctrl_r(r.t8.v_z, gte_cr_RT13),
-	load_half_u(r.t7.v_y, r.look_at, O_(MT3_S2S4, m[2][2])), /* RT33 */      LdSlot_ gte_mv_to_ctrl_r(r.t6.v_x, gte_cr_RT21),
-	/* pos = -eye. The three loads also retire the last CTC2. */                  gte_mv_to_ctrl_r(r.t7.v_y, gte_cr_RT22),
-	GteDelay_ mac_load_word_v3(r.t6.v_x, r.t7.v_y, r.t8.v_z, r.eye, 0), LdSlot_ 
-	mac_sub_s_v3(r.t6.v_x, r.t7.v_y, r.t8.v_z, R_0, R_0, R_0, r.t6.v_x, r.t7.v_y, r.t8.v_z),
-	/* mtc2 pos (as S16) to IR1/2/3. The GTE takes low 16 bits. pos fits in S16. For negative pos, the 32-bit sign-extended value's low 16 bits = correct S16. */
-	gte_mv_to_data_r(r.t6.v_x, C2_IR1),
-	gte_mv_to_data_r(r.t7.v_y, C2_IR2),
-	gte_mv_to_data_r(r.t8.v_z, C2_IR3),
+	/* ctc2 RT chain + MVMVA RT * (-eye) >> 12 */
+	/*   C2[0] = (RT12<<16)|RT11  ← ctc2 RT11 from m[0][0..1]
+	 *   C2[1] = (RT21<<16)|RT13  ← ctc2 RT12 from m[0][2..3]
+	 *   C2[2] = (RT23<<16)|RT22  ← ctc2 RT13 from m[1][1..2]
+	 *   C2[3] = (RT32<<16)|RT31  ← ctc2 RT21 from m[2][0..1]
+	 *   C2[4] = (RT33<<16)|junk  ← ctc2 RT22 from m[2][2] (half) */
+	load_word(  r.vx, r.look_at, O_(MT3_S2S4, m[0][0])), /* RT11|RT12 */ LdSlot_
+	load_word(  r.vy, r.look_at, O_(MT3_S2S4, m[0][2])), /* RT13|RT21 */ LdSlot_ gte_mv_to_ctrl_r(r.vx, gte_cr_RT11),
+	load_word(  r.vz, r.look_at, O_(MT3_S2S4, m[1][1])), /* RT22|RT23 */ LdSlot_ gte_mv_to_ctrl_r(r.vy, gte_cr_RT12),
+	load_word(  r.vx, r.look_at, O_(MT3_S2S4, m[2][0])), /* RT31|RT32 */ LdSlot_ gte_mv_to_ctrl_r(r.vz, gte_cr_RT13),
+	load_half_u(r.vy, r.look_at, O_(MT3_S2S4, m[2][2])), /* RT33 */      LdSlot_ gte_mv_to_ctrl_r(r.vx, gte_cr_RT21),
+
+	GteDelay_ mac_load_word_v3(r.vx, r.vy, r.vz, r.eye, 0), LdSlot_ 
+	mac_sub_s_v3(r.vx, r.vy, r.vz, R_0, R_0, R_0, r.vx, r.vy, r.vz),
+
+	gte_mv_to_data_r(r.vx, C2_IR1),
+	gte_mv_to_data_r(r.vy, C2_IR2),
+	gte_mv_to_data_r(r.vz, C2_IR3),
 	GteDelay_ nop2,
 
-	/* MVMVA pass 2 — C11 ApplyMatrixLV command.
-	 * sf=1, mx=0 (RT), v=3 (IR), cv=3. Reads RT × IR >> 12. */
-	gte_cmdw_mvmva_c11_pass2,                                      GteDelay_ nop,
-	mac_gte_mv_from_data_r_mac123(r.t6.v_x, r.t7.v_y, r.t8.v_z),   GteDelay_ nop,
+	/* MVMVA pass 2 — C11 ApplyMatrixLV command. sf=1, mx=0 (RT), v=3 (IR), cv=3. Reads RT × IR >> 12. */
+	gte_cmdw_mvmva_c11_pass2,                        GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0),            // ac_yield: word 1
+	mac_gte_mv_from_data_r_mac123(r.vx, r.vy, r.vz), GteDelay_ add_ui_self(         R_TapePtr, S_(MipsCode)), // ac_yield: word 2
 
-	/* --- TRANS-MATRIX phase: store off directly to look_at->t[] (skip scratch.eye intermediate) --- */
-	mac_store_word_v3(r.t6.v_x, r.t7.v_y, r.t8.v_z, r.look_at, O_(MT3_S2S4, t)),
+	/* store off directly to look_at->t[] (skip scratch.eye intermediate) */
+	mac_store_word_v3(r.vx, r.vy, r.vz, r.look_at, O_(MT3_S2S4, t)),
 
-	mac_yield()
+	jump_reg(R_AtomJmp), BdSlot_ nop, // ac_yield: word 3-4
 })
 #pragma endregion resolve_look_at
 
@@ -522,7 +471,7 @@ internal MipsAtom_(pad_input_cam) atom_info(atom_bind(Binds_PadInputCam)
 	load_word(R_T1, R_Cam, O_(Camera,pos.x)),
 
 	// D-pad Left → cam.pos.x -= 50.  and_i fulfills BD-slot for load on R_Cam.
-	LdSlot_ and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(left_x, exit_left_x)), BdSlot_ mac_yield_load(), LdSlot_
+	LdSlot_ and_i(R_T3, R_T0, Pad_Left), branch_le_zero(R_T3, atom_offset(left_x, exit_left_x)), BdSlot_ nop,
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.x)), 
 	atom_label(exit_left_x)
 
@@ -544,16 +493,16 @@ internal MipsAtom_(pad_input_cam) atom_info(atom_bind(Binds_PadInputCam)
 
 	/* D-pad Cross → cam.pos.z -= 50. Load pos.z BEFORE the andi. */
 	load_word(R_T1, R_Cam, O_(Camera,pos.z)), LdSlot_
-	and_i(R_T3, R_T0, Pad_Cross), branch_le_zero(R_T3, atom_offset(cross_z, exit_cross_z)), BdSlot_ nop,
+	and_i(R_T3, R_T0, Pad_Cross), branch_le_zero(R_T3, atom_offset(cross_z, exit_cross_z)), BdSlot_ load_word(R_AtomJmp, R_TapePtr, 0), LdSlot_ // ac_yield: word 1
 		add_si(R_T1, R_T1, -50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
 	atom_label(exit_cross_z)
 
 	/* D-pad Circle → cam.pos.z += 50. Reuses R_T1 from Cross. */
-	and_i(R_T3, R_T0, Pad_Circle), branch_le_zero(R_T3, atom_offset(circle_z, exit_circle_z)), BdSlot_ nop,
+	and_i(R_T3, R_T0, Pad_Circle), branch_le_zero(R_T3, atom_offset(circle_z, exit_circle_z)), BdSlot_ add_ui_self(R_TapePtr, S_(MipsCode)), // ac_yield: word 2
 		add_si(R_T1, R_T1,  50), store_word(R_T1, R_Cam, O_(Camera,pos.z)),
 	atom_label(exit_circle_z)
 
-	mac_yield_tail(),
+	jump_reg(R_AtomJmp), BdSlot_ nop // ac_yield: word 3-4
 };
 
 enum {
@@ -600,7 +549,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	GteDelay_ nop, gte_cmdw_rotate_translate_perspective_triple,
 	gte_cmdw_nclip,
 
-	gte_mv_from_data_r(R_T0, C2_MAC0), GteDelay_ nop,
+	gte_mv_from_data_r(R_T0, C2_MAC0), GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0), // ac_yield: word 1
 	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
 		/* BD-slot: Write the prim tag (R_0=0; overwrites the legacy tag word in the prim_buffer).
 		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded —
@@ -619,7 +568,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 		add_ui(      R_AT, R_0,  OrderingTbl_Len),
 		set_lt_u(    R_AT, R_T1, R_AT),
 
-		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), BdSlot_ nop,
+		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), BdSlot_ add_ui_self(R_TapePtr, S_(MipsCode)), // ac_yield: word 2
 			mac_insert_ot_tag(R_OtBase, R_PrimCursor, S_(Poly_G4)),
 			mac_format_g4_color(R_PrimCursor,
 				/* c0 magenta */ 0xFF, 0x00, 0xFF,
@@ -632,7 +581,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 atom_label(cube_g4_face_exit)
 	add_ui_self(R_PrimCursor, S_(Poly_G4)),     /* 9 words = Poly_G4 */
 	add_ui_self(R_FaceCursor, S_(S2) * 4),      /* 4 × S2 = 8 bytes */
-	mac_yield()
+	jump_reg(R_TapePtr), BdSlot_ nop // ac_yield: word 3-4
 };
 
 typedef Struct_(Binds_FloorTri) {
@@ -662,13 +611,13 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 	, atom_writes(R_PrimCursor, R_FaceCursor)
 ) {
 	mac_load_tri_indices(R_FaceCursor, R_T0, R_T1, R_T2),
-	mac_gte_load_tri_verts(R_VertBase,   R_T0, R_T1, R_T2),
-	nop2, gte_cmdw_rotate_translate_perspective_triple, // 2 nops retire the final cpu -> gte writes before RTPT
+	mac_gte_load_tri_verts(R_VertBase, R_T0, R_T1, R_T2), GteDelay_ nop2,
+	gte_cmdw_rotate_translate_perspective_triple, // 2 nops retire the final cpu -> gte writes before RTPT
 	gte_cmdw_nclip,
 
 	/* Culling (Branch forward if Backface) */
-	gte_mv_from_data_r(R_T0, C2_MAC0),
-	nop, branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), nop, // required gte -> cpu load-delay slot.
+	gte_mv_from_data_r(R_T0, C2_MAC0), GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0), // ac_yield: word 1
+	branch_le_zero(R_T0, atom_offset(culling, floor_f3_face_exit)), BdSlot_ add_ui_self(R_TapePtr, S_(MipsCode)),  // ac_yield: word 2
 		/* Format Primitive */
 		mac_gte_store_f3(R_PrimCursor),
 
@@ -678,7 +627,7 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 		/* Bounds Check OTZ < 2048 (Branch forward to skip insertion) */
 		add_ui(      R_AT, R_0,  OrderingTbl_Len),
 		set_lt_u(    R_AT, R_T1, R_AT),
-		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), nop,
+		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, floor_f3_face_exit)), BdSlot_ nop,
 			mac_format_f3_color(R_PrimCursor, 0xFF, 0xFF, 0xFF),  // RGB-form (R=FF, G=FF, B=FF = white)
 			mac_insert_ot_tag(R_OtBase, R_PrimCursor, S_(Poly_F3)),   /* Insert into Ordering Table Linked List */
 			add_ui_self(R_PrimCursor, S_(Poly_F3)), /* Advance Prim Cursor (5 words) */
@@ -689,7 +638,7 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 /* Advance Input Cursor & Yield (Both branch targets land here) */
 atom_label(floor_f3_face_exit)
 	add_ui_self(R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
-	mac_yield()
+	jump_reg(R_TapePtr), BdSlot_ nop // ac_yield: word 3-4
 };
 
 typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };

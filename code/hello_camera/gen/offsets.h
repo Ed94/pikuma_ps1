@@ -26,7 +26,7 @@ enum {
     atom_offset_end_low_exit_stick = _atom_offset_end_low_exit_stick,
 };
 
-// --- atom: pad_input_cam (40 words) ---
+// --- atom: pad_input_cam (39 words) ---
 
 #define _atom_offset_left_x_exit_left_x               3
 #define _atom_offset_right_x_exit_right_x             3
@@ -44,7 +44,7 @@ enum {
     atom_offset_circle_z_exit_circle_z = _atom_offset_circle_z_exit_circle_z,
 };
 
-// --- atom: cube_g4_face (75 words) ---
+// --- atom: cube_g4_face (73 words) ---
 
 #define _atom_offset_cull_cube_g4_face_exit           41
 #define _atom_offset_bounds_chk_cube_g4_face_exit     24
@@ -54,7 +54,7 @@ enum {
     atom_offset_bounds_chk_cube_g4_face_exit = _atom_offset_bounds_chk_cube_g4_face_exit,
 };
 
-// --- atom: floor_f3_face (58 words) ---
+// --- atom: floor_f3_face (56 words) ---
 
 #define _atom_offset_culling_floor_f3_face_exit       25
 #define _atom_offset_bounds_chk_floor_f3_face_exit    16

@@ -273,12 +273,12 @@ typedef Struct_(Binds_NormalizeV3S4) {
 };
 typedef Struct_(RegUse_build_normalize_v3s4) {
 	union { Reg_(V3_S4) res, src; };
-	union { Reg t0, src_ptr, mac2; };
-	union { Reg t1, dst_ptr; };
-	union { Reg t2, dst_offset, mac1, v_sqr_aligned; };
-	union { Reg t3, src_offset, btarget, shift_count, sqrtbl_index; };
-	union { Reg t4, mac3, v_sqr_sum, half_shift_tmp, inv_len; };
-	union { Reg t5, lzcr, half_shift; };
+	union { Reg r0, src_ptr, mac2; };
+	union { Reg r1, dst_ptr; };
+	union { Reg r2, dst_offset, mac1, v_sqr_aligned; };
+	union { Reg r3, src_offset, btarget, shift_count, sqrtbl_index; };
+	union { Reg r4, mac3, v_sqr_sum, half_shift_tmp, inv_len; };
+	union { Reg r5, lzcr, half_shift; };
 };
 /* ─── Full normalize (all 4 stages inline) ───
  * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav). */
