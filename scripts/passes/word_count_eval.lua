@@ -23,10 +23,8 @@
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
---- @type string
-local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
---- @type DuffleExport
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
@@ -46,8 +44,7 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- Module exports
 -- ════════════════════════════════════════════════════════════════════════════
 
---- @type WordCountEval
-local M = {}
+local M = {} ---@type WordCountEval
 
 -- ┌────────────────────────────────────────────────────────────────────┐
 -- │ Shared utility: count_token_words                                  │
@@ -61,15 +58,12 @@ local M = {}
 --- @param wc    WordCounts -- the shared word-count table
 --- @return integer
 function M.count_token_words(token, wc)
-	--- @type string
-	local s = duffle.trim(token)
+	local s = duffle.trim(token) ---@type string
 	if    s == "" then return 0 end
-	--- @type string|nil, integer
-	local name, after = duffle.read_ident(s, 1)
+	local name, after = duffle.read_ident(s, 1) ---@type string|nil, integer
 	if not name then return 1 end
 	if wc[name] then return wc[name] end
-	--- @type integer
-	local paren_pos = duffle.skip_ws_and_cmt(s, after)
+	local paren_pos = duffle.skip_ws_and_cmt(s, after) ---@type integer
 	if s:sub(paren_pos, paren_pos) == "(" then
 		io.stderr:write("  warning: unknown macro '" .. name .. "', assuming 1 word\n")
 	end
@@ -95,8 +89,7 @@ end
 --- @return PassResult
 function M.run(ctx)
 	-- 1. Canonical-corpus ownership gate.
-	--- @type Corpus|nil
-	local corpus = ctx.shared and ctx.shared.corpus
+	local corpus = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
 	if type(corpus) ~= "table" then
 		error("word_count_eval.run requires ctx.shared.corpus (canonical corpus). The fixture must install the corpus before running this pass.", 0)
 	end
@@ -108,8 +101,7 @@ function M.run(ctx)
 
 	-- 3. Load authored metadata. Generated .macs.h files are NOT scanned
 	--    (the pass computes their counts from the just-built bodies after disk emission; see passes/components.lua).
-	--- @type WordCounts
-	local wc = duffle.load_word_counts(ctx.metadata_path)
+	local wc = duffle.load_word_counts(ctx.metadata_path) ---@type WordCounts
 
 	-- 4. Assign the count table. ONE assignment, no copy. The assignment creates no secondary alias.
 	corpus.word_counts = wc

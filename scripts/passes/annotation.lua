@@ -10,10 +10,8 @@
 
 -- Bootstrap follows the entry scripts; `scripts/duffle_paths.lua` sets package.path and package.cpath. See `ps1_meta.lua` for the rationale.
 -- `debug.getinfo(1, "S").source` locates this file for standalone and orchestrated runs, then `duffle_paths.lua` returns the loaded `duffle` module.
---- @type string
-local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
---- @type DuffleExport
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
 
 -- The annotation pass reads the source-derived registries from scan_source:
 --   * pipe_ctx.register_alias_registry — for atom_dbg_reg_default(R_X, ...) and atom_reg_types(R_X, ...) member-identity checks
@@ -107,8 +105,7 @@ end
 --- @param findings Findings
 --- @return nil
 local function check_unique_annotation(_item, pipe_ctx, findings)
-	--- @type string, integer
-	for name, n in pairs(pipe_ctx.annot_counts) do
+	for name, n in pairs(pipe_ctx.annot_counts) do ---@type string, integer
 		if n > 1 then
 			findings.errors[#findings.errors + 1] = {
 				line = pipe_ctx.atom_index[name] and pipe_ctx.atom_index[name].line or 0,
@@ -142,10 +139,8 @@ end
 --- @param findings Findings
 --- @return nil
 local function check_macro_word_drift(m, pipe_ctx, findings)
-	--- @type WordCounts
-	local wc = (pipe_ctx and pipe_ctx.word_counts) or {}
-	--- @type integer|nil
-	local  declared = wc[m.name]
+	local wc = (pipe_ctx and pipe_ctx.word_counts) or {} ---@type WordCounts
+	local  declared = wc[m.name] ---@type integer|nil
 	if not declared then
 		findings.errors[#findings.errors + 1] = {
 			line = m.line,
@@ -174,10 +169,8 @@ end
 --- @return nil
 local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
 	-- Detect duplicate defaults using the ordered occurrence list (the out.types hash only retains the last declaration).
-	--- @type table<string, integer>  -- bag: register ident -> first source line
-	local seen_first_line = {}
-	--- @type integer, RegTypeOccurrence
-	for _, occ in ipairs(pipe_ctx.type_occurrences or {}) do
+	local seen_first_line = {} ---@type table<string, integer>  -- bag: register ident -> first source line
+	for _, occ in ipairs(pipe_ctx.type_occurrences or {}) do ---@type integer, RegTypeOccurrence
 		if seen_first_line[occ.reg] == nil then
 			seen_first_line[occ.reg] = occ.source_line
 		else
@@ -189,12 +182,9 @@ local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
 			}
 		end
 	end
-	--- @type table<string, AliasEntry>
-	local reg_registry  = pipe_ctx.register_alias_registry or {}
-	--- @type table<string, TypeNameEntry>
-	local type_registry = pipe_ctx.type_name_registry      or {}
-	--- @type string, RegTypeDefault
-	for reg, def in pairs(pipe_ctx.types or {}) do
+	local reg_registry  = pipe_ctx.register_alias_registry or {} ---@type table<string, AliasEntry>
+	local type_registry = pipe_ctx.type_name_registry      or {} ---@type table<string, TypeNameEntry>
+	for reg, def in pairs(pipe_ctx.types or {}) do ---@type string, RegTypeDefault
 		if not reg_registry[reg] then
 			findings.errors[#findings.errors + 1] = {
 				line = def.source_line,
@@ -229,15 +219,11 @@ end
 --- @param findings Findings
 --- @return nil
 local function check_atom_reg_types(_src, pipe_ctx, findings)
-	--- @type table<string, AliasEntry>
-	local reg_registry  = pipe_ctx.register_alias_registry or {}
-	--- @type table<string, TypeNameEntry>
-	local type_registry = pipe_ctx.type_name_registry      or {}
-	--- @type integer, AtomInfoEntry
-	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do
+	local reg_registry  = pipe_ctx.register_alias_registry or {} ---@type table<string, AliasEntry>
+	local type_registry = pipe_ctx.type_name_registry      or {} ---@type table<string, TypeNameEntry>
+	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do ---@type integer, AtomInfoEntry
 		if ai.reg_type_overrides then
-			--- @type string, RegTypeOverride
-			for reg, ov in pairs(ai.reg_type_overrides) do
+			for reg, ov in pairs(ai.reg_type_overrides) do ---@type string, RegTypeOverride
 				if not reg_registry[reg] then
 					findings.errors[#findings.errors + 1] = {
 						line = ai.info_line,
@@ -265,13 +251,11 @@ end
 --- @param findings Findings
 --- @return nil
 local function check_atom_view_layout(_src, pipe_ctx, findings)
-	--- @type string, AtomViewEntry
-	for atom_name, view in pairs(pipe_ctx.atom_views or {}) do
+	for atom_name, view in pairs(pipe_ctx.atom_views or {}) do ---@type string, AtomViewEntry
 		if not view.binds_name then
 			-- The atom had atom_reg_types but no atom_view; no layout check needed.
 		else
-			--- @type BindsEntry|nil
-			local bs = pipe_ctx.binds_index[view.binds_name]
+			local bs = pipe_ctx.binds_index[view.binds_name] ---@type BindsEntry|nil
 			if not bs then
 				findings.errors[#findings.errors + 1] = {
 					line = view.info_line,
@@ -297,16 +281,12 @@ end
 --- @param findings Findings
 --- @return nil
 local function check_binds_no_duplicate_fields(_src, pipe_ctx, findings)
-	--- @type integer, BindsEntry
-	for _, bs in ipairs(pipe_ctx.binds_list or {}) do
-		--- @type table<string, integer>  -- bag: field name -> occurrence count
-		local seen = {}
-		--- @type integer, TypeField
-		for _, f in ipairs(bs.fields or {}) do
+	for _, bs in ipairs(pipe_ctx.binds_list or {}) do ---@type integer, BindsEntry
+		local seen = {} ---@type table<string, integer>  -- bag: field name -> occurrence count
+		for _, f in ipairs(bs.fields or {}) do ---@type integer, TypeField
 			seen[f.name] = (seen[f.name] or 0) + 1
 		end
-		--- @type string, integer
-		for name, count in pairs(seen) do
+		for name, count in pairs(seen) do ---@type string, integer
 			if count > 1 then
 				findings.errors[#findings.errors + 1] = {
 					line = bs.line,
@@ -334,10 +314,8 @@ end
 --- @param findings  Findings
 --- @return nil
 local function check_skip_marker(marker, _pipe_ctx, findings)
-	--- @type string
-	local kind = marker.marker_kind
-	--- @type integer
-	local line = marker.marker_line
+	local kind = marker.marker_kind ---@type string
+	local line = marker.marker_line ---@type integer
 	-- Left `scan.debug_skip_markers` with production records for `atom_dbg_skip` only; other identifiers take the walker's unrelated branch.
 
 	if marker.has_parens then
@@ -396,13 +374,10 @@ end
 local function check_wave_context_migration(_src, pipe_ctx, findings)
 	if not (pipe_ctx.types and next(pipe_ctx.types)) then return end
 	if not (pipe_ctx.atom_infos_list) then return end
-	--- @type table<string, AliasEntry>
-	local reg_registry = pipe_ctx.register_alias_registry or {}
-	--- @type integer, AtomInfoEntry
-	for _, ai in ipairs(pipe_ctx.atom_infos_list) do
+	local reg_registry = pipe_ctx.register_alias_registry or {} ---@type table<string, AliasEntry>
+	for _, ai in ipairs(pipe_ctx.atom_infos_list) do ---@type integer, AtomInfoEntry
 		if ai.reg_type_overrides then
-			--- @type string, RegTypeOverride
-			for reg, _ in pairs(ai.reg_type_overrides) do
+			for reg, _ in pairs(ai.reg_type_overrides) do ---@type string, RegTypeOverride
 				if not reg_registry[reg] then
 					findings.warnings[#findings.warnings + 1] = {
 						line = 0,
@@ -429,8 +404,7 @@ end
 --
 -- Adding a new check = 1 row here + 1 function above. The `validate()` dispatch loop never needs editing.
 
---- @type CheckRule[]
-local CHECK_RULES = {
+local CHECK_RULES = { ---@type CheckRule[]
 	{ name = "atom_decl_exists",          per_annot       = check_atom_decl_exists          },
 	{ name = "binds_struct_exists",       per_annot       = check_binds_struct_exists       },
 	{ name = "unique_annotation",         post            = check_unique_annotation         },
@@ -453,12 +427,9 @@ local CHECK_RULES = {
 --- @param ctx PassCtx
 --- @return PipeCtx
 local function build_corpus_pipe_ctx(ctx)
-	--- @type PipeCtx
-	local view         = duffle.corpus_view(ctx)
-	--- @type table<string, integer>  -- bag: atom name -> annotation count
-	local annot_counts = {}
-	--- @type integer, AtomInfoEntry
-	for _, info in ipairs(view.atom_infos) do
+	local view         = duffle.corpus_view(ctx) ---@type PipeCtx
+	local annot_counts = {} ---@type table<string, integer>  -- bag: atom name -> annotation count
+	for _, info in ipairs(view.atom_infos) do ---@type integer, AtomInfoEntry
 		if info and info.atom_name then
 			annot_counts[info.atom_name] = (annot_counts[info.atom_name] or 0) + 1
 		end
@@ -476,17 +447,13 @@ end
 --- @return AnnotatedResult
 local function validate(ctx, src, corpus_pipe_ctx)
 	corpus_pipe_ctx = corpus_pipe_ctx or build_corpus_pipe_ctx(ctx)
-	--- @type SourceScan
-	local scan = src.scan
+	local scan = src.scan ---@type SourceScan
 
 	-- Build a per-source pipe_ctx: shared lookups come from `corpus_pipe_ctx`, while declarations, bodies, types, views, defaults, and occurrences come from `src.scan`.
-	--- @type table<string, integer>  -- bag: register ident -> occurrence count
-	local seen_defaults   = {}; for reg, _ in pairs (scan.types      or {}) do seen_defaults[reg] = (seen_defaults[reg] or 0) + 1 end
-	--- @type AtomInfoEntry[]
-	local atom_infos_list = {}; for _, ai  in ipairs(scan.atom_infos or {}) do atom_infos_list[#atom_infos_list + 1] = ai         end
+	local seen_defaults   = {}; for reg, _ in pairs (scan.types      or {}) do seen_defaults[reg] = (seen_defaults[reg] or 0) + 1 end ---@type table<string, integer>  -- bag: register ident -> occurrence count
+	local atom_infos_list = {}; for _, ai  in ipairs(scan.atom_infos or {}) do atom_infos_list[#atom_infos_list + 1] = ai         end ---@type AtomInfoEntry[]
 
-	--- @type PipeCtx
-	local pipe_ctx = {
+	local pipe_ctx = { ---@type PipeCtx
 		atom_index               = {},
 		binds_index              = {},
 		annot_counts             = corpus_pipe_ctx.annot_counts,
@@ -500,29 +467,23 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		register_alias_registry  = corpus_pipe_ctx.register_alias_registry,
 		type_name_registry       = corpus_pipe_ctx.type_name_registry,
 	}
-	--- @type AtomEntry[]
-	local atoms = {}
-	--- @type integer, AtomEntry
-	for _, a in ipairs(scan.atoms) do
+	local atoms = {} ---@type AtomEntry[]
+	for _, a in ipairs(scan.atoms) do ---@type integer, AtomEntry
 		if a.kind == "atom" or a.kind == "atom_proc" then
 			atoms[#atoms + 1] = a
 			pipe_ctx.atom_index[a.raw_name or a.name] = a
 		end
 	end
-	--- @type integer, BindsEntry
-	for _, b in ipairs(scan.binds) do pipe_ctx.binds_index[b.name] = b end
+	for _, b in ipairs(scan.binds) do pipe_ctx.binds_index[b.name] = b end ---@type integer, BindsEntry
 
 	-- Findings live in a single struct with three lists (errors / warnings / info).
 	-- Each check writes to the list appropriate for its severity.
-	--- @type Findings
-	local findings = { errors = {}, warnings = {}, info = {} }
+	local findings = { errors = {}, warnings = {}, info = {} } ---@type Findings
 
 	-- Lift parse-time errors already recorded in scan_source's atom_info payload into this pass's findings list.
-	--- @type integer, AtomInfoEntry
-	for _, info in ipairs(scan.atom_infos) do
+	for _, info in ipairs(scan.atom_infos) do ---@type integer, AtomInfoEntry
 		if info.errors then
-			--- @type integer, string
-			for _, msg in ipairs(info.errors) do
+			for _, msg in ipairs(info.errors) do ---@type integer, string
 				findings.errors[#findings.errors + 1] = {
 					line = info.info_line,
 					msg  = string.format("'%s': %s", info.atom_name, msg),
@@ -532,8 +493,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	end
 
 	-- THE per-annotation pipeline. ONE loop. CHECK_RULES dispatches per_annot rules.
-	--- @type integer, AtomInfoEntry
-	for _, info in ipairs(scan.atom_infos) do
+	for _, info in ipairs(scan.atom_infos) do ---@type integer, AtomInfoEntry
 		duffle.run_check_rules(CHECK_RULES, "per_annot", info, pipe_ctx, findings)
 	end
 
@@ -542,17 +502,14 @@ local function validate(ctx, src, corpus_pipe_ctx)
 
 	-- scan_source records each marker in scan.debug_skip_markers; this loop validates each record independently and emits at most one error per marker.
 	-- Valid markers stamp `debug_skip = true` on the following atom or component declaration, which downstream consumers read directly.
-	--- @type DebugSkipMarker[]
-	local skip_markers = scan.debug_skip_markers or {}
-	--- @type integer, DebugSkipMarker
-	for _, marker in ipairs(skip_markers) do
+	local skip_markers = scan.debug_skip_markers or {} ---@type DebugSkipMarker[]
+	for _, marker in ipairs(skip_markers) do ---@type integer, DebugSkipMarker
 		duffle.run_check_rules(CHECK_RULES, "per_skip_marker", marker, pipe_ctx, findings)
 	end
 
 	-- Per-macro rules (TAPE_WORDS vs WORD_COUNT drift).
 	pipe_ctx.word_counts = corpus_pipe_ctx.word_counts
-	--- @type integer, MacroEntry
-	for _, m in ipairs(scan.macros) do
+	for _, m in ipairs(scan.macros) do ---@type integer, MacroEntry
 		duffle.run_check_rules(CHECK_RULES, "per_macro", m, pipe_ctx, findings)
 	end
 
@@ -582,8 +539,7 @@ end
 -- M.run — orchestrator entry
 -- ════════════════════════════════════════════════════════════════════════════
 
---- @type AnnotationPass
-local M = {}
+local M = {} ---@type AnnotationPass
 
 -- Expose `validate` for downstream passes (e.g. report.lua) that need to re-render the per-source results into a per-MODULE report.
 M.validate = validate
@@ -591,47 +547,32 @@ M.validate = validate
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
-	--- @type PassOutputEntry[]
-	local outputs  = {}
-	--- @type PassFinding[]
-	local errors   = {}
-	--- @type PassFinding[]
-	local warnings = {}
+	local outputs  = {} ---@type PassOutputEntry[]
+	local errors   = {} ---@type PassFinding[]
+	local warnings = {} ---@type PassFinding[]
 
 	-- Build the shared pipe_ctx once for this run; every validate() call sees the same cross-source registries.
 	-- The corpus owns the canonical cross-source registries; per-source scans retain body / declaration ownership.
-	--- @type PipeCtx
-	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx)
-	--- @type Corpus
-	local corpus          = ctx.shared.corpus
+	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx) ---@type PipeCtx
+	local corpus          = ctx.shared.corpus ---@type Corpus
 
 	-- Group `corpus.sources_by_dir` by module, validate every source in each bucket, and emit one errors.h per directory.
-	--- @type table<string, SourceFile[]>
-	local by_dir = (corpus and corpus.sources_by_dir) or {}
+	local by_dir = (corpus and corpus.sources_by_dir) or {} ---@type table<string, SourceFile[]>
 
-	--- @type string, SourceFile[]
-	for dir, dir_sources in pairs(by_dir) do
-		--- @type string
-		local dir_basename = dir:match("([^/\\]+)$") or dir
-		--- @type integer
-		local dir_atoms    = 0
-		--- @type PassFinding[]
-		local dir_errors   = {}
-		--- @type PassFinding[]
-		local dir_warnings = {}
-		--- @type integer, SourceFile
-		for _, src in ipairs(dir_sources) do
-			--- @type AnnotatedResult
-			local result  = validate(ctx, src, corpus_pipe_ctx)
+	for dir, dir_sources in pairs(by_dir) do ---@type string, SourceFile[]
+		local dir_basename = dir:match("([^/\\]+)$") or dir ---@type string
+		local dir_atoms    = 0 ---@type integer
+		local dir_errors   = {} ---@type PassFinding[]
+		local dir_warnings = {} ---@type PassFinding[]
+		for _, src in ipairs(dir_sources) do ---@type integer, SourceFile
+			local result  = validate(ctx, src, corpus_pipe_ctx) ---@type AnnotatedResult
 			result.source = src.path                           -- tag for downstream rendering
 			dir_atoms = dir_atoms + #result.atoms
-			--- @type integer, PassFinding
-			for _, e in ipairs(result.errors) do
+			for _, e in ipairs(result.errors) do ---@type integer, PassFinding
 				dir_errors[#dir_errors + 1] = { line = e.line, msg = e.msg, source = src.path }
 				errors    [#errors     + 1] = { line = e.line, msg = e.msg }
 			end
-			--- @type integer, PassFinding
-			for _, w in ipairs(result.warnings) do
+			for _, w in ipairs(result.warnings) do ---@type integer, PassFinding
 				dir_warnings[#dir_warnings + 1] = { line = w.line, msg = w.msg }
 				warnings    [#warnings     + 1] = { line = w.line, msg = w.msg }
 			end

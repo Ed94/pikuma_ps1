@@ -106,8 +106,7 @@
 --- @field HARDWARE_RELATIONS          HardwareRelationRow[]
 --- @field CU2_TRANSITION_POLICY       Cu2TransitionPolicy
 
---- @type DuffleIsa
-local M = {}
+local M = {} ---@type DuffleIsa
 
 -- Section 7: domain tables
 -- ════════════════════════════════════════════════════════════════════════════
@@ -422,11 +421,9 @@ function M.gte      (ident) return M.GTE_COMMAND[M.gte_canon(ident)]         end
 local function build_alias_map()
 	--- @type table<string, string>  -- bag: alias or canon -> canon
 	M.ALIAS_TO_CANONICAL = {}
-	--- @type string, GteCommandRow
-	for canon, row in pairs(M.GTE_COMMAND) do
+	for canon, row in pairs(M.GTE_COMMAND) do ---@type string, GteCommandRow
 		M.ALIAS_TO_CANONICAL[canon] = canon
-		--- @type integer, string
-		for _, alias in ipairs(row.aliases or {}) do
+		for _, alias in ipairs(row.aliases or {}) do ---@type integer, string
 			M.ALIAS_TO_CANONICAL[alias] = canon
 		end
 	end

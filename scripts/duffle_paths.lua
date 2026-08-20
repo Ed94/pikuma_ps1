@@ -19,12 +19,10 @@
 --- @class DufflePaths
 --- @field setup fun(): nil
 
---- @type DufflePaths
-local M = {}
+local M = {} ---@type DufflePaths
 
 -- Cache key for the repo root. Stored in `package.loaded` (process-global) so all 8 entry scripts + passes scripts share one resolution.
---- @type string
-local CACHE_KEY = "__duffle_repo_root__"
+local CACHE_KEY = "__duffle_repo_root__" ---@type string
 
 --- Resolve the repo root from this script's own path. Zero shell spawn.
 --- `duffle_paths.lua` always lives at `<repo>/scripts/duffle_paths.lua`, so the repo root is the parent of the directory containing this script.
@@ -35,17 +33,14 @@ local CACHE_KEY = "__duffle_repo_root__"
 local function find_repo_root()
 	if package.loaded[CACHE_KEY] then return package.loaded[CACHE_KEY] end
 
-	--- @type string
-	local source = debug.getinfo(1, "S").source
+	local source = debug.getinfo(1, "S").source ---@type string
 	-- Strip the leading `@` (Lua's dofile marker) and the trailing `/duffle_paths.lua` filename.
 	-- What remains is the directory containing this script, i.e. `<repo>/scripts/`.
-	--- @type string|nil
-	local scripts_dir = source and source:match("^@?(.*)[/\\]duffle_paths%.lua$")
+	local scripts_dir = source and source:match("^@?(.*)[/\\]duffle_paths%.lua$") ---@type string|nil
 	if not scripts_dir then return nil end
 
 	-- The repo root is the parent of `scripts/`. Strip the trailing `scripts/` (with or without trailing slash).
-	--- @type string
-	local root = scripts_dir:gsub("scripts[\\/]?$", "")
+	local root = scripts_dir:gsub("scripts[\\/]?$", "") ---@type string
 	root = root:gsub("\\", "/")
 	if root == "" then root = "./" end
 	if not root:match("/$") then root = root .. "/" end
@@ -60,8 +55,7 @@ end
 --- lpeg is built by `update_deps.ps1` to `toolchain/lpeg/`, which we wire into `package.cpath` here (so `require("lpeg")` from `duffle.lua` resolves without any global state).
 --- @return nil
 function M.setup()
-	--- @type string|nil
-	local  repo_root = find_repo_root()
+	local  repo_root = find_repo_root() ---@type string|nil
 	if not repo_root then
 		-- Unreachable in practice: find_repo_root() derives the repo root from this script's own source path via debug.getinfo(1, "S").source (no subprocess, no git CLI, <1ms).
 		-- A nil return means the source path did not match the expected <repo>/scripts/duffle_paths.lua layout — a packaging bug, not a "missing git repo" condition.
@@ -69,10 +63,8 @@ function M.setup()
 		os.exit(2)
 	end
 
-	--- @type string
-	local scripts_dir = repo_root .. "scripts/"
-	--- @type string
-	local passes_dir  = repo_root .. "scripts/passes/"
+	local scripts_dir = repo_root .. "scripts/"        ---@type string
+	local passes_dir  = repo_root .. "scripts/passes/" ---@type string
 	package.path = scripts_dir .. "?.lua;"
 		.. scripts_dir .. "?/init.lua;"
 		.. passes_dir  .. "?.lua;"
@@ -82,10 +74,8 @@ function M.setup()
 	-- lpeg: built by `update_deps.ps1` to `toolchain/lpeg/lpeg.dll`.
 	-- lfs: compiled from pcsx-redux's vendored luafilesystem source to `toolchain/lfs/lfs.dll`.
 	-- Wire both directories into cpath so `require("lpeg")` and `require("lfs")` resolve.
-	--- @type string
-	local lpeg_dir = repo_root .. "toolchain/lpeg/"
-	--- @type string
-	local lfs_dir  = repo_root .. "toolchain/lfs/"
+	local lpeg_dir = repo_root .. "toolchain/lpeg/" ---@type string
+	local lfs_dir  = repo_root .. "toolchain/lfs/"  ---@type string
 	package.cpath = lpeg_dir .. "?.dll;"
 		.. lfs_dir  .. "?.dll;"
 		.. package.cpath

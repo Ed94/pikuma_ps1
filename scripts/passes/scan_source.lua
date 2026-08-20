@@ -21,18 +21,15 @@
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when required).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
---- @type string
-local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
---- @type DuffleExport
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
 
 -- Forward declarations for helpers used by earlier parsers (parse_enum_body_fields needs parse_enum_int_literal;
 -- parse_typedef_binds needs duffle.find_byte).
 -- Lua local scoping rules require explicit forward declarations because locals are visible only AFTER their declaration site.
 -- The actual assignments happen later in this file;
 -- the closures captured by the early parsers resolve the upvalue at call time (Lua 5.3 / LuaJIT upvalue semantics).
---- @type fun(text: string, start: integer): (integer|nil, integer)
-local parse_enum_int_literal
+local parse_enum_int_literal ---@type fun(text: string, start: integer): (integer|nil, integer)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
@@ -265,8 +262,7 @@ local parse_enum_int_literal
 -- C qualifier keywords that may precede a MipsAtom_ / MipsCode declaration.
 -- (typedef is NOT a qualifier here — it's a separate construct (`typedef Struct_(Binds_X) { ... };`)
 -- and must be read as an ident so the typedef check below can match it.)
---- @type table<string, boolean>  -- bag: C qualifier -> true
-local QUALIFIER_KEYWORDS = {
+local QUALIFIER_KEYWORDS = { ---@type table<string, boolean>  -- bag: C qualifier -> true
 	["static"]   = true, ["const"] = true, ["volatile"] = true, ["extern"] = true,
 	["register"] = true, ["auto"]  = true, ["inline"]   = true,
 	["internal"] = true, ["LP_"]   = true, ["global"]   = true, ["gkknown"] = true,
@@ -274,24 +270,18 @@ local QUALIFIER_KEYWORDS = {
 
 -- "ac_" prefix length on component names (e.g., `MipsAtomComp_(ac_X, ...)`).
 -- The components pass strips this prefix to derive the macro name (e.g., `mac_X`). 
---- @type string
-local AC_PREFIX     = "ac_"
---- @type integer
-local AC_PREFIX_LEN = 3
+local AC_PREFIX     = "ac_" ---@type string
+local AC_PREFIX_LEN = 3 ---@type integer
 
 -- The function-decl keyword that precedes a MipsAtomComp_Proc_ call.
 -- Used by the backward walk in duffle.find_function_decl_for.
---- @type string
-local SLICE_MIPS_CODE    = "Slice_MipsCode"
---- @type integer
-local SLICE_MIPS_CODE_LEN = #SLICE_MIPS_CODE
+local SLICE_MIPS_CODE    = "Slice_MipsCode" ---@type string
+local SLICE_MIPS_CODE_LEN = #SLICE_MIPS_CODE ---@type integer
 
 -- The return type that precedes a MipsAtom_Proc_ function declaration.
 -- Used by the backward walk in duffle.find_atom_proc_decl_for.
---- @type string
-local MIPS_ATOM_PTR    = "MipsAtom*"
---- @type integer
-local MIPS_ATOM_PTR_LEN = #MIPS_ATOM_PTR
+local MIPS_ATOM_PTR    = "MipsAtom*" ---@type string
+local MIPS_ATOM_PTR_LEN = #MIPS_ATOM_PTR ---@type integer
 
 --- Strip the "ac_" prefix from a component name.
 --- Returns the input unchanged if it doesn't start with the prefix.
@@ -311,10 +301,8 @@ end
 --- @param marker DebugSkipMarker
 --- @return nil
 local function push_debug_skip_marker(out, marker)
-	--- @type DebugSkipMarker[]
-	local markers = out.debug_skip_markers
-	--- @type DebugSkipMarker
-	local prior   = markers[#markers]
+	local markers = out.debug_skip_markers ---@type DebugSkipMarker[]
+	local prior   = markers[#markers] ---@type DebugSkipMarker
 	if    prior and prior.pending then
 		prior.pending = false
 		prior.superseded_by_marker_line = marker.marker_line
@@ -331,11 +319,9 @@ end
 --- @param fallback integer|nil
 --- @return string|nil, integer, integer|nil
 local function read_parens_after(source, ident_end, fallback)
-	--- @type integer
-	local open_paren = duffle.skip_ws_and_cmt(source, ident_end)
+	local open_paren = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
 	if source:sub(open_paren, open_paren) ~= "(" then return nil, fallback or open_paren + 1 end
-	--- @type string|nil, integer
-	local  inner, after_paren = duffle.read_parens(source, open_paren)
+	local  inner, after_paren = duffle.read_parens(source, open_paren) ---@type string|nil, integer
 	return inner, after_paren, open_paren
 end
 
@@ -347,11 +333,9 @@ end
 --- @param fallback integer|nil
 --- @return string|nil, integer, integer|nil
 local function find_body_braces(source, after_paren, fallback)
-	--- @type integer
-	local  brace = duffle.scan_to_char(source, "{", after_paren)
+	local  brace = duffle.scan_to_char(source, "{", after_paren) ---@type integer
 	if not brace then return nil, fallback or (after_paren + 1) end
-	--- @type string|nil, integer
-	local  body, after_brace = duffle.read_braces(source, brace)
+	local  body, after_brace = duffle.read_braces(source, brace) ---@type string|nil, integer
 	return body, after_brace, brace + 1
 end
 
@@ -369,16 +353,12 @@ end
 --- @param start_pos integer -- exclusive upper bound for the captured block
 --- @return string
 local function preceding_comment_walk_backward(source, start_pos)
-	--- @type string[]
-	local pieces  = {}
-	--- @type integer
-	local scan_pos = start_pos
+	local pieces  = {} ---@type string[]
+	local scan_pos = start_pos ---@type integer
 	while scan_pos > 0 do
-		--- @type integer
-		local non_ws = scan_pos - 1
+		local non_ws = scan_pos - 1 ---@type integer
 		while non_ws > 0 do
-			--- @type string
-			local ch = source:sub(non_ws, non_ws)
+			local ch = source:sub(non_ws, non_ws) ---@type string
 			if ch == " " or ch == "\t" or ch == "\n" or ch == "\r" then
 				non_ws = non_ws - 1
 			else
@@ -389,23 +369,18 @@ local function preceding_comment_walk_backward(source, start_pos)
 
 		if non_ws >= 2 and source:sub(non_ws - 1, non_ws) == "*/" then
 			-- Block comment close: walk back over `/*` candidates.
-			--- @type string
-			local prefix  = source:sub(1, non_ws - 1)
-			--- @type integer
-			local open_at = nil
-			--- @type integer
-			for scan = #prefix - 1, 1, -1 do
+			local prefix  = source:sub(1, non_ws - 1) ---@type string
+			local open_at = nil ---@type integer
+			for scan = #prefix - 1, 1, -1 do ---@type integer
 				if prefix:sub(scan, scan + 1) == "/*" then
 					open_at = scan
 					break
 				end
 			end
 			if not open_at then break end
-			--- @type integer
-			local block_start = open_at
+			local block_start = open_at ---@type integer
 			while block_start > 1 do
-				--- @type string
-				local ch = source:sub(block_start - 1, block_start - 1)
+				local ch = source:sub(block_start - 1, block_start - 1) ---@type string
 				if ch ~= " " and ch ~= "\t" then break end
 				block_start = block_start - 1
 			end
@@ -415,13 +390,11 @@ local function preceding_comment_walk_backward(source, start_pos)
 			-- Line comment check: walk back from non_ws to the most recent `\n`
 			-- (or position 1) and inspect the resulting line. This handles both
 			-- `// foo\n<marker>` (non_ws ends on `o`) and `// foo\r\n<marker>`.
-			--- @type integer
-			local line_start = non_ws
+			local line_start = non_ws ---@type integer
 			while line_start > 1 and source:sub(line_start - 1, line_start - 1) ~= "\n" do
 				line_start = line_start - 1
 			end
-			--- @type string
-			local line = source:sub(line_start, non_ws)
+			local line = source:sub(line_start, non_ws) ---@type string
 			if    line:sub(1, 2) ~= "//" then break end
 			table.insert(pieces, 1, line)
 			scan_pos = line_start - 1
@@ -456,10 +429,8 @@ end
 --- @param target_kind string|nil -- "atom" | "atom_proc" | "comp_bare" | "comp_proc" | "unrelated" once observed
 --- @return boolean|nil -- true iff the marker is the positive bare form
 local function attach_debug_skip_marker(out, target_kind)
-	--- @type DebugSkipMarker[]
-	local markers = out.debug_skip_markers
-	--- @type DebugSkipMarker
-	local marker  = markers[#markers]
+	local markers = out.debug_skip_markers ---@type DebugSkipMarker[]
+	local marker  = markers[#markers] ---@type DebugSkipMarker
 	if not (marker and marker.pending) then return nil end
 
 	marker.pending     = false
@@ -488,24 +459,18 @@ end
 local function register_atom(out, kind, declaration_line, name, body, body_off, raw_name, pos, after_paren, source)
 	-- Capture the pending marker BEFORE attaching so the walker can anchor the backward comment walk on the marker's marker_pos
 	-- (which is the correct anchor even when an `FI_ MipsAtom ac_X(args)` proc-prelude separates the marker from the declaration).
-	--- @type DebugSkipMarker|nil
-	local pending_marker = nil
-	--- @type DebugSkipMarker[]
-	local markers        = out.debug_skip_markers
-	--- @type DebugSkipMarker
-	local m              = markers[#markers]
+	local pending_marker = nil ---@type DebugSkipMarker|nil
+	local markers        = out.debug_skip_markers ---@type DebugSkipMarker[]
+	local m              = markers[#markers] ---@type DebugSkipMarker
 	if m and m.pending then pending_marker = m end
 
-	--- @type boolean|nil
-	local positive = attach_debug_skip_marker(out, kind)
-	--- @type string
-	local comment  = ""
+	local positive = attach_debug_skip_marker(out, kind) ---@type boolean|nil
+	local comment  = "" ---@type string
 	if kind == "comp_bare" or kind == "comp_proc" then
 		-- Scanner-owned declaration-comment attachment.
 		-- The walker does not need to detect marker shape.
 		-- A pending_marker record (or the declaration ident_pos fallback) supplies the anchor position.
-		--- @type integer
-		local start_pos = comment_walk_start(pending_marker, pos)
+		local start_pos = comment_walk_start(pending_marker, pos) ---@type integer
 		comment         = preceding_comment_walk_backward(source, start_pos)
 	end
 	out.atoms[#out.atoms + 1] = {
@@ -547,15 +512,11 @@ end
 local function parse_type_chain(text, pos)
 	if pos > #text then return nil end
 	-- Skip leading whitespace before the type ident.
-	--- @type integer
-	local start        = duffle.skip_ws_and_cmt(text, pos)
-	--- @type string|nil, integer
-	local ident, after = duffle.read_ident(text, start)
+	local start        = duffle.skip_ws_and_cmt(text, pos) ---@type integer
+	local ident, after = duffle.read_ident(text, start) ---@type string|nil, integer
 	if not ident then return nil end
-	--- @type integer
-	local depth  = 0
-	--- @type integer
-	local cursor = duffle.skip_ws_and_cmt(text, after)
+	local depth  = 0 ---@type integer
+	local cursor = duffle.skip_ws_and_cmt(text, after) ---@type integer
 	while cursor <= #text and text:sub(cursor, cursor) == "*" do
 		depth  = depth + 1
 		cursor = cursor + 1
@@ -567,8 +528,7 @@ end
 -- Byte-size lookup for builtin C primitives + the GCC __UINT*_TYPE__ family.
 -- Returns a confident byte_size (positive integer) or nil if `type_name` is not a known builtin primitive.
 -- Builtin primitive map; used by the byte-size propagation pass to seed confident byte_size values for typedef chains that bottom out at a builtin.
---- @type table<string, integer>  -- bag: builtin type name -> byte size
-local BUILTIN_BYTE_SIZES = {
+local BUILTIN_BYTE_SIZES = { ---@type table<string, integer>  -- bag: builtin type name -> byte size
 	["U1"]                  = 1,
 	["U2"]                  = 2,
 	["U4"]                  = 4,
@@ -589,12 +549,10 @@ local BUILTIN_BYTE_SIZES = {
 }
 
 -- Pointer fields collapse to 4 bytes on MIPS32 (PS1).
---- @type integer
-local POINTER_BYTE_SIZE = 4
+local POINTER_BYTE_SIZE = 4 ---@type integer
 
 -- Maximum chain depth when resolving typedef / TSet_ chains (cycle guard).
---- @type integer
-local TYPE_CHAIN_MAX_DEPTH = 8
+local TYPE_CHAIN_MAX_DEPTH = 8 ---@type integer
 
 --- Walk a `Struct_` / `Enum_` body, calling `build_field(first, first_end, after_first)` for each entry.
 --- The builder returns either:
@@ -606,24 +564,18 @@ local TYPE_CHAIN_MAX_DEPTH = 8
 --- @param build_field fun(first: string, first_end: integer, after_first: integer): (TypeField|nil, integer)
 --- @return TypeField[]
 local function walk_body_fields(body, build_field)
-	--- @type TypeField[]
-	local fields   = {}
-	--- @type integer
-	local body_pos = 1
-	--- @type integer
-	local body_len = #body
+	local fields   = {} ---@type TypeField[]
+	local body_pos = 1 ---@type integer
+	local body_len = #body ---@type integer
 	while body_pos <= body_len do
 		body_pos = duffle.skip_ws_and_cmt(body, body_pos)
 		if body_pos > body_len then break end
-		--- @type string|nil, integer
-		local  first, first_end = duffle.read_ident(body, body_pos)
+		local  first, first_end = duffle.read_ident(body, body_pos) ---@type string|nil, integer
 		if not first then
 			body_pos = body_pos + 1
 		else
-			--- @type integer
-			local after_first     = duffle.skip_ws_and_cmt(body, first_end)
-			--- @type TypeField|nil, integer
-			local result, new_pos = build_field(first, first_end, after_first)
+			local after_first     = duffle.skip_ws_and_cmt(body, first_end) ---@type integer
+			local result, new_pos = build_field(first, first_end, after_first) ---@type TypeField|nil, integer
 			if    result then fields[#fields + 1] = result end
 			body_pos = new_pos or first_end
 			-- Skip a single trailing `,` or `;`.
@@ -643,29 +595,23 @@ end
 --- @param body string
 --- @return TypeField[]
 local function parse_struct_body_fields(body)
-	--- @type TypeField[]
-	local fields   = {}
-	--- @type integer
-	local body_pos = 1
-	--- @type integer
-	local body_len = #body
+	local fields   = {} ---@type TypeField[]
+	local body_pos = 1 ---@type integer
+	local body_len = #body ---@type integer
 	while body_pos <= body_len do
 		body_pos = duffle.skip_ws_and_cmt(body, body_pos)
 		if body_pos > body_len then break end
-		--- @type string|nil, integer
-		local type_name, type_end = duffle.read_ident(body, body_pos)
+		local type_name, type_end = duffle.read_ident(body, body_pos) ---@type string|nil, integer
 		if not type_name then
 			body_pos = body_pos + 1
 		else
-			--- @type integer, integer
-			local depth, cursor = 0, duffle.skip_ws_and_cmt(body, type_end)
+			local depth, cursor = 0, duffle.skip_ws_and_cmt(body, type_end) ---@type integer, integer
 			while cursor <= body_len and body:sub(cursor, cursor) == "*" do
 				depth = depth + 1
 				cursor = duffle.skip_ws_and_cmt(body, cursor + 1)
 			end
 			while cursor <= body_len do
-				--- @type string|nil, integer
-				local field_ident, field_end = duffle.read_ident(body, cursor)
+				local field_ident, field_end = duffle.read_ident(body, cursor) ---@type string|nil, integer
 				if not field_ident then break end
 				fields[#fields + 1] = {
 					name          = field_ident,
@@ -701,15 +647,11 @@ local function parse_enum_body_fields(body)
 	--- @param after_name integer
 	--- @return TypeField, integer
 	return walk_body_fields(body, function(entry_name, name_end, after_name)
-		--- @type integer|nil
-		local value
-		--- @type integer
-		local new_pos
+		local value ---@type integer|nil
+		local new_pos ---@type integer
 		if body:sub(after_name, after_name) == "=" then
-			--- @type integer
-			local val_pos    = duffle.skip_ws_and_cmt(body, after_name + 1)
-			--- @type integer|nil, integer
-			local v, end_pos = parse_enum_int_literal(body, val_pos)
+			local val_pos    = duffle.skip_ws_and_cmt(body, after_name + 1) ---@type integer
+			local v, end_pos = parse_enum_int_literal(body, val_pos) ---@type integer|nil, integer
 			if v ~= nil then
 				value   = v
 				new_pos = end_pos
@@ -738,12 +680,10 @@ local function resolve_typedef_byte_size(type_name, type_name_registry, visited,
 	-- Check the builtin primitive map FIRST.
 	-- This handles undeclared builtin idents (e.g. `__UINT32_TYPE__` appears as underlying_type in `typedef __UINT32_TYPE__ TSet_(V4_S2);` 
 	-- even though the fixture never declares `__UINT32_TYPE__` itself).
-	--- @type integer|nil
-	local builtin = BUILTIN_BYTE_SIZES[type_name]
+	local builtin = BUILTIN_BYTE_SIZES[type_name] ---@type integer|nil
 	if    builtin ~= nil then return builtin end
 
-	--- @type TypeNameEntry|nil
-	local  entry = type_name_registry[type_name]
+	local  entry = type_name_registry[type_name] ---@type TypeNameEntry|nil
 	if not entry then return nil end
 
 	-- Confident: this entry was already resolved by the propagation pass (e.g., a builtin or a struct whose fields are all resolved).
@@ -756,12 +696,9 @@ local function resolve_typedef_byte_size(type_name, type_name_registry, visited,
 
 	-- Struct_ entries with unresolved byte_size can still resolve when their fields are all resolved.
 	if entry.kind == "struct" and entry.fields then
-		--- @type integer
-		local sum       = 0
-		--- @type boolean
-		local all_have  = true
-		--- @type integer, TypeField
-		for _, f in ipairs(entry.fields) do
+		local sum       = 0 ---@type integer
+		local all_have  = true ---@type boolean
+		for _, f in ipairs(entry.fields) do ---@type integer, TypeField
 			if f.byte_size == nil then all_have = false; break end
 			sum = sum + f.byte_size
 		end
@@ -778,13 +715,11 @@ end
 --- @param out SourceScan
 --- @return nil
 local function propagate_type_sizes(out)
-	--- @type table<string, TypeNameEntry>
-	local  reg = out.type_name_registry
+	local  reg = out.type_name_registry ---@type table<string, TypeNameEntry>
 	if not reg then return end
 
 	-- Seed builtin primitives (U1/U2/U4/S1/S2/S4 + __UINT*_TYPE__ family).
-	--- @type string, integer
-	for name, size in pairs(BUILTIN_BYTE_SIZES) do
+	for name, size in pairs(BUILTIN_BYTE_SIZES) do ---@type string, integer
 		if reg[name] and reg[name].byte_size == nil then
 			reg[name].byte_size = size
 		end
@@ -794,15 +729,11 @@ local function propagate_type_sizes(out)
 	-- since chains may span multiple hops and the resolution order isn't guaranteed by declaration order.
 	-- The visited map is empty when handed to the resolver.
 	-- The resolver marks visited as it enters each node, so the cycle guard fires only on RECURSIVE re-entry (not on the initial call).
-	--- @type integer
-	for _ = 1, TYPE_CHAIN_MAX_DEPTH do
-		--- @type boolean
-		local any_change = false
-		--- @type string, TypeNameEntry
-		for name, entry in pairs(reg) do
+	for _ = 1, TYPE_CHAIN_MAX_DEPTH do ---@type integer
+		local any_change = false ---@type boolean
+		for name, entry in pairs(reg) do ---@type string, TypeNameEntry
 			if entry.byte_size == nil then
-				--- @type integer
-				local resolved = resolve_typedef_byte_size(name, reg, {}, 1)
+				local resolved = resolve_typedef_byte_size(name, reg, {}, 1) ---@type integer
 				if    resolved ~= nil then
 					entry.byte_size = resolved
 					any_change      = true
@@ -815,36 +746,25 @@ local function propagate_type_sizes(out)
 	-- Resolve struct field byte_sizes + offsets, then aggregate the struct's own byte_size.
 	-- Iterate to a fixed point: struct A may reference struct B which hasn't been resolved yet on the first pass.
 	-- Each pass updates as many fields + aggregates as possible; the loop terminates when no struct's byte_size changes between passes.
-	--- @type integer
-	for _ = 1, TYPE_CHAIN_MAX_DEPTH do
-		--- @type boolean
-		local any_change = false
-		--- @type string, TypeNameEntry
-		for _, entry in pairs(reg) do
+	for _ = 1, TYPE_CHAIN_MAX_DEPTH do ---@type integer
+		local any_change = false ---@type boolean
+		for _, entry in pairs(reg) do ---@type string, TypeNameEntry
 			if entry.kind == "array" and entry.byte_size == nil and entry.counts then
-				--- @type integer
-				local elem_size = BUILTIN_BYTE_SIZES[entry.elem]
+				local elem_size = BUILTIN_BYTE_SIZES[entry.elem] ---@type integer
 					or (reg[entry.elem] and reg[entry.elem].byte_size)
 				if elem_size then
-					--- @type integer
-					local n = 1
-					--- @type integer, string
-					for _, c in ipairs(entry.counts) do n = n * c end
+					local n = 1 ---@type integer
+					for _, c in ipairs(entry.counts) do n = n * c end ---@type integer, string
 					entry.byte_size = elem_size * n
 					any_change = true
 				end
 			end
 			if entry.kind == "struct" and entry.fields then
-				--- @type integer
-				local byte_off  = 0
-				--- @type boolean
-				local gap_seen  = false
-				--- @type integer
-				local sum       = 0
-				--- @type boolean
-				local all_have  = true
-				--- @type integer, TypeField
-				for _, f in ipairs(entry.fields) do
+				local byte_off  = 0 ---@type integer
+				local gap_seen  = false ---@type boolean
+				local sum       = 0 ---@type integer
+				local all_have  = true ---@type boolean
+				for _, f in ipairs(entry.fields) do ---@type integer, TypeField
 					-- Resolve field byte_size (pointer / builtin / typedef chain).
 					if f.byte_size == nil then
 						if     f.pointer_depth > 0                                    then f.byte_size = POINTER_BYTE_SIZE
@@ -885,10 +805,8 @@ local function propagate_type_sizes(out)
 
 	-- Mirror aggregate byte_size onto the Binds_* entries in out.binds (Binds_* structs are shared via type_name_registry fields;
 	-- Only the aggregate bytes needs a mirror write since binds.bytes is a separate field from type_name_registry[name].byte_size).
-	--- @type integer, BindsEntry
-	for _, bind_entry in ipairs(out.binds or {}) do
-		--- @type TypeNameEntry|nil
-		local reg_entry = reg[bind_entry.name]
+	for _, bind_entry in ipairs(out.binds or {}) do ---@type integer, BindsEntry
+		local reg_entry = reg[bind_entry.name] ---@type TypeNameEntry|nil
 		if reg_entry then
 			bind_entry.bytes = reg_entry.byte_size
 		end
@@ -899,15 +817,12 @@ end
 --- @param sub_inner string
 --- @return string[]
 local function scan_reg_list(sub_inner)
-	--- @type string[]
-	local regs = {}
-	--- @type integer
-	local sub_inner_pos = 1
+	local regs = {} ---@type string[]
+	local sub_inner_pos = 1 ---@type integer
 	while sub_inner_pos <= #sub_inner do
 		sub_inner_pos = duffle.skip_ws_and_cmt(sub_inner, sub_inner_pos)
 		if sub_inner_pos > #sub_inner then break end
-		--- @type string|nil, integer
-		local reg_ident, reg_end = duffle.read_ident(sub_inner, sub_inner_pos)
+		local reg_ident, reg_end = duffle.read_ident(sub_inner, sub_inner_pos) ---@type string|nil, integer
 		if reg_ident then
 			regs[#regs + 1] = duffle.trim(reg_ident)
 			sub_inner_pos = reg_end
@@ -931,54 +846,45 @@ end
 --- @param entry string
 --- @return string|nil, AtomInfoOverride|nil, boolean
 local function parse_atom_info_reg_entry(entry)
-	--- @type integer
-	local pos = 1
+	local pos = 1 ---@type integer
 	pos = duffle.skip_ws_and_cmt(entry, pos)
 	if pos > #entry then return nil, nil, false end
-	--- @type string|nil, integer
-	local  reg_name, reg_end = duffle.read_ident(entry, pos)
+	local  reg_name, reg_end = duffle.read_ident(entry, pos) ---@type string|nil, integer
 	if not reg_name then return nil, nil, false end
 	pos = duffle.skip_ws_and_cmt(entry, reg_end)
 	-- Plain register, no adjacent atom_type — done.
 	if pos > #entry then return reg_name, nil, false end
 
 	-- Adjacent ident must be a bare `atom_type` (word-bounded both sides).
-	--- @type string|nil, integer
-	local  next_ident, next_end = duffle.read_ident(entry, pos)
+	local  next_ident, next_end = duffle.read_ident(entry, pos) ---@type string|nil, integer
 	if not next_ident or next_ident ~= "atom_type" then return reg_name, nil, false end
 	-- Left word-boundary: `_atom_type` should NOT match `atom_type`.
 	if pos > 1 then
-		--- @type integer
-		local prev = entry:byte(pos - 1)
+		local prev = entry:byte(pos - 1) ---@type integer
 		if duffle.is_alnum_byte(prev) then return reg_name, nil, false end
 	end
 	-- Right word-boundary: `atom_type_foo` should NOT match `atom_type`.
 	if next_end <= #entry then
-		--- @type integer
-		local nxt = entry:byte(next_end)
+		local nxt = entry:byte(next_end) ---@type integer
 		if duffle.is_alnum_byte(nxt) then return reg_name, nil, false end
 	end
 
 	-- Expect `(` immediately after `atom_type` (whitespace tolerated).
 	pos = duffle.skip_ws_and_cmt(entry, next_end)
 	if pos > #entry or entry:sub(pos, pos) ~= "(" then return reg_name, nil, true end
-	--- @type string|nil, integer
-	local sub_inner, sub_after = duffle.read_parens(entry, pos)
+	local sub_inner, sub_after = duffle.read_parens(entry, pos) ---@type string|nil, integer
 
 	-- Reject any trailing tokens (including `;` / `,`) after the close paren.
 	-- The outer caller already split on top-level commas, so the only legal terminator here is end-of-entry.
-	--- @type integer
-	local after_close = duffle.skip_ws_and_cmt(entry, sub_after)
+	local after_close = duffle.skip_ws_and_cmt(entry, sub_after) ---@type integer
 	if    after_close <= #entry then return reg_name, nil, true end
 
 	-- Parse the type chain inside the parens; require full consumption.
 	-- parse_type_chain returns (ident, depth, end_pos);
 	-- We reject any non-whitespace residue past end_pos (catches `V4_S2*()` etc.).
-	--- @type string|nil, integer, integer
-	local  type_name, depth, after_chain = parse_type_chain(sub_inner, 1)
+	local  type_name, depth, after_chain = parse_type_chain(sub_inner, 1) ---@type string|nil, integer, integer
 	if not type_name then return reg_name, nil, true end
-	--- @type integer
-	local end_check = duffle.skip_ws_and_cmt(sub_inner, after_chain)
+	local end_check = duffle.skip_ws_and_cmt(sub_inner, after_chain) ---@type integer
 	if    end_check <= #sub_inner then return reg_name, nil, true end
 
 	return reg_name, { type_name = type_name, pointer_depth = depth }, false
@@ -997,12 +903,9 @@ end
 --- @param info_line integer
 --- @return string|nil, string[]|nil, string[]|nil, string|nil, table<string, RegTypeOverride>|nil, string|nil, string|nil
 local function scan_atom_info_subcalls(info_inner, info_line)
-	--- @type string|nil, string[]|nil, string[]|nil
-	local binds, reads, writes       = nil, nil, nil
-	--- @type string|nil, table<string, RegTypeOverride>|nil
-	local view_binds, reg_overrides  = nil, nil
-	--- @type string|nil, string|nil
-	local ctx_atom_name, phase_label = nil, nil
+	local binds, reads, writes       = nil, nil, nil ---@type string|nil, string[]|nil, string[]|nil
+	local view_binds, reg_overrides  = nil, nil ---@type string|nil, table<string, RegTypeOverride>|nil
+	local ctx_atom_name, phase_label = nil, nil ---@type string|nil, string|nil
 
 	-- Per-subcall handler table. Each handler takes (sub_inner, info_line) and mutates the outer locals above.
 	-- atom_reads/atom_writes share a handler (same shape; just different output target).
@@ -1013,14 +916,10 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 	local function rw_handler(sub_inner, info_line, kind)
 		-- reads/writes arrays contain ONLY register idents;
 		-- `atom_type(...)` sub-entry (when present and well-formed) is recorded as a per-atom reg_type_override.
-		--- @type string[]
-		local entries = duffle.split_top_level_commas(sub_inner)
-		--- @type string[]
-		local regs    = {}
-		--- @type integer, string
-		for _, entry in ipairs(entries) do
-			--- @type string|nil, AtomInfoOverride|nil, boolean
-			local reg_name, override, malformed = parse_atom_info_reg_entry(entry)
+		local entries = duffle.split_top_level_commas(sub_inner) ---@type string[]
+		local regs    = {} ---@type string[]
+		for _, entry in ipairs(entries) do ---@type integer, string
+			local reg_name, override, malformed = parse_atom_info_reg_entry(entry) ---@type string|nil, AtomInfoOverride|nil, boolean
 			if reg_name then
 				regs[#regs + 1] = reg_name
 				if override then
@@ -1044,11 +943,9 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 	local function ident_handler(sub_inner, info_line, out_name)
 		-- Validates the arg is a single C identifier (no commas / parens / whitespace).
 		-- Silently reject malformed args; DWARF chain treats the field as un-set.
-		--- @type string|nil
-		local name = duffle.read_ident(sub_inner, 1)
+		local name = duffle.read_ident(sub_inner, 1) ---@type string|nil
 		if name then
-			--- @type integer
-			local after_id = duffle.skip_ws_and_cmt(sub_inner, 1 + #name)
+			local after_id = duffle.skip_ws_and_cmt(sub_inner, 1 + #name) ---@type integer
 			if after_id > #sub_inner then
 				if     out_name == "ctx_atom_name" then ctx_atom_name = name
 				elseif out_name == "phase_label"   then phase_label   = name end
@@ -1059,17 +956,13 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 	--- @param info_line integer
 	--- @return nil
 	local function reg_types_handler(sub_inner, info_line)
-		--- @type string[]
-		local  args = duffle.split_top_level_commas(sub_inner)
+		local  args = duffle.split_top_level_commas(sub_inner) ---@type string[]
 		if not args[1] then return end
 		reg_overrides  = reg_overrides or {}
-		--- @type string
-		local reg_name = duffle.trim(args[1])
-		--- @type string|nil, integer
-		local type_name, depth = nil, 0
+		local reg_name = duffle.trim(args[1]) ---@type string
+		local type_name, depth = nil, 0 ---@type string|nil, integer
 		if args[2] then
-			--- @type string|nil, integer
-			local parsed_name, parsed_depth = parse_type_chain(args[2], 1)
+			local parsed_name, parsed_depth = parse_type_chain(args[2], 1) ---@type string|nil, integer
 			if parsed_name then
 				type_name, depth = parsed_name, parsed_depth
 			else
@@ -1083,8 +976,7 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 			source_line   = info_line,
 		}
 	end
-	--- @type table<string, fun(sub_inner: string, info_line: integer|nil): nil>
-	local SUBCALL_HANDLERS = {
+	local SUBCALL_HANDLERS = { ---@type table<string, fun(sub_inner: string, info_line: integer|nil): nil>
 		--- @param sub_inner string
 		--- @return nil
 		atom_bind      = function(sub_inner)            binds = duffle.trim(sub_inner)                       end, -- scan: atom_bind(<Binds_X>)
@@ -1110,23 +1002,18 @@ local function scan_atom_info_subcalls(info_inner, info_line)
 		atom_phase     = function(sub_inner, info_line) ident_handler(sub_inner, info_line, "phase_label")   end, -- scan: atom_phase(<label>)
 	}
 
-	--- @type integer
-	local sub_pos = 1
+	local sub_pos = 1 ---@type integer
 	while sub_pos <= #info_inner do
 		sub_pos = duffle.skip_ws_and_cmt(info_inner, sub_pos)
 		if sub_pos > #info_inner then break end
-		--- @type string|nil, integer
-		local sub_ident, sub_end = duffle.read_ident(info_inner, sub_pos)
+		local sub_ident, sub_end = duffle.read_ident(info_inner, sub_pos) ---@type string|nil, integer
 		if not sub_ident then
 			sub_pos = sub_pos + 1
 		else
-			--- @type integer
-			local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end)
+			local sub_open = duffle.skip_ws_and_cmt(info_inner, sub_end) ---@type integer
 			if info_inner:sub(sub_open, sub_open) == "(" then
-				--- @type string|nil, integer
-				local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open)
-				--- @type fun(sub_inner: string, info_line: integer|nil): nil|nil
-				local handler               = SUBCALL_HANDLERS[sub_ident]
+				local sub_inner, sub_after2 = duffle.read_parens(info_inner, sub_open) ---@type string|nil, integer
+				local handler               = SUBCALL_HANDLERS[sub_ident] ---@type fun(sub_inner: string, info_line: integer|nil): nil|nil
 				if handler then handler(sub_inner, info_line) end
 				sub_pos = sub_after2
 			else
@@ -1144,8 +1031,7 @@ end
 local function scan_skip_qualifiers(source, pos)
 	while true do
 		pos = duffle.skip_ws_and_cmt(source, pos)
-		--- @type string|nil, integer
-		local  ident, after = duffle.read_ident(source, pos)
+		local  ident, after = duffle.read_ident(source, pos) ---@type string|nil, integer
 		if not ident then return pos end
 		if QUALIFIER_KEYWORDS[ident] then pos = after else return pos end
 	end
@@ -1160,57 +1046,33 @@ end
 -- symbol references resolve via the cross-source `_code_macros` registry built in two passes by `M.run`.
 
 -- Byte constants (local to this file).
---- @type integer
-local BYTE_HASH       = 0x23   -- '#'
---- @type integer
-local BYTE_NEWLINE    = 0x0A   -- '\n'
---- @type integer
-local BYTE_DASH       = 0x2D   -- '-'
---- @type integer
-local BYTE_COMMA      = 0x2C   -- ','
---- @type integer
-local BYTE_SEMI       = 0x3B   -- ';'
---- @type integer
-local BYTE_EQUAL      = 0x3D   -- '='
---- @type integer
-local BYTE_R          = 0x52   -- 'R'
---- @type integer
-local BYTE_UNDERSCORE = 0x5F   -- '_'
---- @type integer
-local BYTE_0          = 0x30   -- '0'
---- @type integer
-local BYTE_9          = 0x39   -- '9'
---- @type integer
-local BYTE_a          = 0x61   -- 'a'
---- @type integer
-local BYTE_f          = 0x66   -- 'f'
---- @type integer
-local BYTE_A          = 0x41   -- 'A'
---- @type integer
-local BYTE_F          = 0x46   -- 'F'
---- @type integer
-local BYTE_x          = 0x78   -- 'x'
---- @type integer
-local BYTE_X          = 0x58   -- 'X'
---- @type integer
-local BYTE_OPEN_BRACE = 0x7B   -- '{'
---- @type integer
-local BYTE_CLOSE_BRACE= 0x7D   -- '}'
---- @type integer
-local BYTE_SLASH      = 0x2F   -- '/'
---- @type integer
-local BYTE_STAR       = 0x2A   -- '*'
---- @type integer
-local BYTE_SPACE      = 0x20   -- ' '
---- @type integer
-local BYTE_TAB        = 0x09   -- '\t'
---- @type integer
-local BYTE_CR         = 0x0D   -- '\r'
+local BYTE_HASH       = 0x23   ---@type integer -- '#'
+local BYTE_NEWLINE    = 0x0A   ---@type integer -- '\n'
+local BYTE_DASH       = 0x2D   ---@type integer -- '-'
+local BYTE_COMMA      = 0x2C   ---@type integer -- ','
+local BYTE_SEMI       = 0x3B   ---@type integer -- ';'
+local BYTE_EQUAL      = 0x3D   ---@type integer -- '='
+local BYTE_R          = 0x52   ---@type integer -- 'R'
+local BYTE_UNDERSCORE = 0x5F   ---@type integer -- '_'
+local BYTE_0          = 0x30   ---@type integer -- '0'
+local BYTE_9          = 0x39   ---@type integer -- '9'
+local BYTE_a          = 0x61   ---@type integer -- 'a'
+local BYTE_f          = 0x66   ---@type integer -- 'f'
+local BYTE_A          = 0x41   ---@type integer -- 'A'
+local BYTE_F          = 0x46   ---@type integer -- 'F'
+local BYTE_x          = 0x78   ---@type integer -- 'x'
+local BYTE_X          = 0x58   ---@type integer -- 'X'
+local BYTE_OPEN_BRACE = 0x7B   ---@type integer -- '{'
+local BYTE_CLOSE_BRACE= 0x7D   ---@type integer -- '}'
+local BYTE_SLASH      = 0x2F   ---@type integer -- '/'
+local BYTE_STAR       = 0x2A   ---@type integer -- '*'
+local BYTE_SPACE      = 0x20   ---@type integer -- ' '
+local BYTE_TAB        = 0x09   ---@type integer -- '\t'
+local BYTE_CR         = 0x0D   ---@type integer -- '\r'
 
 -- Maximum chain depth when resolving `R_*_Code` symbol RHS references.
 -- Eight hops is enough for any production chain (R_TapePtr_Code -> R_T8_Code -> ...).
---- @type integer
-local CODE_MACRO_MAX_DEPTH = 8
+local CODE_MACRO_MAX_DEPTH = 8 ---@type integer
 
 -- Returns true iff the byte is one of [0-9a-fA-F].
 --- @param b integer|nil
@@ -1245,20 +1107,16 @@ end
 --- @param pos integer
 --- @return string|nil
 local function read_trailing_cmt_after(body, pos)
-	--- @type integer
-	local body_len = #body
+	local body_len = #body ---@type integer
 	while pos <= body_len do
-		--- @type integer
-		local b = body:byte(pos)
+		local b = body:byte(pos) ---@type integer
 		if    b == BYTE_SPACE or b == BYTE_TAB or b == BYTE_NEWLINE or b == BYTE_CR then
 			pos = pos + 1
 		elseif b == BYTE_SLASH then
-			--- @type integer
-			local b2 = body:byte(pos + 1)
+			local b2 = body:byte(pos + 1) ---@type integer
 			if    b2 == BYTE_STAR then
 				-- Block comment /* ... */
-				--- @type integer
-				local i = pos + 2
+				local i = pos + 2 ---@type integer
 				while i < body_len do
 					if body:byte(i) == BYTE_STAR and body:byte(i + 1) == BYTE_SLASH then
 						return body:sub(pos + 2, i - 1)
@@ -1268,8 +1126,7 @@ local function read_trailing_cmt_after(body, pos)
 				return nil  -- unterminated; treat as no comment
 			elseif b2 == BYTE_SLASH then
 				-- Line comment // ... (strip the trailing newline)
-				--- @type integer|nil
-				local end_pos = duffle.find_byte(body, BYTE_NEWLINE, pos + 2) or (body_len + 1)
+				local end_pos = duffle.find_byte(body, BYTE_NEWLINE, pos + 2) or (body_len + 1) ---@type integer|nil
 				return body:sub(pos + 2, end_pos - 1)
 			end
 			return nil
@@ -1290,14 +1147,11 @@ end
 --- so the forward declaration at the top of the file is the same upvalue the earlier `parse_enum_body_fields` closure captures.
 --- Lua 5.3 / LuaJIT upvalue semantics resolve the assignment at call time.
 parse_enum_int_literal = function(text, start)
-	--- @type integer
-	local pos = start
-	--- @type integer
-	local len = #text
+	local pos = start ---@type integer
+	local len = #text ---@type integer
 	if    pos > len then return nil, start end
 
-	--- @type integer
-	local sign = 1
+	local sign = 1 ---@type integer
 	if text:byte(pos) == BYTE_DASH then
 		sign = -1
 		pos  = pos + 1
@@ -1307,17 +1161,13 @@ parse_enum_int_literal = function(text, start)
 
 	-- Detect hex form: `0x` / `0X`. Decimal fallback otherwise.
 	if text:byte(pos) == BYTE_0 and pos + 1 <= len then
-		--- @type integer
-		local peek = text:byte(pos + 1)
+		local peek = text:byte(pos + 1) ---@type integer
 		if peek == BYTE_x or peek == BYTE_X then
 			pos = pos + 2
-			--- @type integer|nil
-			local value     = 0
-			--- @type boolean
-			local has_digit = false
+			local value     = 0 ---@type integer|nil
+			local has_digit = false ---@type boolean
 			while pos <= len do
-				--- @type integer|nil
-				local  d = hex_digit_value(text:byte(pos))
+				local  d = hex_digit_value(text:byte(pos)) ---@type integer|nil
 				if not d then break end
 				value     = value * 16 + d
 				has_digit = true
@@ -1329,11 +1179,9 @@ parse_enum_int_literal = function(text, start)
 	end
 
 	-- Decimal form.
-	--- @type integer|nil
-	local value = 0
+	local value = 0 ---@type integer|nil
 	while pos <= len do
-		--- @type integer
-		local b = text:byte(pos)
+		local b = text:byte(pos) ---@type integer
 		if not (b >= BYTE_0 and b <= BYTE_9) then break end
 		value = value * 10 + (b - BYTE_0)
 		pos   = pos + 1
@@ -1372,8 +1220,7 @@ local function lookup_code_value(sym, code_macros, code_macro_bodies, visited, d
 	if code_macros and code_macros[sym] ~= nil then return code_macros[sym] end
 
 	-- Cross-source fallback: walk the raw RHS body of the missing symbol.
-	--- @type string
-	local body = code_macro_bodies and code_macro_bodies[sym]
+	local body = code_macro_bodies and code_macro_bodies[sym] ---@type string
 	if body then
 		return resolve_code_macro_value(body, 1, code_macros, code_macro_bodies, visited, depth + 1)
 	end
@@ -1400,13 +1247,11 @@ local function resolve_code_macro_value(source, pos, code_macros, code_macro_bod
 	pos = duffle.skip_ws_and_cmt(source, pos)
 
 	-- Try integer literal first (decimal / negative / hex).
-	--- @type integer|nil, integer
-	local int_val, int_end = parse_enum_int_literal(source, pos)
+	local int_val, int_end = parse_enum_int_literal(source, pos) ---@type integer|nil, integer
 	if    int_val ~= nil then return int_val end
 
 	-- Try symbol reference (must be R_*_Code per the spec).
-	--- @type string|nil
-	local  sym = duffle.read_ident(source, pos)
+	local  sym = duffle.read_ident(source, pos) ---@type string|nil
 	if not sym then return nil end
 	if not is_r_code_macro(sym) then return nil end
 
@@ -1419,8 +1264,7 @@ local function resolve_code_macro_value(source, pos, code_macros, code_macro_bod
 
 	-- Cross-source fallback: walk the body of the missing symbol if any other source collected its RHS during pass 1a.
 	-- The body is parsed as a fresh RHS (it's the raw post-`=` text of the original `#define` line), so the chain continues transparently.
-	--- @type string
-	local body = code_macro_bodies and code_macro_bodies[sym]
+	local body = code_macro_bodies and code_macro_bodies[sym] ---@type string
 	if    body then
 		return resolve_code_macro_value(body, 1, code_macros, code_macro_bodies, visited, depth + 1)
 	end
@@ -1441,36 +1285,27 @@ end
 --- @param code_macro_bodies table<string, string>  -- bag: R_*_Code -> raw RHS text
 --- @return nil
 local function try_extract_code_macro(source, directive_start, code_macros, code_macro_bodies)
-	--- @type integer
-	local rest = duffle.skip_ws_and_cmt(source, directive_start + 1)
-	--- @type string|nil, integer
-	local kw, kw_end = duffle.read_ident(source, rest)
+	local rest = duffle.skip_ws_and_cmt(source, directive_start + 1) ---@type integer
+	local kw, kw_end = duffle.read_ident(source, rest) ---@type string|nil, integer
 	if kw ~= "define" then return end
 
-	--- @type integer
-	local  after_kw              = duffle.skip_ws_and_cmt(source, kw_end)
-	--- @type string|nil, integer
-	local  macro_name, macro_end = duffle.read_ident(source, after_kw)
+	local  after_kw              = duffle.skip_ws_and_cmt(source, kw_end) ---@type integer
+	local  macro_name, macro_end = duffle.read_ident(source, after_kw) ---@type string|nil, integer
 	if not macro_name then return end
 	if not is_r_code_macro(macro_name) then return end
 
 	-- Save the raw RHS (post-`=` text up to the line end) into the cross-source body table 
 	-- FIRST so the chain walker can fall back to it when the defining `#define` lives in a different source.
-	--- @type integer
-	local rhs_pos  = duffle.skip_ws_and_cmt(source, macro_end)
-	--- @type integer|nil
-	local rhs_end  = duffle.find_byte(source, BYTE_NEWLINE, rhs_pos) or (#source + 1)
-	--- @type string
-	local rhs_text = duffle.trim(source:sub(rhs_pos, rhs_end - 1))
+	local rhs_pos  = duffle.skip_ws_and_cmt(source, macro_end) ---@type integer
+	local rhs_end  = duffle.find_byte(source, BYTE_NEWLINE, rhs_pos) or (#source + 1) ---@type integer|nil
+	local rhs_text = duffle.trim(source:sub(rhs_pos, rhs_end - 1)) ---@type string
 	if    rhs_text ~= "" then
 		code_macro_bodies[macro_name] = rhs_text
 	end
 
 	-- Resolve RHS via per-chain visited + depth-bounded recursion.
-	--- @type table<string, boolean>  -- bag: already-walked ident -> true
-	local visited = { [macro_name] = true }
-	--- @type integer|nil
-	local value   = resolve_code_macro_value(source, rhs_pos, code_macros, code_macro_bodies, visited, 1)
+	local visited = { [macro_name] = true } ---@type table<string, boolean>  -- bag: already-walked ident -> true
+	local value   = resolve_code_macro_value(source, rhs_pos, code_macros, code_macro_bodies, visited, 1) ---@type integer|nil
 	if value ~= nil then code_macros[macro_name] = value end
 end
 
@@ -1483,16 +1318,13 @@ end
 --- @param code_macro_bodies table<string, string>  -- bag: R_*_Code -> raw RHS text
 --- @return nil
 local function scan_source_pre_pass(source, code_macros, code_macro_bodies)
-	--- @type integer
-	local pos     = 1
-	--- @type integer
-	local src_len = #source
+	local pos     = 1 ---@type integer
+	local src_len = #source ---@type integer
 	while pos <= src_len do
 		pos = duffle.skip_ws_and_cmt(source, pos)
 		if pos > src_len then break end
 		if source:byte(pos) == BYTE_HASH then
-			--- @type integer|nil
-			local pp_pos = duffle.skip_preprocessor_line(source, pos)
+			local pp_pos = duffle.skip_preprocessor_line(source, pos) ---@type integer|nil
 			if pp_pos then
 				try_extract_code_macro(source, pos, code_macros, code_macro_bodies)
 				pos = pp_pos
@@ -1516,21 +1348,18 @@ end
 local function check_bare_atom_reg(body, pos)
 	if pos > #body then return false, pos end
 
-	--- @type string|nil, integer
-	local ident, ident_end = duffle.read_ident(body, pos)
+	local ident, ident_end = duffle.read_ident(body, pos) ---@type string|nil, integer
 	if    ident ~= "atom_reg" then return false, pos end
 
 	-- Word-boundary check on the LEFT side: the byte at `pos - 1` must NOT be an alphanumeric/underscore byte (otherwise `atom_reg` is a suffix of `_not_atom_reg` or similar).
 	if pos > 1 then
-		--- @type integer
-		local prev = body:byte(pos - 1)
+		local prev = body:byte(pos - 1) ---@type integer
 		if duffle.is_alnum_byte(prev) then return false, pos end
 	end
 
 	-- Word-boundary check on the RIGHT side: the byte at `ident_end` must NOT be an alphanumeric/underscore byte (otherwise `atom_reg` is a prefix of a longer identifier).
 	if ident_end <= #body then
-		--- @type integer
-		local nxt = body:byte(ident_end)
+		local nxt = body:byte(ident_end) ---@type integer
 		if duffle.is_alnum_byte(nxt) then return false, pos end
 	end
 
@@ -1547,39 +1376,30 @@ end
 local function parse_enum_atom_type_default(body, pos)
 	if pos > #body then return nil, 0, pos end
 	-- Bare `atom_type` word with word-bounding on both sides.
-	--- @type string|nil, integer
-	local ident, ident_end = duffle.read_ident(body, pos)
+	local ident, ident_end = duffle.read_ident(body, pos) ---@type string|nil, integer
 	if    ident ~= "atom_type" then return nil, 0, pos end
 	if pos > 1 then
-		--- @type integer
-		local prev = body:byte(pos - 1)
+		local prev = body:byte(pos - 1) ---@type integer
 		if duffle.is_alnum_byte(prev) then return nil, 0, pos end
 	end
 	if ident_end <= #body then
-		--- @type integer
-		local nxt = body:byte(ident_end)
+		local nxt = body:byte(ident_end) ---@type integer
 		if duffle.is_alnum_byte(nxt) then return nil, 0, pos end
 	end
 	-- Expect `( ... )` immediately after.
-	--- @type integer
-	local open_pos = duffle.skip_ws_and_cmt(body, ident_end)
+	local open_pos = duffle.skip_ws_and_cmt(body, ident_end) ---@type integer
 	if    open_pos > #body or body:sub(open_pos, open_pos) ~= "(" then return nil, 0, pos end
-	--- @type string|nil, integer
-	local inner, after_close = duffle.read_parens(body, open_pos)
+	local inner, after_close = duffle.read_parens(body, open_pos) ---@type string|nil, integer
 	-- Reject any trailing tokens past the close paren other than comma / close-brace (next enum entry / end of enum).
-	--- @type integer
-	local residue = duffle.skip_ws_and_cmt(body, after_close)
+	local residue = duffle.skip_ws_and_cmt(body, after_close) ---@type integer
 	if    residue <= #body then
-		--- @type integer
-		local rbyte = body:byte(residue)
+		local rbyte = body:byte(residue) ---@type integer
 		if rbyte ~= BYTE_COMMA and rbyte ~= BYTE_CLOSE_BRACE then return nil, 0, pos end
 	end
 	-- Parse the type chain inside the parens (e.g. `V4_S2*` -> ("V4_S2", 1)).
-	--- @type string|nil, integer, integer
-	local  type_name, depth, after_chain = parse_type_chain(inner, 1)
+	local  type_name, depth, after_chain = parse_type_chain(inner, 1) ---@type string|nil, integer, integer
 	if not type_name then return nil, 0, pos end
-	--- @type integer
-	local end_check = duffle.skip_ws_and_cmt(inner, after_chain)
+	local end_check = duffle.skip_ws_and_cmt(inner, after_chain) ---@type integer
 	if    end_check <= #inner then return nil, 0, pos end
 	return type_name, depth, duffle.skip_ws_and_cmt(body, after_close)
 end
@@ -1619,22 +1439,16 @@ end
 --- @param out       SourceScan
 --- @return integer -- source cursor position to resume from
 local function parse_dbg_skip_marker(source, pos, ident_end, line_of, out)
-	--- @type string
-	local marker_kind = source:sub(pos, ident_end - 1)
+	local marker_kind = source:sub(pos, ident_end - 1) ---@type string
 
 	-- Diagnostic-only detection of an invalid following `(...)`.
 	-- The cursor is advanced past the `()` either way to keep token order coherent for the next scan iteration.
-	--- @type integer
-	local marker_end  = ident_end
-	--- @type integer
-	local open_paren  = duffle.skip_ws_and_cmt(source, ident_end)
-	--- @type boolean
-	local has_parens  = false
-	--- @type string[]
-	local args        = nil
+	local marker_end  = ident_end ---@type integer
+	local open_paren  = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
+	local has_parens  = false ---@type boolean
+	local args        = nil ---@type string[]
 	if source:sub(open_paren, open_paren) == "(" then
-		--- @type string|nil, integer
-		local inner, after_paren = duffle.read_parens(source, open_paren)
+		local inner, after_paren = duffle.read_parens(source, open_paren) ---@type string|nil, integer
 		marker_end = after_paren
 		has_parens = true
 		args       = duffle.trim(inner)
@@ -1665,21 +1479,15 @@ end
 --- @param out       SourceScan
 --- @return integer
 local function parse_auto_reg_marker(source, pos, ident_end, line_of, out)
-	--- @type string
-	local marker_kind = source:sub(pos, ident_end - 1)  -- "atom_auto_reg" or "phase_auto_reg"
-	--- @type string
-	local scope_kind  = marker_kind == "atom_auto_reg" and "atom" or "phase"
+	local marker_kind = source:sub(pos, ident_end - 1)  ---@type string -- "atom_auto_reg" or "phase_auto_reg"
+	local scope_kind  = marker_kind == "atom_auto_reg" and "atom" or "phase" ---@type string
 
-	--- @type string|nil, integer
-	local inner, after_paren = read_parens_after(source, ident_end)
+	local inner, after_paren = read_parens_after(source, ident_end) ---@type string|nil, integer
 	if not inner then return after_paren end
 
-	--- @type string[]
-	local args = duffle.split_top_level_commas(inner)
-	--- @type string
-	local scope_name = args[1] and duffle.trim(args[1]) or nil
-	--- @type string
-	local sym        = args[2] and duffle.trim(args[2]) or nil
+	local args = duffle.split_top_level_commas(inner) ---@type string[]
+	local scope_name = args[1] and duffle.trim(args[1]) or nil ---@type string
+	local sym        = args[2] and duffle.trim(args[2]) or nil ---@type string
 
 	-- Filter: only accept `R_<Sym>` form (matches `^R_[%w_]+$`).
 	if scope_name and sym and sym:match("^R_[%w_]+$") then
@@ -1706,21 +1514,16 @@ end
 --- @param out SourceScan
 --- @return integer
 local function parse_atom_dbg_reg_default(source, pos, ident_end, line_of, out)
-	--- @type string|nil, integer
-	local  inner, after_paren = read_parens_after(source, ident_end)
+	local  inner, after_paren = read_parens_after(source, ident_end) ---@type string|nil, integer
 	if not inner then return after_paren end
-	--- @type string[]
-	local args = duffle.split_top_level_commas(inner)
+	local args = duffle.split_top_level_commas(inner) ---@type string[]
 	if   #args < 1 then
 		-- Annotation pass surfaces this; we still consume the marker.
 		return after_paren
 	end
-	--- @type string
-	local reg_name         = duffle.trim(args[1])
-	--- @type string
-	local type_part        = args[2] or "void"
-	--- @type string|nil, integer
-	local type_name, depth = parse_type_chain(type_part, 1)
+	local reg_name         = duffle.trim(args[1]) ---@type string
+	local type_part        = args[2] or "void" ---@type string
+	local type_name, depth = parse_type_chain(type_part, 1) ---@type string|nil, integer
 	if not type_name then type_name, depth = duffle.trim(type_part), 0 end
 	out.types[reg_name] = {
 		name          = reg_name,
@@ -1747,21 +1550,15 @@ end
 --- @param dest AtomInfoEntry[]|nil
 --- @return integer
 local function parse_atom_info_after_decl(source, after_paren, raw_name, line_of, out, dest)
-	--- @type integer
-	local lookahead            = duffle.skip_ws_and_cmt(source, after_paren)
-	--- @type string|nil, integer
-	local look_ident, look_end = duffle.read_ident(source, lookahead)
+	local lookahead            = duffle.skip_ws_and_cmt(source, after_paren) ---@type integer
+	local look_ident, look_end = duffle.read_ident(source, lookahead) ---@type string|nil, integer
 	if    look_ident ~= "atom_info" then return after_paren end
-	--- @type integer
-	local info_open = duffle.skip_ws_and_cmt(source, look_end)
+	local info_open = duffle.skip_ws_and_cmt(source, look_end) ---@type integer
 	if source:sub(info_open, info_open) ~= "(" then return after_paren end
-	--- @type string|nil, integer
-	local  info_inner, info_after = duffle.read_parens(source, info_open)
+	local  info_inner, info_after = duffle.read_parens(source, info_open) ---@type string|nil, integer
 	if not info_inner then return after_paren end
-	--- @type integer
-	local info_line = line_of(info_open)
-	--- @type string|nil, string[]|nil, string[]|nil, string|nil, table<string, RegTypeOverride>|nil, string|nil, string|nil
-	local ai_binds, ai_reads, ai_writes, ai_view, ai_overrides, ai_ctx, ai_phase = scan_atom_info_subcalls(info_inner, info_line)
+	local info_line = line_of(info_open) ---@type integer
+	local ai_binds, ai_reads, ai_writes, ai_view, ai_overrides, ai_ctx, ai_phase = scan_atom_info_subcalls(info_inner, info_line) ---@type string|nil, string[]|nil, string[]|nil, string|nil, table<string, RegTypeOverride>|nil, string|nil, string|nil
 	dest = dest or out.atom_infos
 	dest[#dest + 1] = {
 		atom_name          = raw_name or "?", binds = ai_binds,
@@ -1797,8 +1594,7 @@ local function parse_atom_info_after_decl(source, after_paren, raw_name, line_of
 	return info_after
 end
 
---- @type table<string, DeclForm>
-local DECL_FORMS = {
+local DECL_FORMS = { ---@type table<string, DeclForm>
 	MipsAtom_ = {
 		kind      = "atom",
 		name      = "paren_ident",
@@ -1842,18 +1638,15 @@ local DECL_FORMS = {
 --- @param open_paren integer
 --- @return string|nil, integer|nil
 local function last_brace_body(inner, open_paren)
-	--- @type integer
-	local last_brace_pos = nil
-	--- @type integer
-	for search_pos = #inner, 1, -1 do
+	local last_brace_pos = nil ---@type integer
+	for search_pos = #inner, 1, -1 do ---@type integer
 		if inner:sub(search_pos, search_pos) == "{" then
 			last_brace_pos = search_pos
 			break
 		end
 	end
 	if not last_brace_pos then return nil end
-	--- @type string|nil, integer
-	local body, close_pos = duffle.read_braces(inner, last_brace_pos)
+	local body, close_pos = duffle.read_braces(inner, last_brace_pos) ---@type string|nil, integer
 	if close_pos > #inner + 1 then return nil end
 	return body, open_paren + 2 + last_brace_pos
 end
@@ -1865,20 +1658,14 @@ end
 --- @param extras DeclExtras
 --- @return nil
 local function reguse_hook(source, pos, line_of, out, extras)
-	--- @type AtomEntry
-	local  entry = out.atoms[#out.atoms]
+	local  entry = out.atoms[#out.atoms] ---@type AtomEntry
 	if not entry then return end
-	--- @type string|nil, string|nil
-	local reg_use_schema_name, reg_use_param_name
+	local reg_use_schema_name, reg_use_param_name ---@type string|nil, string|nil
 	if extras.args_inner then
-		--- @type string[]
-		local arg_tokens = duffle.split_top_level_commas(extras.args_inner)
-		--- @type integer, string
-		for _, tok in ipairs(arg_tokens) do
-			--- @type string
-			local trimmed = duffle.trim(tok)
-			--- @type string, string
-			local schema_suffix, param = trimmed:match("RegUse_([%w_]+)%s+([%w_]+)$")
+		local arg_tokens = duffle.split_top_level_commas(extras.args_inner) ---@type string[]
+		for _, tok in ipairs(arg_tokens) do ---@type integer, string
+			local trimmed = duffle.trim(tok) ---@type string
+			local schema_suffix, param = trimmed:match("RegUse_([%w_]+)%s+([%w_]+)$") ---@type string, string
 			if schema_suffix then
 				if reg_use_schema_name then
 					out.reg_use_errors[#out.reg_use_errors + 1] = {
@@ -1896,8 +1683,7 @@ local function reguse_hook(source, pos, line_of, out, extras)
 	entry.reg_use_schema_name = reg_use_schema_name
 	entry.reg_use_param_name  = reg_use_param_name
 	if reg_use_schema_name and extras.func_ident then
-		--- @type string
-		local expected = "RegUse_" .. extras.func_ident
+		local expected = "RegUse_" .. extras.func_ident ---@type string
 		if reg_use_schema_name ~= expected then
 			out.reg_use_errors[#out.reg_use_errors + 1] = {
 				kind        = "reguse_name_mismatch",
@@ -1916,20 +1702,15 @@ end
 --- @param out SourceScan
 --- @return integer
 local function parse_decl_form(source, pos, ident_end, line_of, out)
-	--- @type string|nil
-	local ident = duffle.read_ident(source, pos)
-	--- @type DeclForm|nil
-	local form  = ident and DECL_FORMS[ident]
+	local ident = duffle.read_ident(source, pos) ---@type string|nil
+	local form  = ident and DECL_FORMS[ident] ---@type DeclForm|nil
 	if not form then return ident_end end
 
-	--- @type string|nil, integer, integer
-	local  inner, after_paren, open_paren = read_parens_after(source, ident_end)
+	local  inner, after_paren, open_paren = read_parens_after(source, ident_end) ---@type string|nil, integer, integer
 	if not inner then return after_paren end
 
-	--- @type DeclExtras
-	local extras = {}
-	--- @type string
-	local raw_name
+	local extras = {} ---@type DeclExtras
+	local raw_name ---@type string
 	if form.name == "paren_ident" then
 		raw_name = duffle.read_ident(inner, 1)
 		if form.strip and not raw_name then return open_paren + 1 end
@@ -1943,25 +1724,20 @@ local function parse_decl_form(source, pos, ident_end, line_of, out)
 		return open_paren + 1
 	end
 	if not raw_name then raw_name = "?" end
-	--- @type string
-	local name = form.strip and strip_ac_prefix(raw_name) or raw_name
+	local name = form.strip and strip_ac_prefix(raw_name) or raw_name ---@type string
 
 	if form.info_dest == "component_atom_infos" then
 		out.component_atom_infos = out.component_atom_infos or {}
 	end
-	--- @type AtomInfoEntry[]|nil
-	local info_dest = form.info_dest and out[form.info_dest]
+	local info_dest = form.info_dest and out[form.info_dest] ---@type AtomInfoEntry[]|nil
 
-	--- @type string|nil, integer|nil, integer|nil
-	local body, body_off, resume
+	local body, body_off, resume ---@type string|nil, integer|nil, integer|nil
 	if form.body == "braces_after" then
-		--- @type integer
-		local brace_search = after_paren
+		local brace_search = after_paren ---@type integer
 		if info_dest then
 			brace_search = parse_atom_info_after_decl(source, after_paren, name, line_of, out, info_dest)
 		end
-		--- @type integer
-		local after_brace
+		local after_brace ---@type integer
 		body, after_brace, body_off = find_body_braces(source, brace_search, open_paren + 1)
 		if not body then return after_brace end
 		resume = after_brace
@@ -1975,8 +1751,7 @@ local function parse_decl_form(source, pos, ident_end, line_of, out)
 			end
 		end
 	elseif form.body == "comma_arg_2" then
-		--- @type string[]
-		local args = duffle.split_top_level_commas(inner)
+		local args = duffle.split_top_level_commas(inner) ---@type string[]
 		if #args < 2 then return after_paren end
 		body = duffle.trim(args[2])
 		if body == "" then return after_paren end
@@ -1986,8 +1761,7 @@ local function parse_decl_form(source, pos, ident_end, line_of, out)
 		return after_paren
 	end
 
-	--- @type boolean
-	local skip_register = form.name == "paren_ident" and not form.strip
+	local skip_register = form.name == "paren_ident" and not form.strip ---@type boolean
 		and (raw_name == "?" or raw_name == "")
 	if not skip_register then
 		register_atom(out, form.kind, line_of(pos), name, body, body_off,
@@ -1997,8 +1771,7 @@ local function parse_decl_form(source, pos, ident_end, line_of, out)
 	if form.after == "reguse_hook" then
 		reguse_hook(source, pos, line_of, out, extras)
 	elseif form.after == "map_command_hook" then
-		--- @type AtomEntry
-		local entry = out.atoms[#out.atoms]
+		local entry = out.atoms[#out.atoms] ---@type AtomEntry
 		if entry then entry.map_command = body end
 	end
 
@@ -2013,18 +1786,14 @@ end
 --- @param out       SourceScan
 --- @return integer
 local function parse_mips_code(source, pos, ident_end, line_of, out)
-	--- @type integer
-	local  next_pos               = duffle.skip_ws_and_cmt(source, ident_end)
-	--- @type string|nil, integer
-	local  next_ident, next_after = duffle.read_ident(source, next_pos)
+	local  next_pos               = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
+	local  next_ident, next_after = duffle.read_ident(source, next_pos) ---@type string|nil, integer
 	if not next_ident or #next_ident <= 5 or next_ident:sub(1, 5) ~= "code_" then
 		return ident_end
 	end
 
-	--- @type string
-	local atom_name                   = next_ident:sub(6)
-	--- @type string|nil, integer, integer
-	local body, after_brace, body_off = find_body_braces(source, next_after, ident_end)
+	local atom_name                   = next_ident:sub(6) ---@type string
+	local body, after_brace, body_off = find_body_braces(source, next_after, ident_end) ---@type string|nil, integer, integer
 	if not body then return after_brace end
 	register_raw_atom(out, line_of(pos), atom_name, body, body_off, atom_name, pos)
 
@@ -2050,10 +1819,8 @@ end
 --- @param out     SourceScan
 --- @return nil
 local function register_struct_type(body, name, pos, line_of, out)
-	--- @type TypeField[]
-	local fields     = parse_struct_body_fields(body)
-	--- @type integer
-	local source_pos = line_of(pos)
+	local fields     = parse_struct_body_fields(body) ---@type TypeField[]
+	local source_pos = line_of(pos) ---@type integer
 	out.type_name_registry[name] = {
 		name          = name,
 		kind          = "struct",
@@ -2085,8 +1852,7 @@ end
 --- @param out        SourceScan
 --- @return nil
 local function register_enum_type(underlying, name, body, pos, line_of, out)
-	--- @type TypeField[]
-	local fields = parse_enum_body_fields(body)
+	local fields = parse_enum_body_fields(body) ---@type TypeField[]
 	out.type_name_registry[name] = {
 		name            = name,
 		kind            = "enum",
@@ -2139,34 +1905,26 @@ local function register_array_type(name, elem, counts, pos, line_of, out)
 	}
 end
 
---- @type fun(body: string, type_registry: table<string, TypeNameEntry>|nil, opts: RegUseParseOpts|nil): (RegUseSchema|nil, RegUseError[])
-local parse_reg_use_schema_body
+local parse_reg_use_schema_body ---@type fun(body: string, type_registry: table<string, TypeNameEntry>|nil, opts: RegUseParseOpts|nil): (RegUseSchema|nil, RegUseError[])
 
 --- @param type_name string
 --- @param type_registry table<string, TypeNameEntry>|nil
 --- @return string[]|nil
 local function fields_for_reg_type(type_name, type_registry)
-	--- @type string
-	local reg_name = "Reg_" .. type_name
-	--- @type TypeNameEntry|nil
-	local entry    = type_registry and type_registry[reg_name]
+	local reg_name = "Reg_" .. type_name ---@type string
+	local entry    = type_registry and type_registry[reg_name] ---@type TypeNameEntry|nil
 	if entry and entry.fields and #entry.fields > 0 then
-		--- @type string[]
-		local names = {}
-		--- @type integer, TypeField
-		for _, field in ipairs(entry.fields) do
+		local names = {} ---@type string[]
+		for _, field in ipairs(entry.fields) do ---@type integer, TypeField
 			if field.name then names[#names + 1] = field.name end
 		end
 		if #names > 0 then return names end
 	end
 	if entry and entry.body and parse_reg_use_schema_body then
-		--- @type RegUseSchema|nil
-		local schema = parse_reg_use_schema_body(entry.body, type_registry)
+		local schema = parse_reg_use_schema_body(entry.body, type_registry) ---@type RegUseSchema|nil
 		if schema and schema.slots then
-			--- @type string[]
-			local names = {}
-			--- @type integer, RegUseSlot
-			for _, slot in ipairs(schema.slots) do
+			local names = {} ---@type string[]
+			for _, slot in ipairs(schema.slots) do ---@type integer, RegUseSlot
 				if slot.name then names[#names + 1] = slot.name end
 			end
 			if #names > 0 then return names end
@@ -2181,18 +1939,12 @@ end
 --- @return RegUseSchema|nil, RegUseError[]
 parse_reg_use_schema_body = function(body, type_registry, opts)
 	opts = opts or {}
-	--- @type boolean
-	local require_types = opts.require_types == true
-	--- @type boolean
-	local pending       = false
-	--- @type RegUseSlot[]
-	local slots         = {}
-	--- @type table<string, string>  -- bag: alias path -> slot name
-	local alias_to_slot = {}
-	--- @type table<string, boolean>  -- bag: slot name -> true
-	local slot_names    = {}
-	--- @type RegUseError[]
-	local errors        = {}
+	local require_types = opts.require_types == true ---@type boolean
+	local pending       = false ---@type boolean
+	local slots         = {} ---@type RegUseSlot[]
+	local alias_to_slot = {} ---@type table<string, string>  -- bag: alias path -> slot name
+	local slot_names    = {} ---@type table<string, boolean>  -- bag: slot name -> true
+	local errors        = {} ---@type RegUseError[]
 
 	--- @param path string
 	--- @param slot string
@@ -2216,8 +1968,7 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 			return nil
 		end
 		slot_names[name] = true
-		--- @type RegUseSlot
-		local slot = { name = name, aliases = aliases, readonly = readonly == true }
+		local slot = { name = name, aliases = aliases, readonly = readonly == true } ---@type RegUseSlot
 		slots[#slots + 1] = slot
 		return slot
 	end
@@ -2226,12 +1977,10 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 	--- @param pos integer
 	--- @return string[]|nil, integer
 	local function parse_reg_names(text, pos)
-		--- @type string[]
-		local names = {}
+		local names = {} ---@type string[]
 		while pos <= #text do
 			pos = duffle.skip_ws_and_cmt(text, pos)
-			--- @type string|nil, integer
-			local  name, name_end = duffle.read_ident(text, pos)
+			local  name, name_end = duffle.read_ident(text, pos) ---@type string|nil, integer
 			if not name then return nil, pos end
 			names[#names + 1] = name
 			pos = duffle.skip_ws_and_cmt(text, name_end)
@@ -2245,19 +1994,16 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 		return names, pos
 	end
 
-	--- @type integer
-	local pos = 1
+	local pos = 1 ---@type integer
 	while pos <= #body do
 		pos = duffle.skip_ws_and_cmt(body, pos)
 		if pos > #body then break end
-		--- @type string|nil, integer
-		local first, first_end = duffle.read_ident(body, pos)
+		local first, first_end = duffle.read_ident(body, pos) ---@type string|nil, integer
 		if not first then
 			pos = pos + 1
 			goto continue
 		end
-		--- @type integer
-		local after = duffle.skip_ws_and_cmt(body, first_end)
+		local after = duffle.skip_ws_and_cmt(body, first_end) ---@type integer
 		if first == "const" then
 			errors[#errors + 1] = { kind = "reguse_const_reg_spelling" }
 			return nil, errors
@@ -2266,18 +2012,14 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 				errors[#errors + 1] = { kind = "reguse_malformed" }
 				return nil, errors
 			end
-			--- @type string|nil, integer
-			local inner, after_braces = duffle.read_braces(body, after)
+			local inner, after_braces = duffle.read_braces(body, after) ---@type string|nil, integer
 			if not inner then
 				errors[#errors + 1] = { kind = "reguse_malformed" }
 				return nil, errors
 			end
-			--- @type RegUseView[]
-			local views          = {}
-			--- @type boolean
-			local union_readonly = nil
-			--- @type integer
-			local inner_pos      = 1
+			local views          = {} ---@type RegUseView[]
+			local union_readonly = nil ---@type boolean
+			local inner_pos      = 1 ---@type integer
 
 			--- @param flag boolean
 			--- @return boolean
@@ -2294,8 +2036,7 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 			while inner_pos <= #inner do
 				inner_pos = duffle.skip_ws_and_cmt(inner, inner_pos)
 				if inner_pos > #inner then break end
-				--- @type string|nil, integer
-				local m_type, m_type_end = duffle.read_ident(inner, inner_pos)
+				local m_type, m_type_end = duffle.read_ident(inner, inner_pos) ---@type string|nil, integer
 				if not m_type then
 					inner_pos = inner_pos + 1
 					goto continue_inner
@@ -2306,23 +2047,19 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 				end
 
 				if m_type == "Reg_" then
-					--- @type integer
-					local after_ty = duffle.skip_ws_and_cmt(inner, m_type_end)
+					local after_ty = duffle.skip_ws_and_cmt(inner, m_type_end) ---@type integer
 					if inner:sub(after_ty, after_ty) ~= "(" then
 						errors[#errors + 1] = { kind = "reguse_malformed" }
 						return nil, errors
 					end
-					--- @type string|nil, integer
-					local type_inner, after_paren = duffle.read_parens(inner, after_ty)
+					local type_inner, after_paren = duffle.read_parens(inner, after_ty) ---@type string|nil, integer
 					if not type_inner then
 						errors[#errors + 1] = { kind = "reguse_malformed" }
 						return nil, errors
 					end
-					--- @type string
-					local typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry)
+					local typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry) ---@type string
 					after_paren = duffle.skip_ws_and_cmt(inner, after_paren)
-					--- @type string[]|nil, integer
-					local inst_names, new_inner = parse_reg_names(inner, after_paren)
+					local inst_names, new_inner = parse_reg_names(inner, after_paren) ---@type string[]|nil, integer
 					if not inst_names or #inst_names == 0 then
 						errors[#errors + 1] = { kind = "reguse_malformed" }
 						return nil, errors
@@ -2335,12 +2072,9 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 						end
 						pending = true
 					else
-						--- @type integer, string
-						for _, inst in ipairs(inst_names) do
-							--- @type string[]
-							local names = {}
-							--- @type integer, string
-							for _, field in ipairs(typed_fields) do
+						for _, inst in ipairs(inst_names) do ---@type integer, string
+							local names = {} ---@type string[]
+							for _, field in ipairs(typed_fields) do ---@type integer, string
 								names[#names + 1] = inst .. "." .. field
 							end
 							views[#views + 1] = { names = names, lanes = true }
@@ -2349,11 +2083,9 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 					inner_pos = new_inner
 
 				elseif m_type == "struct" then
-					--- @type integer
-					local after_struct = duffle.skip_ws_and_cmt(inner, m_type_end)
+					local after_struct = duffle.skip_ws_and_cmt(inner, m_type_end) ---@type integer
 					if inner:sub(after_struct, after_struct) ~= "{" then
-						--- @type string|nil, integer
-						local _, tag_end = duffle.read_ident(inner, after_struct)
+						local _, tag_end = duffle.read_ident(inner, after_struct) ---@type string|nil, integer
 						if not tag_end then
 							errors[#errors + 1] = { kind = "reguse_malformed" }
 							return nil, errors
@@ -2364,43 +2096,35 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 						errors[#errors + 1] = { kind = "reguse_malformed" }
 						return nil, errors
 					end
-					--- @type string|nil, integer
-					local struct_inner, after_struct_braces = duffle.read_braces(inner, after_struct)
+					local struct_inner, after_struct_braces = duffle.read_braces(inner, after_struct) ---@type string|nil, integer
 					if not struct_inner then
 						errors[#errors + 1] = { kind = "reguse_malformed" }
 						return nil, errors
 					end
-					--- @type string[]
-					local lane_names = {}
-					--- @type integer
-					local s_pos = 1
+					local lane_names = {} ---@type string[]
+					local s_pos = 1 ---@type integer
 					while s_pos <= #struct_inner do
 						s_pos = duffle.skip_ws_and_cmt(struct_inner, s_pos)
 						if s_pos > #struct_inner then break end
-						--- @type string|nil, integer
-						local  s_ty, s_ty_end = duffle.read_ident(struct_inner, s_pos)
+						local  s_ty, s_ty_end = duffle.read_ident(struct_inner, s_pos) ---@type string|nil, integer
 						if not s_ty then
 							s_pos = s_pos + 1
 							goto continue_struct
 						end
 						if s_ty == "Reg_" then
-							--- @type integer
-							local after_ty = duffle.skip_ws_and_cmt(struct_inner, s_ty_end)
+							local after_ty = duffle.skip_ws_and_cmt(struct_inner, s_ty_end) ---@type integer
 							if struct_inner:sub(after_ty, after_ty) ~= "(" then
 								errors[#errors + 1] = { kind = "reguse_malformed" }
 								return nil, errors
 							end
-							--- @type string|nil, integer
-							local  type_inner, after_paren = duffle.read_parens(struct_inner, after_ty)
+							local  type_inner, after_paren = duffle.read_parens(struct_inner, after_ty) ---@type string|nil, integer
 							if not type_inner then
 								errors[#errors + 1] = { kind = "reguse_malformed" }
 								return nil, errors
 							end
-							--- @type string
-							local typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry)
+							local typed_fields = fields_for_reg_type(duffle.trim(type_inner), type_registry) ---@type string
 							after_paren = duffle.skip_ws_and_cmt(struct_inner, after_paren)
-							--- @type string[]|nil, integer
-							local  inst_names, new_s = parse_reg_names(struct_inner, after_paren)
+							local  inst_names, new_s = parse_reg_names(struct_inner, after_paren) ---@type string[]|nil, integer
 							if not inst_names or #inst_names == 0 then
 								errors[#errors + 1] = { kind = "reguse_malformed" }
 								return nil, errors
@@ -2413,35 +2137,28 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 								end
 								pending = true
 							else
-								--- @type integer, string
-								for _, inst in ipairs(inst_names) do
-									--- @type integer, string
-									for _, field in ipairs(typed_fields) do
+								for _, inst in ipairs(inst_names) do ---@type integer, string
+									for _, field in ipairs(typed_fields) do ---@type integer, string
 										lane_names[#lane_names + 1] = inst .. "." .. field
 									end
 								end
 							end
 							s_pos = new_s
 						elseif s_ty == "Reg" then
-							--- @type integer
-							local s_after    = duffle.skip_ws_and_cmt(struct_inner, s_ty_end)
-							--- @type boolean
-							local s_readonly = false
-							--- @type string|nil, integer
-							local maybe_const, maybe_end = duffle.read_ident(struct_inner, s_after)
+							local s_after    = duffle.skip_ws_and_cmt(struct_inner, s_ty_end) ---@type integer
+							local s_readonly = false ---@type boolean
+							local maybe_const, maybe_end = duffle.read_ident(struct_inner, s_after) ---@type string|nil, integer
 							if maybe_const == "const" then
 								s_readonly = true
 								s_after = duffle.skip_ws_and_cmt(struct_inner, maybe_end)
 							end
 							if not note_readonly(s_readonly) then return nil, errors end
-							--- @type string[]|nil, integer
-							local  names, new_s = parse_reg_names(struct_inner, s_after)
+							local  names, new_s = parse_reg_names(struct_inner, s_after) ---@type string[]|nil, integer
 							if not names or #names == 0 then
 								errors[#errors + 1] = { kind = "reguse_malformed" }
 								return nil, errors
 							end
-							--- @type integer, string
-							for _, n in ipairs(names) do lane_names[#lane_names + 1] = n end
+							for _, n in ipairs(names) do lane_names[#lane_names + 1] = n end ---@type integer, string
 							s_pos = new_s
 						else
 							errors[#errors + 1] = { kind = "reguse_malformed" }
@@ -2460,19 +2177,15 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 					if inner:sub(inner_pos, inner_pos) == ";" then inner_pos = inner_pos + 1 end
 
 				elseif m_type == "Reg" then
-					--- @type integer
-					local m_after    = duffle.skip_ws_and_cmt(inner, m_type_end)
-					--- @type boolean
-					local m_readonly = false
-					--- @type string|nil, integer
-					local maybe_const, maybe_end = duffle.read_ident(inner, m_after)
+					local m_after    = duffle.skip_ws_and_cmt(inner, m_type_end) ---@type integer
+					local m_readonly = false ---@type boolean
+					local maybe_const, maybe_end = duffle.read_ident(inner, m_after) ---@type string|nil, integer
 					if maybe_const == "const" then
 						m_readonly = true
 						m_after    = duffle.skip_ws_and_cmt(inner, maybe_end)
 					end
 					if not note_readonly(m_readonly) then return nil, errors end
-					--- @type string[]|nil, integer
-					local names, new_inner = parse_reg_names(inner, m_after)
+					local names, new_inner = parse_reg_names(inner, m_after) ---@type string[]|nil, integer
 					if not names or #names == 0 then
 						errors[#errors + 1] = { kind = "reguse_malformed" }
 						return nil, errors
@@ -2486,10 +2199,8 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 				::continue_inner::
 			end
 
-			--- @type integer
-			local after_close         = duffle.skip_ws_and_cmt(body, after_braces)
-			--- @type string|nil, integer
-			local inst_name, inst_end = duffle.read_ident(body, after_close)
+			local after_close         = duffle.skip_ws_and_cmt(body, after_braces) ---@type integer
+			local inst_name, inst_end = duffle.read_ident(body, after_close) ---@type string|nil, integer
 
 			if #views == 0 then
 				if not pending then
@@ -2497,18 +2208,14 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 					return nil, errors
 				end
 			else
-			--- @type boolean
-			local has_lanes = false
-			--- @type integer, RegUseView
-			for _, v in ipairs(views) do
+			local has_lanes = false ---@type boolean
+			for _, v in ipairs(views) do ---@type integer, RegUseView
 				if v.lanes then has_lanes = true end
 			end
 
 			if has_lanes then
-				--- @type integer
-				local width = nil
-				--- @type integer, RegUseView
-				for _, v in ipairs(views) do
+				local width = nil ---@type integer
+				for _, v in ipairs(views) do ---@type integer, RegUseView
 					if not v.lanes then
 						errors[#errors + 1] = { kind = "reguse_malformed" }
 						return nil, errors
@@ -2521,17 +2228,12 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 					end
 				end
 				if width then
-					--- @type integer
-					for i = 1, width do
-						--- @type string
-						local slot_name = views[1].names[i]
+					for i = 1, width do ---@type integer
+						local slot_name = views[1].names[i] ---@type string
 						if inst_name then slot_name = inst_name .. "." .. slot_name end
-						--- @type string[]
-						local aliases = {}
-						--- @type integer, RegUseView
-						for _, v in ipairs(views) do
-							--- @type integer
-							local n = v.names[i]
+						local aliases = {} ---@type string[]
+						for _, v in ipairs(views) do ---@type integer, RegUseView
+							local n = v.names[i] ---@type integer
 							if inst_name then n = inst_name .. "." .. n end
 							if not add_alias(n, slot_name) then return nil, errors end
 							aliases[#aliases + 1] = n
@@ -2540,30 +2242,22 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 					end
 				end
 			else
-				--- @type string[]
-				local members = {}
-				--- @type integer, RegUseView
-				for _, v in ipairs(views) do
-					--- @type integer, integer
-					for _, n in ipairs(v.names) do members[#members + 1] = n end
+				local members = {} ---@type string[]
+				for _, v in ipairs(views) do ---@type integer, RegUseView
+					for _, n in ipairs(v.names) do members[#members + 1] = n end ---@type integer, integer
 				end
-				--- @type string[]
-				local aliases = {}
-				--- @type string
-				local slot_name
+				local aliases = {} ---@type string[]
+				local slot_name ---@type string
 				if inst_name then
 					slot_name = inst_name
-					--- @type integer, string
-					for _, m in ipairs(members) do
-						--- @type string
-						local path = inst_name .. "." .. m
+					for _, m in ipairs(members) do ---@type integer, string
+						local path = inst_name .. "." .. m ---@type string
 						if not add_alias(path, slot_name) then return nil, errors end
 						aliases[#aliases + 1] = path
 					end
 				else
 					slot_name = members[1]
-					--- @type integer, string
-					for _, m in ipairs(members) do
+					for _, m in ipairs(members) do ---@type integer, string
 						if not add_alias(m, slot_name) then return nil, errors end
 						aliases[#aliases + 1] = m
 					end
@@ -2577,21 +2271,18 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 			if body:sub(after_close, after_close) == ";" then after_close = after_close + 1 end
 			pos = after_close
 		elseif first == "Reg" or first == "Reg_" then
-			--- @type string[]|nil
-			local typed_fields = nil
+			local typed_fields = nil ---@type string[]|nil
 			if first == "Reg_" then
 				if body:sub(after, after) ~= "(" then
 					errors[#errors + 1] = { kind = "reguse_malformed" }
 					return nil, errors
 				end
-				--- @type string|nil, integer
-				local  type_inner, after_paren = duffle.read_parens(body, after)
+				local  type_inner, after_paren = duffle.read_parens(body, after) ---@type string|nil, integer
 				if not type_inner then
 					errors[#errors + 1] = { kind = "reguse_malformed" }
 					return nil, errors
 				end
-				--- @type string
-				local type_ident = duffle.trim(type_inner)
+				local type_ident = duffle.trim(type_inner) ---@type string
 				typed_fields = fields_for_reg_type(type_ident, type_registry)
 				if not typed_fields then
 					if require_types then
@@ -2602,28 +2293,22 @@ parse_reg_use_schema_body = function(body, type_registry, opts)
 				end
 				after = duffle.skip_ws_and_cmt(body, after_paren)
 			end
-			--- @type boolean
-			local readonly = false
-			--- @type string|nil, integer
-			local maybe_const, maybe_end = duffle.read_ident(body, after)
+			local readonly = false ---@type boolean
+			local maybe_const, maybe_end = duffle.read_ident(body, after) ---@type string|nil, integer
 			if maybe_const == "const" then
 				readonly = true
 				after = duffle.skip_ws_and_cmt(body, maybe_end)
 			end
-			--- @type string[]|nil, integer
-			local  names, new_pos = parse_reg_names(body, after)
+			local  names, new_pos = parse_reg_names(body, after) ---@type string[]|nil, integer
 			if not names or #names == 0 then
 				errors[#errors + 1] = { kind = "reguse_malformed" }
 				return nil, errors
 			end
-			--- @type integer, string
-			for _, n in ipairs(names) do
+			for _, n in ipairs(names) do ---@type integer, string
 				if first == "Reg_" then
 					if typed_fields then
-						--- @type integer, string
-						for _, field in ipairs(typed_fields) do
-							--- @type string
-							local path = n .. "." .. field
+						for _, field in ipairs(typed_fields) do ---@type integer, string
+							local path = n .. "." .. field ---@type string
 							if not add_alias(path, path) then return nil, errors end
 							if not add_slot(path, { path }, readonly) then return nil, errors end
 						end
@@ -2661,27 +2346,22 @@ end
 --- @param after_typedef integer
 --- @return integer
 local function parse_typedef_struct(source, pos, id2_end, line_of, out, after_typedef)
-	--- @type string|nil, integer, integer
-	local  inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end)
+	local  inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end) ---@type string|nil, integer, integer
 	if not inner then return id2_end end
-	--- @type string
-	local name = duffle.trim(inner)
+	local name = duffle.trim(inner) ---@type string
 
-	--- @type string|nil, integer
-	local body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
+	local body, after_brace = find_body_braces(source, after_paren, open_paren + 1) ---@type string|nil, integer
 	if not body then return after_brace end
 	register_struct_type(body, name, pos, line_of, out)
 	if name:sub(1, 7) == "RegUse_" then
-		--- @type RegUseSchema|nil, RegUseError[]
-		local schema, schema_errors = parse_reg_use_schema_body(body, out.type_name_registry)
+		local schema, schema_errors = parse_reg_use_schema_body(body, out.type_name_registry) ---@type RegUseSchema|nil, RegUseError[]
 		if schema then
 			schema.name        = name
 			schema.source_file = out._source_file
 			schema.source_line = line_of(pos)
 			out.reg_use_schemas[name] = schema
 		end
-		--- @type integer, RegUseError
-		for _, err in ipairs(schema_errors or {}) do
+		for _, err in ipairs(schema_errors or {}) do ---@type integer, RegUseError
 			err.schema_name = name
 			err.source_file = out._source_file
 			err.source_line = line_of(pos)
@@ -2701,20 +2381,15 @@ end
 --- @param after_typedef integer
 --- @return integer
 local function parse_typedef_enum (source, pos, id2_end, line_of, out, after_typedef)
-	--- @type string|nil, integer, integer
-	local  inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end)
+	local  inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end) ---@type string|nil, integer, integer
 	if not inner then return id2_end end
 	-- Split `inner` on the first top-level comma into (<underlying>, <name>).
-	--- @type string[]
-	local args = duffle.split_top_level_commas(inner)
+	local args = duffle.split_top_level_commas(inner) ---@type string[]
 	if   #args < 2 then return after_paren end
-	--- @type string
-	local underlying = duffle.trim(args[1])
-	--- @type string
-	local name       = duffle.trim(args[2])
+	local underlying = duffle.trim(args[1]) ---@type string
+	local name       = duffle.trim(args[2]) ---@type string
 
-	--- @type string|nil, integer
-	local  body, after_brace = find_body_braces(source, after_paren, open_paren + 1)
+	local  body, after_brace = find_body_braces(source, after_paren, open_paren + 1) ---@type string|nil, integer
 	if not body then return after_brace end
 	register_enum_type(underlying, name, body, pos, line_of, out)
 	attach_debug_skip_marker(out, "unrelated")
@@ -2730,11 +2405,9 @@ end
 --- @param after_typedef integer
 --- @return integer
 local function parse_typedef_tset (source, pos, id2_end, line_of, out, after_typedef)
-	--- @type string|nil, integer
-	local  inner, after_paren = read_parens_after(source, id2_end, id2_end)
+	local  inner, after_paren = read_parens_after(source, id2_end, id2_end) ---@type string|nil, integer
 	if not inner then return id2_end end
-	--- @type string
-	local tset_name = duffle.trim(inner)
+	local tset_name = duffle.trim(inner) ---@type string
 	-- Empty underlying span is acceptable; the TSet_ wrapper itself encodes the alias identity (per the duffle TSet_ convention).
 	register_typedef_alias("", tset_name, pos, line_of, out)
 	attach_debug_skip_marker(out, "unrelated")
@@ -2749,30 +2422,23 @@ end
 --- @param after_typedef integer
 --- @return integer
 local function parse_typedef_array(source, pos, id2_end, line_of, out, after_typedef)
-	--- @type string|nil, integer
-	local inner, after_paren = read_parens_after(source, id2_end, id2_end)
+	local inner, after_paren = read_parens_after(source, id2_end, id2_end) ---@type string|nil, integer
 	if not inner then return id2_end end
-	--- @type string[]
-	local args = duffle.split_top_level_commas(inner)
+	local args = duffle.split_top_level_commas(inner) ---@type string[]
 	if #args < 2 then return after_paren end
-	--- @type string
-	local elem = duffle.trim(args[1])
-	--- @type string
-	local len  = tonumber(duffle.trim(args[2]), 10)
+	local elem = duffle.trim(args[1]) ---@type string
+	local len  = tonumber(duffle.trim(args[2]), 10) ---@type string
 	if type(elem) ~= "string" or elem == "" or not len or len < 1 or len ~= math.floor(len) then
 		return after_paren
 	end
-	--- @type string
-	local name = "A" .. tostring(len) .. "_" .. elem
+	local name = "A" .. tostring(len) .. "_" .. elem ---@type string
 	register_array_type(name, elem, { len }, pos, line_of, out)
 	attach_debug_skip_marker(out, "unrelated")
-	--- @type integer|nil
-	local semi = duffle.find_byte(source, BYTE_SEMI, after_paren)
+	local semi = duffle.find_byte(source, BYTE_SEMI, after_paren) ---@type integer|nil
 	return semi and (semi + 1) or after_paren
 end
 
---- @type table<string, fun(source: string, pos: integer, id2_end: integer, line_of: fun(pos: integer): integer, out: SourceScan, after_typedef: integer): integer>
-local TYPE_FORMS = {
+local TYPE_FORMS = { ---@type table<string, fun(source: string, pos: integer, id2_end: integer, line_of: fun(pos: integer): integer, out: SourceScan, after_typedef: integer): integer>
 	Struct_ = parse_typedef_struct,
 	Enum_   = parse_typedef_enum,
 	TSet_   = parse_typedef_tset,
@@ -2799,13 +2465,10 @@ local TYPE_FORMS = {
 --- @param out       SourceScan
 --- @return          integer
 local function parse_typedef_binds(source, pos, ident_end, line_of, out)
-	--- @type integer
-	local  after_typedef = duffle.skip_ws_and_cmt(source, ident_end)
-	--- @type string|nil, integer
-	local  id2, id2_end  = duffle.read_ident(source, after_typedef)
+	local  after_typedef = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
+	local  id2, id2_end  = duffle.read_ident(source, after_typedef) ---@type string|nil, integer
 	if not id2 then return ident_end end
-	--- @type DeclForm|nil
-	local form = TYPE_FORMS[id2]
+	local form = TYPE_FORMS[id2] ---@type DeclForm|nil
 	if form then
 		return form(source, pos, id2_end, line_of, out, after_typedef)
 	end
@@ -2831,37 +2494,27 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 	-- Struct_/Enum_ declarations carry their own dedicated parser paths above; this branch only handles non-Struct_/Enum_ typedefs.
 
 	-- Find the terminating `;` (BYTE_SEMI). If absent, abort cleanly.
-	--- @type integer|nil
-	local  semi_pos = duffle.find_byte(source, BYTE_SEMI, id2_end)
+	local  semi_pos = duffle.find_byte(source, BYTE_SEMI, id2_end) ---@type integer|nil
 	if not semi_pos then return id2_end end
 
 	-- Walk idents forward to find the alias ident (last ident before `;`), or the TSet_(<arg>) form (capture the arg, use it as the alias).
-	--- @type string
-	local last_ident      = nil
-	--- @type integer
-	local last_ident_pos  = nil
-	--- @type integer
-	local last_ident_end  = nil
-	--- @type string
-	local tset_arg        = nil
-	--- @type integer
-	local tset_arg_end    = nil
-	--- @type integer
-	local tset_pos        = nil
+	local last_ident      = nil ---@type string
+	local last_ident_pos  = nil ---@type integer
+	local last_ident_end  = nil ---@type integer
+	local tset_arg        = nil ---@type string
+	local tset_arg_end    = nil ---@type integer
+	local tset_pos        = nil ---@type integer
 
-	--- @type SourceScan
-	local scan = id2_end
+	local scan = id2_end ---@type SourceScan
 	while scan < semi_pos do
 		scan = duffle.skip_ws_and_cmt(source, scan)
 		if scan >= semi_pos then break end
-		--- @type string|nil, integer
-		local  id, id_end = duffle.read_ident(source, scan)
+		local  id, id_end = duffle.read_ident(source, scan) ---@type string|nil, integer
 		if not id then
 			scan = scan + 1
 		elseif id == "TSet_" then
 			-- Shape 4 (TSet_ at non-id2 position): grab the parenthesized argument.
-			--- @type string|nil, integer
-			local inner, after_paren = read_parens_after(source, id_end, id_end)
+			local inner, after_paren = read_parens_after(source, id_end, id_end) ---@type string|nil, integer
 			if    inner then
 				tset_arg     = duffle.trim(inner)
 				tset_arg_end = after_paren
@@ -2881,19 +2534,15 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 	-- C-array suffix: `typedef S2 A3x3_S2[3][3];` → kind=array, not a typedef alias.
 	-- Malformed `[` / non-decimal dims fall through to the typedef-alias path.
 	if last_ident and not tset_arg then
-		--- @type integer[]
-		local dims = {}
-		--- @type integer
-		local dim_scan = duffle.skip_ws_and_cmt(source, last_ident_end)
+		local dims = {} ---@type integer[]
+		local dim_scan = duffle.skip_ws_and_cmt(source, last_ident_end) ---@type integer
 		while dim_scan < semi_pos and source:sub(dim_scan, dim_scan) == "[" do
-			--- @type boolean
-			local close = source:find("]", dim_scan + 1, true)
+			local close = source:find("]", dim_scan + 1, true) ---@type boolean
 			if not close or close >= semi_pos then
 				dims = nil
 				break
 			end
-			--- @type string
-			local n = tonumber(duffle.trim(source:sub(dim_scan + 1, close - 1)), 10)
+			local n = tonumber(duffle.trim(source:sub(dim_scan + 1, close - 1)), 10) ---@type string
 			if not n or n < 1 or n ~= math.floor(n) then
 				dims = nil
 				break
@@ -2902,8 +2551,7 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 			dim_scan = duffle.skip_ws_and_cmt(source, close + 1)
 		end
 		if dims and #dims > 0 then
-			--- @type string
-			local elem = duffle.trim(source:sub(after_typedef, last_ident_pos - 1))
+			local elem = duffle.trim(source:sub(after_typedef, last_ident_pos - 1)) ---@type string
 			register_array_type(last_ident, elem, dims, pos, line_of, out)
 			attach_debug_skip_marker(out, "unrelated")
 			return semi_pos + 1
@@ -2912,10 +2560,8 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 
 	if tset_arg then
 		-- Shape 4: alias is the TSet_ argument; the underlying span is the trimmed text from the start of id2 up to (but not including) the TSet_ ident.
-		--- @type string
-		local underlying_span = source:sub(after_typedef, tset_pos - 1)
-		--- @type string
-		local underlying      = duffle.trim(underlying_span)
+		local underlying_span = source:sub(after_typedef, tset_pos - 1) ---@type string
+		local underlying      = duffle.trim(underlying_span) ---@type string
 		register_typedef_alias(underlying, tset_arg, pos, line_of, out)
 		attach_debug_skip_marker(out, "unrelated")
 		return tset_arg_end or (semi_pos + 1)
@@ -2923,10 +2569,8 @@ local function parse_typedef_binds(source, pos, ident_end, line_of, out)
 
 	if last_ident then
 		-- Shape 3: alias is the last ident before `;`; the underlying span is the trimmed text from the start of id2 up to (but not including) the alias ident.
-		--- @type string
-		local underlying_span = source:sub(after_typedef, last_ident_pos - 1)
-		--- @type string
-		local underlying      = duffle.trim(underlying_span)
+		local underlying_span = source:sub(after_typedef, last_ident_pos - 1) ---@type string
+		local underlying      = duffle.trim(underlying_span) ---@type string
 		register_typedef_alias(underlying, last_ident, pos, line_of, out)
 		attach_debug_skip_marker(out, "unrelated")
 		return last_ident_end
@@ -2944,30 +2588,22 @@ end
 --- @param out       SourceScan
 --- @return integer
 local function parse_pragma_macro(source, pos, ident_end, line_of, out)
-	--- @type string|nil, integer
-	local str, str_end = read_parens_after(source, ident_end)
+	local str, str_end = read_parens_after(source, ident_end) ---@type string|nil, integer
 	if not str then return str_end end
 	str = duffle.trim(str)
 	if str:sub(1, 1) ~= '"' or str:sub(-1) ~= '"' then return str_end end
 
-	--- @type string
-	local  inner = str:sub(2, -2)
-	--- @type integer|nil
-	local  space = duffle.find_byte(inner, 32, 1)
+	local  inner = str:sub(2, -2) ---@type string
+	local  space = duffle.find_byte(inner, 32, 1) ---@type integer|nil
 	if not space then return str_end end
 
-	--- @type string
-	local  name = inner:sub(1, space - 1)
-	--- @type integer
-	local  rest = inner:sub(space + 1)
-	--- @type integer|nil
-	local  eq   = duffle.find_byte(rest, 61, 1)
+	local  name = inner:sub(1, space - 1) ---@type string
+	local  rest = inner:sub(space + 1) ---@type integer
+	local  eq   = duffle.find_byte(rest, 61, 1) ---@type integer|nil
 	if not eq then return str_end end
 
-	--- @type string
-	local key = duffle.trim(rest:sub(1, eq - 1))
-	--- @type string
-	local val = duffle.trim(rest:sub(eq + 1))
+	local key = duffle.trim(rest:sub(1, eq - 1)) ---@type string
+	local val = duffle.trim(rest:sub(eq + 1)) ---@type string
 	if    key == "tape_atom words" or key == "words" then
 		out.macros[#out.macros + 1] = { line = line_of(pos), name = name, words = tonumber(val) or 0 }
 	end
@@ -2986,18 +2622,15 @@ end
 --- @param out SourceScan
 --- @return integer|nil, integer
 local function parse_enum_value(body, pos, out)
-	--- @type integer|nil, integer
-	local int_val, int_end = parse_enum_int_literal(body, pos)
+	local int_val, int_end = parse_enum_int_literal(body, pos) ---@type integer|nil, integer
 	if    int_val ~= nil then return int_val, int_end end
 
-	--- @type string|nil
-	local  sym = duffle.read_ident(body, pos)
+	local  sym = duffle.read_ident(body, pos) ---@type string|nil
 	if not sym then return nil, pos end
 
 	-- Bare `R_*` (no `_Code` suffix) → translate to `R_*_Code` and look that up. Non-`R_*` symbols
 	-- (plain idents without the prefix) are not value sources and fall through to the nil return.
-	--- @type string
-	local lookup_sym = sym
+	local lookup_sym = sym ---@type string
 	if not is_r_code_macro(sym)
 		and sym:byte(1) == BYTE_R
 		and sym:byte(2) == BYTE_UNDERSCORE then
@@ -3006,8 +2639,7 @@ local function parse_enum_value(body, pos, out)
 
 	-- visited starts empty; lookup_code_value marks visited[sym] = true on its first cycle-guard check,
 	-- so pre-marking here would falsely trigger the cycle short-circuit and return nil.
-	--- @type integer|nil
-	local value = lookup_code_value(lookup_sym, out._code_macros, out._code_macro_bodies, {}, 1)
+	local value = lookup_code_value(lookup_sym, out._code_macros, out._code_macro_bodies, {}, 1) ---@type integer|nil
 	if value ~= nil then return value, (pos + #sym) end
 
 	return nil, pos
@@ -3029,34 +2661,27 @@ end
 --- @return integer
 local function parse_enum_entry(source, body, body_offset, line_of, out, entry_name, name_body_pos, value_start)
 	-- value_start is within `body`, just past the `=`.
-	--- @type integer
-	local after_ws = duffle.skip_ws_and_cmt(body, value_start)
-	--- @type integer|nil, integer
-	local value, value_end = parse_enum_value(body, after_ws, out)
+	local after_ws = duffle.skip_ws_and_cmt(body, value_start) ---@type integer
+	local value, value_end = parse_enum_value(body, after_ws, out) ---@type integer|nil, integer
 	if value == nil then return value_start end
 
 	-- Capture the trailing C-comment (if any) before `skip_ws_and_cmt` discards it.
 	-- The `atom_auto_reg(<scope>, <sym>)` macro expands to `R_<Sym> = R_<Sym>_Code /* atom_auto_reg: <scope> */`,
 	-- so the scope name lives in the comment after the RHS value. Routes through `out.atom_entry_comments`
 	-- for downstream `parse_enum` to split into `out.atom_auto_regs` / `out.phase_auto_regs`.
-	--- @type string|nil
-	local trailing_cmt = read_trailing_cmt_after(body, value_end)
+	local trailing_cmt = read_trailing_cmt_after(body, value_end) ---@type string|nil
 	if trailing_cmt then
 		out.atom_entry_comments = out.atom_entry_comments or {}
 		out.atom_entry_comments[entry_name] = trailing_cmt
 	end
 
-	--- @type integer
-	local after_value       = duffle.skip_ws_and_cmt(body, value_end)
-	--- @type boolean, integer
-	local has_atom_reg, end_after_atom_reg = check_bare_atom_reg(body, after_value)
+	local after_value       = duffle.skip_ws_and_cmt(body, value_end) ---@type integer
+	local has_atom_reg, end_after_atom_reg = check_bare_atom_reg(body, after_value) ---@type boolean, integer
 
 	-- Only register R_* entries whose value is followed by bare `atom_reg`.
 	if has_atom_reg and entry_name:byte(1) == BYTE_R and entry_name:byte(2) == BYTE_UNDERSCORE then
-		--- @type integer
-		local entry_source_pos = body_offset + name_body_pos - 1
-		--- @type SiteCarrier
-		local entry = {
+		local entry_source_pos = body_offset + name_body_pos - 1 ---@type integer
+		local entry = { ---@type SiteCarrier
 			name          = entry_name,
 			code          = value,
 			source_line   = line_of(entry_source_pos),
@@ -3065,10 +2690,8 @@ local function parse_enum_entry(source, body, body_offset, line_of, out, entry_n
 			has_atom_reg  = true,
 		}
 		-- Adjacent enum-site default view, if any. Tolerant of malformed `atom_type(...)`.
-		--- @type integer
-		local after_atom_reg = duffle.skip_ws_and_cmt(body, end_after_atom_reg)
-		--- @type string|nil, integer, integer
-		local dflt_type_name, dflt_depth, end_after_atom_type = parse_enum_atom_type_default(body, after_atom_reg)
+		local after_atom_reg = duffle.skip_ws_and_cmt(body, end_after_atom_reg) ---@type integer
+		local dflt_type_name, dflt_depth, end_after_atom_type = parse_enum_atom_type_default(body, after_atom_reg) ---@type string|nil, integer, integer
 		if dflt_type_name then
 			entry.default_type  = dflt_type_name
 			entry.default_depth = dflt_depth
@@ -3093,16 +2716,13 @@ end
 --- @param out SourceScan
 --- @return nil
 local function parse_enum_body(source, body, body_offset, line_of, out)
-	--- @type integer
-	local pos      = 1
-	--- @type integer
-	local body_len = #body
+	local pos      = 1 ---@type integer
+	local body_len = #body ---@type integer
 	while pos <= body_len do
 		pos = duffle.skip_ws_and_cmt(body, pos)
 		if pos > body_len then break end
 
-		--- @type integer
-		local c = body:byte(pos)
+		local c = body:byte(pos) ---@type integer
 		if c == BYTE_COMMA then
 			-- Leading comma (mips.h style: `, rtmp_0 = R_T0,`).
 			pos = pos + 1
@@ -3111,27 +2731,22 @@ local function parse_enum_body(source, body, body_offset, line_of, out)
 		elseif c == BYTE_HASH then
 			-- Inline `#define` inside the enum body (lottes_tape.h style).
 			-- Skip past the newline; the main preprocessor intercept in scan_source has already resolved the `_Code` chain.
-			--- @type integer|nil
-			local nl = duffle.find_byte(body, BYTE_NEWLINE, pos)
+			local nl = duffle.find_byte(body, BYTE_NEWLINE, pos) ---@type integer|nil
 			if nl then pos = nl + 1 else pos = body_len + 1 end
 		else
-			--- @type string|nil, integer
-			local entry_name, name_end = duffle.read_ident(body, pos)
+			local entry_name, name_end = duffle.read_ident(body, pos) ---@type string|nil, integer
 			if entry_name then
 				-- In-enum `atom_auto_reg(<scope>, R_<Sym>)` / `phase_auto_reg(<scope>, R_<Sym>)` markers:
 				-- the C preprocessor expands them to `R_<Sym> = R_<Sym>_Code /* atom_auto_reg: <scope> */`,
 				-- but the metaprogram reads source-as-written so we must dispatch the parser here too.
 				-- Mirrors the top-level `DECL_PARSERS` entry for `atom_auto_reg` / `phase_auto_reg`.
 				if entry_name == "atom_auto_reg" or entry_name == "phase_auto_reg" then
-					--- @type integer
-					local new_pos = parse_auto_reg_marker(body, pos, name_end, line_of, out)
+					local new_pos = parse_auto_reg_marker(body, pos, name_end, line_of, out) ---@type integer
 					if new_pos > pos then pos = new_pos else pos = name_end end
 				else
-					--- @type integer
-					local after_name = duffle.skip_ws_and_cmt(body, name_end)
+					local after_name = duffle.skip_ws_and_cmt(body, name_end) ---@type integer
 					if body:byte(after_name) == BYTE_EQUAL then
-						--- @type integer
-						local new_pos = parse_enum_entry(
+						local new_pos = parse_enum_entry( ---@type integer
 							source, body, body_offset, line_of, out,
 							entry_name, pos, after_name + 1
 						)
@@ -3157,17 +2772,14 @@ end
 local function parse_enum(source, pos, ident_end, line_of, out)
 	-- pos points at the `e` of `enum`; ident_end points past `enum`.
 	-- Optional enum tag (e.g. `enum Foo { ... }`): a single ident between `enum` and `{` that is not followed by `(`.
-	--- @type integer
-	local after_ident        = duffle.skip_ws_and_cmt(source, ident_end)
-	--- @type string|nil, integer
-	local tag_ident, tag_end = duffle.read_ident(source, after_ident)
+	local after_ident        = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
+	local tag_ident, tag_end = duffle.read_ident(source, after_ident) ---@type string|nil, integer
 	if tag_ident and source:byte(tag_end) ~= 0x28 then  -- not '('
 		after_ident = tag_end
 	end
 
 	-- Find the opening brace of the enum body.
-	--- @type string|nil, integer, integer
-	local body, after_brace, body_off = find_body_braces(source, after_ident, ident_end)
+	local body, after_brace, body_off = find_body_braces(source, after_ident, ident_end) ---@type string|nil, integer, integer
 	if not body then return after_brace end
 	parse_enum_body(source, body, body_off, line_of, out)
 
@@ -3175,17 +2787,14 @@ local function parse_enum(source, pos, ident_end, line_of, out)
 	-- into the per-source `atom_auto_regs` / `phase_auto_regs` projections.
 	-- Pattern matches the RHS expansion `R_<Sym> = R_<Sym>_Code /* <kind>_auto_reg: <scope> */`
 	-- emitted by the `atom_auto_reg` / `phase_auto_reg` macros in dsl.atom.h.
-	--- @type string, string
-	for entry_name, cmt_text in pairs(out.atom_entry_comments or {}) do
-		--- @type string
-		local atom_scope = cmt_text:match("atom_auto_reg:%s*([%w_]+)")
+	for entry_name, cmt_text in pairs(out.atom_entry_comments or {}) do ---@type string, string
+		local atom_scope = cmt_text:match("atom_auto_reg:%s*([%w_]+)") ---@type string
 		if atom_scope then
 			out.atom_auto_regs = out.atom_auto_regs or {}
 			out.atom_auto_regs[atom_scope] = out.atom_auto_regs[atom_scope] or {}
 			out.atom_auto_regs[atom_scope][entry_name] = entry_name
 		end
-		--- @type string
-		local phase_scope = cmt_text:match("phase_auto_reg:%s*([%w_]+)")
+		local phase_scope = cmt_text:match("phase_auto_reg:%s*([%w_]+)") ---@type string
 		if phase_scope then
 			out.phase_auto_regs = out.phase_auto_regs or {}
 			out.phase_auto_regs[phase_scope] = out.phase_auto_regs[phase_scope] or {}
@@ -3203,21 +2812,16 @@ end
 --- @param out SourceScan
 --- @return integer
 local function parse_addrs_assign(source, pos, ident_end, line_of, out)
-	--- @type integer
-	local after = duffle.skip_ws_and_cmt(source, ident_end)
+	local after = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
 	if source:sub(after, after) ~= "[" then return ident_end end
-	--- @type string|nil, integer
-	local inner, after_br = duffle.read_brackets(source, after)
-	--- @type string
-	local idx             = inner and tonumber(duffle.trim(inner))
+	local inner, after_br = duffle.read_brackets(source, after) ---@type string|nil, integer
+	local idx             = inner and tonumber(duffle.trim(inner)) ---@type string
 	after_br = duffle.skip_ws_and_cmt(source, after_br or after)
 	if not (idx and source:sub(after_br, after_br) == "=") then
 		return after_br or (after + 1)
 	end
-	--- @type integer
-	local rhs       = duffle.skip_ws_and_cmt(source, after_br + 1)
-	--- @type string|nil
-	local rhs_ident = duffle.read_ident(source, rhs)
+	local rhs       = duffle.skip_ws_and_cmt(source, after_br + 1) ---@type integer
+	local rhs_ident = duffle.read_ident(source, rhs) ---@type string|nil
 	if rhs_ident then out._addrs[idx] = rhs_ident end
 	return rhs
 end
@@ -3229,13 +2833,10 @@ end
 --- @param out SourceScan
 --- @return integer
 local function parse_tb_emit_(source, pos, ident_end, line_of, out)
-	--- @type integer
-	local after = duffle.skip_ws_and_cmt(source, ident_end)
+	local after = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
 	if source:sub(after, after) ~= "(" then return ident_end end
-	--- @type string|nil, integer
-	local inner, after_p = duffle.read_parens(source, after)
-	--- @type string
-	local name           = duffle.trim(inner or ""):match("^([%w_]+)")
+	local inner, after_p = duffle.read_parens(source, after) ---@type string|nil, integer
+	local name           = duffle.trim(inner or ""):match("^([%w_]+)") ---@type string
 	if name then
 		out._chain = out._chain or {}
 		out._chain[#out._chain + 1] = name
@@ -3250,19 +2851,13 @@ end
 --- @param out SourceScan
 --- @return integer
 local function parse_tb_emit(source, pos, ident_end, line_of, out)
-	--- @type integer
-	local after = duffle.skip_ws_and_cmt(source, ident_end)
+	local after = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
 	if source:sub(after, after) ~= "(" then return ident_end end
-	--- @type string|nil, integer
-	local inner, after_p = duffle.read_parens(source, after)
-	--- @type string[]
-	local args           = duffle.split_top_level_commas(inner or "")
-	--- @type string
-	local last           = duffle.trim(args[#args] or "")
-	--- @type integer
-	local idx            = last:match("^addrs%s*%[%s*(%d+)%s*%]$")
-	--- @type string
-	local name
+	local inner, after_p = duffle.read_parens(source, after) ---@type string|nil, integer
+	local args           = duffle.split_top_level_commas(inner or "") ---@type string[]
+	local last           = duffle.trim(args[#args] or "") ---@type string
+	local idx            = last:match("^addrs%s*%[%s*(%d+)%s*%]$") ---@type integer
+	local name ---@type string
 	if idx then name = out._addrs[tonumber(idx)]
 	else        name = last:match("([%w_]+)$")
 	end
@@ -3273,8 +2868,7 @@ local function parse_tb_emit(source, pos, ident_end, line_of, out)
 	return after_p or (after + 1)
 end
 
---- @type table<string, fun(source: string, pos: integer, ident_end: integer, line_of: fun(pos: integer): integer, out: SourceScan): integer>
-local C_STMT_PARSERS = {
+local C_STMT_PARSERS = { ---@type table<string, fun(source: string, pos: integer, ident_end: integer, line_of: fun(pos: integer): integer, out: SourceScan): integer>
 	tb_emit_ = parse_tb_emit_,
 	tb_emit  = parse_tb_emit,
 	addrs    = parse_addrs_assign,
@@ -3288,8 +2882,7 @@ local C_STMT_PARSERS = {
 --
 -- Adding a new construct = 1 row here + 1 parser function above.
 
---- @type table<string, fun(source: string, pos: integer, ident_end: integer, line_of: fun(pos: integer): integer, out: SourceScan): integer>
-local DECL_PARSERS = {
+local DECL_PARSERS = { ---@type table<string, fun(source: string, pos: integer, ident_end: integer, line_of: fun(pos: integer): integer, out: SourceScan): integer>
 	MipsAtom_                 = parse_decl_form,
 	MipsAtom_Proc_            = parse_decl_form,
 	MipsAtomComp_             = parse_decl_form,
@@ -3325,10 +2918,8 @@ local DECL_PARSERS = {
 --- @param code_macro_bodies table<string, string>|nil  -- bag: R_*_Code -> raw RHS; nil = local-only
 --- @return SourceScan
 local function scan_source(source, source_file, code_macros, code_macro_bodies)
-	--- @type fun(pos: integer): integer
-	local line_of = duffle.LineIndex(source)
-	--- @type SourceScan
-	local out     = {
+	local line_of = duffle.LineIndex(source) ---@type fun(pos: integer): integer
+	local out     = { ---@type SourceScan
 		atoms                = {},
 		raw_atoms            = {},
 		binds                = {},
@@ -3372,10 +2963,8 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		_code_macro_bodies   = code_macro_bodies or {},
 		_source_file         = source_file,
 	}
-	--- @type integer
-	local pos     = 1
-	--- @type integer
-	local src_len = #source
+	local pos     = 1 ---@type integer
+	local src_len = #source ---@type integer
 
 	while pos <= src_len do
 		pos = duffle.skip_ws_and_cmt(source, pos)
@@ -3383,8 +2972,7 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 
 		-- Skip preprocessor directives (#define / #include / #pragma / etc).
 		-- _Pragma is an operator (not a directive) — it doesn't start with #.
-		--- @type integer|nil
-		local pp_pos = duffle.skip_preprocessor_line(source, pos)
+		local pp_pos = duffle.skip_preprocessor_line(source, pos) ---@type integer|nil
 		if pp_pos then
 			-- Resolve `#define R_*_Code <int-or-symbol>` into the shared `_code_macros` registry before skipping the line.
 			try_extract_code_macro(source, pos, out._code_macros, out._code_macro_bodies)
@@ -3393,21 +2981,17 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 			-- Skip C qualifiers (static, const, etc.) that may precede a declaration.
 			pos = scan_skip_qualifiers(source, pos)
 			if pos <= src_len then
-				--- @type string|nil, integer
-				local ident, ident_end = duffle.read_ident(source, pos)
+				local ident, ident_end = duffle.read_ident(source, pos) ---@type string|nil, integer
 				if ident then
-					--- @type fun(source: string, pos: integer, ident_end: integer, line_of: fun(pos: integer): integer, out: SourceScan): integer|nil
-					local parser = DECL_PARSERS[ident] or C_STMT_PARSERS[ident]
+					local parser = DECL_PARSERS[ident] or C_STMT_PARSERS[ident] ---@type fun(source: string, pos: integer, ident_end: integer, line_of: fun(pos: integer): integer, out: SourceScan): integer|nil
 					if parser then
 						pos = parser(source, pos, ident_end, line_of, out)
 					else
 						-- Unsupported identifiers follow the unrelated-token path. 
 						-- If a pending marker is still open, consume it so it cannot drift to a later declaration.
 						-- Unsupported identifiers never create marker records.
-						--- @type DebugSkipMarker[]
-						local markers = out.debug_skip_markers
-						--- @type DebugSkipMarker
-						local marker  = markers[#markers]
+						local markers = out.debug_skip_markers ---@type DebugSkipMarker[]
+						local marker  = markers[#markers] ---@type DebugSkipMarker
 						if marker and marker.pending then
 							if ident == "FI_" then
 								marker.proc_prelude = true
@@ -3418,12 +3002,9 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 						pos = ident_end
 					end
 				else
-					--- @type DebugSkipMarker[]
-					local markers = out.debug_skip_markers
-					--- @type DebugSkipMarker
-					local marker  = markers[#markers]
-					--- @type string
-					local c       = source:sub(pos, pos)
+					local markers = out.debug_skip_markers ---@type DebugSkipMarker[]
+					local marker  = markers[#markers] ---@type DebugSkipMarker
+					local c       = source:sub(pos, pos) ---@type string
 					if marker and marker.pending and marker.proc_prelude then
 						if c == "{" or c == ";" then
 							attach_debug_skip_marker(out, "unrelated")
@@ -3499,23 +3080,17 @@ end
 local function type_shape(entry)
 	if type(entry) ~= "table" then return "" end
 	if entry.kind == "struct" then
-		--- @type TypeField[]
-		local fields = entry.fields or {}
-		--- @type string[]
-		local parts  = {}
-		--- @type integer, TypeField
-		for _, f in ipairs(fields) do
+		local fields = entry.fields or {} ---@type TypeField[]
+		local parts  = {} ---@type string[]
+		for _, f in ipairs(fields) do ---@type integer, TypeField
 			parts[#parts + 1] = string.format("%s:%s*%s",
 				tostring(f.name), tostring(f.type_name), tostring(f.pointer_depth or 0))
 		end
 		return "struct[" .. table.concat(parts, ",") .. "]"
 	elseif entry.kind == "enum" then
-		--- @type TypeField[]
-		local fields = entry.fields or {}
-		--- @type string[]
-		local parts  = {}
-		--- @type integer, TypeField
-		for _, f in ipairs(fields) do
+		local fields = entry.fields or {} ---@type TypeField[]
+		local parts  = {} ---@type string[]
+		for _, f in ipairs(fields) do ---@type integer, TypeField
 			parts[#parts + 1] = string.format("%s=%s", tostring(f.name), tostring(f.value))
 		end
 		return "enum[" .. table.concat(parts, ",") .. "]"
@@ -3533,12 +3108,9 @@ end
 --- @return string
 local function bind_shape(entry)
 	if type(entry) ~= "table" then return "" end
-	--- @type TypeField[]
-	local fields = entry.fields or {}
-	--- @type string[]
-	local parts  = {}
-	--- @type integer, TypeField
-	for _, f in ipairs(fields) do
+	local fields = entry.fields or {} ---@type TypeField[]
+	local parts  = {} ---@type string[]
+	for _, f in ipairs(fields) do ---@type integer, TypeField
 		parts[#parts + 1] = string.format("%s:%s*%s",
 			tostring(f.name), tostring(f.type_name), tostring(f.pointer_depth or 0))
 	end
@@ -3562,22 +3134,16 @@ end
 --- @return string
 local function view_shape(entry)
 	if type(entry) ~= "table" then return "" end
-	--- @type table<string, RegTypeOverride>
-	local overrides = entry.reg_type_overrides or {}
-	--- @type string[]
-	local keys = {}
-	--- @type string
-	for k in pairs(overrides) do keys[#keys + 1] = k end
+	local overrides = entry.reg_type_overrides or {} ---@type table<string, RegTypeOverride>
+	local keys = {} ---@type string[]
+	for k in pairs(overrides) do keys[#keys + 1] = k end ---@type string
 	--- @param a string
 	--- @param b string
 	--- @return boolean
 	table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
-	--- @type string[]
-	local parts = {}
-	--- @type integer, string
-	for _, k in ipairs(keys) do
-		--- @type RegTypeOverride
-		local ov = overrides[k]
+	local parts = {} ---@type string[]
+	for _, k in ipairs(keys) do ---@type integer, string
+		local ov = overrides[k] ---@type RegTypeOverride
 		parts[#parts + 1] = string.format("%s=%s*%s", tostring(k),
 			tostring(ov.type_name), tostring(ov.pointer_depth or 0))
 	end
@@ -3600,12 +3166,9 @@ end
 --- @return string
 local function phase_shape(entry)
 	if type(entry) ~= "table" then return "" end
-	--- @type string[]
-	local atoms = entry.atoms or {}
-	--- @type string[]
-	local sorted = {}
-	--- @type integer, string
-	for _, a in ipairs(atoms) do sorted[#sorted + 1] = a end
+	local atoms = entry.atoms or {} ---@type string[]
+	local sorted = {} ---@type string[]
+	for _, a in ipairs(atoms) do sorted[#sorted + 1] = a end ---@type integer, string
 	--- @param a string
 	--- @param b string
 	--- @return boolean
@@ -3631,12 +3194,9 @@ local function merge_named_with_sites(registry, name, new_entry, site, collision
 		registry[name].sites = { site }
 		return
 	end
-	--- @type SiteCarrier
-	local existing  = registry[name]
-	--- @type string
-	local new_shape = shape_fn(new_entry)
-	--- @type string
-	local old_shape = shape_fn(existing)
+	local existing  = registry[name] ---@type SiteCarrier
+	local new_shape = shape_fn(new_entry) ---@type string
+	local old_shape = shape_fn(existing) ---@type string
 	if new_shape == old_shape and new_shape ~= "" then
 		-- Identical shape: coalesce by appending the site.
 		existing.sites = existing.sites or { build_site(existing.source_file, existing.source_line) }
@@ -3680,8 +3240,7 @@ local function merge_corpus_registries(corpus)
 
 	-- Replace the existing corpus collections with empty tables so a re-run on the same corpus produces identical state (deterministic merge).
 	-- This is safe because M.run is the only writer to these tables within a single orchestrator invocation.
-	--- @type integer, string
-	for _, key in ipairs({
+	for _, key in ipairs({ ---@type integer, string
 		"register_alias_registry",
 		"type_name_registry",
 		"binds_by_name",
@@ -3699,29 +3258,22 @@ local function merge_corpus_registries(corpus)
 		corpus[key] = {}
 	end
 
-	--- @type integer, SourceFile
-	for _, src in ipairs(corpus.source_order or {}) do
-		--- @type SourceScan
-		local scan = src.scan
+	for _, src in ipairs(corpus.source_order or {}) do ---@type integer, SourceFile
+		local scan = src.scan ---@type SourceScan
 		if scan then
-			--- @type string
-			local path = src.path
+			local path = src.path ---@type string
 			-- register_alias_registry: keyed by R_* alias ident.
 			-- Each AliasEntry carries `source_file` (set by scan_source to the path).
-			--- @type string, AliasEntry
-			for name, entry in pairs(scan.register_alias_registry or {}) do
-				--- @type CollisionSite
-				local site = build_site(entry.source_file or path, entry.source_line)
+			for name, entry in pairs(scan.register_alias_registry or {}) do ---@type string, AliasEntry
+				local site = build_site(entry.source_file or path, entry.source_line) ---@type CollisionSite
 				merge_named_with_sites(
 					corpus.register_alias_registry, name, entry, site,
 					corpus.collisions, "alias", alias_shape)
 			end
 
 			-- type_name_registry: keyed by type ident; covers Struct_/Enum_/typedef.
-			--- @type string, TypeNameEntry
-			for name, entry in pairs(scan.type_name_registry or {}) do
-				--- @type CollisionSite
-				local site = build_site(path, entry.source_line)
+			for name, entry in pairs(scan.type_name_registry or {}) do ---@type string, TypeNameEntry
+				local site = build_site(path, entry.source_line) ---@type CollisionSite
 				merge_named_with_sites(
 					corpus.type_name_registry, name, entry, site,
 					corpus.collisions, "type", type_shape)
@@ -3730,10 +3282,8 @@ local function merge_corpus_registries(corpus)
 			-- binds_by_name: the Binds_* projection of Struct_ types.
 			-- Sources populate scan.binds[] (per-source array) with `{line, name, fields, body}`.
 			-- We merge by name (Binds_X) so cross-source Struct_(X) declarations can be coalesced or collided.
-			--- @type integer, BindsEntry
-			for _, bind_entry in ipairs(scan.binds or {}) do
-				--- @type CollisionSite
-				local site = build_site(path, bind_entry.line)
+			for _, bind_entry in ipairs(scan.binds or {}) do ---@type integer, BindsEntry
+				local site = build_site(path, bind_entry.line) ---@type CollisionSite
 				merge_named_with_sites(
 					corpus.binds_by_name, bind_entry.name, bind_entry, site,
 					corpus.collisions, "binds", bind_shape)
@@ -3742,30 +3292,24 @@ local function merge_corpus_registries(corpus)
 			-- atoms_by_name: MipsAtom_(name) + MipsAtom_Proc_(name) + MipsAtomComp_(name) + MipsAtomComp_Proc_(name).
 			-- Each atom carries `{line, name, body, body_off, kind, raw_name, ...}`.
 			-- Duplicate atom names across sources are first-wins + collision; see the atom_infos block below for the evidence list.
-			--- @type integer, AtomEntry
-			for _, atom_entry in ipairs(scan.atoms or {}) do
-				--- @type CollisionSite
-				local site = build_site(path, atom_entry.line)
+			for _, atom_entry in ipairs(scan.atoms or {}) do ---@type integer, AtomEntry
+				local site = build_site(path, atom_entry.line) ---@type CollisionSite
 				merge_named_with_sites(
 					corpus.atoms_by_name, atom_entry.name, atom_entry, site,
 					corpus.collisions, "atom", atom_shape)
 			end
 
 			-- atom_views: keyed by atom_name; each carries `binds_name` + per-atom overrides.
-			--- @type string, AtomViewEntry
-			for name, entry in pairs(scan.atom_views or {}) do
-				--- @type CollisionSite
-				local site = build_site(path, entry.info_line)
+			for name, entry in pairs(scan.atom_views or {}) do ---@type string, AtomViewEntry
+				local site = build_site(path, entry.info_line) ---@type CollisionSite
 				merge_named_with_sites(
 					corpus.atom_views, name, entry, site,
 					corpus.collisions, "view", view_shape)
 			end
 
 			-- atom_ctxs: keyed by atom_name; each carries `rbind_atom`.
-			--- @type string, AtomCtxEntry
-			for name, entry in pairs(scan.atom_ctxs or {}) do
-				--- @type CollisionSite
-				local site = build_site(path, entry.info_line)
+			for name, entry in pairs(scan.atom_ctxs or {}) do ---@type string, AtomCtxEntry
+				local site = build_site(path, entry.info_line) ---@type CollisionSite
 				merge_named_with_sites(
 					corpus.atom_ctxs, name, entry, site,
 					corpus.collisions, "ctx", ctx_shape)
@@ -3773,10 +3317,8 @@ local function merge_corpus_registries(corpus)
 
 			-- atom_phases: keyed by phase label; each carries `atoms = [...]`.
 			-- The phase atoms list is set-shaped for the collision discipline (phase_shape sorts atoms before comparing).
-			--- @type string, AtomPhaseGroup
-			for name, entry in pairs(scan.atom_phases or {}) do
-				--- @type CollisionSite
-				local site = build_site(path, 0)
+			for name, entry in pairs(scan.atom_phases or {}) do ---@type string, AtomPhaseGroup
+				local site = build_site(path, 0) ---@type CollisionSite
 				merge_named_with_sites(
 					corpus.atom_phases, name, entry, site,
 					corpus.collisions, "phase", phase_shape)
@@ -3784,8 +3326,7 @@ local function merge_corpus_registries(corpus)
 
 			-- atom_auto_regs: keyed by atom scope name; each carries a `{R_<Sym> = R_<Sym>}` map.
 			-- Per-source entries are simple inner maps (no body / no shape comparison); first-wins suffices.
-			--- @type string, AutoRegSymMap
-			for atom_scope, syms in pairs(scan.atom_auto_regs or {}) do
+			for atom_scope, syms in pairs(scan.atom_auto_regs or {}) do ---@type string, AutoRegSymMap
 				if corpus.atom_auto_regs[atom_scope] == nil then
 					corpus.atom_auto_regs[atom_scope] = syms
 				end
@@ -3793,8 +3334,7 @@ local function merge_corpus_registries(corpus)
 
 			-- phase_auto_regs: keyed by phase label; each carries a `{R_<Sym> = R_<Sym>}` map.
 			-- Per-source entries are simple inner maps (no body / no shape comparison); first-wins suffices.
-			--- @type string, AutoRegSymMap
-			for phase_label, syms in pairs(scan.phase_auto_regs or {}) do
+			for phase_label, syms in pairs(scan.phase_auto_regs or {}) do ---@type string, AutoRegSymMap
 				if corpus.phase_auto_regs[phase_label] == nil then
 					corpus.phase_auto_regs[phase_label] = syms
 				end
@@ -3803,35 +3343,29 @@ local function merge_corpus_registries(corpus)
 			-- atom_infos: ALWAYS append every record in source/declaration order.
 			-- Duplicates are preserved so the annotation pass can flag them via `check_unique_annotation`;
 			-- The merge is purely order-preserving.
-			--- @type integer, AtomInfoEntry
-			for _, info in ipairs(scan.atom_infos or {}) do
+			for _, info in ipairs(scan.atom_infos or {}) do ---@type integer, AtomInfoEntry
 				corpus.atom_infos[#corpus.atom_infos + 1] = info
 			end
-			--- @type integer, AtomInfoEntry
-			for _, info in ipairs(scan.component_atom_infos or {}) do
+			for _, info in ipairs(scan.component_atom_infos or {}) do ---@type integer, AtomInfoEntry
 				corpus.component_atom_infos[#corpus.component_atom_infos + 1] = info
 			end
 
-			--- @type string, RegUseSchema
-			for name, schema in pairs(scan.reg_use_schemas or {}) do
+			for name, schema in pairs(scan.reg_use_schemas or {}) do ---@type string, RegUseSchema
 				if corpus.reg_use_schemas[name] == nil then
 					corpus.reg_use_schemas[name] = schema
 				end
 			end
-			--- @type integer, RegUseError
-			for _, err in ipairs(scan.reg_use_errors or {}) do
+			for _, err in ipairs(scan.reg_use_errors or {}) do ---@type integer, RegUseError
 				corpus.reg_use_errors[#corpus.reg_use_errors + 1] = err
 			end
-			--- @type integer, TapeChain
-			for _, chain in ipairs(scan.tape_chains or {}) do
+			for _, chain in ipairs(scan.tape_chains or {}) do ---@type integer, TapeChain
 				corpus.tape_chains[#corpus.tape_chains + 1] = chain
 			end
 		end
 	end
 end
 
---- @type table<string, boolean>  -- bag: reguse error kind -> true
-local SCHEMA_BODY_ERROR = {
+local SCHEMA_BODY_ERROR = { ---@type table<string, boolean>  -- bag: reguse error kind -> true
 	reguse_malformed          = true,
 	reguse_unknown_reg_type   = true,
 	reguse_duplicate_alias    = true,
@@ -3847,34 +3381,28 @@ local SCHEMA_BODY_ERROR = {
 --- @param corpus Corpus
 --- @return nil
 local function resolve_reg_use_schemas(corpus)
-	--- @type RegUseError[]
-	local kept = {}
-	--- @type integer, RegUseError
-	for _, err in ipairs(corpus.reg_use_errors or {}) do
+	local kept = {} ---@type RegUseError[]
+	for _, err in ipairs(corpus.reg_use_errors or {}) do ---@type integer, RegUseError
 		if not SCHEMA_BODY_ERROR[err.kind] then
 			kept[#kept + 1] = err
 		end
 	end
 	corpus.reg_use_errors = kept
 
-	--- @type string, TypeNameEntry
-	for name, type_entry in pairs(corpus.type_name_registry or {}) do
+	for name, type_entry in pairs(corpus.type_name_registry or {}) do ---@type string, TypeNameEntry
 		if name:sub(1, 7) == "RegUse_" and type_entry.body then
-			--- @type RegUseSchema|nil, RegUseError[]
-			local fresh, errs = parse_reg_use_schema_body(
+			local fresh, errs = parse_reg_use_schema_body( ---@type RegUseSchema|nil, RegUseError[]
 				type_entry.body, corpus.type_name_registry, { require_types = true })
 			if fresh then
 				fresh.name = name
-				--- @type RegUseSchema|nil
-				local old = corpus.reg_use_schemas[name]
+				local old = corpus.reg_use_schemas[name] ---@type RegUseSchema|nil
 				fresh.source_file = (old and old.source_file) or type_entry.source_file
 				fresh.source_line = (old and old.source_line) or type_entry.source_line
 				corpus.reg_use_schemas[name] = fresh
 			else
 				corpus.reg_use_schemas[name] = nil
 			end
-			--- @type integer, RegUseError
-			for _, err in ipairs(errs or {}) do
+			for _, err in ipairs(errs or {}) do ---@type integer, RegUseError
 				err.schema_name = name
 				err.source_file = type_entry.source_file
 				err.source_line = type_entry.source_line
@@ -3888,8 +3416,7 @@ end
 -- M — module exports
 -- ════════════════════════════════════════════════════════════════════════════
 
---- @type ScanSourcePass
-local M = {}
+local M = {} ---@type ScanSourcePass
 
 --- Walk each source once and attach the fat SourceScan payload to `src.scan`.
 --- No output files; this is a pure in-memory pre-processing pass.
@@ -3916,24 +3443,19 @@ function M.run(ctx)
 	-- The cross-source _code_macros / _code_macro_bodies tables are LOCAL to this run.
 	-- They live across source scans only long enough to resolve cross-source R_*_Code chains, then go out of scope on M.run return.
 	-- The Lua GC reclaims them; nothing here survives onto ctx.shared, ctx.shared.corpus, or any src.scan.
-	--- @type table<string, integer>  -- bag: R_*_Code -> GPR code
-	local code_macros       = {}
-	--- @type table<string, string>  -- bag: R_*_Code -> raw RHS text
-	local code_macro_bodies = {}
+	local code_macros       = {} ---@type table<string, integer>  -- bag: R_*_Code -> GPR code
+	local code_macro_bodies = {} ---@type table<string, string>  -- bag: R_*_Code -> raw RHS text
 
 	-- Canonical-corpus check (see the docstring Resolve phase). The corpus is the only source of source_order.
 	ctx.shared = ctx.shared or {}
-	--- @type Corpus
-	local corpus = ctx.shared.corpus
+	local corpus = ctx.shared.corpus ---@type Corpus
 	if not corpus or type(corpus.source_order) ~= "table" then
 		error("scan_source.run requires ctx.shared.corpus.source_order (the canonical corpus is the source of truth; no per-source fallback is supported)", 0)
 	end
-	--- @type SourceFile[]
-	local sources = corpus.source_order
+	local sources = corpus.source_order ---@type SourceFile[]
 
 	-- Pass 1a: collect `_code_macros` + `_code_macro_bodies` across ALL sources.
-	--- @type integer, SourceFile
-	for _, src in ipairs(sources) do
+	for _, src in ipairs(sources) do ---@type integer, SourceFile
 		scan_source_pre_pass(src.text, code_macros, code_macro_bodies)
 	end
 
@@ -3942,15 +3464,11 @@ function M.run(ctx)
 	-- This iteration finishes the chain even when the chain hops span sources
 	-- (e.g. R_TapePtr_Code -> R_T8_Code -> 24 spans lottes_tape.h into mips.h).
 	-- Same `code_macros` table is shared with pass 2 below.
-	--- @type string, string
-	for macro_name, _ in pairs(code_macro_bodies) do
+	for macro_name, _ in pairs(code_macro_bodies) do ---@type string, string
 		if code_macros[macro_name] == nil then
-			--- @type string
-			local body    = code_macro_bodies[macro_name]
-			--- @type table<string, boolean>  -- bag: already-walked ident -> true
-			local visited = { [macro_name] = true }
-			--- @type integer|nil
-			local value   = resolve_code_macro_value(body, 1, code_macros, code_macro_bodies, visited, 1)
+			local body    = code_macro_bodies[macro_name] ---@type string
+			local visited = { [macro_name] = true } ---@type table<string, boolean>  -- bag: already-walked ident -> true
+			local value   = resolve_code_macro_value(body, 1, code_macros, code_macro_bodies, visited, 1) ---@type integer|nil
 			if value ~= nil then code_macros[macro_name] = value end
 		end
 	end
@@ -3959,8 +3477,7 @@ function M.run(ctx)
 	-- `R_*_Code` references and bare `R_*` symbols via the `_Code` registry fallback.
 	-- The private `_code_macros` / `_code_macro_bodies` / `_source_file` strip is midway through `source_order`.
 	-- Must not leave earlier sources leaking the private parse state, because a separate post-loop would not run when an exception propagates out of pass 2.
-	--- @type integer, SourceFile
-	for _, src in ipairs(sources) do
+	for _, src in ipairs(sources) do ---@type integer, SourceFile
 		src.scan = scan_source(src.text, src.path, code_macros, code_macro_bodies)
 		-- Strip the three private fields immediately so a later fatal source does not leave this source leaking parse state.
 		-- The shared `code_macros` / `code_macro_bodies` locals remain in the outer scope and keep their contents for subsequent sources.
@@ -3971,10 +3488,8 @@ function M.run(ctx)
 		end
 		-- Pre-tokenize each atom body once (plex: cache lives in duffle.lua; downstream passes read from `atom.body_tokens` instead of calling `split_top_level_commas` / `tokenize_body` independently).
 		-- Re-access is O(1) thanks to the memoization.
-		--- @type integer, AtomEntry
-		for _, atom in ipairs(src.scan.atoms)           do atom.body_tokens = duffle.tokenize_body(atom.body) end
-		--- @type integer, AtomEntry
-		for _, atom in ipairs(src.scan.raw_atoms or {}) do atom.body_tokens = duffle.tokenize_body(atom.body) end
+		for _, atom in ipairs(src.scan.atoms)           do atom.body_tokens = duffle.tokenize_body(atom.body) end ---@type integer, AtomEntry
+		for _, atom in ipairs(src.scan.raw_atoms or {}) do atom.body_tokens = duffle.tokenize_body(atom.body) end ---@type integer, AtomEntry
 	end
 
 	-- Merge per-source scans into the corpus registries (see merge_corpus_registries for first-wins + collision discipline).

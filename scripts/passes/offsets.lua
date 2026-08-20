@@ -20,24 +20,19 @@
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
---- @type string
-local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
---- @type DuffleExport
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Offset macro/enum naming prefixes (the emitted header uses these).
---- @type string
-local OFFSET_MACRO_PREFIX = "_atom_offset_"
---- @type string
-local OFFSET_ENUM_PREFIX  = "atom_offset_"
+local OFFSET_MACRO_PREFIX = "_atom_offset_" ---@type string
+local OFFSET_ENUM_PREFIX  = "atom_offset_" ---@type string
 
 -- Column width for the `#define _atom_offset_F_T = N` alignment.
---- @type integer
-local OFFSET_MACRO_COL = 44
+local OFFSET_MACRO_COL = 44 ---@type integer
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations
@@ -91,8 +86,7 @@ local OFFSET_MACRO_COL = 44
 -- MARKER_PROJECTORS is the marker-kind data table.
 -- The emission-model pass already records marker word positions + consuming-instruction context;
 -- this pass only projects those records into the label/branch lookup shape needed by offset computation.
---- @type table<string, fun(state: MarkerProjectState, marker: EmissionMarker): nil>
-local MARKER_PROJECTORS = {
+local MARKER_PROJECTORS = { ---@type table<string, fun(state: MarkerProjectState, marker: EmissionMarker): nil>
 	--- @param state MarkerProjectState
 	--- @param marker EmissionMarker
 	--- @return nil
@@ -119,12 +113,9 @@ local MARKER_PROJECTORS = {
 --- @return table<string, integer>
 --- @return OffsetBranch[]
 local function project_markers(markers)
-	--- @type MarkerProjectState
-	local state = { labels = {}, branches = {} }
-	--- @type integer, EmissionMarker
-	for _, marker in ipairs(markers or {}) do
-		--- @type (fun(state: MarkerProjectState, marker: EmissionMarker): nil)|nil
-		local project = MARKER_PROJECTORS[marker.kind]
+	local state = { labels = {}, branches = {} } ---@type MarkerProjectState
+	for _, marker in ipairs(markers or {}) do ---@type integer, EmissionMarker
+		local project = MARKER_PROJECTORS[marker.kind] ---@type (fun(state: MarkerProjectState, marker: EmissionMarker): nil)|nil
 		if    project then project(state, marker) end
 	end
 	return state.labels, state.branches
@@ -149,20 +140,16 @@ end
 --- @param errors   PassFinding[]
 --- @return BranchOffset[]
 local function compute_offsets(labels, branches, errors)
-	--- @type BranchOffset[]
-	local results = {}
-	--- @type integer, OffsetBranch
-	for _, br in ipairs(branches) do
-		--- @type integer|nil
-		local target = labels[br.target]
+	local results = {} ---@type BranchOffset[]
+	for _, br in ipairs(branches) do ---@type integer, OffsetBranch
+		local target = labels[br.target] ---@type integer|nil
 		if not target then
 			errors[#errors + 1] = {
 				line = br.line or 0,
 				msg  = "Branch target '" .. br.target .. "' has no atom_label (at word " .. br.branch_word .. ")",
 			}
 		else
-			--- @type string|nil
-			local consuming = br.consuming_encoder
+			local consuming = br.consuming_encoder ---@type string|nil
 			if consuming == nil or consuming == "" then
 				errors[#errors + 1] = {
 					line = br.line or 0,
@@ -218,20 +205,16 @@ local function emit_atom_offsets(add, atom)
 	if #atom.offsets == 0 then return end
 	add("// --- atom: " .. atom.name .. " (" .. atom.total_words .. " words) ---")
 	add("")
-	--- @type OffsetConst[]
-	local consts = {}
-	--- @type integer, BranchOffset
-	for _, r in ipairs(atom.offsets) do
+	local consts = {} ---@type OffsetConst[]
+	for _, r in ipairs(atom.offsets) do ---@type integer, BranchOffset
 		consts[#consts + 1] = make_offset_const(r)
 	end
-	--- @type integer, OffsetConst
-	for _, c in ipairs(consts) do
+	for _, c in ipairs(consts) do ---@type integer, OffsetConst
 		add("#define " .. pad_right(c.macro_name, OFFSET_MACRO_COL) .. "  " .. c.value)
 	end
 	add("")
 	add("enum {")
-	--- @type integer, OffsetConst
-	for _, c in ipairs(consts) do
+	for _, c in ipairs(consts) do ---@type integer, OffsetConst
 		add("    " .. c.enum_name .. " = " .. c.macro_name .. ",")
 	end
 	add("};")
@@ -244,19 +227,16 @@ end
 --- @param atoms_data AtomData[]
 --- @return string
 local function generate_header(dir, sources, atoms_data)
-	--- @type string
-	local dir_basename = duffle.basename_no_ext(dir)
+	local dir_basename = duffle.basename_no_ext(dir) ---@type string
 
-	--- @type string[]
-	local lines = {}
+	local lines = {} ---@type string[]
 	--- @param s string
 	--- @return nil
 	local function add(s) lines[#lines + 1] = s end
 
 	add("// Auto-generated by ps1_meta.lua (passes/offsets.lua) — DO NOT EDIT")
 	add("// Directory: " .. dir:gsub("/", "\\") .. "\\")
-	--- @type integer, SourceFile
-	for _, src in ipairs(sources) do
+	for _, src in ipairs(sources) do ---@type integer, SourceFile
 		add("//   source: " .. src.path:gsub("/", "\\"))
 	end
 	add("#pragma once")
@@ -264,8 +244,7 @@ local function generate_header(dir, sources, atoms_data)
 	add("#pragma region " .. dir_basename)
 	add("")
 	add("")
-	--- @type integer, AtomData
-	for _, atom in ipairs(atoms_data) do
+	for _, atom in ipairs(atoms_data) do ---@type integer, AtomData
 		emit_atom_offsets(add, atom)
 	end
 	add("#pragma endregion " .. dir_basename)
@@ -273,8 +252,7 @@ local function generate_header(dir, sources, atoms_data)
 	return table.concat(lines, "\n") .. "\n"
 end
 
---- @type OffsetsPass
-local M = {}
+local M = {} ---@type OffsetsPass
 
 --- (internal) Aggregate atoms from every source in one directory, render the per-directory `offsets.h`.
 --- Returns the offsets_h path if a header was written, or nil.
@@ -284,17 +262,14 @@ local M = {}
 --- @param errors  PassFinding[]
 --- @return string|nil
 local function process_directory(ctx, dir, sources, errors)
-	--- @type AtomData[]
-	local atoms_data = {}
+	local atoms_data = {} ---@type AtomData[]
 
 	--- @param atom AtomEntry
 	--- @return nil
 	local function append_atom(atom)
-		--- @type AtomPaths|nil
-		local  paths = atom and atom.paths
+		local  paths = atom and atom.paths ---@type AtomPaths|nil
 		if not paths then return end
-		--- @type table<string, integer>, OffsetBranch[]
-		local labels, branches = project_markers(paths.markers)
+		local labels, branches = project_markers(paths.markers) ---@type table<string, integer>, OffsetBranch[]
 		atoms_data[#atoms_data + 1] = {
 			name        = atom.raw_name or atom.name,
 			total_words = #(paths.word_events or {}),
@@ -302,19 +277,14 @@ local function process_directory(ctx, dir, sources, errors)
 		}
 	end
 
-	--- @type integer, SourceFile
-	for _, src in ipairs(sources) do
-		--- @type SourceScan
-		local scan = src.scan or {}
-		--- @type integer, AtomEntry
-		for _, atom in ipairs(scan.atoms or {}) do append_atom(atom) end
-		--- @type integer, AtomEntry
-		for _, atom in ipairs(scan.raw_atoms or {}) do append_atom(atom) end
+	for _, src in ipairs(sources) do ---@type integer, SourceFile
+		local scan = src.scan or {} ---@type SourceScan
+		for _, atom in ipairs(scan.atoms or {}) do append_atom(atom) end ---@type integer, AtomEntry
+		for _, atom in ipairs(scan.raw_atoms or {}) do append_atom(atom) end ---@type integer, AtomEntry
 	end
 	if #atoms_data == 0 then return nil end
 
-	--- @type string
-	local out_path = dir .. "/gen/offsets.h"
+	local out_path = dir .. "/gen/offsets.h" ---@type string
 	duffle.ensure_dir(duffle.dirname(out_path))
 	duffle.write_file(out_path, generate_header(dir, sources, atoms_data))
 	return out_path
@@ -326,15 +296,11 @@ end
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
-	--- @type OffsetOutput[]
-	local outputs  = {}
-	--- @type PassFinding[]
-	local errors   = {}
-	--- @type PassFinding[]
-	local warnings = {}
+	local outputs  = {} ---@type OffsetOutput[]
+	local errors   = {} ---@type PassFinding[]
+	local warnings = {} ---@type PassFinding[]
 
-	--- @type Corpus|nil
-	local corpus = ctx.shared and ctx.shared.corpus
+	local corpus = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
 	if type(corpus) ~= "table" then
 		error("offsets.run requires ctx.shared.corpus", 0)
 	end
@@ -343,12 +309,9 @@ function M.run(ctx)
 	end
 
 	-- Per-directory aggregation: every source in the same directory contributes to one `gen/offsets.h`.
-	--- @type table<string, SourceFile[]>
-	local sources_by_dir = corpus.sources_by_dir or duffle.group_sources_by_dir(corpus.source_order)
-	--- @type string, SourceFile[]
-	for dir, sources in pairs(sources_by_dir) do
-		--- @type string|nil
-		local out_path = process_directory(ctx, dir, sources, errors)
+	local sources_by_dir = corpus.sources_by_dir or duffle.group_sources_by_dir(corpus.source_order) ---@type table<string, SourceFile[]>
+	for dir, sources in pairs(sources_by_dir) do ---@type string, SourceFile[]
+		local out_path = process_directory(ctx, dir, sources, errors) ---@type string|nil
 		if out_path then
 			outputs[#outputs + 1] = { offsets_h = out_path }
 		end

@@ -35,10 +35,8 @@
 --- @field run  fun(ctx: PassCtx): AutoRegResult
 --- @field POOL GprIdent[]
 
---- @type string
-local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
---- @type DuffleExport
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
 
 --- ════════════════════════════════════════════════════════════════════════════
 --- THE GPR ALLOCATION POOL — what's allocatable, and (more importantly) WHY
@@ -56,8 +54,7 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 ---   R_K0/K1       (codes 26-27) — Kernel / interrupt handler reserves. Never touched by user code.
 ---   R_GP/SP/FP/RA (codes 28-31) — R_SP/R_FP/R_RA are tape-runtime carriers between tape_enter and tape_exit; R_GP stays the host global pointer.
 ---
---- @type GprIdent[]
-local POOL = {
+local POOL = { ---@type GprIdent[]
 	"R_V0", "R_V1",
 	"R_T0", "R_T1", "R_T2", "R_T3",
 	"R_T4", "R_T5", "R_T6", "R_T7",
@@ -72,8 +69,7 @@ local POOL = {
 -- Only the POOL entries matter for auto_reg — non-pool aliases
 -- (R_AT=1, R_A0..A3=4..7, R_T8=24, R_T9=25, R_K0/K1=26..27, R_GP/SP/FP/RA=28..31) 
 -- are deliberately omitted — see the comment block above for the WHY of each exclusion.
---- @type table<integer, GprIdent>  -- bag: MIPS GPR code -> POOL ident
-local INT_CODE_TO_POOL_GPR = {
+local INT_CODE_TO_POOL_GPR = { ---@type table<integer, GprIdent>  -- bag: MIPS GPR code -> POOL ident
 	[2]  = "R_V0", [3]  = "R_V1",
 	[4]  = "R_A0", [5]  = "R_A1", [6]  = "R_A2", [7]  = "R_A3",
 	[8]  = "R_T0", [9]  = "R_T1", [10] = "R_T2", [11] = "R_T3",
@@ -87,10 +83,8 @@ local INT_CODE_TO_POOL_GPR = {
 --- @param tbl table<string, string>  -- bag: key set only; values unused
 --- @return string[]
 local function stable_sort_keys(tbl)
-	--- @type string[]
-	local keys = {}
-	--- @type string
-	for k in pairs(tbl) do keys[#keys + 1] = k end
+	local keys = {} ---@type string[]
+	for k in pairs(tbl) do keys[#keys + 1] = k end ---@type string
 	table.sort(keys)
 	return keys
 end
@@ -105,18 +99,12 @@ local function allocate_phase(phase_label, decls)
 	-- Deep-copy POOL into a fresh sequence table. The original `table.unpack and table.unpack(POOL) or { unpack(POOL) }`
 	-- idiom wraps the unpacked values in a single inner table under LuaJIT 5.1 (`table.unpack` is nil; the `or` returns one value),
 	-- which corrupts the pool into `{ {R_T0, R_T1, ...} }` — making `table.remove(pool, 1)` return the inner table on iteration.
-	--- @type GprIdent[]
-	local pool   = {}
-	--- @type integer
-	for i = 1, #POOL do pool[i] = POOL[i] end
-	--- @type GprAllocMap
-	local result = {}
-	--- @type PassFinding[]
-	local errors = {}
-	--- @type integer, string
-	for _, sym in ipairs(stable_sort_keys(decls)) do
-		--- @type GprIdent|nil
-		local next_gpr = table.remove(pool, 1)
+	local pool   = {} ---@type GprIdent[]
+	for i = 1, #POOL do pool[i] = POOL[i] end ---@type integer
+	local result = {} ---@type GprAllocMap
+	local errors = {} ---@type PassFinding[]
+	for _, sym in ipairs(stable_sort_keys(decls)) do ---@type integer, string
+		local next_gpr = table.remove(pool, 1) ---@type GprIdent|nil
 		if not next_gpr then
 			errors[#errors + 1] = {
 				line = 0,
@@ -144,16 +132,12 @@ end
 --- @return table<GprIdent, boolean>
 --- @return table<string, GprIdent>
 local function build_user_pins(corpus)
-	--- @type table<GprIdent, boolean>  -- bag: pinned physical GPR -> true
-	local user_pinned  = {}
-	--- @type table<string, GprIdent>  -- bag: alias ident -> physical GPR
-	local alias_to_gpr = {}
+	local user_pinned  = {} ---@type table<GprIdent, boolean>  -- bag: pinned physical GPR -> true
+	local alias_to_gpr = {} ---@type table<string, GprIdent>  -- bag: alias ident -> physical GPR
 	if not corpus.register_alias_registry then return user_pinned, alias_to_gpr end
-	--- @type string, AliasEntry
-	for alias_name, alias_entry in pairs(corpus.register_alias_registry) do
+	for alias_name, alias_entry in pairs(corpus.register_alias_registry) do ---@type string, AliasEntry
 		if alias_entry.has_atom_reg and alias_entry.code then
-			--- @type GprIdent|nil
-			local gpr = INT_CODE_TO_POOL_GPR[alias_entry.code]
+			local gpr = INT_CODE_TO_POOL_GPR[alias_entry.code] ---@type GprIdent|nil
 			if gpr then
 				user_pinned[gpr]         = true
 				alias_to_gpr[alias_name] = gpr
@@ -174,29 +158,22 @@ end
 --- @param alias_to_gpr table<string, GprIdent>  -- bag: alias ident -> physical GPR
 --- @return table<GprIdent, integer>
 local function find_used_gprs(body_text, alias_to_gpr)
-	--- @type table<GprIdent, integer>  -- bag: physical GPR -> hit count
-	local found = {}
+	local found = {} ---@type table<GprIdent, integer>  -- bag: physical GPR -> hit count
 	-- (a) Hardcoded physical GPRs (R_T0..R_T7, R_V0..R_V1, R_A0..R_A3, R_S0..R_S7).
-	--- @type GprIdent
-	for gpr in body_text:gmatch("(R_T%d+|R_V%d+|R_A%d+|R_S%d+)") do
+	for gpr in body_text:gmatch("(R_T%d+|R_V%d+|R_A%d+|R_S%d+)") do ---@type GprIdent
 		found[gpr] = (found[gpr] or 0) + 1
 	end
 	-- (b) Alias references (R_<Alias>) resolved to physical GPRs via the registry.
 	--      Sorted by name so the regex is byte-stable across runs.
 	if alias_to_gpr and next(alias_to_gpr) then
-		--- @type string[]
-		local aliases = {}
-		--- @type string
-		for alias_name in pairs(alias_to_gpr) do
+		local aliases = {} ---@type string[]
+		for alias_name in pairs(alias_to_gpr) do ---@type string
 			aliases[#aliases + 1] = alias_name
 		end
 		table.sort(aliases)
-		--- @type string
-		local pattern = "(" .. table.concat(aliases, "|") .. ")"
-		--- @type string
-		for alias_name in body_text:gmatch(pattern) do
-			--- @type GprIdent|nil
-			local gpr = alias_to_gpr[alias_name]
+		local pattern = "(" .. table.concat(aliases, "|") .. ")" ---@type string
+		for alias_name in body_text:gmatch(pattern) do ---@type string
+			local gpr = alias_to_gpr[alias_name] ---@type GprIdent|nil
 			if gpr and not found[gpr] then
 				found[gpr] = 1
 			end
@@ -213,30 +190,24 @@ end
 --- @return string|nil
 local function emit_auto_reg_h(out_dir, dir, sources, mappings)
 	if not mappings or next(mappings) == nil then return end
-	--- @type string
-	local out_path = out_dir .. "/" .. "auto_reg.h"
+	local out_path = out_dir .. "/" .. "auto_reg.h" ---@type string
 	duffle.ensure_dir(out_dir)
-	--- @type string[]
-	local lines = {
+	local lines = { ---@type string[]
 		"#ifdef INTELLISENSE_DIRECTIVES",
 		"#pragma once",
 		"#endif",
 		"// Auto-generated by ps1_meta.lua (passes/auto_reg.lua) — DO NOT EDIT",
 		"// Directory: " .. dir:gsub("/", "\\"),
 	}
-	--- @type integer, SourceFile
-	for _, src in ipairs(sources) do
+	for _, src in ipairs(sources) do ---@type integer, SourceFile
 		lines[#lines + 1] = "//   source: " .. src.path
 	end
 	lines[#lines + 1] = "// Per-phase register allocations resolved by the lua pass."
 	lines[#lines + 1] = "// R_<Sym>_Code = <chosen GPR's _Code constant> for every marker in this directory."
 	lines[#lines + 1] = ""
-	--- @type integer, string
-	for _, sym in ipairs(stable_sort_keys(mappings)) do
-		--- @type GprIdent
-		local gpr         = mappings[sym]
-		--- @type string
-		local gpr_code    = gpr .. "_Code"
+	for _, sym in ipairs(stable_sort_keys(mappings)) do ---@type integer, string
+		local gpr         = mappings[sym] ---@type GprIdent
+		local gpr_code    = gpr .. "_Code" ---@type string
 		lines[#lines + 1] = "#define " .. sym .. "_Code " .. gpr_code
 	end
 	lines[#lines + 1] = ""
@@ -249,21 +220,16 @@ end
 -- Pass entry
 -- ════════════════════════════════════════════════════════════════════════════
 
---- @type AutoRegPass
-local M = {}
+local M = {} ---@type AutoRegPass
 
 --- @param ctx PassCtx
 --- @return AutoRegResult
 function M.run(ctx)
-	--- @type AutoRegOutput[]
-	local outputs  = {}
-	--- @type PassFinding[]
-	local errors   = {}
-	--- @type PassFinding[]
-	local warnings = {}
+	local outputs  = {} ---@type AutoRegOutput[]
+	local errors   = {} ---@type PassFinding[]
+	local warnings = {} ---@type PassFinding[]
 
-	--- @type Corpus|nil
-	local corpus = ctx.shared and ctx.shared.corpus
+	local corpus = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
 	if type(corpus) ~= "table" then
 		error("auto_reg.run requires ctx.shared.corpus", 0)
 	end
@@ -273,23 +239,17 @@ function M.run(ctx)
 	--  MUST NOT be allocated to any auto-reg marker — they're preserved across atoms by the wave-context discipline.
 	--  The corpus's register_alias_registry is the source of truth for these opt-in pins.
 	--  Body references to those aliases (via alias_to_gpr) are also excluded on a per-atom basis in step 2 below.
-	--- @type table<GprIdent, boolean>, table<string, GprIdent>
-	local user_pinned, alias_to_gpr = build_user_pins(corpus)
+	local user_pinned, alias_to_gpr = build_user_pins(corpus) ---@type table<GprIdent, boolean>, table<string, GprIdent>
 
 	-- 1. Allocate phase pools first (phase declarations take precedence over per-atom declarations).
-	--- @type table<string, GprAllocMap>  -- bag: phase_label -> alloc map
-	local phase_allocations = {}
-	--- @type string, table<string, string>
-	for phase_label, decls in pairs(corpus.phase_auto_regs or {}) do
-		--- @type GprAllocMap, PassFinding[]
-		local mapping, errs = allocate_phase(phase_label, decls)
-		--- @type string, GprIdent
-		for sym, gpr in pairs(mapping) do
+	local phase_allocations = {} ---@type table<string, GprAllocMap>  -- bag: phase_label -> alloc map
+	for phase_label, decls in pairs(corpus.phase_auto_regs or {}) do ---@type string, table<string, string>
+		local mapping, errs = allocate_phase(phase_label, decls) ---@type GprAllocMap, PassFinding[]
+		for sym, gpr in pairs(mapping) do ---@type string, GprIdent
 			phase_allocations[phase_label]      = phase_allocations[phase_label] or {}
 			phase_allocations[phase_label][sym] = gpr
 		end
-		--- @type integer, PassFinding
-		for _, e in ipairs(errs) do
+		for _, e in ipairs(errs) do ---@type integer, PassFinding
 			errors[#errors + 1] = e
 		end
 	end
@@ -298,22 +258,16 @@ function M.run(ctx)
 	-- Otherwise, allocate a private pool for the atom.
 	-- The phase membership is in `corpus.atom_phases[phase_label].atoms` (an array of atom names declared via `atom_phase(<phase>)`
 	-- in the atom's `atom_info` line). Build a reverse map `atom_name -> phase_label` so the lookup is O(1) per atom scope.
-	--- @type table<AtomName, string>  -- bag: atom name -> phase label
-	local atom_name_to_phase = {}
-	--- @type string, AtomPhaseGroup
-	for phase_label, entry in pairs(corpus.atom_phases or {}) do
-		--- @type integer, AtomName
-		for _, atom_name in ipairs(entry.atoms or {}) do
+	local atom_name_to_phase = {} ---@type table<AtomName, string>  -- bag: atom name -> phase label
+	for phase_label, entry in pairs(corpus.atom_phases or {}) do ---@type string, AtomPhaseGroup
+		for _, atom_name in ipairs(entry.atoms or {}) do ---@type integer, AtomName
 			atom_name_to_phase[atom_name] = phase_label
 		end
 	end
 
-	--- @type table<AtomName, GprAllocMap>  -- bag: atom scope -> alloc map
-	local atom_allocations = {}
-	--- @type AtomName, table<string, string>
-	for atom_scope, decls in pairs(corpus.atom_auto_regs or {}) do
-		--- @type string|nil
-		local phase_label = atom_name_to_phase[atom_scope]
+	local atom_allocations = {} ---@type table<AtomName, GprAllocMap>  -- bag: atom scope -> alloc map
+	for atom_scope, decls in pairs(corpus.atom_auto_regs or {}) do ---@type AtomName, table<string, string>
+		local phase_label = atom_name_to_phase[atom_scope] ---@type string|nil
 		-- Build the atom's source pool: start with the full POOL, subtract:
 		--   (a) every GPR already committed (phase allocations + prior atom allocations)
 		--   (b) every USER-PINNED GPR (wave-context carriers + file-scope pinned aliases)
@@ -323,37 +277,26 @@ function M.run(ctx)
 		-- the original `source_pool = phase_allocations[phase_label]` form used the phase
 		-- allocation MAP as a pool, but that map has no array part, so `table.remove(source_pool, 1)`
 		-- returned nil and every atom-with-phase marker errored with `phase_register_pool_exhausted`.
-		--- @type table<GprIdent, boolean>  -- bag: committed or body-referenced GPR -> true
-		local used = {}
-		--- @type integer, GprAllocMap
-		for _, m in pairs(phase_allocations) do for _, gpr in pairs(m) do used[gpr] = true end end
-		--- @type integer, GprAllocMap
-		for _, m in pairs(atom_allocations)  do for _, gpr in pairs(m) do used[gpr] = true end end
+		local used = {} ---@type table<GprIdent, boolean>  -- bag: committed or body-referenced GPR -> true
+		for _, m in pairs(phase_allocations) do for _, gpr in pairs(m) do used[gpr] = true end end ---@type integer, GprAllocMap
+		for _, m in pairs(atom_allocations)  do for _, gpr in pairs(m) do used[gpr] = true end end ---@type integer, GprAllocMap
 		-- (c) Body references — scan the atom body for hardcoded + alias-resolved GPRs.
 		--     Folded into `used` so the source_pool exclusion is a single check.
-		--- @type AtomEntry|nil
-		local atom = corpus.atoms_by_name and corpus.atoms_by_name[atom_scope]
+		local atom = corpus.atoms_by_name and corpus.atoms_by_name[atom_scope] ---@type AtomEntry|nil
 		if atom and atom.body then
-			--- @type table<GprIdent, integer>
-			local body_used = find_used_gprs(atom.body, alias_to_gpr)
-			--- @type GprIdent
-			for gpr in pairs(body_used) do used[gpr] = true end
+			local body_used = find_used_gprs(atom.body, alias_to_gpr) ---@type table<GprIdent, integer>
+			for gpr in pairs(body_used) do used[gpr] = true end ---@type GprIdent
 		end
-		--- @type GprIdent[]
-		local source_pool = {}
-		--- @type integer, GprIdent
-		for _, gpr in ipairs(POOL) do
+		local source_pool = {} ---@type GprIdent[]
+		for _, gpr in ipairs(POOL) do ---@type integer, GprIdent
 			-- Exclude (a) prior commitments, (b) USER-PINNED GPRs (wave-context carriers declared via atom_reg + _Code defs, preserved across atoms globally).
 			if not used[gpr] and not user_pinned[gpr] then
 				source_pool[#source_pool + 1] = gpr
 			end
 		end
-		--- @type GprAllocMap
-		local result = {}
-		--- @type integer, string
-		for _, sym in ipairs(stable_sort_keys(decls)) do
-			--- @type GprIdent|nil
-			local next_gpr = table.remove(source_pool, 1)
+		local result = {} ---@type GprAllocMap
+		for _, sym in ipairs(stable_sort_keys(decls)) do ---@type integer, string
+			local next_gpr = table.remove(source_pool, 1) ---@type GprIdent|nil
 			if not next_gpr then
 				errors[#errors + 1] = {
 					line = 0,
@@ -375,15 +318,11 @@ function M.run(ctx)
 	-- This warning is kept as a defensive safety net for cases the body scanner might miss
 	-- (e.g. macros that expand to register references the scanner cannot resolve).
 	-- For each resolved (scope, sym) -> R_Tn mapping, scan the atom body source for used GPRs.
-	--- @type AtomName, GprAllocMap
-	for atom_scope, decls in pairs(atom_allocations) do
-		--- @type AtomEntry|nil
-		local atom = corpus.atoms_by_name and corpus.atoms_by_name[atom_scope]
+	for atom_scope, decls in pairs(atom_allocations) do ---@type AtomName, GprAllocMap
+		local atom = corpus.atoms_by_name and corpus.atoms_by_name[atom_scope] ---@type AtomEntry|nil
 		if    atom and atom.body then
-			--- @type table<GprIdent, integer>
-			local used_in_body = find_used_gprs(atom.body, alias_to_gpr)
-			--- @type string, GprIdent
-			for sym, allocated_gpr in pairs(decls) do
+			local used_in_body = find_used_gprs(atom.body, alias_to_gpr) ---@type table<GprIdent, integer>
+			for sym, allocated_gpr in pairs(decls) do ---@type string, GprIdent
 				if used_in_body[allocated_gpr] and used_in_body[allocated_gpr] > 0 then
 					warnings[#warnings + 1] = {
 						line  = atom.line or 0,
@@ -398,37 +337,27 @@ function M.run(ctx)
 
 	-- 4. Emit per-directory gen/auto_reg.h.
 	-- For each source directory that has atom_auto_regs or phase_auto_regs entries, emit one header.
-	--- @type table<string, SourceFile[]>
-	local sources_by_dir = corpus.sources_by_dir or {}
-	--- @type string, SourceFile[]
-	for dir, sources in pairs(sources_by_dir) do
-		--- @type GprAllocMap
-		local per_dir_mappings = {}
-		--- @type integer, SourceFile
-		for _, src in ipairs(sources) do
+	local sources_by_dir = corpus.sources_by_dir or {} ---@type table<string, SourceFile[]>
+	for dir, sources in pairs(sources_by_dir) do ---@type string, SourceFile[]
+		local per_dir_mappings = {} ---@type GprAllocMap
+		for _, src in ipairs(sources) do ---@type integer, SourceFile
 			-- Collect every (sym -> gpr) entry that originated from a source in this directory.
 			-- `src.scan.atom_auto_regs` is keyed by ATOM SCOPE NAME; `pairs(t)` iterates KEYS so `scope_name` here is the scope ident (e.g. "cube_g4_face").
 			-- The previous `for _, scan_atom_auto` form silently assigned the VALUE (a `{sym = sym}` table) to the variable,
 			-- which made `atom_allocations[scan_atom_auto]` a table-indexed lookup that never resolved.
-			--- @type string
-			for scope_name in pairs(src.scan and src.scan.atom_auto_regs or {}) do
-				--- @type string, GprIdent
-				for sym, gpr in pairs(atom_allocations[scope_name] or {}) do
+			for scope_name in pairs(src.scan and src.scan.atom_auto_regs or {}) do ---@type string
+				for sym, gpr in pairs(atom_allocations[scope_name] or {}) do ---@type string, GprIdent
 					per_dir_mappings[sym] = gpr
 				end
 			end
-			--- @type string
-			for scope_name in pairs(src.scan and src.scan.phase_auto_regs or {}) do
-				--- @type string, GprIdent
-				for sym, gpr in pairs(phase_allocations[scope_name] or {}) do
+			for scope_name in pairs(src.scan and src.scan.phase_auto_regs or {}) do ---@type string
+				for sym, gpr in pairs(phase_allocations[scope_name] or {}) do ---@type string, GprIdent
 					per_dir_mappings[sym] = gpr
 				end
 			end
 		end
-		--- @type string
-		local out_dir  = dir .. "/gen"
-		--- @type string|nil
-		local out_path = emit_auto_reg_h(out_dir, dir, sources, per_dir_mappings)
+		local out_dir  = dir .. "/gen" ---@type string
+		local out_path = emit_auto_reg_h(out_dir, dir, sources, per_dir_mappings) ---@type string|nil
 		if out_path then outputs[#outputs + 1] = { auto_reg_h = out_path } end
 	end
 	return { outputs = outputs, errors = errors, warnings = warnings }
