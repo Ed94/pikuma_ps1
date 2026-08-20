@@ -210,7 +210,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		local prefix = reg_use_param .. "."
 		if operand:sub(1, #prefix) ~= prefix then return nil end
 		local member_path = operand:sub(#prefix + 1)
-		local slot = reg_use_schema.alias_to_slot[member_path]
+		local  slot       = reg_use_schema.alias_to_slot[member_path]
 		if not slot then return nil, member_path end
 		return "reguse:" .. atom_name .. ":" .. slot, nil, slot
 	end
@@ -223,9 +223,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		return ids
 	end
 
-	local function emit_word(encoder, args, line, word_call_text,
-		def_source_now, def_line_now,
-		immediate_call_text, root_call_text_w, sub_map)
+	local function emit_word(encoder, args, line, word_call_text, def_source_now, def_line_now, immediate_call_text, root_call_text_w, sub_map)
 		local inv_ids   = open_invocation_ids_snapshot()
 		local outermost = inv_ids[1] or 0
 		-- For words emitted at the root atom body, `immediate_call_text` is nil and the walker's `word_call_text` (the word's own token, e.g. "nop") becomes the effective call_text.
@@ -233,7 +231,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		-- The call that triggered the body expansion we're currently walking.
 		local eff_call_text      = immediate_call_text or word_call_text
 		local eff_root_call_text = root_call_text_w
-		local gpr_keys = nil
+		local gpr_keys           = nil
 		if reg_use_schema or sub_map then
 			gpr_keys = {}
 			for pos, arg in ipairs(args or {}) do
@@ -268,17 +266,17 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		if not reg_use_schema then
 			gpr_keys = nil
 		end
-		local isa = M.instr(encoder)
-		local isa_kind = isa and isa.kind or "unknown"
+		local isa       = M.instr(encoder)
+		local isa_kind  = isa and isa.kind or "unknown"
 		local nop_words = (encoder == "nop" and 1) or (encoder == "nop2" and 2) or 0
-		local is_yield = (encoder == "mac_yield" or encoder == "mac_yield_tail")
+		local is_yield  = (encoder == "mac_yield" or encoder == "mac_yield_tail")
 		local gp0_shape = type(encoder) == "string"
 			and encoder:match("^mac_format_([%w_]+)_color$")
 			or nil
-		local is_load = (isa_kind == "load")
-		local is_branch = (isa_kind == "branch")
+		local is_load               = (isa_kind == "load")
+		local is_branch             = (isa_kind == "branch")
 		local is_unconditional_jump = (encoder == "jump" or encoder == "call_addr")
-		local is_terminal_jump = (encoder == "jump_reg" or encoder == "call_reg" or encoder == "jump_link")
+		local is_terminal_jump      = (encoder == "jump_reg" or encoder == "call_reg" or encoder == "jump_link")
 		items[#items + 1] = {
 			kind                     = "word",
 			encoder                  = encoder,
@@ -335,14 +333,18 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		-- `consuming_encoder` + `consuming_arg_pos` carry the surrounding control-transfer instruction context
 		-- (e.g. `branch_le_zero` consuming its 3rd argument, or `jump` / `call_addr` consuming their only argument).
 		-- `passes/offsets.lua` reads these to dispatch per-consuming-instruction offset encoding.
-		-- nil for top-level markers (where the marker is the entire token — no surrounding consuming instruction).
+		-- Offset markers require a real consuming encoder. A lone top-level `atom_offset` is not emitted.
+		-- Label and delay markers may have a nil encoder (they are not consumed as immediates).
+		if kind == "offset" and (consuming_encoder == nil or consuming_encoder == "") then
+			return
+		end
 		local it = {
-			kind                     = kind,
-			name                     = name,
-			line                     = line,
-			word_index               = word_idx,
-			invocation_ids           = inv_ids,
-			outermost_invocation_id  = outermost,
+			kind                    = kind,
+			name                    = name,
+			line                    = line,
+			word_index              = word_idx,
+			invocation_ids          = inv_ids,
+			outermost_invocation_id = outermost,
 		}
 		if target ~= nil then it.target = target end
 		if consuming_encoder then it.consuming_encoder = consuming_encoder end
@@ -450,15 +452,14 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			-- Commit: label takes 1 arg, offset takes 2.
 			-- For embedded markers, propagate the consuming_encoder + the marker's arg position
 			-- (1-based) so `passes/offsets.lua` can dispatch per-consuming-instruction offset encoding.
-			-- Top-level markers (no consuming_encoder) get nil for both — the offsets pass treats
-			-- them as branch-equivalent for backward compatibility.
+			-- Offset markers are emitted only when a consuming encoder is present.
 			local arg_pos = nil
 			if consuming_encoder and consuming_paren then
 				arg_pos = count_top_level_commas(tok, consuming_paren + 1, pos) + 1
 			end
 			local args = split_call_args(inner)
 			if ident == "atom_label" then emit_marker("label",  args[1] or "", nil,           tok_line, nil, nil, consuming_encoder, arg_pos)
-			else                          emit_marker("offset", args[1] or "", args[2] or "", tok_line, nil, nil, consuming_encoder, arg_pos)
+			elseif consuming_encoder then emit_marker("offset", args[1] or "", args[2] or "", tok_line, nil, nil, consuming_encoder, arg_pos)
 			end
 			pos = after_paren
 			::continue_loop::
@@ -545,7 +546,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		local wc = ctx_table.word_counts
 		if    wc and wc[ident] then return wc[ident] end
 		local canon = M.gte_canon(ident)
-		if canon ~= ident and wc and wc[canon] then return wc[canon] end
+		if    canon ~= ident and wc and wc[canon] then return wc[canon] end
 		warnings[#warnings + 1] = {
 			kind = "uncounted",
 			line = tok_line,
@@ -572,6 +573,18 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		-- "opaque word" emit handles direct encoders + mac_X-without-component.
 		local function process_token(bt)
 			local tok = M.trim(bt.tok or "")
+			-- Substituted MipsCode args can carry // comments from the call site.
+			while tok ~= "" do
+				if tok:sub(1, 2) == "//" then
+					local nl = tok:find("\n")
+					tok = M.trim(nl and tok:sub(nl + 1) or "")
+				elseif tok:sub(1, 2) == "/*" then
+					local close = tok:find("*/", 3, true)
+					tok = M.trim(close and tok:sub(close + 2) or "")
+				else
+					break
+				end
+			end
 			if tok == "" then return end
 			local ident, after = M.read_ident(tok, 1)
 			if not ident then ident = "?" end
@@ -582,10 +595,16 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				local rest = tok:sub(after or (#tok + 1))
 				while true do
 					rest = M.trim(rest)
-					if rest:sub(1, 2) ~= "/*" then break end
-					local close = rest:find("*/", 3, true)
-					if not close then rest = ""; break end
-					rest = rest:sub(close + 2)
+					if rest:sub(1, 2) == "//" then
+						local nl = rest:find("\n")
+						rest = nl and rest:sub(nl + 1) or ""
+					elseif rest:sub(1, 2) == "/*" then
+						local close = rest:find("*/", 3, true)
+						if not close then rest = ""; break end
+						rest = rest:sub(close + 2)
+					else
+						break
+					end
 				end
 				if rest ~= "" then
 					process_token({ tok = rest, rel = bt.rel })
@@ -601,12 +620,19 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				emit_embedded_markers(tok, tok_line, consuming_encoder_for_markers)
 			end
 			-- atom_label / atom_offset: terminal markers, no further descent.
-			-- Top-level markers (the marker IS the entire token) have no consuming instruction;
-			-- nil for both `consuming_encoder` and `consuming_arg_pos`.
-			-- The offsets pass treats these as branch-equivalent for backward compatibility.
-			-- TODO(Ed): Review this don't want legacy cruft here..
-			if     ident == "atom_label"  then emit_marker("label",  args[1] or "", nil,           tok_line); return
-			elseif ident == "atom_offset" then emit_marker("offset", args[1] or "", args[2] or "", tok_line); return
+			-- A lone top-level atom_label is an anchor and is emitted with no consuming encoder.
+			-- A lone top-level atom_offset has no consuming encoder and is not emitted.
+			if     ident == "atom_label"  then emit_marker("label", args[1] or "", nil, tok_line); return
+			elseif ident == "atom_offset" then return
+			end
+			-- MipsCode formals (nop_slot1, …): the ident is a sub_map key.
+			-- Re-process the replacement token so load_word(...) becomes a real encoder.
+			if sub_map and type(sub_map[ident]) == "string" and sub_map[ident] ~= ident then
+				local repl = M.trim(sub_map[ident])
+				if repl ~= "" then
+					process_token({ tok = repl, rel = bt.rel })
+					return
+				end
 			end
 			if ident:sub(1, 4) == "mac_" then
 				local bare = ident:sub(5)
@@ -738,7 +764,8 @@ end
 ---   * Metadata-backed N-word tokens (`nop2`, `mask_upper`, ...): N `word` items, all sharing the same encoder + word_count = 1.
 ---     `nop2` is normalized to encoder `nop` (per the spec).
 ---   * `atom_label(F)` markers: one `label` item with `name = "F"`, `word_index = current word_idx`; zero-width (does NOT advance word_idx).
----   * `atom_offset(B, T)` markers: one `offset` item with `name = "B"`, `target = "T"`, `word_index = current word_idx`; zero-width.
+---   * `atom_offset(B, T)` nested in a consuming instruction: one `offset` item with `name = "B"`, `target = "T"`, `word_index = current word_idx`; zero-width.
+---     A lone top-level `atom_offset` is not emitted.
 ---   * Delay markers (`GteDelay_` / `LdSlot_` / `BdSlot_` / `DmaSlot_`): one `delay` item; zero-width. The following encoder is the next token.
 ---   * `mac_X(...)` calls: emit `invoke_begin` (zero-width), recurse into the component body, emit `invoke_end` (zero-width).
 ---     The component body's words land between the begin/end pair; one invocation record is allocated per call (monotonic ID per atom).

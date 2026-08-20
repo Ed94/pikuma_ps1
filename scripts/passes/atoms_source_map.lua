@@ -526,13 +526,11 @@ function M.render_atom_provenance(atom, wc, rel_path)
 	local lines = {}
 	lines[#lines + 1] = string.format("ATOM %s  %d", (atom.raw_name or atom.name), total)
 	for _, entry in ipairs(entries) do
-		local inv = entry.invocation
+		local inv         = entry.invocation
 		local macro_count = inv and wc and wc["mac_" .. inv.component_name]
 		if inv and macro_count ~= nil then
-			lines[#lines + 1] = string.format(
-				'WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d',
-				entry.pos, rel_path, entry.line, inv.component_name,
-				inv.def_path or "", inv.def_line or 0, entry.body_line)
+			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d'
+				, entry.pos, rel_path, entry.line, inv.component_name, inv.def_path or "", inv.def_line or 0, entry.body_line)
 		else
 			lines[#lines + 1] = string.format(
 				"WORD %d  CALL %s:%d  RAW", entry.pos, rel_path, entry.line)

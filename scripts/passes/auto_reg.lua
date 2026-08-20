@@ -9,8 +9,7 @@
 --- These GPRs are unavailable to EVERY atom's source pool.
 --- Carriers are preserved across atoms by context discipline and must never be reallocated.
 --- Per-atom body parsing also catches alias references (R_<Alias>) and hardcoded R_Tn references,
---- so the user can write either `R_T4` or `R_ResolveScratch` in an atom body and the pass will
---- exclude R_T4 from that atom's pool.
+--- so the user can write either `R_T4` or `R_ResolveScratch` in an atom body and the pass will exclude R_T4 from that atom's pool.
 ---
 --- Conflict detection: If the user hardcodes `R_Tn` in an atom body that shares a phase with an auto-reg that picked `R_Tn`,
 --- emit `phase_register_clash` as an info finding (no build stop).
@@ -27,30 +26,26 @@
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
--- ════════════════════════════════════════════════════════════════════════════
--- THE GPR ALLOCATION POOL — what's allocatable, and (more importantly) WHY
--- ════════════════════════════════════════════════════════════════════════════
---
--- The auto-reg pass picks physical GPRs for `atom_auto_reg(...)` / `phase_auto_reg(...)` markers.
--- The 24-register pool covers R2-R25 (the user/atom allocatable surface):
---   R_T0..R_T7, R_V0..R_V1, R_A0..A3, R_S0..S7, R_T8..T9.
--- Excluded (and never added to the pool):
---   R_0          (code 0)  — hardwired zero. Cannot be written.
---   R_AT         (code 1)  — assembler temporary. Reserved by the MIPS O32 ABI.
---   R_A0..A3                — explicitly omitted above even though their integer codes
---                              map to POOL entries; the pool-construction loop below
---                              only references the POOL string literals, never the
---                              integer codes, so they are NOT auto-allocated by default.
---                              (A0-A3 become available when the user adds them to
---                              POOL or hardcodes an R_A0 reference in the atom body.)
---   R_K0/K1      (codes 26-27) — kernel / interrupt handler reserves. Never touched by user code.
---   R_GP/SP/FP/RA (codes 28-31) — R_SP/R_FP/R_RA are tape-runtime carriers between
---                              tape_enter and tape_exit; R_GP stays the host global pointer.
+--- ════════════════════════════════════════════════════════════════════════════
+--- THE GPR ALLOCATION POOL — what's allocatable, and (more importantly) WHY
+--- ════════════════════════════════════════════════════════════════════════════
+---
+--- The auto-reg pass picks physical GPRs for `atom_auto_reg(...)` / `phase_auto_reg(...)` markers.
+--- The 24-register pool covers R2-R25 (the user/atom allocatable surface):
+---   R_T0..R_T7, R_V0..R_V1, R_A0..A3, R_S0..S7, R_T8..T9.
+--- Excluded (and never added to the pool):
+---   R_0          (code 0)   — Hardwired zero. Cannot be written.
+---   R_AT         (code 1)   — Assembler temporary. Reserved by the MIPS O32 ABI.
+---   R_A0..A3                — Explicitly omitted above even though their integer codes map to POOL entries;
+---                             the pool-construction loop below only references the POOL string literals, never the integer codes, so they are NOT auto-allocated by default.
+---                             (A0-A3 become available when the user adds them to POOL or hardcodes an R_A0 reference in the atom body.)
+---   R_K0/K1       (codes 26-27) — Kernel / interrupt handler reserves. Never touched by user code.
+---   R_GP/SP/FP/RA (codes 28-31) — R_SP/R_FP/R_RA are tape-runtime carriers between tape_enter and tape_exit; R_GP stays the host global pointer.
 ---
 local POOL = {
+	"R_V0", "R_V1",
 	"R_T0", "R_T1", "R_T2", "R_T3",
 	"R_T4", "R_T5", "R_T6", "R_T7",
-	"R_V0", "R_V1",
 	"R_A0", "R_A1", "R_A2", "R_A3",
 	"R_S0", "R_S1", "R_S2", "R_S3",
 	"R_S4", "R_S5", "R_S6", "R_S7",
@@ -131,13 +126,13 @@ local function build_user_pins(corpus)
 	return user_pinned, alias_to_gpr
 end
 
--- Find every physical GPR referenced in the atom body, via EITHER:
---   (a) A hardcoded physical GPR ident (R_T\d+|R_V\d+|R_A\d+|R_S\d+) — the existing regex;
---   (b) An alias ident (R_<Alias>) resolved via alias_to_gpr back to its physical GPR ident.
--- Returns { [physical_gpr_ident] = count }. Clash-detection and source-pool-exclusion logic
--- only needs the presence of each GPR (boolean test), but keeping count preserves the
--- original find_hardcoded_rn shape so callers can switch without churn.
--- The alias pattern is sorted lexicographically to keep the regex deterministic.
+--- Find every physical GPR referenced in the atom body, via EITHER:
+---   (a) A hardcoded physical GPR ident (R_T\d+|R_V\d+|R_A\d+|R_S\d+) — the existing regex;
+---   (b) An alias ident (R_<Alias>) resolved via alias_to_gpr back to its physical GPR ident.
+--- Returns { [physical_gpr_ident] = count }.
+--- Clash-detection and source-pool-exclusion logic only needs the presence of each GPR (boolean test), 
+--- but keeping count preserves the original find_hardcoded_rn shape so callers can switch without churn.
+--- The alias pattern is sorted lexicographically to keep the regex deterministic.
 local function find_used_gprs(body_text, alias_to_gpr)
 	local found = {}
 	-- (a) Hardcoded physical GPRs (R_T0..R_T7, R_V0..R_V1, R_A0..R_A3, R_S0..R_S7).
@@ -265,8 +260,7 @@ function M.run(ctx)
 		end
 		local source_pool = {}
 		for _, gpr in ipairs(POOL) do
-			-- Exclude (a) prior commitments, (b) USER-PINNED GPRs (wave-context carriers
-			-- declared via atom_reg + _Code defs, preserved across atoms globally).
+			-- Exclude (a) prior commitments, (b) USER-PINNED GPRs (wave-context carriers declared via atom_reg + _Code defs, preserved across atoms globally).
 			if not used[gpr] and not user_pinned[gpr] then
 				source_pool[#source_pool + 1] = gpr
 			end
@@ -297,7 +291,7 @@ function M.run(ctx)
 	-- For each resolved (scope, sym) -> R_Tn mapping, scan the atom body source for used GPRs.
 	for atom_scope, decls in pairs(atom_allocations) do
 		local atom = corpus.atoms_by_name and corpus.atoms_by_name[atom_scope]
-		if atom and atom.body then
+		if    atom and atom.body then
 			local used_in_body = find_used_gprs(atom.body, alias_to_gpr)
 			for sym, allocated_gpr in pairs(decls) do
 				if used_in_body[allocated_gpr] and used_in_body[allocated_gpr] > 0 then

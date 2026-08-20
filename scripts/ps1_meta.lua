@@ -531,7 +531,7 @@ local function build_ctx(args)
 			end
 			local text = file:read("*a")
 			file:close()
-
+			
 			local source = {
 				path     = path,
 				text     = text,
@@ -727,7 +727,7 @@ local function main(argv)
 	local ok, err = pcall(function()
 		local args = parse_args(argv)
 		local ctx  = build_ctx(args)
-
+		
 		local requested = args.requested_set
 		local closed    = topo_sort(PASSES, requested)
 

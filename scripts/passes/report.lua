@@ -1,8 +1,9 @@
 --- passes/report.lua — Per-MODULE annotation report renderer + project-wide summary writer.
 ---
---- Two output files per build:
----   - `build/gen/<dir_basename>.annotations.txt` — one per source-directory containing atoms; aggregates across all sources in the directory.
----   - `build/gen/annotation_validation.txt` — the project summary.
+--- Per-module markdown plus one project summary:
+---   - `build/<dir_basename>.atom_meta_report.md` — one per source-directory containing atoms
+---   - `build/<dir_basename>.atoms.md` — verbose source map
+---   - `build/atom_meta_report.summary.md` — the project summary
 ---
 --- The canonical `corpus.sources_by_dir` projection groups sources by directory.
 --- This pass builds one ModuleView per directory and walks SECTION_RENDERERS.
@@ -305,7 +306,6 @@ local function build_module_view(dir, dir_sources, corpus)
 		decls    = decls,
 		schemas  = schemas,
 		findings = sa.findings or {},
-		sa       = sa,
 		corpus   = corpus,
 	}
 end

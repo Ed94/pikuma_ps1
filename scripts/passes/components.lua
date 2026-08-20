@@ -100,9 +100,8 @@ local M = {}
 --- Returns the args string (e.g., `"U4 off, U4 code, U1 r, U1 g, U1 b"`) or nil if no function declaration is found.
 ---
 --- After the `sym` arg was dropped from MipsAtomComp_Proc_, the component name
---- and the args both come from the preceding `FI_ Slice_MipsCode ac_X(args)`
---- declaration. The shared `duffle.find_function_decl_for` helper does the
---- backward walk; this function returns just the args.
+--- and the args both come from the preceding `FI_ Slice_MipsCode ac_X(args)` declaration.
+--- The shared `duffle.find_function_decl_for` helper does the backward walk; this function returns just the args.
 ---
 --- @param source     string
 --- @param name       string  (retained for signature stability; unused — the walk derives the name)
@@ -336,11 +335,11 @@ end
 --- @param tok string
 --- @return string
 local function strip_leading_delay_marker(tok)
-	local ident = duffle.read_ident(tok, 1)
+	local  ident = duffle.read_ident(tok, 1)
 	if not ident or not duffle.DELAY_MARKERS[ident] then return tok end
 	local rest = tok:sub(#ident + 1):match("^%s*(.*)$") or ""
 	while rest:sub(1, 2) == "/*" do
-		local close = rest:find("*/", 3, true)
+		local  close = rest:find("*/", 3, true)
 		if not close then return "" end
 		rest = rest:sub(close + 2):match("^%s*(.*)$") or ""
 	end
@@ -428,115 +427,87 @@ end
 -- Always walk the original `MipsAtomComp_` body via `cc.body_tokens`.
 -- ═══════════════════════════════════════════
 
---- (internal) Recursive cycle-cost derivation. Sum `latency[ident]` per emitted instruction in the component body,
---- recursing through nested `mac_*` calls (so `mac_format_g4_color`'s cost = 4 × `mac_pack_color_word`'s cost).
---- Special rule: `mac_yield`'s cost = 0 (per `lottes_tape.h:125-130` "the runtime cost lands in the next atom's prologue").
+--- (internal) One walk of a component body that fills both `cycle_cost` and `gp0_contrib`.
+--- Cycle: sum `isa.cycles` / `gte.cycles` / `latency[ident]` / 1 per leaf, recurse `mac_*`.
+--- `mac_yield` cycle_cost is 0 (runtime cost lands in the next atom's prologue); its gp0 still comes from the token walk.
+--- GP0: count `gte_sw` and `store_word` / `store_half` / `store_byte` that target `R_PrimCursor` / `O_(Poly_` / `r_prim_cursor` / `r_primitive_cursor` / `r_base`.
+--- `insert_ot_tag*` gp0_contrib is 0; cycle still comes from the body walk.
+--- Missing component: cycle 1, gp0 0.
 --- @param name         string  -- component bare name (e.g. "yield", "pack_color_word")
 --- @param comp_by_name table<string, Component>
 --- @param latency      table<string, integer>
---- @param cache        table<string, integer>  -- shared memoization; `-1` sentinel detects cycles
---- @return integer
-local function cycle_cost_rec(name, comp_by_name, latency, cache)
+--- @param cache        table<string, {cycle_cost=integer, gp0_contrib=integer}>
+--- @return {cycle_cost=integer, gp0_contrib=integer}
+local function component_meta_rec(name, comp_by_name, latency, cache)
 	if cache[name] ~= nil then return cache[name] end
-	cache[name] = -1
+	cache[name] = { cycle_cost = -1, gp0_contrib = -1 }
 	local cc = comp_by_name[name]
-	local n
+	local cycle_cost
+	local gp0_contrib
 	if cc then
-		if name == "yield" then
-			-- mac_yield's cost is 0 by convention (the runtime cost lands in the next atom's prologue).
-			n = 0
-		else
-			n = 0
+		local skip_cycle = (name == "yield")
+		local skip_gp0   = name:match("^insert_ot_tag") ~= nil
+		cycle_cost  = 0
+		gp0_contrib = 0
+		if not skip_cycle or not skip_gp0 then
 			local tokens = cc.body_tokens
 			for _, t in ipairs(tokens) do
 				local trimmed = t.tok
 				if trimmed ~= "" then
 					local ident = duffle.read_ident(trimmed, 1)
-					if ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
-						-- Nested `mac_X(...)` call: recurse.
+					if    ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
 						local nested = ident:sub(MAC_PREFIX_LEN + 1)
-						n = n + cycle_cost_rec(nested, comp_by_name, latency, cache)
+						local nested_meta = component_meta_rec(nested, comp_by_name, latency, cache)
+						if not skip_cycle then
+							cycle_cost = cycle_cost + nested_meta.cycle_cost
+						end
+						if not skip_gp0 then
+							gp0_contrib = gp0_contrib + nested_meta.gp0_contrib
+						end
 					else
-						-- Leaf instruction or pseudo-macro.
-						local isa = duffle.instr(ident)
-						local gte = duffle.gte(ident)
-						n = n + ((isa and isa.cycles) or (gte and gte.cycles) or latency[ident] or 1)
+						if not skip_cycle then
+							local isa = duffle.instr(ident)
+							local gte = duffle.gte(ident)
+							cycle_cost = cycle_cost + ((isa and isa.cycles) or (gte and gte.cycles) or latency[ident] or 1)
+						end
+						if not skip_gp0 then
+							if ident == "gte_sw" then
+								gp0_contrib = gp0_contrib + 1
+							elseif ident == "store_word" or ident == "store_half" or ident == "store_byte" then
+								if trimmed:find("R_PrimCursor", 1, true)
+									or trimmed:find("O_(Poly_", 1, true)
+									or trimmed:find("r_prim_cursor", 1, true)
+									or trimmed:find("r_primitive_cursor", 1, true)
+									or trimmed:find("r_base", 1, true)
+								then
+									gp0_contrib = gp0_contrib + 1
+								end
+							end
+						end
 					end
 				end
 			end
 		end
 	else
-		n = 1
+		cycle_cost  = 1
+		gp0_contrib = 0
 	end
-	cache[name] = n
-	return n
-end
-
---- (internal) Recursive GP0 prim-buffer contribution. Count `store_word` / `store_half` / `store_byte` 
---- calls in the component body that target `R_PrimCursor` (these are the RAM-side prim-buffer words the macro contributes), recursing through nested `mac_*` calls.
---- Only `R_PrimCursor`-targeting stores count. Stores targeting other registers (e.g. `R_OtBase`, heap pointers) are not prim-buffer contributions.
---- @param name         string
---- @param comp_by_name table<string, Component>
---- @param cache        table<string, integer>
---- @return integer
-local function gp0_contrib_rec(name, comp_by_name, cache)
-	if name:match("^insert_ot_tag") then
-		cache[name] = 0
-		return 0
-	end
-	if cache[name] ~= nil then return cache[name] end
-	cache[name] = -1
-	local cc = comp_by_name[name]
-	local n
-	if cc then
-		n = 0
-		local tokens = cc.body_tokens
-		for _, t in ipairs(tokens) do
-			local trimmed = t.tok
-			if    trimmed ~= "" then
-				local ident = duffle.read_ident(trimmed, 1)
-				if    ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
-					-- Nested `mac_X(...)` call: recurse.
-					local nested = ident:sub(MAC_PREFIX_LEN + 1)
-					n = n + gp0_contrib_rec(nested, comp_by_name, cache)
-				elseif ident == "gte_sw" then
-					n = n + 1
-				elseif ident == "store_word" or ident == "store_half" or ident == "store_byte" then
-					if trimmed:find("R_PrimCursor", 1, true)
-						or trimmed:find("O_(Poly_", 1, true)
-						or trimmed:find("r_prim_cursor", 1, true)
-						or trimmed:find("r_primitive_cursor", 1, true)
-						or trimmed:find("r_base", 1, true)
-					then
-						n = n + 1
-					end
-				end
-			end
-		end
-	else
-		n = 0
-	end
-	cache[name] = n
-	return n
+	cache[name] = { cycle_cost = cycle_cost, gp0_contrib = gp0_contrib }
+	return cache[name]
 end
 
 --- Compute `cycle_cost` + `gp0_contrib` for every component in `components` in a single pass.
---- Memoization cache is built ONCE (per source) and shared across both helpers so that
---- a nested `mac_Y` reference inside a `mac_X` body computes its values once.
+--- One memoization cache; a nested `mac_Y` inside a `mac_X` body computes both fields once.
 --- @param components Component[]
 --- @param latency    table<string, integer>
 --- @return table<string, {cycle_cost=integer, gp0_contrib=integer}>
 local function compute_components_metadata(components, latency)
 	local comp_by_name = {}
 	for _, cc in ipairs(components) do comp_by_name[cc.name] = cc end
-	local cc_cache  = {}
-	local gc_cache  = {}
-	local out       = {}
+	local cache = {}
+	local out   = {}
 	for _, c in ipairs(components) do
-		out[c.name] = {
-			cycle_cost = cycle_cost_rec(c.name, comp_by_name, latency, cc_cache),
-			gp0_contrib = gp0_contrib_rec(c.name, comp_by_name, gc_cache),
-		}
+		out[c.name] = component_meta_rec(c.name, comp_by_name, latency, cache)
 	end
 	return out
 end
@@ -589,29 +560,23 @@ local function strip_trailing_continuation(lines)
 	end
 end
 
---- Classify a token as a "pure delay marker token" (a delay-marker identifier
---- with no following instruction — only whitespace and/or block comments).
+--- Classify a token as a "pure delay marker token" (a delay-marker identifier with no following instruction — only whitespace and/or block comments).
 --- Examples that match:
 ---   * `GteDelay_`                               → marker alone
 ---   * `GteDelay_  /* RT diagonal: D1 = a.x... */` → marker + block comment
 ---   * `GteDelay_  /* RT diagonal: ... */\n\t`    → marker + comment + trailing whitespace
---- Examples that DO NOT match (these contain a real instruction after the marker
---- and must be preserved verbatim so the instruction still gets emitted):
+--- Examples that DO NOT match (these contain a real instruction after the marker and must be preserved verbatim so the instruction still gets emitted):
 ---   * `GteDelay_ nop2`
 ---   * `GteDelay_ add_si(r.dst_ptr, r.scratch, dst_offset)`
 ---
---- Why this classification matters: the metaprogram emits tokens separated by `,`
---- and joins them with `\<newline>` line continuations. After C preprocessor
+--- Why this classification matters: the metaprogram emits tokens separated by `,` and joins them with `\<newline>` line continuations. After C preprocessor
 --- phase 2 (line splicing), the macro body collapses to a single logical line.
---- Each delay-marker identifier expands to empty (its definition
---- `#define GteDelay_ // ...` consumes the `//` line comment during preprocessing
---- of the definition itself, leaving an empty replacement list). When a token
---- is purely a delay marker with only a trailing comment, the `,` the metaprogram
---- normally adds before each token-after-the-first brackets empty content and
---- produces the syntax error `,,` (`expected expression before ',' token`) at
---- C compile. The metaprogram therefore emits such tokens WITHOUT the leading
---- `,` (see `token_skips_leading_comma`) — but the marker + trailing comment
---- are still emitted verbatim so the annotation is preserved in `gen/macs.h`.
+--- Each delay-marker identifier expands to empty (its definition `#define GteDelay_ // ...` consumes the `//` line comment during preprocessing
+--- of the definition itself, leaving an empty replacement list). 
+--- When a token is purely a delay marker with only a trailing comment, the `,` the metaprogram normally adds before 
+--- each token-after-the-first brackets empty content and produces the syntax error `,,` (`expected expression before ',' token`) at C compile.
+--- The metaprogram therefore emits such tokens WITHOUT the leading `,` (see `token_skips_leading_comma`) —
+--- but the marker + trailing comment are still emitted verbatim so the annotation is preserved in `gen/macs.h`.
 --- @param tok string  -- a single token from split_top_level_commas (already trimmed at the start, may contain trailing whitespace + block comment)
 --- @return boolean
 local function is_pure_delay_marker_token(tok)
@@ -655,17 +620,14 @@ end
 --- followed by whitespace + optional block comment and NOTHING ELSE) expand
 --- to empty at C preprocessor time. Emitting them WITHOUT the leading `,`
 --- separator that the metaprogram normally adds before each token after the
---- first keeps exactly one `,` between the surrounding real expressions in
---- the spliced macro body:
----
+--- first keeps exactly one `,` between the surrounding real expressions in the spliced macro body:
 ---   * before this rule:  `<tok1> ,\t<gdelay> ,\t<tok3>` → after expansion
 ---                        `<tok1> ,  /* comment */ , <tok3>` → `,,` syntax error.
 ---   * after  this rule:  `<tok1> \t<gdelay> ,\t<tok3>` → after expansion
 ---                        `<tok1>  /* comment */ , <tok3>` → `<tok1>, <tok3>` — valid.
 ---
---- Tokens like `GteDelay_ nop2` keep the leading `,` (the marker is followed
---- by a real instruction, so the marker + instruction together need the
---- separator on the LEFT to land between two real expressions).
+--- Tokens like `GteDelay_ nop2` keep the leading `,`
+--- (the marker is followed by a real instruction, so the marker + instruction together need the separator on the LEFT to land between two real expressions).
 --- @param tok string
 --- @return boolean  -- true if the token needs NO leading `,` separator.
 local function token_skips_leading_comma(tok)
@@ -675,7 +637,10 @@ end
 --- Emit the `#define mac_X(sig) \<newline>\t<tok1> \<newline>,\t<tok2> ...` block.
 --- Converts `//` line comments to `/* */` block comments in each token so they don't break the C macro `\` line continuations.
 ---
---- Pure delay-marker tokens (`GteDelay_` / `LdSlot_` / `BdSlot_` / `DmaSlot_` with only a trailing block comment, no real instruction) are emitted WITHOUT a leading `,` separator; the annotation IS preserved in the generated header (so the comment + marker remain visible to anyone reading `gen/macs.h`), but the C preprocessor expands the marker to empty, so leaving the `,` separator out is what stops the `,,` syntax error. See `token_skips_leading_comma` for the contract.
+--- Pure delay-marker tokens (`GteDelay_` / `LdSlot_` / `BdSlot_` / `DmaSlot_` with only a trailing block comment, no real instruction) are emitted WITHOUT a leading `,` separator;
+--- the annotation IS preserved in the generated header
+--- (so the comment + marker remain visible to anyone reading `gen/macs.h`), but the C preprocessor expands the marker to empty, so leaving the `,`
+--- separator out is what stops the `,,` syntax error. See `token_skips_leading_comma` for the contract.
 local function emit_macro_body(lines, c, sig, tokens)
 	for tok_idx = 1, #tokens do
 		tokens[tok_idx] = convert_line_comments_to_block(tokens[tok_idx])

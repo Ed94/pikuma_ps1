@@ -1661,24 +1661,24 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		S.bytes[#S.bytes + 1] = s
 		S.next_offset       = S.next_offset + #s
 	end
+	local FORM_WRITERS = {
+		string     = function(emit, v) emit(v .. "\0") end,
+		data1      = function(emit, v) emit(string.char(v)) end,
+		udata      = function(emit, v) emit(uleb128(v)) end,
+		addr       = function(emit, v) emit(elf_dwarf.write_u32_le(v)) end,
+		ref4       = function(emit, v) emit(elf_dwarf.write_u32_le(v)) end,
+		sec_offset = function(emit, v) emit(elf_dwarf.write_u32_le(v)) end,
+		data2      = function(emit, v) emit(elf_dwarf.write_u16_le(v)) end,
+		exprloc    = function(emit, v) emit(v) end,
+	}
 	local function emit_die(schema_name, values)
 		local row = DIE_SCHEMA[schema_name]
 		emit(uleb128(row.abbrev))
 		for _, attr in ipairs(row.attrs) do
 			local v = values[attr.key]
-			if attr.form == "string" then
-				emit(v .. "\0")
-			elseif attr.form == "data1" then
-				emit(string.char(v))
-			elseif attr.form == "udata" then
-				emit(uleb128(v))
-			elseif attr.form == "addr" or attr.form == "ref4" or attr.form == "sec_offset" then
-				emit(elf_dwarf.write_u32_le(v))
-			elseif attr.form == "data2" then
-				emit(elf_dwarf.write_u16_le(v))
-			elseif attr.form == "exprloc" then
-				emit(v)
-			end
+			local w = FORM_WRITERS[attr.form]
+			if not w then error("emit_die: unknown form " .. tostring(attr.form)) end
+			w(emit, v)
 		end
 	end
 	local function ref4_of(section_offset)
@@ -1737,55 +1737,35 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	-- then a single DW_TAG_pointer_type pointing at the structure_type. gdb's
 	-- `print *<var>` then expands the struct and lists its members (x, y, z, w for V4_S2; etc.).
 	--
-	-- Hardcoded member-info table for the 6 typed views the prototype uses (V2_S2 / V3_S2 / V4_S2 / V2_S4 / V3_S4 / V4_S4).
-	-- Each row is {byte_size, members}, where each member is {name, offset, byte_size, type_name}.
-	-- `type_name` is the base type name from `type_name_registry`; "S2" / "S4" need a signed base_type emit too.
-	--
-	-- The table is small + explicit — the prototype principle treats the typed-view struct layout as data, not derived state.
-	local STRUCT_MEMBER_TABLE = {
-		-- TODO(Ed): This hardcoding is brittle...
-		-- TODO(Ed): Better to just have a table for the fundamental types in duffle/dsl.h, we can derive the rest via typedef parsing...
-		-- 2-element signed short vector (rare; placeholder for future use).
-		V2_S2 = { byte_size = 4, members = {
-			{ name = "x", offset = 0, byte_size = 2 },
-			{ name = "y", offset = 2, byte_size = 2 },
-		}},
-		-- 4-element signed short vector (the dominant face-cursor type).
-		V4_S2 = { byte_size = 8, members = {
-			{ name = "x", offset = 0, byte_size = 2 },
-			{ name = "y", offset = 2, byte_size = 2 },
-			{ name = "z", offset = 4, byte_size = 2 },
-			{ name = "w", offset = 6, byte_size = 2 },
-		}},
-		-- 3-element signed short vector (the floor face-cursor type; includes explicit pad byte to match math.h's S2 pad member).
-		V3_S2 = { byte_size = 8, members = {
-			{ name = "x",   offset = 0, byte_size = 2 },
-			{ name = "y",   offset = 2, byte_size = 2 },
-			{ name = "z",   offset = 4, byte_size = 2 },
-			{ name = "pad", offset = 6, byte_size = 2 },
-		}},
-		-- 2-element signed int vector.
-		V2_S4 = { byte_size = 8, members = {
-			{ name = "x", offset = 0, byte_size = 4 },
-			{ name = "y", offset = 4, byte_size = 4 },
-		}},
-		-- 3-element signed int vector.
-		V3_S4 = { byte_size = 16, members = {
-			{ name = "x",   offset = 0,  byte_size = 4 },
-			{ name = "y",   offset = 4,  byte_size = 4 },
-			{ name = "z",   offset = 8,  byte_size = 4 },
-			{ name = "pad", offset = 12, byte_size = 4 },
-		}},
-		-- 4-element signed int vector.
-		V4_S4 = { byte_size = 16, members = {
-			{ name = "x", offset = 0,  byte_size = 4 },
-			{ name = "y", offset = 4,  byte_size = 4 },
-			{ name = "z", offset = 8,  byte_size = 4 },
-			{ name = "w", offset = 12, byte_size = 4 },
-		}},
-	}
-	local S2_TYPE_BYTE_SIZE = 2  -- S2 = signed 16-bit (see dsl.h)
-	local S4_TYPE_BYTE_SIZE = 4  -- S4 = signed 32-bit (see dsl.h)
+	-- Layout for V* / Rect_* / Reg_* / Slice / … comes from corpus.type_name_registry.
+	-- scan_source parses Struct_() in math.h, math.atom.h, memory.h and fills field offset + byte_size.
+	-- U1–U4 / S1–S4 / B1–B4 stay authored fundamentals (BUILTIN_BYTE_SIZES + base_type DIEs below).
+	local type_reg = registries.type_name_registry or {}
+	local function layout_from_registry(tn)
+		local entry = type_reg[tn]
+		if not entry or entry.kind ~= "struct" or not entry.fields or #entry.fields == 0 then
+			return nil
+		end
+		if entry.byte_size == nil then return nil end
+		local members = {}
+		for _, f in ipairs(entry.fields) do
+			if f.offset == nil or f.byte_size == nil then return nil end
+			members[#members + 1] = {
+				name          = f.name,
+				offset        = f.offset,
+				byte_size     = f.byte_size,
+				type_name     = f.type_name,
+				pointer_depth = f.pointer_depth or 0,
+			}
+		end
+		return { byte_size = entry.byte_size, members = members }
+	end
+	local function encoding_for_type(tn)
+		if type(tn) == "string" and tn:match("^S[124]$") then return 5 end
+		return 7
+	end
+	local S2_TYPE_BYTE_SIZE = 2
+	local S4_TYPE_BYTE_SIZE = 4
 
 	-- Pre-emit the signed base types (S2, S4) once if any typed view's member needs them.
 	-- We emit per-typed-view lazily below; build a member-base-type offset cache (idempotent).
@@ -1804,17 +1784,54 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	end
 	-- Always emit S2 + S4 (the v*_S2 / v*_S4 family base types) once before any typed-view,
 	-- even if no atom currently declares a v*_S2 field, so future atoms pick them up without rewiring.
-	ensure_member_base_type("S2", S2_TYPE_BYTE_SIZE, 5)  -- DW_ATE_signed = 5
+	ensure_member_base_type("S2", S2_TYPE_BYTE_SIZE, 5)
 	ensure_member_base_type("S4", S4_TYPE_BYTE_SIZE, 5)
 
 	local type_chain_offsets = {}
+	local struct_die_offsets = {}
+	local function emit_struct_layout(tn)
+		if struct_die_offsets[tn] then return struct_die_offsets[tn] end
+		local type_info = layout_from_registry(tn)
+		if not type_info then return nil end
+		for _, m in ipairs(type_info.members) do
+			if (m.pointer_depth or 0) == 0 and layout_from_registry(m.type_name) then
+				emit_struct_layout(m.type_name)
+			end
+		end
+		local struct_offset = next_offset()
+		struct_die_offsets[tn] = struct_offset
+		emit_die("structure_type", {
+			name      = tn,
+			byte_size = type_info.byte_size,
+		})
+		for _, m in ipairs(type_info.members) do
+			local member_type_off
+			if (m.pointer_depth or 0) > 0 then
+				member_type_off = type_chain_offsets[m.type_name .. "|" .. m.pointer_depth]
+			elseif layout_from_registry(m.type_name) then
+				member_type_off = struct_die_offsets[m.type_name]
+			else
+				member_type_off = ensure_member_base_type(
+					m.type_name, m.byte_size, encoding_for_type(m.type_name))
+			end
+			if not member_type_off then
+				member_type_off = ensure_member_base_type(
+					m.type_name or "U4", m.byte_size or U4_BYTE_SIZE, 7)
+			end
+			emit_die("member", {
+				name                 = m.name,
+				data_member_location = m.offset,
+				type                 = ref4_of(member_type_off),
+			})
+		end
+		emit(string.char(DIE_CHILDREN_TERMINATOR))
+		return struct_offset
+	end
 	for _, tn in ipairs(sorted_typed_types) do
 		if tn ~= "U4" then
 			local depth = used_typed_views[tn]
-			local type_info = STRUCT_MEMBER_TABLE[tn]
-			if not type_info then
-				-- Unknown typed view: fall back to a generic 4-byte unsigned base_type to keep the wire valid.
-				-- gdb renders as the typename but `print *ptr` only sees the first 4 bytes.
+			local struct_offset = emit_struct_layout(tn)
+			if not struct_offset then
 				local innermost_offset = next_offset()
 				emit_die("base_type", {
 					name      = tn,
@@ -1824,40 +1841,12 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 				local outermost_offset = next_offset()
 				emit_die("pointer_type", { type = ref4_of(innermost_offset) })
 				type_chain_offsets[tn .. "|" .. depth] = outermost_offset
+			elseif depth == 1 then
+				local outermost_offset = next_offset()
+				emit_die("pointer_type", { type = ref4_of(struct_offset) })
+				type_chain_offsets[tn .. "|" .. depth] = outermost_offset
 			else
-				-- Emit a proper structure_type DIE for this typed view.
-				local struct_offset = next_offset()
-				emit_die("structure_type", {
-					name      = tn,
-					byte_size = type_info.byte_size,
-				})
-				for _, m in ipairs(type_info.members) do
-					local member_type_name, member_type_encoding
-					if m.byte_size == 2 then
-						member_type_name = "S2"
-						member_type_encoding = 5
-					elseif m.byte_size == 4 then
-						member_type_name = "S4"
-						member_type_encoding = 5
-					else
-						member_type_name = "U4"
-						member_type_encoding = 7
-					end
-					local member_base_off = ensure_member_base_type(member_type_name, m.byte_size, member_type_encoding)
-					emit_die("member", {
-						name                   = m.name,
-						data_member_location   = m.offset,
-						type                   = ref4_of(member_base_off),
-					})
-				end
-				emit(string.char(DIE_CHILDREN_TERMINATOR))
-				if depth == 1 then
-					local outermost_offset = next_offset()
-					emit_die("pointer_type", { type = ref4_of(struct_offset) })
-					type_chain_offsets[tn .. "|" .. depth] = outermost_offset
-				else
-					error("typed-view: pointer_depth > 1 is not yet supported in this emission path")
-				end
+				error("typed-view: pointer_depth > 1 is not yet supported in this emission path")
 			end
 		end
 	end
@@ -1991,9 +1980,6 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			end
 		end
 		local atom_view = (registries.atom_views or {})[atom.name]
-		-- Build the atom-name lookup table once (cheap; O(atom_table)) so step (b) and step (d) can resolve rbind_atom names.
-		-- TODO(Ed): Bad assignment?
-		local atom_by_name = atom_by_name or (function() local m = {}; for _, a in ipairs(atom_table) do if a.name then m[a.name] = a end end; return m end)()
 		-- step (b) inputs: this atom's `atom_ctx(<rbind_atom>)` (resolved from the registries' atom_ctxs)
 		local this_ctx = registries.atom_ctxs and registries.atom_ctxs[atom.name]
 		if this_ctx and this_ctx.rbind_atom then
@@ -2073,9 +2059,9 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			end,
 			-- (e) enum-site atom_type(<T>) default on the registry entry.
 			function(r_name, alias_code)
-				-- TODO(Ed): Bad definition?
-				if alias and alias.default_type and alias.default_depth and alias.default_depth > 0 then
-					return type_chain_offsets[alias.default_type .. "|" .. alias.default_depth]
+				local a = by_alias[r_name]
+				if a and a.default_type and a.default_depth and a.default_depth > 0 then
+					return type_chain_offsets[a.default_type .. "|" .. a.default_depth]
 				end
 			end,
 		}

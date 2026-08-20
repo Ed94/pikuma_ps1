@@ -330,8 +330,8 @@ MipsAtom_Proc_(aa, {
 	mac_store_v3s4(r.res, r.dst_ptr, 0),
 
 	jump_reg(R_AtomJmp), BdSlot_ nop // ac_yield: word 3-4
-	// mac_yield()
 })
+
 
 /* ─── GTE OP cross product (a × b → out) ───
  * Generalized V3_S4 cross product via GTE OP (OuterProduct12 libpsyx convention).

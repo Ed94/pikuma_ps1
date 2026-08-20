@@ -13,7 +13,7 @@ local lfs = require("lfs")
 
 -- scripts/elf32.lua contains format-constant tables + the byte-level walker.
 -- The this file re-exports `read_u32_le` / `read_u16_le` (and the DWARF32 terminator).
--- TODO(Ed): Remove re-export.
+-- read_u32_le is this module's reader; implementation in elf32.lua.
 local E = require("elf32")
 
 local M = {}
@@ -113,7 +113,6 @@ M.MIPS_BYTES_PER_WORD = 0x04
 
 --- spec: DWARF4 spec §7.4 — 32-bit DWARF initial-length terminator
 M.dw_dwarf32_terminator = E.dw_dwarf32_terminator
--- TODO(Ed): Remove re-export.
 
 -- ----------------------------------------------------------------------------
 -- DWARF4 .debug_aranges (per DWARF5 spec §7.4 — Address Range Table)
@@ -372,48 +371,70 @@ end
 -- For DW_FORM_strp we return the inline string resolved from `str_buf`.
 -- For DW_FORM_ref4 we return the absolute CU-relative offset.
 -- The caller decides whether to interpret that as a section offset.
-local function read_form_value(buf, str_buf, pos, form)
-	if form == M.DW_FORM.addr then
+local FORM_READERS = {
+	[M.DW_FORM.addr] = function(buf, _, pos)
 		return M.read_u32_le(buf, pos), pos + 4
-	elseif form == M.DW_FORM.string then
+	end,
+	[M.DW_FORM.string] = function(buf, _, pos)
 		local s = read_c_string_at(buf, pos)
 		return s, pos + #s + 1
-	elseif form == M.DW_FORM.strp then
+	end,
+	[M.DW_FORM.strp] = function(buf, str_buf, pos)
 		-- DW_FORM_strp: 4-byte offset into .debug_str.
 		local strp_off = M.read_u32_le(buf, pos)
 		return read_c_string_at(str_buf, strp_off), pos + 4
-	elseif form == M.DW_FORM.udata then return M.read_uleb128_at(buf, pos)
-	elseif form == M.DW_FORM.data1 then return buf:byte(pos + 1), pos + 1
-	elseif form == M.DW_FORM.data2 then return M.read_u16_le(buf, pos), pos + 2
-	elseif form == M.DW_FORM.data4 then return M.read_u32_le(buf, pos), pos + 4
-	elseif form == M.DW_FORM.ref4  then return M.read_u32_le(buf, pos), pos + 4
-	elseif form == M.DW_FORM.sec_offset then
+	end,
+	[M.DW_FORM.udata] = function(buf, _, pos)
+		return M.read_uleb128_at(buf, pos)
+	end,
+	[M.DW_FORM.data1] = function(buf, _, pos)
+		return buf:byte(pos + 1), pos + 1
+	end,
+	[M.DW_FORM.data2] = function(buf, _, pos)
+		return M.read_u16_le(buf, pos), pos + 2
+	end,
+	[M.DW_FORM.data4] = function(buf, _, pos)
+		return M.read_u32_le(buf, pos), pos + 4
+	end,
+	[M.DW_FORM.ref4] = function(buf, _, pos)
+		return M.read_u32_le(buf, pos), pos + 4
+	end,
+	[M.DW_FORM.sec_offset] = function(buf, _, pos)
 		-- DW_FORM_sec_offset: 4-byte offset (size depends on DWARF version;
 		-- on DWARF5 32-bit it's always 4 bytes).
 		return M.read_u32_le(buf, pos), pos + 4
-	elseif form == M.DW_FORM.flag_present then
+	end,
+	[M.DW_FORM.flag_present] = function(_, _, pos)
 		return 1, pos
-	elseif form == M.DW_FORM.exprloc then
+	end,
+	[M.DW_FORM.exprloc] = function(buf, _, pos)
 		-- DW_FORM_exprloc: ULEB byte count + that many bytes of DW_OP_*.
-		local  len, ne = M.read_uleb128_at(buf, pos)
+		local len, ne = M.read_uleb128_at(buf, pos)
 		if not len then return nil, pos end
 		return nil, ne + len
-	elseif form == DW_FORM_implicit_const then
+	end,
+	[DW_FORM_implicit_const] = function(_, _, pos)
 		-- The constant is declared in the abbrev; no value bytes in the DIE.
 		return nil, pos
-	elseif form == M.DW_FORM.ref_sig8 then
+	end,
+	[M.DW_FORM.ref_sig8] = function(buf, _, pos)
 		-- DW_FORM_ref_sig8 (DWARF5 §7.4.2): An 8-byte value identifying a type by signature.
 		-- The low  4 bytes (LE) are the type signature (content hash);
 		-- The high 4 bytes (LE) are a CU-relative offset into the matching type unit.
-		-- Consumers use the low  4 to look up the type unit (see M.find_type_unit_by_signature)
-		--          then the high 4 to resolve the specific type within it.
+		-- Consumers use the low  4 to look up the type unit (see M.find_type_unit_by_signature) 
+		--  then the high 4 to resolve the specific type within it.
 		-- Return the low  4 as the primary value to preserve the (value, next_pos) shape;
-		--        the high 4 is exposed via M.read_ref_sig8 (which returns both halves).
+		--  the high 4 is exposed via M.read_ref_sig8 (which returns both halves).
 		local _, _, next_pos = M.read_ref_sig8(buf, pos)
 		return M.read_u32_le(buf, pos), next_pos
-	else
+	end,
+}
+local function read_form_value(buf, str_buf, pos, form)
+	local r = FORM_READERS[form]
+	if not r then
 		return nil, pos
 	end
+	return r(buf, str_buf, pos)
 end
 
 --- Read a `DW_FORM_ref_sig8` value at 0-based offset `pos` from `buf`.
@@ -426,9 +447,7 @@ end
 --- @return integer -- low 4 bytes (LE), the type signature
 --- @return integer -- high 4 bytes (LE), the offset within the matching type unit
 --- @return integer -- cursor after the 8-byte value
-function M.read_ref_sig8(buf, pos)
-	return M.read_u32_le(buf, pos), M.read_u32_le(buf, pos + 4), pos + 8
-end
+function M.read_ref_sig8(buf, pos) return M.read_u32_le(buf, pos), M.read_u32_le(buf, pos + 4), pos + 8 end
 
 --- DWARF5 §7.5.6 (Type Entries).
 --- Walk all units in `info` and return the 0-based offset of the first unit whose `DW_AT_type_signature`
@@ -459,23 +478,23 @@ function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
 			return nil, nil  -- malformed
 		end
 		-- Per DWARF5 §7.5.6, the type_unit (DW_UT_type = 0x02) body layout is:
-		--  0:  version (2)
-		--  2:  unit_type (1) -- DW_UT_type = 0x02
-		--  3:  address_size (1)
+		--  0:  version             (2)
+		--  2:  unit_type           (1) -- DW_UT_type = 0x02
+		--  3:  address_size        (1)
 		--  4:  debug_abbrev_offset (4)
-		--  8:  type_signature (8)
-		--  16: type_offset (4)
+		--  8:  type_signature      (8)
+		--  16: type_offset         (4)
 		--  20: <children>
 		if body_end - body_start >= 20 then
 			-- read_ref_sig8 / write_u32_le / etc. are 1-indexed (string:byte);
 			-- pos / body_start / body_end are 0-based wire offsets, so the 1-indexed byte at 0-based wire offset X is string:byte(X + 1).
 			-- Per DWARF5 §7.5.6, the type_unit body is laid out as:
-			--  byte 0-1:   version (2)
-			--  byte 2:     unit_type (1) -- DW_UT_type = 0x02
-			--  byte 3:     address_size (1)
+			--  byte 0-1:   version             (2)
+			--  byte 2:     unit_type           (1) -- DW_UT_type = 0x02
+			--  byte 3:     address_size        (1)
 			--  byte 4-7:   debug_abbrev_offset (4)
-			--  byte 8-15:  type_signature (8)
-			--  byte 16-19: type_offset (4)
+			--  byte 8-15:  type_signature      (8)
+			--  byte 16-19: type_offset         (4)
 			local unit_type = info:byte(body_start + 2 + 1)  -- 0-based +2 = unit_type in 1-indexed
 			if    unit_type == 0x02 then  -- DW_UT_type
 				local sig_lo, sig_hi, _ = M.read_ref_sig8(info, body_start + 8)  -- 0-based +8 = type_signature in 1-indexed
@@ -626,14 +645,10 @@ function M.read_nm(elf_path)
 	local addrs = {}
 
 	-- Existence check first; an empty or missing ELF returns an empty map.
-	if lfs.attributes(elf_path, "mode") ~= "file" then
-		return addrs
-	end
+	if lfs.attributes(elf_path, "mode") ~= "file" then return addrs end
 
 	local f = io.open(elf_path, "rb")
-	if not f then
-		return addrs
-	end
+	if not f then return addrs end
 
 	-- Build the file adapter for E.*.
 	local file_size
@@ -775,7 +790,7 @@ end
 --- @return string
 function M.sleb128(n)
 	local bytes = {}
-	local more = true
+	local more  = true
 	while more do
 		local b = n % (LEB_DATA_MASK + 1) -- extract low 7 bits
 		n = (n - b) / (LEB_DATA_MASK + 1) -- arithmetic shift right by 7

@@ -45,14 +45,12 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- @field warnings table[]
 
 --- @class AtomAnnotation
---- @field line    integer       -- Source line of the atom_info call
---- @field macro   string        -- Macro name (always "atom_info" in the new shape)
---- @field name    string        -- Atom name
---- @field kind    string        -- Always "info"
---- @field binds   string|nil    -- Binds_X name if any
---- @field reads   string[]      -- R_* names (read targets)
---- @field writes  string[]      -- R_* names (write targets)
---- @field errors  string[]|nil  -- Parse-time errors from scan_source (atom_info body malformed)
+--- @field atom_name string        -- Atom name (scan.atom_infos row)
+--- @field info_line integer       -- Source line of the atom_info call
+--- @field binds     string|nil    -- Binds_X name if any
+--- @field reads     string[]      -- R_* names (read targets)
+--- @field writes    string[]      -- R_* names (write targets)
+--- @field errors    string[]|nil  -- Parse-time errors from scan_source (atom_info body malformed)
 
 --- @class DebugSkipMarker  -- Sub-shape of scan_source.lua's @class DebugSkipMarker
 --- @field marker_kind    string                 -- Exact marker ident read from source. Only "atom_dbg_skip" (bare) is positive.
@@ -74,7 +72,7 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- @field info     Finding[]
 
 --- @class PipeCtx
---- @field atom_index     table<string, AtomAnnotation> -- Name -> AtomAnnotation (only kind=="atom")
+--- @field atom_index     table<string, AtomEntry> -- raw_name or name -> scan.atoms row (kind atom/atom_proc)
 --- @field binds_index    table<string, BindsStruct>    -- Name -> BindsStruct
 --- @field annot_counts   table<string, integer>        -- Name -> annotation count (for unique_annotation check)
 --- @field types          table<string, RegTypeDefault> -- From scan_source
@@ -99,14 +97,14 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 --- `macro_word_drift` writes errors[] for missing or mismatched metadata and info[] for a match.
 
 --- Check: Every annotated atom must have a matching MipsAtom_(name) declaration.
---- @param a        AtomAnnotation
+--- @param info     AtomAnnotation
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
-local function check_atom_decl_exists(a, pipe_ctx, findings)
-	if not pipe_ctx.atom_index[a.name] then
+local function check_atom_decl_exists(info, pipe_ctx, findings)
+	if not pipe_ctx.atom_index[info.atom_name] then
 		findings.errors[#findings.errors + 1] = {
-			line = a.line,
-			msg  = string.format("annotation for '%s' has no matching MipsAtom_(%s) { ... }", a.name, a.name),
+			line = info.info_line,
+			msg  = string.format("annotation for '%s' has no matching MipsAtom_(%s) { ... }", info.atom_name, info.atom_name),
 		}
 	end
 end
@@ -128,17 +126,17 @@ end
 
 --- Check: BIND atoms must reference a real Binds_* struct.
 --- I keep this as a warning so the annotation pass can report the common test-fixture case; `check_abi_handoff` in static analysis supplies the build-stopping error.
---- @param a        AtomAnnotation
+--- @param info     AtomAnnotation
 --- @param pipe_ctx PipeCtx
 --- @param findings Findings
-local function check_binds_struct_exists(a, pipe_ctx, findings)
-	if not a.binds                   then return end
-	if pipe_ctx.binds_index[a.binds] then return end
+local function check_binds_struct_exists(info, pipe_ctx, findings)
+	if not info.binds                   then return end
+	if pipe_ctx.binds_index[info.binds] then return end
 	findings.warnings[#findings.warnings + 1] = {
-		line = a.line,
+		line = info.info_line,
 		msg  = string.format("'%s' binds '%s' but no Struct_(%s) { ... } " 
 			.. "declaration found (also flagged as an error by check_abi_handoff in the static-analysis pass)"
-			, a.name, a.binds, a.binds),
+			, info.atom_name, info.binds, info.binds),
 	}
 end
 
@@ -315,7 +313,7 @@ end
 ---   6. unsupported target_kind     -> marker precedes an unrelated declaration
 --- Valid markers stamp `debug_skip` on whole-atom, bare-component, and proc-component declaration records in scan_source.lua.
 --- @param marker DebugSkipMarker
---- @param _pipe_ctx PipeCtx     -- Unused; kept for consistency with per_annot // TODO(Ed): Remove?
+--- @param _pipe_ctx PipeCtx     -- Unused; kept for consistency with per_annot
 --- @param findings Findings
 local function check_skip_marker(marker, _pipe_ctx, findings)
 	local kind = marker.marker_kind
@@ -400,7 +398,7 @@ end
 -- ════════════════════════════════════════════════════════════════════════════
 --
 -- Each rule entry picks one of four "shapes" of dispatch:
---   per_annot(annot, pipe_ctx, findings)        -- runs once per AtomAnnotation
+--   per_annot(info, pipe_ctx, findings)         -- runs once per scan.atom_infos row
 --   post(pipe_ctx, findings)                    -- runs once after all per_annot calls complete (full-corpus aggregation)
 --   per_macro(macro, wc, findings)              -- runs once per TAPE_WORDS / _Pragma macro declaration
 --   per_skip_marker(marker, pipe_ctx, findings) -- runs once per src.scan.debug_skip_markers entry
@@ -430,7 +428,7 @@ local CHECK_RULES = {
 --- @param ctx PassCtx
 --- @return PipeCtx
 local function build_corpus_pipe_ctx(ctx)
-	local view = duffle.corpus_view(ctx)
+	local view         = duffle.corpus_view(ctx)
 	local annot_counts = {}
 	for _, info in ipairs(view.atom_infos) do
 		if info and info.atom_name then
@@ -452,29 +450,6 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	corpus_pipe_ctx = corpus_pipe_ctx or build_corpus_pipe_ctx(ctx)
 	local scan = src.scan
 
-	-- Project the pre-scanned atoms to the AtomEntry shape this pass needs.
-	local atoms = {}
-	for _, a in ipairs(scan.atoms) do
-		if a.kind == "atom" or a.kind == "atom_proc" then
-			atoms[#atoms + 1] = { line = a.line, name = a.raw_name or a.name }
-		end
-	end
-
-	-- Project the pre-scanned atom_infos to AtomAnnotation shape.
-	local annots = {}
-	for _, info in ipairs(scan.atom_infos) do
-		annots[#annots + 1] = {
-			line   = info.info_line,
-			macro  = "atom_info",
-			name   = info.atom_name,
-			kind   = "info",
-			binds  = info.binds,
-			reads  = info.reads or {},
-			writes = info.writes or {},
-			errors = info.errors,
-		}
-	end
-
 	-- Build a per-source pipe_ctx: shared lookups come from `corpus_pipe_ctx`, while declarations, bodies, types, views, defaults, and occurrences come from `src.scan`.
 	local seen_defaults   = {}; for reg, _ in pairs (scan.types      or {}) do seen_defaults[reg] = (seen_defaults[reg] or 0) + 1 end
 	local atom_infos_list = {}; for _, ai  in ipairs(scan.atom_infos or {}) do atom_infos_list[#atom_infos_list + 1] = ai         end
@@ -493,7 +468,13 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		register_alias_registry  = corpus_pipe_ctx.register_alias_registry,
 		type_name_registry       = corpus_pipe_ctx.type_name_registry,
 	}
-	for _, a in ipairs(atoms)      do pipe_ctx.atom_index [a.name] = a end
+	local atoms = {}
+	for _, a in ipairs(scan.atoms) do
+		if a.kind == "atom" or a.kind == "atom_proc" then
+			atoms[#atoms + 1] = a
+			pipe_ctx.atom_index[a.raw_name or a.name] = a
+		end
+	end
 	for _, b in ipairs(scan.binds) do pipe_ctx.binds_index[b.name] = b end
 
 	-- Findings live in a single struct with three lists (errors / warnings / info).
@@ -501,20 +482,20 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	local findings = { errors = {}, warnings = {}, info = {} }
 
 	-- Lift parse-time errors already recorded in scan_source's atom_info payload into this pass's findings list.
-	for _, a in ipairs(annots) do
-		if a.errors then
-			for _, msg in ipairs(a.errors) do
+	for _, info in ipairs(scan.atom_infos) do
+		if info.errors then
+			for _, msg in ipairs(info.errors) do
 				findings.errors[#findings.errors + 1] = {
-					line = a.line,
-					msg  = string.format("'%s': %s", a.name, msg),
+					line = info.info_line,
+					msg  = string.format("'%s': %s", info.atom_name, msg),
 				}
 			end
 		end
 	end
 
 	-- THE per-annotation pipeline. ONE loop. CHECK_RULES dispatches per_annot rules.
-	for _, a in ipairs(annots) do
-		duffle.run_check_rules(CHECK_RULES, "per_annot", a, pipe_ctx, findings)
+	for _, info in ipairs(scan.atom_infos) do
+		duffle.run_check_rules(CHECK_RULES, "per_annot", info, pipe_ctx, findings)
 	end
 
 	-- Post-loop rules (one-shot checks that need full-corpus aggregation in pipe_ctx).
@@ -541,12 +522,12 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	findings.info[#findings.info + 1] = {
 		line = 0,
 		msg  = string.format("scanned: %d atom(s), %d annotation(s), %d macro-word-decl(s), %d binds struct(s)"
-			, #atoms, #annots, #scan.macros, #scan.binds),
+			, #atoms, #scan.atom_infos, #scan.macros, #scan.binds),
 	}
 
 	return {
 		atoms    = atoms,
-		annots   = annots,
+		annots   = scan.atom_infos,
 		macros   = scan.macros,
 		binds    = scan.binds,
 		errors   = findings.errors,
@@ -576,7 +557,7 @@ function M.run(ctx)
 	-- Build the shared pipe_ctx once for this run; every validate() call sees the same cross-source registries.
 	-- The corpus owns the canonical cross-source registries; per-source scans retain body / declaration ownership.
 	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx)
-	local corpus = ctx.shared.corpus
+	local corpus          = ctx.shared.corpus
 
 	-- Group `corpus.sources_by_dir` by module, validate every source in each bucket, and emit one errors.h per directory.
 	local by_dir = (corpus and corpus.sources_by_dir) or {}

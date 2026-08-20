@@ -9,13 +9,6 @@
 --- Per-directory aggregation: every source in the same directory contributes to the same `gen/offsets.h`.
 --- The directory itself is the namespace; the filename does not repeat the module name.
 ---
---- (Task 12.16 note: atom-namespaced enum names — e.g., `atom_offset__normalize_v3s4__srav_path__aligned_done` —
---- were considered to prevent cross-atom label collisions, but the C-side `atom_offset(F, T)` macro in
---- `code/duffle/dsl.atom.h` doesn't know the current atom_name at expansion time, so any namespacing
---- on the metaprogram side breaks the C build. Reverted. The C-side would need a per-atom
---- `CURRENT_ATOM` #define (set by `MipsAtom_`/`MipsAtom_Proc_` macros) plus an updated `atom_offset`
---- macro that uses it. That's a coordinated refactor — deferred to a future track.)
----
 --- The offset is `target_word - branch_word - 1` (the standard MIPS branch-immediate encoding: branch_offset = relative_pc_in_words - 1).
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -124,9 +117,7 @@ end
 ---     For cross-module `j`/`jal` (atom body in one module, target in another), the linker emits a `R_MIPS_26` relocation against the lower 26 bits; the upper 4 bits come from the PC of the delay slot following the `j`.
 ---     The metaprogram doesn't know either at compile time, so the emitted value is the relative word offset that the duffle `enc_i` macro places in the immediate field; the toolchain handles the rest.
 ---   `jump_reg` / `call_reg` / `jump_link` -> ERROR. Register-form jumps have no offset field; `atom_offset` is invalid.
----
---- Top-level `atom_offset(F, T)` markers (where the marker is the entire token — `consuming_encoder` == nil) default to `branch_*` behavior (relative offset).
---- This preserves backward compatibility for any top-level marker that may exist outside a control-transfer instruction.
+---   missing `consuming_encoder` -> ERROR. A lone top-level `atom_offset` is not a branch.
 --- @param labels   table<string, integer>
 --- @param branches table[]
 --- @param errors   table[]
@@ -142,14 +133,19 @@ local function compute_offsets(labels, branches, errors)
 			}
 		else
 			local consuming = br.consuming_encoder
-			if consuming == "jump_reg" or consuming == "call_reg" or consuming == "jump_link" then
+			if consuming == nil or consuming == "" then
+				errors[#errors + 1] = {
+					line = br.line or 0,
+					msg  = "atom_offset requires a consuming encoder (branch_*, jump, call_addr); top-level atom_offset is invalid; at word " .. br.branch_word,
+				}
+			elseif consuming == "jump_reg" or consuming == "call_reg" or consuming == "jump_link" then
 				errors[#errors + 1] = {
 					line = br.line or 0,
 					msg  = "atom_offset cannot be used with " .. consuming
 						.. " (register-form jumps have no offset field); at word " .. br.branch_word,
 				}
 			else
-				-- All other consuming instructions (including `branch_*`, `jump`, `call_addr`, and nil for top-level markers) use the same relative offset value.
+				-- Consuming instructions with an offset field (`branch_*`, `jump`, `call_addr`) use the same relative offset value.
 				-- The MIPS encoding differs per opcode but the duffle `enc_i` macro handles the truncation to the immediate-field width.
 				results[#results + 1] = {
 					target             = br.target,
