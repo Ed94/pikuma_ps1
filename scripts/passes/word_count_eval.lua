@@ -23,7 +23,9 @@
 -- Bootstrap: load `scripts/duffle_paths.lua` (sets package.path + package.cpath).
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
+--- @type string
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
+--- @type DuffleExport
 local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -31,35 +33,20 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class WordCounts
---- @field [string] integer  -- macro name -> word count
+--- @field [string] integer  -- bag: macro name -> word count
 
---- @class SourceFile
---- @field path     string  -- absolute path to the source file
---- @field text     string  -- the full source text
---- @field dir      string  -- the directory containing the source
---- @field basename string  -- filename without extension
+--- @class WordCountEval
+--- @field count_token_words fun(token: string, wc: WordCounts): integer
+--- @field run               fun(ctx: PassCtx): PassResult
 
---- @class PassCtx
---- @field sources            SourceFile[]  -- all source files in the build
---- @field metadata_path      string        -- path to word_count.metadata.h
---- @field shared             table         -- cross-pass shared state
---- @field shared.corpus      table         -- canonical corpus (required)
---- @field shared.corpus.word_counts WordCounts -- canonical count table (populated by this pass)
---- @field out_root           string        -- output root (e.g. "build/gen")
---- @field project_root       string        -- project root (e.g. "code/")
---- @field upstream           table<string, table>  -- per-pass upstream outputs
---- @field flags              table         -- CLI flags
---- @field verbose            boolean       -- if true, log diagnostic info
-
---- @class PassResult
---- @field outputs  table[]  -- {kind=, path=} entries describing emit files
---- @field errors   table[]  -- {line=, msg=} entries; build-stops
---- @field warnings table[]  -- {line=, msg=} entries; build-succeeds
+-- SourceFile, PassCtx, PassResult: see ps1_meta.lua
+-- DuffleExport: see duffle.lua (facade returned by duffle_paths.lua)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Module exports
 -- ════════════════════════════════════════════════════════════════════════════
 
+--- @type WordCountEval
 local M = {}
 
 -- ┌────────────────────────────────────────────────────────────────────┐
@@ -74,11 +61,14 @@ local M = {}
 --- @param wc    WordCounts -- the shared word-count table
 --- @return integer
 function M.count_token_words(token, wc)
+	--- @type string
 	local s = duffle.trim(token)
 	if    s == "" then return 0 end
+	--- @type string|nil, integer
 	local name, after = duffle.read_ident(s, 1)
 	if not name then return 1 end
 	if wc[name] then return wc[name] end
+	--- @type integer
 	local paren_pos = duffle.skip_ws_and_cmt(s, after)
 	if s:sub(paren_pos, paren_pos) == "(" then
 		io.stderr:write("  warning: unknown macro '" .. name .. "', assuming 1 word\n")
@@ -105,6 +95,7 @@ end
 --- @return PassResult
 function M.run(ctx)
 	-- 1. Canonical-corpus ownership gate.
+	--- @type Corpus|nil
 	local corpus = ctx.shared and ctx.shared.corpus
 	if type(corpus) ~= "table" then
 		error("word_count_eval.run requires ctx.shared.corpus (canonical corpus). The fixture must install the corpus before running this pass.", 0)
@@ -117,6 +108,7 @@ function M.run(ctx)
 
 	-- 3. Load authored metadata. Generated .macs.h files are NOT scanned
 	--    (the pass computes their counts from the just-built bodies after disk emission; see passes/components.lua).
+	--- @type WordCounts
 	local wc = duffle.load_word_counts(ctx.metadata_path)
 
 	-- 4. Assign the count table. ONE assignment, no copy. The assignment creates no secondary alias.

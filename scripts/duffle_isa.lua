@@ -1,16 +1,126 @@
 --- duffle_isa.lua — encoder / GTE / hardware tables.
+
+--- @class InstructionImm
+--- @field arg    integer
+--- @field signed boolean|nil
+--- @field width  integer
+
+--- @class InstructionValue
+--- @field dest      integer
+--- @field op        string
+--- @field sources   integer[]|nil
+--- @field immediate integer|nil
+--- @field source    integer|nil
+
+--- @class InstructionRow
+--- @field cycles        integer
+--- @field kind          string
+--- @field reads         integer[]|nil
+--- @field writes        integer[]|nil
+--- @field imm           InstructionImm[]|nil
+--- @field value         InstructionValue|nil
+--- @field delay_slot    boolean|nil
+--- @field suppress_arg1 table<string, string>|nil  -- bag: GPR ident -> reason
+
+--- @class TapeAtomMacroRow
+--- @field kind  string
+--- @field binds boolean
+
+--- @class GteCommandPort
+--- @field register string
+--- @field role     string
+
+--- @class GteCommandLatch
+--- @field register string
+--- @field required integer
+
+--- @class GteCommandRow
+--- @field aliases string[]
+--- @field cycles  integer
+--- @field inputs  string[]
+--- @field outputs GteCommandPort[]
+--- @field latch   GteCommandLatch[]
+
+--- @class GteCrAliasGroup
+--- @field [1] integer   -- C2 control-register slot
+--- @field [2] string[]  -- aliases that share that slot
+
+--- @class GtePackedSlotRelation
+--- @field slot   integer
+--- @field first  string
+--- @field second string
+
+--- @class HardwareRelationPort
+--- @field domain string
+--- @field arg    integer
+
+--- @class HardwareRelationVisibility
+--- @field kind     string
+--- @field required integer
+
+--- @class HardwareRelationEvidence
+--- @field confidence string
+--- @field source     string
+
+--- @class HardwareRelationRow
+--- @field id                string
+--- @field semantic          string
+--- @field consumer          string
+--- @field token             string
+--- @field direction         string
+--- @field reads             HardwareRelationPort
+--- @field writes            HardwareRelationPort
+--- @field visibility        HardwareRelationVisibility|nil
+--- @field evidence          HardwareRelationEvidence
+--- @field violation_kind    string
+--- @field destination_match string|nil
+--- @field fanout_to         string[]|nil
+--- @field required          integer|nil
+--- @field clear_on_consumer boolean|nil
+--- @field stage             boolean|nil
+--- @field cu2_transition    boolean|nil
+--- @field status_register   integer|nil
+
+--- @class Cu2TransitionPolicy
+--- @field status_register integer
+--- @field enable_bit      integer
+--- @field required        integer
+--- @field visibility_kind string
+--- @field evidence        HardwareRelationEvidence
+
+--- @class DuffleIsa
+--- @field TAPE_ATOM_MACROS            table<string, TapeAtomMacroRow>
+--- @field DELAY_MARKERS               table<string, boolean>
+--- @field INSTRUCTION                 table<string, InstructionRow>
+--- @field GTE_COMMAND                 table<string, GteCommandRow>
+--- @field ALIAS_TO_CANONICAL          table<string, string>
+--- @field instr                       fun(ident: string): InstructionRow|nil
+--- @field gte_canon                   fun(ident: string): string
+--- @field gte                         fun(ident: string): GteCommandRow|nil
+--- @field GTE_CR_ALIAS_GROUPS         GteCrAliasGroup[]
+--- @field GTE_PACKED_SLOT_RELATIONS   GtePackedSlotRelation[]
+--- @field OPERAND_READ_POSITIONS      table<string, integer[]>
+--- @field GP0_CMD_SIZE                table<integer, integer>
+--- @field GP0_CMD_BY_SHAPE            table<string, integer>
+--- @field UNKNOWN_INSTRUCTION_CYCLES  integer
+--- @field HARDWARE_RELATIONS          HardwareRelationRow[]
+--- @field CU2_TRANSITION_POLICY       Cu2TransitionPolicy
+
+--- @type DuffleIsa
 local M = {}
 
 -- Section 7: domain tables
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- atom_info sub-calls: atom_bind, atom_reads, atom_writes, atom_view, atom_reg_types, atom_ctx, atom_phase.
+--- @type table<string, TapeAtomMacroRow>
 M.TAPE_ATOM_MACROS = {
 	["atom_info"] = { kind = "info", binds = false },
 }
 
 -- Empty C macros that prefix the next encoder. Zero words.
 -- BdSlot_ nop is one nop word. The marker is not the BD instruction.
+--- @type table<string, boolean>  -- bag: marker prefix -> true
 M.DELAY_MARKERS = {
 	["GteDelay_"] = true,
 	["LdSlot_"]   = true,
@@ -19,6 +129,7 @@ M.DELAY_MARKERS = {
 }
 
 -- One row per encoder. Read through duffle.instr.
+--- @type table<string, InstructionRow>
 M.INSTRUCTION = {
 	["BdSlot_"]            = { cycles = 0,  kind = "marker", },
 	["LdSlot_"]            = { cycles = 0,  kind = "marker", },
@@ -115,6 +226,7 @@ M.INSTRUCTION = {
 }
 
 -- One row per GTE command. Alias cycle numbers live here, not on INSTRUCTION.
+--- @type table<string, GteCommandRow>
 M.GTE_COMMAND = {
 	["gte_cmdw_avsz3"] = {
 		aliases = { "gte_avg_sort_z3", "gte_avsz3", "gte_cmdw_avg_sort_z3" },
@@ -296,14 +408,24 @@ M.GTE_COMMAND = {
 	},
 }
 
+--- @param ident string
+--- @return InstructionRow|nil
 function M.instr    (ident) return M.INSTRUCTION            [ident]          end
+--- @param ident string
+--- @return string
 function M.gte_canon(ident) return M.ALIAS_TO_CANONICAL     [ident] or ident end
+--- @param ident string
+--- @return GteCommandRow|nil
 function M.gte      (ident) return M.GTE_COMMAND[M.gte_canon(ident)]         end
 
+--- @return nil
 local function build_alias_map()
+	--- @type table<string, string>  -- bag: alias or canon -> canon
 	M.ALIAS_TO_CANONICAL = {}
+	--- @type string, GteCommandRow
 	for canon, row in pairs(M.GTE_COMMAND) do
 		M.ALIAS_TO_CANONICAL[canon] = canon
+		--- @type integer, string
 		for _, alias in ipairs(row.aliases or {}) do
 			M.ALIAS_TO_CANONICAL[alias] = canon
 		end
@@ -319,6 +441,7 @@ build_alias_map()
 --- Cross-alias writes inside one atom body, or across the wave-context boundary, silently clobber each other.
 --- The `check_gte_cr_alias_writes` check warns about each pair per source. See `docs/gte_reference.md` §"Control-register alias table"
 --- for the HW rationale and the libgte outer-product convention.
+--- @type GteCrAliasGroup[]
 M.GTE_CR_ALIAS_GROUPS = {
 	{ 24, { "gte_cr_RBK", "gte_cr_OFX" } },   -- background R vs screen offset X
 	{ 25, { "gte_cr_GBK", "gte_cr_OFY" } },   -- background G vs screen offset Y
@@ -326,6 +449,7 @@ M.GTE_CR_ALIAS_GROUPS = {
 }
 
 -- Packed RT slots named by the gte.h packed-slot comment. First must be written before second.
+--- @type GtePackedSlotRelation[]
 M.GTE_PACKED_SLOT_RELATIONS = {
 	{ slot = 2, first = "gte_cr_RT13", second = "gte_cr_RT22" },
 }
@@ -340,6 +464,7 @@ M.GTE_PACKED_SLOT_RELATIONS = {
 --   * The check tracks one entry per destination GPR per MFC2 / CFC2 event.
 --     A subsequent event counts as a "use" iff any of its read operand positions reference that destination GPR's ident (e.g. `R_T0`).
 --   * Branch delay slots are out of scope (MIPS control-flow; tracked separately).
+--- @type table<string, integer[]>  -- bag: encoder ident -> GPR operand positions
 M.OPERAND_READ_POSITIONS = {
 	-- CPU ALU with one or two GPR operands. Reads every GPR operand.
 	["add_ui"]                 = {1, 2},
@@ -439,6 +564,7 @@ M.OPERAND_READ_POSITIONS = {
 --   set_poly_gt3(p)  -> set_len(p, 9)   -> 10 total GP0 0x34
 --   set_poly_g4(p)   -> set_len(p, 8)   ->  9 total GP0 0x38
 --   set_poly_gt4(p)  -> set_len(p, 12)  -> 13 total GP0 0x3C
+--- @type table<integer, integer>  -- bag: GP0 cmd byte -> word count
 M.GP0_CMD_SIZE = {
 	[0x20] =  5,  -- Poly_F3
 	[0x24] =  8,  -- Poly_FT3
@@ -452,6 +578,7 @@ M.GP0_CMD_SIZE = {
 
 -- Shape suffix (after `ac_format_` / `mac_format_` prefix) -> GP0 cmd byte.
 -- Lets the static-analysis check derive the cmd byte from a macro name like `mac_format_g4_color` -> `g4` -> 0x38 -> 9 expected words.
+--- @type table<string, integer>  -- bag: shape suffix -> GP0 cmd byte
 M.GP0_CMD_BY_SHAPE = {
 	["f3"]  = 0x20, ["ft3"] = 0x24,
 	["f4"]  = 0x28, ["ft4"] = 0x2C,
@@ -459,6 +586,7 @@ M.GP0_CMD_BY_SHAPE = {
 	["g4"]  = 0x38, ["gt4"] = 0x3C,
 }
 
+--- @type integer
 M.UNKNOWN_INSTRUCTION_CYCLES = 1
 
 -- Hardware-relation policy table.
@@ -491,6 +619,7 @@ M.UNKNOWN_INSTRUCTION_CYCLES = 1
 --   * passes/static_analysis.lua::analyze_hardware_relations          (forward walker).
 --   * passes/static_analysis.lua::transfer_hazards CHECK_RULES reader (renders hazards onto `findings`).
 -- This table is consumed by the hardware-relation analyzer and hazard renderer.
+--- @type HardwareRelationRow[]
 M.HARDWARE_RELATIONS = {
 	-- CPU → COP2 data register (MTC2). The ordinary default is 2 cached words between producer and consumer (cpuspecifications.md:407-419).
 	{
@@ -681,6 +810,7 @@ M.HARDWARE_RELATIONS = {
 -- Bounded Status/SR.CU2 transition policy.
 -- The value lattice and the transition consumer both read this immutable row; no second value pass is permitted.
 -- The source says the enable/disable transition takes "2 clock cycles or so", so the boundary is conservative rather than exact.
+--- @type Cu2TransitionPolicy
 M.CU2_TRANSITION_POLICY = {
 	status_register = 12,
 	enable_bit      = 0x40000000,

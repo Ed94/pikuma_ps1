@@ -16,9 +16,14 @@
 --- Net effect: the caller gets the duffle module in one statement; no separate `dofile(...)` + `require("duffle")` dance.
 ---
 
+--- @class DufflePaths
+--- @field setup fun(): nil
+
+--- @type DufflePaths
 local M = {}
 
 -- Cache key for the repo root. Stored in `package.loaded` (process-global) so all 8 entry scripts + passes scripts share one resolution.
+--- @type string
 local CACHE_KEY = "__duffle_repo_root__"
 
 --- Resolve the repo root from this script's own path. Zero shell spawn.
@@ -30,13 +35,16 @@ local CACHE_KEY = "__duffle_repo_root__"
 local function find_repo_root()
 	if package.loaded[CACHE_KEY] then return package.loaded[CACHE_KEY] end
 
+	--- @type string
 	local source = debug.getinfo(1, "S").source
 	-- Strip the leading `@` (Lua's dofile marker) and the trailing `/duffle_paths.lua` filename.
 	-- What remains is the directory containing this script, i.e. `<repo>/scripts/`.
+	--- @type string|nil
 	local scripts_dir = source and source:match("^@?(.*)[/\\]duffle_paths%.lua$")
 	if not scripts_dir then return nil end
 
 	-- The repo root is the parent of `scripts/`. Strip the trailing `scripts/` (with or without trailing slash).
+	--- @type string
 	local root = scripts_dir:gsub("scripts[\\/]?$", "")
 	root = root:gsub("\\", "/")
 	if root == "" then root = "./" end
@@ -50,7 +58,9 @@ end
 --- This script does NOT touch the OS environment: no `os.setenv`, no `os.putenv`, no `$PATH` mods. 
 --- It just sets `package.path` and `package.cpath` (the standard Lua way to register module search dirs). 
 --- lpeg is built by `update_deps.ps1` to `toolchain/lpeg/`, which we wire into `package.cpath` here (so `require("lpeg")` from `duffle.lua` resolves without any global state).
+--- @return nil
 function M.setup()
+	--- @type string|nil
 	local  repo_root = find_repo_root()
 	if not repo_root then
 		-- Unreachable in practice: find_repo_root() derives the repo root from this script's own source path via debug.getinfo(1, "S").source (no subprocess, no git CLI, <1ms).
@@ -59,7 +69,9 @@ function M.setup()
 		os.exit(2)
 	end
 
+	--- @type string
 	local scripts_dir = repo_root .. "scripts/"
+	--- @type string
 	local passes_dir  = repo_root .. "scripts/passes/"
 	package.path = scripts_dir .. "?.lua;"
 		.. scripts_dir .. "?/init.lua;"
@@ -70,7 +82,9 @@ function M.setup()
 	-- lpeg: built by `update_deps.ps1` to `toolchain/lpeg/lpeg.dll`.
 	-- lfs: compiled from pcsx-redux's vendored luafilesystem source to `toolchain/lfs/lfs.dll`.
 	-- Wire both directories into cpath so `require("lpeg")` and `require("lfs")` resolve.
+	--- @type string
 	local lpeg_dir = repo_root .. "toolchain/lpeg/"
+	--- @type string
 	local lfs_dir  = repo_root .. "toolchain/lfs/"
 	package.cpath = lpeg_dir .. "?.dll;"
 		.. lfs_dir  .. "?.dll;"

@@ -37,8 +37,11 @@
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` 
 -- (works both standalone + when require'd). `duffle_paths.lua` sets package.path then returns `require("duffle")` 
 -- at the bottom, so the dofile value IS the duffle module.
+--- @type string
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
+--- @type DuffleExport
 local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")
+--- @type ElfDwarfMod
 local elf_dwarf      = require("elf_dwarf")
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -47,6 +50,7 @@ local elf_dwarf      = require("elf_dwarf")
 
 -- Format version emitted as the first line. Bump + add a migration test if the format changes; 
 -- the gdb runtime loader rejects mismatches (E2).
+--- @type integer
 local FORMAT_VERSION = 1
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -54,29 +58,71 @@ local FORMAT_VERSION = 1
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- @class AtomSourceMapCtx
---- @field shared             table   -- `ctx.shared`
---- @field shared.corpus      table   -- source-order registry; single writer is build_ctx
---- @field shared.word_counts table
---- @field out_root           string  -- output root (e.g. "build/gen")
---- @field flags              table   -- `ctx.flags`; reads `flags.gdb_runtime` + `flags.elf_path`
+--- @field shared        PassShared
+--- @field out_root      string
+--- @field flags         PassFlags
+--- @field project_root  string|nil
+
+--- @class WordMapEntry
+--- @field pos        integer
+--- @field line       integer
+--- @field text       string
+--- @field body_line  integer
+--- @field gpr_keys   string[]|nil
+--- @field invocation InvocationRecord|nil
+
+--- @class NmAddr
+--- @field [1] integer  -- st_value
+--- @field [2] integer  -- st_size
+
+--- @class GdbAtomRecord
+--- @field idx        integer|nil
+--- @field name       string
+--- @field src_path   string
+--- @field file_base  string
+--- @field addr       integer
+--- @field size_bytes integer
+--- @field words      integer
+--- @field entries    WordMapEntry[]
+
+--- @class ElfDwarfMod
+--- @field read_nm fun(elf_path: Path): table<string, NmAddr>
+
+--- @class AtomSourceMapPass
+--- @field render_source_map      fun(src: SourceFile): string
+--- @field render_provenance      fun(src: SourceFile, wc: WordCounts): string
+--- @field render_atom_source_map fun(atom: AtomEntry): string
+--- @field render_atom_provenance fun(atom: AtomEntry, wc: WordCounts, rel_path: string): string
+--- @field run                    fun(ctx: PassCtx): PassResult
+
+--- @class AtomEntry
+--- @field paths AtomPaths|nil
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Atom-path renderers
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Join word boundaries (from `items`) to per-word call text + source lines (from `word_events`).
---- @param atom table
---- @return table[], integer
+--- @param atom AtomEntry
+--- @return WordMapEntry[]
+--- @return integer
 local function canonical_word_entries(atom)
+	--- @type AtomPaths
 	local paths      = atom.paths or {}
+	--- @type WordEvent[]
 	local events     = paths.word_events or {}
+	--- @type EmissionItem[]
 	local word_items = {}
+	--- @type integer, EmissionItem
 	for _, item in ipairs(paths.items or {}) do
 		if item.kind == "word" then word_items[#word_items + 1] = item end
 	end
 
+	--- @type WordMapEntry[]
 	local entries = {}
+	--- @type integer, WordEvent
 	for index, event in ipairs(events) do
+		--- @type EmissionItem
 		local item = word_items[index] or {}
 		entries[#entries + 1] = {
 			pos        = event.i or (index - 1),
@@ -97,18 +143,25 @@ end
 ---   `WORD N  CALL <src-path>:<src-line>  RAW` (raw `.word` outside any mac_* component)
 --- Component identity comes from the outermost invocation record; the count-table lookup confirms the component was declared in `corpus.word_counts` 
 --- (populated by word_count_eval + components passes).
---- @param src  table
---- @param atom table
---- @param wc   table -- identity alias of corpus.word_counts
---- @return string[], integer
+--- @param src  SourceFile
+--- @param atom AtomEntry
+--- @param wc   WordCounts
+--- @return string[]
+--- @return integer
 local function emit_provenance_stanza(src, atom, wc)
+	--- @type string[]
 	local lines          = {}
+	--- @type string
 	local rel_path       = src.path:gsub("\\\\", "/")
+	--- @type WordMapEntry[], integer
 	local entries, total = canonical_word_entries(atom)
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
 
+	--- @type integer, WordMapEntry
 	for _, entry in ipairs(entries) do
+		--- @type InvocationRecord|nil
 		local inv         = entry.invocation
+		--- @type integer|nil
 		local macro_count = inv and wc["mac_" .. inv.component_name]
 		if inv and macro_count ~= nil then
 			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d'
@@ -125,10 +178,11 @@ local function emit_provenance_stanza(src, atom, wc)
 end
 
 --- Render the full provenance file content for one source.
---- @param src table
---- @param wc  table
+--- @param src SourceFile
+--- @param wc  WordCounts
 --- @return string
 local function render_provenance(src, wc)
+	--- @type string[]
 	local lines = {}
 	lines[#lines + 1] = "# FORMAT_VERSION 1"
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
@@ -138,13 +192,19 @@ local function render_provenance(src, wc)
 	lines[#lines + 1] = "# dwarf_injection to synthesize DW_TAG_inlined_subroutine instances + per-word"
 	lines[#lines + 1] = "# line program rows for native source-level step into component bodies."
 
+	--- @param atom AtomEntry
+	--- @return nil
 	local function append(atom)
+		--- @type string[]
 		local stanza = emit_provenance_stanza(src, atom, wc)
+		--- @type integer, string
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
+	--- @type integer, AtomEntry
 	for _, atom in ipairs(src.scan.atoms or {}) do
 		if atom.paths then append(atom) end
 	end
+	--- @type integer, AtomEntry
 	for _, atom in ipairs(src.scan.raw_atoms or {}) do
 		if atom.paths then append(atom) end
 	end
@@ -154,16 +214,20 @@ end
 
 --- Render one atom's stanza for the sourcemap.txt form (ATOM header line, N WORD lines, ENDATOM marker).
 --- Returns (lines, total_words).
---- @param src    table
---- @param atom   table
---- @param wc     table
---- @return string[], integer
+--- @param src  SourceFile
+--- @param atom AtomEntry
+--- @return string[]
+--- @return integer
 local function emit_atom_stanza(src, atom)
+	--- @type string[]
 	local lines          = {}
+	--- @type string
 	local rel_path       = src.path:gsub("\\\\", "/")
+	--- @type WordMapEntry[], integer
 	local entries, total = canonical_word_entries(atom)
 
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
+	--- @type integer, WordMapEntry
 	for _, entry in ipairs(entries) do
 		lines[#lines + 1] = string.format("WORD %d  LINE %d  TEXT %s",
 			entry.pos, entry.line, entry.text)
@@ -175,21 +239,27 @@ end
 
 --- Render the full source map file content for one source (one .atoms.sourcemap.txt per source). Mirrors offsets.lua's
 --- `project_atoms` shape: scan.atoms + scan.raw_atoms, no kind filter.
---- @param src table
---- @param wc  table
+--- @param src SourceFile
 --- @return string
 local function render_source_map(src)
+	--- @type string[]
 	local lines       = {}
 	lines[#lines + 1] = "# FORMAT_VERSION " .. FORMAT_VERSION
 	lines[#lines + 1] = "# auto-generated by ps1_meta.lua (passes/atoms_source_map.lua) — DO NOT EDIT"
 
+	--- @param atom AtomEntry
+	--- @return nil
 	local function append(atom)
+		--- @type string[]
 		local stanza = emit_atom_stanza(src, atom)
+		--- @type integer, string
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end
 	end
+	--- @type integer, AtomEntry
 	for _, atom in ipairs(src.scan.atoms or {}) do
 		if atom.paths then append(atom) end
 	end
+	--- @type integer, AtomEntry
 	for _, atom in ipairs(src.scan.raw_atoms or {}) do
 		if atom.paths then append(atom) end
 	end
@@ -211,19 +281,29 @@ end
 
 --- Build the list of atoms with addresses + word entries. Shared helper for the gdb-runtime file emission.
 --- @param ctx PassCtx
---- @return table[] -- list of {idx, name, src_path, file_base, addr, size_bytes, words, entries}
+--- @return GdbAtomRecord[]
 local function build_atom_table(ctx)
+	--- @type table<string, NmAddr>
 	local addrs   = elf_dwarf.read_nm(ctx.flags.elf_path)
+	--- @type Corpus|nil
 	local corpus  = ctx.shared and ctx.shared.corpus
+	--- @type GdbAtomRecord[]
 	local matched = {}
 
+	--- @type integer, SourceFile
 	for _, src in ipairs(corpus.source_order or {}) do
+		--- @type string
 		local file_base = src.path:match("([^/\\\\]+)$") or src.path
+		--- @param atom AtomEntry
+		--- @return nil
 		local function append(atom)
 			if not atom.paths then return end
+			--- @type string
 			local  name = atom.raw_name or atom.name
+			--- @type NmAddr|nil
 			local  info = addrs[name]
 			if not info then return end
+			--- @type WordMapEntry[], integer
 			local entries, total = canonical_word_entries(atom)
 			matched[#matched + 1] = {
 				name       = name,
@@ -235,12 +315,18 @@ local function build_atom_table(ctx)
 				entries    = entries,
 			}
 		end
+		--- @type integer, AtomEntry
 		for _, atom in ipairs((src.scan or {}).atoms or {}) do append(atom) end
+		--- @type integer, AtomEntry
 		for _, atom in ipairs((src.scan or {}).raw_atoms or {}) do append(atom) end
 	end
 
 	-- Deterministic order: sort by address (matches `nm` output ordering).
+	--- @param a GdbAtomRecord
+	--- @param b GdbAtomRecord
+	--- @return boolean
 	table.sort(matched, function(a, b) return a.addr < b.addr end)
+	--- @type integer, GdbAtomRecord
 	for i, a in ipairs(matched) do a.idx = i - 1 end
 	return matched
 end
@@ -252,12 +338,14 @@ end
 ---
 --- Why hardcoded per-atom: gdb's `$` substitution doesn't concat inside var names — `$__atom_name_$__i` in a `while`
 --- loop resolves to one literal identifier, not `name_i`. Compile-time emission is the only path.
---- @param lines   table  -- output line buffer (mutated in place)
---- @param matched table  -- list of atom records from `build_atom_table`
+--- @param lines   string[]
+--- @param matched GdbAtomRecord[]
+--- @return nil
 local function append_gdb_commands(lines, matched)
 	-- ── tape_atoms ──
 	-- Hardcoded one printf per atom. No loop.
 	lines[#lines + 1] = "define tape_atoms"
+	--- @type integer, GdbAtomRecord
 	for _, a in ipairs(matched) do
 		-- gdb 12.1 quirk: literals in printf args require an attached target.
 		-- Use the per-atom convenience vars set above as printf args.
@@ -273,6 +361,7 @@ local function append_gdb_commands(lines, matched)
 	-- ── break_atom (generic) + per-atom break_atom_X ──
 	lines[#lines + 1] = "define break_atom"
 	lines[#lines + 1] = '  echo "Usage: break_atom_<exact_name>  (pick from the list below)"'
+	--- @type integer, GdbAtomRecord
 	for _, a in ipairs(matched) do
 		lines[#lines + 1] = string.format('  printf "  break_atom_%%-32s\\n", $__atom_name_%d', a.idx)
 	end
@@ -282,6 +371,7 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "end"
 	lines[#lines + 1] = ""
 
+	--- @type integer, GdbAtomRecord
 	for _, a in ipairs(matched) do
 		lines[#lines + 1] = string.format("define break_atom_%s", a.name)
 		lines[#lines + 1] = string.format("  break *$__atom_addr_%d", a.idx)
@@ -296,6 +386,7 @@ local function append_gdb_commands(lines, matched)
 	-- ── step_atom / next_atom ──
 	-- Hardcoded one tbreak per atom. No loop.
 	lines[#lines + 1] = "define step_atom"
+	--- @type integer, GdbAtomRecord
 	for _, a in ipairs(matched) do
 		lines[#lines + 1] = string.format("  tbreak *$__atom_addr_%d", a.idx)
 	end
@@ -319,6 +410,7 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "define where_in_atom"
 	lines[#lines + 1] = "  set $__pc = (unsigned int)$pc"
 	lines[#lines + 1] = "  set $__matched = 0"
+	--- @type integer, GdbAtomRecord
 	for _, a in ipairs(matched) do
 		-- Precompute end_addr (gdb 12.1's expression evaluator chokes on `addr + words*4`).
 		lines[#lines + 1] = string.format("  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
@@ -328,14 +420,17 @@ local function append_gdb_commands(lines, matched)
 		lines[#lines + 1] = string.format("    set $__word = ($__pc - $__atom_addr_%d) / 4", a.idx)
 		lines[#lines + 1] = string.format('    printf "word:    %%d/%%d\\n", $__word, $__atom_words_%d', a.idx)
 		-- One inner-if per WORD entry. Each word's line + text hardcoded.
+		--- @type integer, WordMapEntry
 		for _, we in ipairs(a.entries) do
 			lines[#lines + 1] = string.format("    if $__word == %d", we.pos)
 			-- Escape TEXT for printf format string.
+			--- @type string
 			local escaped_text = we.text:gsub("%%", "%%%%"):gsub('"', '\\"')
 			lines[#lines + 1] = string.format('      printf "source:  %%s:%%d  %%s\\n", $__atom_file_%d, %d, "%s"', a.idx, we.line, escaped_text)
 			lines[#lines + 1] = "    end"
 		end
 		-- Fallback for words beyond the source map (shouldn't happen if nm matches).
+		--- @type integer
 		local max_word = 0
 		if #a.entries > 0 then max_word = a.entries[#a.entries].pos end
 		lines[#lines + 1] = string.format('    if $__word > %d', max_word)
@@ -361,6 +456,7 @@ local function append_gdb_commands(lines, matched)
 	lines[#lines + 1] = "  set $__in_atom = 0"
 	lines[#lines + 1] = "  set $__did_step = 0"
 	lines[#lines + 1] = "  set $__pc = (unsigned int)$pc"
+	--- @type integer, GdbAtomRecord
 	for _, a in ipairs(matched) do
 		-- Precompute end_addr in the convenience var (single expression gdb handles).
 		lines[#lines + 1] = string.format("  set $__end_%d = $__atom_addr_%d + $__atom_words_%d * 4", a.idx, a.idx, a.idx)
@@ -395,8 +491,10 @@ end
 --- Emit the gdb-runtime file (post-link). Pure gdb scripting — addresses come from `mipsel-none-elf-nm -S`, get embedded
 --- in `<ctx.out_root>/gdb_tape_atoms_runtime.gdb`, and load via `set $var = ...` + `define ... end` blocks at gdb source-time.
 --- @param ctx PassCtx
+--- @return nil
 local function emit_gdb_runtime(ctx)
 	if not (ctx.flags and ctx.flags.gdb_runtime) then return end
+	--- @type string|nil
 	local  elf_path = ctx.flags.elf_path
 	if not elf_path or elf_path == "" then
 		io.stderr:write("[atoms_source_map] --gdb-runtime requires --elf <elf>\n")
@@ -408,12 +506,14 @@ local function emit_gdb_runtime(ctx)
 		return
 	end
 
+	--- @type GdbAtomRecord[]
 	local matched = build_atom_table(ctx)
 	if #matched == 0 then
 		io.stderr:write("[atoms_source_map] --gdb-runtime: no atoms matched against nm symbols (stale scan?).\n")
 		return
 	end
 
+	--- @type string[]
 	local lines = {}
 	lines[#lines + 1] = "# Auto-generated by ps1_meta.lua (passes/atoms_source_map.lua)"
 	lines[#lines + 1] = "# DO NOT EDIT — re-run ps1_meta.lua --atoms-source-map --gdb-runtime to regenerate"
@@ -435,6 +535,7 @@ local function emit_gdb_runtime(ctx)
 
 	-- Per-atom convenience vars (used as printf args; literals aren't accepted
 	-- without an attached target on gdb 12.1).
+	--- @type integer, GdbAtomRecord
 	for _, a in ipairs(matched) do
 		lines[#lines + 1] = string.format('set $__atom_name_%d = "%s"', a.idx, gdb_escape(a.name))
 		lines[#lines + 1] = string.format("set $__atom_addr_%d = 0x%x", a.idx, a.addr)
@@ -451,10 +552,13 @@ local function emit_gdb_runtime(ctx)
 	-- Confirmation line for the source operator.
 	lines[#lines + 1] = 'printf "[gdb_tape_atoms] runtime loaded %d atoms from %s\\n", $__atom_count, $__elf_path'
 
+	--- @type string
 	local out_path
 	-- Move out of `<out_root>/gdb_tape_atoms_runtime.gdb` to `<out_root>/../gdb_tape_atoms_runtime.gdb` when the conventional `<out_root>` is `<build>/gen`
 	-- (any equivalent spelling — relative, absolute backslash, absolute forward-slash, trailing-separator variants).
 	-- This puts the gdb runtime alongside the ELF at `build/` rather than under the report subdir.
+	--- @param p string
+	--- @return boolean
 	local function ends_with_gen_dir(p)
 		if type(p) ~= "string" then return false end
 		return p:match("[/\\]gen[/\\]?$") ~= nil or p == "build/gen" or p == "build\\gen"
@@ -462,6 +566,7 @@ local function emit_gdb_runtime(ctx)
 	if ends_with_gen_dir(ctx.out_root) then
 		-- Strip the trailing `/gen` segment, then write the runtime script under `build/`.
 		-- e.g. "C:/projects/Pikuma/ps1/build/gen" -> "C:/projects/Pikuma/ps1/build".
+		--- @type string
 		local parent = ctx.out_root:gsub("[/\\]gen[/\\]?$", "")
 		out_path = parent .. "/gdb_tape_atoms_runtime.gdb"
 	else
@@ -476,6 +581,7 @@ end
 -- M — module exports
 -- ════════════════════════════════════════════════════════════════════════════
 
+--- @type AtomSourceMapPass
 local M = {}
 
 -- Expose the pure render functions so `report.lua` and the focused tests can call them directly without triggering the file-emit path.
@@ -483,19 +589,26 @@ M.render_source_map = render_source_map
 M.render_provenance = render_provenance
 
 --- Render ONE atom's sourcemap stanza.
---- @param atom table   -- atom record (must have `atom.paths` populated)
+--- @param atom AtomEntry
 --- @return string
 function M.render_atom_source_map(atom)
 	assert(type(atom) == "table", "render_atom_source_map: atom must be a table")
 	assert(type(atom.paths) == "table", "render_atom_source_map: atom.paths must be a table")
+	--- @type WordMapEntry[], integer
 	local entries, total = canonical_word_entries(atom)
+	--- @type string[]
 	local lines = {}
 	lines[#lines + 1] = string.format("ATOM %s  %d", (atom.raw_name or atom.name), total)
+	--- @type integer, WordMapEntry
 	for _, entry in ipairs(entries) do
+		--- @type string
 		local word_line = string.format("WORD %d  LINE %d  TEXT %s",
 			entry.pos, entry.line, entry.text)
+		--- @type string[]
 		local keys = {}
+		--- @type integer
 		for pos = 1, 16 do
+			--- @type string|nil
 			local k = entry.gpr_keys and entry.gpr_keys[pos]
 			if type(k) == "string" and k:sub(1, 7) == "reguse:" then
 				keys[#keys + 1] = k
@@ -514,19 +627,24 @@ end
 ---
 --- `rel_path` is the source path (forward-slashes) embedded in every `CALL` line.
 --- The .md caller (report.lua) is expected to derive this once per `## <source>` heading and pass it down for each atom in that source.
---- @param atom      table   -- atom record (must have `atom.paths` populated)
---- @param wc        table   -- identity alias of `corpus.word_counts`
---- @param rel_path  string  -- source path (forward-slashes) for `CALL` fields
+--- @param atom     AtomEntry
+--- @param wc       WordCounts
+--- @param rel_path string
 --- @return string
 function M.render_atom_provenance(atom, wc, rel_path)
 	assert(type(atom)       == "table", "render_atom_provenance:  atom must be a table")
 	assert(type(atom.paths) == "table", "render_atom_provenance:  atom.paths must be a table")
 	assert(type(rel_path)   == "string", "render_atom_provenance: rel_path must be a string")
+	--- @type WordMapEntry[], integer
 	local entries, total = canonical_word_entries(atom)
+	--- @type string[]
 	local lines = {}
 	lines[#lines + 1] = string.format("ATOM %s  %d", (atom.raw_name or atom.name), total)
+	--- @type integer, WordMapEntry
 	for _, entry in ipairs(entries) do
+		--- @type InvocationRecord|nil
 		local inv         = entry.invocation
+		--- @type integer|nil
 		local macro_count = inv and wc and wc["mac_" .. inv.component_name]
 		if inv and macro_count ~= nil then
 			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d'
@@ -546,16 +664,21 @@ end
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
+	--- @type PassOutputEntry[]
 	local outputs  = {}
+	--- @type PassFinding[]
 	local errors   = {}
+	--- @type PassFinding[]
 	local warnings = {}
 
+	--- @type Corpus|nil
 	local corpus = ctx.shared and ctx.shared.corpus
 	if type(corpus) ~= "table" or type(corpus.source_order) ~= "table" then
 		error("atoms_source_map.run requires ctx.shared.corpus.source_order (canonical corpus).", 0)
 	end
 
 	-- Word counts come from `corpus.word_counts` (populated by word_count_eval + components passes).
+	--- @type WordCounts
 	local wc = corpus.word_counts or {}
 	if not next(wc) then
 		warnings[#warnings + 1] = {

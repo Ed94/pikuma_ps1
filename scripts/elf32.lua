@@ -22,6 +22,94 @@
 -- spec: System V ABI gABI v1.2 §"ELF Header" (Table 1) + §"Section Header Table"
 -- spec: System V ABI gABI v1.2 §"Symbol Table" (Elf32_Sym layout)
 
+--- @class Elf32Adapter
+--- @field read_u8_at  fun(off: integer): integer|nil
+--- @field read_u16_at fun(off: integer): integer|nil
+--- @field read_u32_at fun(off: integer): integer|nil
+--- @field read_size   fun(): integer
+
+--- @class Elf32Header
+--- @field e_entry     integer
+--- @field e_shoff     integer
+--- @field e_shentsize integer
+--- @field e_shnum     integer
+--- @field e_shstrndx  integer
+--- @field error       string|nil
+
+--- @class Elf32Section
+--- @field sh_name   integer
+--- @field sh_type   integer
+--- @field sh_flags  integer
+--- @field sh_addr   integer
+--- @field sh_offset integer
+--- @field sh_size   integer
+--- @field sh_link   integer
+--- @field name      string
+
+--- @class Elf32Sym
+--- @field value integer
+--- @field size  integer
+--- @field info  integer
+--- @field shndx integer
+
+--- @class Elf32HeaderLayout
+--- @field magic_offset       integer
+--- @field magic              string
+--- @field class_offset       integer
+--- @field endian_offset      integer
+--- @field header_bytes       integer
+--- @field e_entry_offset     integer
+--- @field e_shoff_offset     integer
+--- @field e_shentsize_offset integer
+--- @field e_shnum_offset     integer
+--- @field e_shstrndx_offset  integer
+
+--- @class Elf32SectionLayout
+--- @field sh_name_offset   integer
+--- @field sh_type_offset   integer
+--- @field sh_flags_offset  integer
+--- @field sh_addr_offset   integer
+--- @field sh_offset_offset integer
+--- @field sh_size_offset   integer
+--- @field sh_link_offset   integer
+--- @field sh_entsize_bytes integer
+
+--- @class Elf32SymLayout
+--- @field st_name         integer
+--- @field st_value        integer
+--- @field st_size         integer
+--- @field st_info         integer
+--- @field sym_entry_bytes integer
+
+--- @class Elf32Mod
+--- @field ELFCLASS32             integer
+--- @field ELFDATA2LSB            integer
+--- @field EM_MIPS                integer
+--- @field SHT_SYMTAB             integer
+--- @field SHT_STRTAB             integer
+--- @field SHT_NOBITS             integer
+--- @field SHF_WRITE              integer
+--- @field SHF_ALLOC              integer
+--- @field SHF_EXECINSTR          integer
+--- @field ELF32_HEADER           Elf32HeaderLayout
+--- @field ELF32_SECTION          Elf32SectionLayout
+--- @field ELF32_SYM              Elf32SymLayout
+--- @field dw_dwarf32_terminator  integer
+--- @field read_u32               fun(adapter: Elf32Adapter, off: integer): integer|nil
+--- @field read_u16               fun(adapter: Elf32Adapter, off: integer): integer|nil
+--- @field read_u8                fun(adapter: Elf32Adapter, off: integer): integer|nil
+--- @field size                   fun(adapter: Elf32Adapter): integer
+--- @field read_u32_le            fun(buf: string, off: integer): integer
+--- @field read_u16_le            fun(buf: string, off: integer): integer
+--- @field validate_adapter       fun(adapter: any): boolean, string|nil
+--- @field get_str                fun(strtab: string, off: integer): string|nil
+--- @field parse_elf32_headers    fun(adapter: Elf32Adapter): Elf32Header|nil, string|nil
+--- @field walk_sections          fun(adapter: Elf32Adapter, hdr: Elf32Header): Elf32Section[]|nil, string|nil
+--- @field read_section_bytes     fun(adapter: Elf32Adapter, section: Elf32Section): string|nil
+--- @field read_named_section     fun(adapter: Elf32Adapter, sections: Elf32Section[], name: string): string|nil, string|nil
+--- @field collect_symbols        fun(adapter: Elf32Adapter, sections: Elf32Section[]): table<string, Elf32Sym>|nil, string|nil
+
+--- @type Elf32Mod
 local M = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -39,7 +127,7 @@ local M = {}
 --- **Call form:** explicit-pass. The reader receives `adapter` as the first positional argument and the offset as the second; no `self` is passed.
 --- Test fixtures declare `function(offset) ... end` and the parsers call them via dot syntax `adapter.read_u8_at(off)`.
 --- The colon form `adapter:read_u8_at(off)` would prepend the adapter table as `offset` and break the contract.
---- @param adapter table
+--- @param adapter Elf32Adapter
 --- @param off     integer  -- zero-based wire offset
 --- @return integer|nil
 function M.read_u32(adapter, off)
@@ -50,7 +138,7 @@ function M.read_u32(adapter, off)
 end
 
 --- Read a 2-byte little-endian unsigned integer from `adapter` at zero-based wire offset `off`.
---- @param adapter table
+--- @param adapter Elf32Adapter
 --- @param off integer  -- zero-based wire offset
 --- @return integer|nil
 function M.read_u16(adapter, off)
@@ -59,7 +147,7 @@ function M.read_u16(adapter, off)
 end
 
 --- Read a 1-byte unsigned integer from `adapter` at zero-based wire offset `off`.
---- @param adapter table
+--- @param adapter Elf32Adapter
 --- @param off integer  -- zero-based wire offset
 --- @return integer|nil
 function M.read_u8(adapter, off)
@@ -67,7 +155,7 @@ function M.read_u8(adapter, off)
 end
 
 --- Total adapter byte length.
---- @param adapter table
+--- @param adapter Elf32Adapter
 --- @return integer
 function M.size(adapter)
 	return adapter.read_size()
@@ -76,7 +164,11 @@ end
 --- Forwarders kept for backward compat with scripts/elf_dwarf.lua.
 --- The metaprogram side keeps `read_u32_le` / `read_u16_le`;
 --- both layers now use the same byte-level helpers under the hood.
+--- @param buf string
+--- @param off integer
+--- @return integer
 function M.read_u32_le(buf, off)
+	--- @type integer
 	local byte_off = off + 1
 	return buf:byte(byte_off)
 		+ buf:byte(byte_off + 0x01) * 0x00000100
@@ -89,6 +181,7 @@ end
 --- @param off integer  -- zero-based wire offset
 --- @return integer
 function M.read_u16_le(buf, off)
+	--- @type integer
 	local byte_off = off + 1
 	return buf:byte(byte_off) + buf:byte(byte_off + 0x01) * 0x00000100
 end
@@ -116,6 +209,7 @@ M.SHF_EXECINSTR = 0x4 -- spec: gABI v1.2 §"Section Attributes" — executable
 -- ELF32 header layout (System V ABI gABI v1.2 §"ELF Header" Table 1)
 -- ---------------------------------------------------------------------------
 -- All offsets are zero-based wire offsets. The header is 52 bytes total (header_bytes = 0x34 = 52).
+--- @type Elf32HeaderLayout
 M.ELF32_HEADER = {
 	magic_offset         = 0x00,  -- 4 bytes; expected "\127ELF"
 	magic                = "\127ELF",
@@ -134,6 +228,7 @@ M.ELF32_HEADER = {
 -- ---------------------------------------------------------------------------
 -- Each entry is 40 bytes (sh_entsize_bytes = 0x28 = 40);
 -- zero-based, field offsets relative to the start of the entry.
+--- @type Elf32SectionLayout
 M.ELF32_SECTION = {
 	sh_name_offset    = 0x00,  -- 4-byte LE; offset into .shstrtab
 	sh_type_offset    = 0x04,  -- 4-byte LE; section type (SHT_*)
@@ -150,6 +245,7 @@ M.ELF32_SECTION = {
 -- ---------------------------------------------------------------------------
 -- Each entry is 16 bytes (sym_entry_bytes = 0x10 = 16);
 -- zero-based, field offsets relative to the start of the entry.
+--- @type Elf32SymLayout
 M.ELF32_SYM = {
 	st_name          = 0x00,  -- 4-byte LE; offset into the linked string table
 	st_value         = 0x04,  -- 4-byte LE; symbol value (address / absolute)
@@ -190,6 +286,7 @@ end
 --- @return string|nil
 function M.get_str(strtab, off)
 	if off < 0 or off >= #strtab then return nil end
+	--- @type integer|nil
 	local  end_pos = strtab:find("\0", off + 1, true)
 	if not end_pos then return nil end
 	return strtab:sub(off + 1, end_pos - 1)
@@ -205,38 +302,50 @@ end
 --- On failure returns nil + a stable error code:
 ---   bad_magic, unsupported_elf_class, unsupported_elf_data, truncated_header
 --- The header's machine field is NOT validated here — callers (e.g. the helper's prime path) decide whether to require EM_MIPS before symbol reads.
---- @param adapter table
---- @return table|nil, string|nil
+--- @param adapter Elf32Adapter
+--- @return Elf32Header|nil, string|nil
 function M.parse_elf32_headers(adapter)
+	--- @type boolean, string|nil
 	local  ok, err = M.validate_adapter(adapter)
 	if not ok then return nil, err end
 
 	-- 4-byte magic: 0x7F 'E' 'L' 'F'.
 	-- The byte readers take the adapter explicitly.
 	-- The production `Support.File` adapter is wrapped by the caller to drop its implicit `self` so the parser shape is flat pass-style.
+	--- @type integer|nil
 	local b1 = M.read_u8(adapter, 0)
+	--- @type integer|nil
 	local b2 = M.read_u8(adapter, 1)
+	--- @type integer|nil
 	local b3 = M.read_u8(adapter, 2)
+	--- @type integer|nil
 	local b4 = M.read_u8(adapter, 3)
 	if not (b1 and b2 and b3 and b4)
 		or not (b1 == 0x7f and b2 == 0x45 and b3 == 0x4c and b4 == 0x46) then
 		return nil, "bad_magic"
 	end
 
+	--- @type integer|nil
 	local class = M.read_u8(adapter, M.ELF32_HEADER.class_offset)
 	if    class ~= M.ELFCLASS32 then
 		return nil, "unsupported_elf_class"
 	end
 
+	--- @type integer|nil
 	local data = M.read_u8(adapter, M.ELF32_HEADER.endian_offset)
 	if    data ~= M.ELFDATA2LSB then
 		return nil, "unsupported_elf_data"
 	end
 
+	--- @type integer|nil
 	local e_entry     = M.read_u32(adapter, M.ELF32_HEADER.e_entry_offset)
+	--- @type integer|nil
 	local e_shoff     = M.read_u32(adapter, M.ELF32_HEADER.e_shoff_offset)
+	--- @type integer|nil
 	local e_shentsize = M.read_u16(adapter, M.ELF32_HEADER.e_shentsize_offset)
+	--- @type integer|nil
 	local e_shnum     = M.read_u16(adapter, M.ELF32_HEADER.e_shnum_offset)
+	--- @type integer|nil
 	local e_shstrndx  = M.read_u16(adapter, M.ELF32_HEADER.e_shstrndx_offset)
 	if not (e_entry and e_shoff and e_shentsize and e_shnum and e_shstrndx) then
 		return nil, "truncated_header"
@@ -254,10 +363,11 @@ end
 
 --- Read one section-header entry from `adapter` at `sh_off`.
 --- Returns a table with the wire fields plus a (yet-unresolved) `name` field.
---- @param adapter table
+--- @param adapter Elf32Adapter
 --- @param sh_off  integer
---- @return table|nil, string|nil  -- entry, error
+--- @return Elf32Section|nil, string|nil
 local function read_section_entry(adapter, sh_off)
+	--- @type Elf32Section
 	local entry = {
 		sh_name   = M.read_u32(adapter, sh_off + M.ELF32_SECTION.sh_name_offset),
 		sh_type   = M.read_u32(adapter, sh_off + M.ELF32_SECTION.sh_type_offset),
@@ -279,21 +389,26 @@ end
 --- (the section at logical index 0 is at array position 1, etc.).
 --- Each entry has the wire fields plus a resolved `name` derived from `.shstrtab`.
 --- Returns nil + a stable error code on failure: truncated_section_headers, missing_shstrtab, truncated_strtab
---- @param adapter table
---- @param hdr     table  -- the table returned by parse_elf32_headers
---- @return table|nil, string|nil
+--- @param adapter Elf32Adapter
+--- @param hdr     Elf32Header
+--- @return Elf32Section[]|nil, string|nil
 function M.walk_sections(adapter, hdr)
 	if not hdr or hdr.error then return nil, hdr and hdr.error or "truncated_section_headers" end
 
+	--- @type integer
 	local file_size = M.size(adapter)
 	if hdr.e_shoff + hdr.e_shnum * hdr.e_shentsize > file_size then
 		return nil, "truncated_section_headers"
 	end
 
 	-- Read every section header first; we need .shstrtab to resolve names.
+	--- @type Elf32Section[]
 	local sections = {}
+	--- @type integer
 	for i = 0, hdr.e_shnum - 1 do
+		--- @type integer
 		local sh_off = hdr.e_shoff + i * hdr.e_shentsize
+		--- @type Elf32Section|nil, string|nil
 		local entry, err = read_section_entry(adapter, sh_off)
 		if not entry then return nil, err end
 		sections[i + 1] = entry
@@ -303,6 +418,7 @@ function M.walk_sections(adapter, hdr)
 		return nil, "missing_shstrtab"
 	end
 
+	--- @type Elf32Section|nil
 	local  shstrtab = sections[hdr.e_shstrndx + 1]
 	if not shstrtab or shstrtab.sh_type ~= M.SHT_STRTAB then
 		return nil, "missing_shstrtab"
@@ -310,9 +426,11 @@ function M.walk_sections(adapter, hdr)
 	if shstrtab.sh_offset + shstrtab.sh_size > file_size then
 		return nil, "truncated_section_headers"
 	end
+	--- @type string|nil
 	local  shstrtab_bytes = M.read_section_bytes(adapter, shstrtab)
 	if not shstrtab_bytes then return nil, "truncated_section_headers" end
 
+	--- @type integer, Elf32Section
 	for _, s in ipairs(sections) do
 		s.name = M.get_str(shstrtab_bytes, s.sh_name) or ""
 	end
@@ -322,14 +440,18 @@ end
 
 --- Read the bytes of one section. Returns a string, or nil if the adapter returns nil for any byte (out-of-bounds).
 --- The caller is responsible fors sizing the buffer (the section's sh_offset + sh_size must fit in adapter.size).
---- @param adapter table
---- @param section table  -- one entry from walk_sections
+--- @param adapter Elf32Adapter
+--- @param section Elf32Section
 --- @return string|nil
 function M.read_section_bytes(adapter, section)
+	--- @type integer
 	local size = section.sh_size
 	if    size == 0 then return "" end
+	--- @type string[]
 	local out = {}
+	--- @type integer
 	for i = 0, size - 1 do
+		--- @type integer|nil
 		local b = M.read_u8(adapter, section.sh_offset + i)
 		if    b == nil then return nil end
 		out[#out + 1] = string.char(b)
@@ -339,14 +461,16 @@ end
 
 --- Convenience: walk sections, then look up the named section, then read its bytes.
 --- Returns nil + a stable error code if the section is absent or out-of-bounds.
---- @param adapter  table
---- @param sections table  -- 1-based array from walk_sections
+--- @param adapter  Elf32Adapter
+--- @param sections Elf32Section[]
 --- @param name     string
 --- @return string|nil, string|nil
 function M.read_named_section(adapter, sections, name)
 	if not sections then return nil, "missing_section" end
+	--- @type integer, Elf32Section
 	for _, s in ipairs(sections) do
 		if   s.name == name then
+			--- @type string|nil
 			local bytes = M.read_section_bytes(adapter, s)
 			if not bytes then return nil, "truncated_section_data" end
 			return bytes, nil
@@ -359,15 +483,19 @@ end
 --- Each stored entry is `{ value = st_value, size = st_size, info = st_info, shndx = st_shndx }`.
 --- Both STB_LOCAL and STB_GLOBAL symbols are included; the live ELF stores `smem` as a local symbol.
 --- Returns nil + a stable error code on failure: missing_symtab_strtab, truncated_section_headers
---- @param adapter  table
---- @param sections table
---- @return table|nil, string|nil
+--- @param adapter  Elf32Adapter
+--- @param sections Elf32Section[]
+--- @return table<string, Elf32Sym>|nil, string|nil
 function M.collect_symbols(adapter, sections)
 	if not sections then return nil, "missing_sections" end
+	--- @type table<string, Elf32Sym>  -- bag: symbol name -> Elf32Sym
 	local symbols = {}
+	--- @type integer
 	local file_size = M.size(adapter)
+	--- @type integer, Elf32Section
 	for _, s in ipairs(sections) do
 		if s.sh_type == M.SHT_SYMTAB then
+			--- @type Elf32Section|nil
 			local  strtab = sections[s.sh_link + 1]
 			if not strtab or strtab.sh_type ~= M.SHT_STRTAB then
 				return nil, "missing_symtab_strtab"
@@ -375,30 +503,43 @@ function M.collect_symbols(adapter, sections)
 			if strtab.sh_offset + strtab.sh_size > file_size then
 				return nil, "truncated_section_headers"
 			end
+			--- @type string|nil
 			local  strtab_bytes = M.read_section_bytes(adapter, strtab)
 			if not strtab_bytes then return nil, "truncated_section_headers" end
 			if s.sh_offset + s.sh_size > file_size then
 				return nil, "truncated_section_headers"
 			end
+			--- @type string|nil
 			local  symtab_bytes = M.read_section_bytes(adapter, s)
 			if not symtab_bytes then return nil, "truncated_section_headers" end
+			--- @type number
 			local n = #symtab_bytes / M.ELF32_SYM.sym_entry_bytes
+			--- @type integer
 			for j = 0, n - 1 do
+				--- @type integer
 				local e = s.sh_offset + j * M.ELF32_SYM.sym_entry_bytes
+				--- @type integer|nil
 				local st_name  = M.read_u32(adapter, e + M.ELF32_SYM.st_name)
 				if    st_name then
+					--- @type integer|nil
 					local st_value = M.read_u32(adapter, e + M.ELF32_SYM.st_value)
+					--- @type integer|nil
 					local st_size  = M.read_u32(adapter, e + M.ELF32_SYM.st_size)
+					--- @type integer|nil
 					local st_info  = M.read_u8(adapter, e + M.ELF32_SYM.st_info)
 					-- st_shndx is at offset 14 (2 bytes) — derived from the layout
 					-- the metaprogram reads too. Inline the read to keep the
 					-- adapter as the only I/O surface.
+					--- @type integer|nil
 					local b1 = M.read_u8(adapter, e + 14)
+					--- @type integer|nil
 					local b2 = M.read_u8(adapter, e + 15)
 					if not (b1 and b2) then
 						return nil, "truncated_section_headers"
 					end
+					--- @type integer
 					local st_shndx = b1 + b2 * 0x100
+					--- @type string
 					local name = M.get_str(strtab_bytes, st_name) or ""
 					if    name ~= "" then
 						symbols[name] = {

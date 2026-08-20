@@ -1,4 +1,4 @@
---- duffle.lua — shared primitives + domain tables for the tape-atom metaprograms.
+--- duffle_scan.lua — shared primitives + domain tables for the tape-atom metaprograms.
 ---   * Character classification: `is_space`, `is_alpha`, `is_alnum`, `is_digit`, plus the byte-fast `_byte` variants.
 ---   * String / path primitives: `trim`, `dirname`, `basename_no_ext`, `normalize_path`, `canonical_path_key`, `find_byte`.
 ---   * I/O primitives:           `read_file`, `write_file`, `ensure_dir`.
@@ -7,61 +7,130 @@
 ---   * Word-count loader:        `load_word_counts` for `WORD_COUNT(...)` metadata files.
 ---   * Line lookup:              `LineIndex` returns an O(log N) `line_of(pos)` closure for source-mapping.
 ---   * Domain tables:            `TAPE_ATOM_MACROS`, `GTE_PIPELINE_LATENCY`, `GP0_CMD_SIZE`, `GP0_CMD_BY_SHAPE`, `INSTRUCTION_LATENCY`.
+---
+--- **Type aliases** (Path, LineNum, ByteOff, MacroName, AtomName, Severity) and **@class SourceFile**
+--- live on `duffle.lua`. This file re-exports `M` only.
 
+
+--- @class LfsMod
+--- @field currentdir fun(): string|nil
+--- @field attributes fun(path: string, request: string|nil): string|nil
+--- @field mkdir      fun(path: string): boolean|nil
+
+--- @class LpegPattern
+
+--- @alias LpegCtor fun(...: any): LpegPattern
+
+--- @class LpegMod
+--- @field P     LpegCtor
+--- @field S     LpegCtor
+--- @field R     LpegCtor
+--- @field C     fun(p: LpegPattern): LpegPattern
+--- @field match fun(p: LpegPattern, s: string, init: integer|nil): any
+
+--- @class PathRoot
+--- @field kind     string
+--- @field prefix   string
+--- @field rest     string
+--- @field anchored boolean
+
+--- @class QuotedInclude
+--- @field path         string
+--- @field include_path string
+--- @field include_text string
+--- @field line         integer
+
+--- @class ResolverEvidence
+--- @field include_path             string|nil
+--- @field include_text             string|nil
+--- @field root_source              string
+--- @field root_line                integer
+--- @field candidate_a              string|nil
+--- @field candidate_b              string|nil
+--- @field candidate_a_in_code_root boolean|nil
+--- @field candidate_b_in_code_root boolean|nil
+--- @field selected_path            string|nil
+--- @field disposition              string|nil
+--- @field reason                   string|nil
+--- @field duplicate_of             string|nil
+--- @field alternate_path           string|nil
+
+--- @class ResolveOptions
+--- @field unity_root   Path
+--- @field project_root Path
+
+--- @alias LineIndexFn fun(query_pos: integer): integer
+
+--- @class DuffleScan
+
+--- @class SourceResolver
+--- @field resolved ResolverEvidence[]
+--- @field skipped  ResolverEvidence[]
+--- @field shadowed ResolverEvidence[]
+
+--- @type DuffleScan
 local M = {}
 
 -- Required native extension: lfs (LuaFileSystem). Built by `update_deps.ps1` to `toolchain/lfs/lfs.dll` and wired into package.cpath by `scripts/duffle_paths.lua`.
 -- If lfs is missing, `require` throws — fail loud per the build-tool convention.
+--- @type LfsMod
 local lfs = require("lfs")
-
--- ════════════════════════════════════════════════════════════════════════════
--- Cross-file type aliases
--- ════════════════════════════════════════════════════════════════════════════
-
---- @alias Path        string   -- Absolute or CWD-relative file path
---- @alias LineNum     integer  -- 1-indexed source line number
---- @alias ByteOff     integer  -- 0-indexed byte offset within a source string
---- @alias MacroName   string   -- lower_snake_case macro identifier (e.g. "mac_yield")
---- @alias AtomName    string   -- lower_snake_case atom name (e.g. "cube_g4_face")
---- @alias Severity    string   -- "error" | "warning" | "info"
-
---- @class SourceFile
---- @field path     Path      -- Absolute path to the source file
---- @field text     string    -- Full source text
---- @field dir      string    -- Directory containing the source
---- @field basename string    -- Filename without extension
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ASCII byte constants
 -- ════════════════════════════════════════════════════════════════════════════
 
+--- @type integer
 local BYTE_SPACE      = 0x20    -- ' '
+--- @type integer
 local BYTE_TAB        = 0x09    -- '\t'
+--- @type integer
 local BYTE_NEWLINE    = 0x0A    -- '\n'
+--- @type integer
 local BYTE_CR         = 0x0D    -- '\r'
+--- @type integer
 local BYTE_VT         = 0x0B    -- '\v'
+--- @type integer
 local BYTE_FF         = 0x0C    -- '\f'
 
+--- @type integer
 local BYTE_UNDERSCORE = 0x5F    -- '_'
+--- @type integer
 local BYTE_DOT        = 0x2E    -- '.'
+--- @type integer
 local BYTE_SLASH      = 0x2F    -- '/'
+--- @type integer
 local BYTE_BACKSLASH  = 0x5C    -- '\\'
+--- @type integer
 local BYTE_STAR       = 0x2A    -- '*'
+--- @type integer
 local BYTE_DQUOTE     = 0x22    -- '"'
+--- @type integer
 local BYTE_SQUOTE     = 0x27    -- '\''
+--- @type integer
 local BYTE_COMMA      = 0x2C    -- ','
+--- @type integer
 local BYTE_SEMI       = 0x3B    -- ';'
 
+--- @type integer
 local BYTE_OPEN_PAREN  = 0x28   -- '('
+--- @type integer
 local BYTE_OPEN_BRACE  = 0x7B   -- '{'
+--- @type integer
 local BYTE_OPEN_BRACK  = 0x5B   -- '['
 
+--- @type integer
 local BYTE_LOWER_A = 0x61       -- 'a'
+--- @type integer
 local BYTE_LOWER_Z = 0x7A       -- 'z'
+--- @type integer
 local BYTE_UPPER_A = 0x41       -- 'A'
+--- @type integer
 local BYTE_UPPER_Z = 0x5A       -- 'Z'
 
+--- @type integer
 local BYTE_DIGIT_0 = 0x30       -- '0'
+--- @type integer
 local BYTE_DIGIT_9 = 0x39       -- '9'
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -76,6 +145,7 @@ local BYTE_DIGIT_9 = 0x39       -- '9'
 -- LPeg handles the high-level scanner; the byte-by-byte helpers in Section 1 handle classification primitives that LPeg's CPython-level cost would dominate.
 --
 -- If the require fails, fail loud with an actionable message. The build script (`update_deps.ps1`) builds lpeg.dll into `toolchain/lpeg/`; run it when the dll is missing.
+--- @type boolean, LpegMod|string
 local lpeg_ok, lpeg = pcall(require, "lpeg")
 if not lpeg_ok then
 	io.stderr:write("[duffle] require('lpeg') failed: ", lpeg, "\n")
@@ -83,30 +153,45 @@ if not lpeg_ok then
 	io.stderr:write("[duffle] Run 'scripts/update_deps.ps1' to build it into toolchain/lpeg/.\n")
 	os.exit(1)
 end
+--- @type LpegCtor, LpegCtor, LpegCtor
 local P, S, R = lpeg.P, lpeg.S, lpeg.R
 
 -- Character class patterns
+--- @type LpegPattern
 local alpha_pat      = R("AZ", "az") + P("_")
+--- @type LpegPattern
 local digit_pat      = R("09")
+--- @type LpegPattern
 local lpeg_alnum_pat = alpha_pat + digit_pat
 
 -- Identifier: alpha followed by zero+ alnum. Capture as a string.
+--- @type LpegPattern
 local lpeg_alpha_pat = alpha_pat
+--- @type LpegPattern
 local lpeg_ident_pat = lpeg.C(alpha_pat * lpeg_alnum_pat^0)
 
+--- @type LpegPattern
 local lpeg_str_pat        = P('"') * (P(1) - S('"\\') + P('\\') * P(1))^0 * P('"') -- String literal: "..." with backslash escapes.
+--- @type LpegPattern
 local lpeg_chr_pat        = P("'") * (P(1) - S("'\\") + P('\\') * P(1))^0 * P("'") -- Char literal: '...' with backslash escapes.
+--- @type LpegPattern
 local lpeg_line_cmt_pat   = P("//") * (P(1) - S("\n"))^0                           -- Line comment: // ... to end-of-line.
+--- @type LpegPattern
 local lpeg_block_cmt_pat  = P("/*") * (P(1) - P("*/"))^0 * P("*/")                 -- Block comment: /* ... */ (no nesting per C standard).
+--- @type LpegPattern
 local lpeg_str_or_cmt_pat = lpeg_str_pat + lpeg_chr_pat + lpeg_line_cmt_pat + lpeg_block_cmt_pat -- String or comment (any of the four forms).
 
 -- Whitespace + comment skipper: zero+ (whitespace run | string | comment).
+--- @type LpegPattern
 local ws_pat              = S(" \t\n\r\v\f")
+--- @type LpegPattern
 local lpeg_ws_and_cmt_pat = (ws_pat + lpeg_str_or_cmt_pat)^0
 
 -- Generic "skip until target, but step over balanced groups" matcher.
 -- Used by scan_to_char for non-ident / non-bracket chars. We accept any single char except the target.
 -- The balanced-group stepping is handled by the caller (via read_balanced).
+--- @param target string
+--- @return LpegPattern
 local lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -116,9 +201,13 @@ local lpeg_scan_to_target_pat = function(target) return (P(1) - P(target))^0  en
 -- Used in all hot loops because they avoid the string allocation per s:sub(pos, pos) call.
 
 -- Whitespace characters per C locale.
+--- @param b integer
+--- @return boolean
 function M.is_space_byte(b) return b == BYTE_SPACE or b == BYTE_TAB or b == BYTE_NEWLINE or b == BYTE_CR or b == BYTE_VT  or b == BYTE_FF end
 
 -- Letters (a-z, A-Z) and underscore.
+--- @param b integer|nil
+--- @return boolean
 function M.is_alpha_byte(b)
 	if not b then return false end
 	if     b >= BYTE_LOWER_A and b <= BYTE_LOWER_Z then return true end  -- 'a'..'z'
@@ -127,15 +216,23 @@ function M.is_alpha_byte(b)
 end
 
 -- Single digit.
+--- @param b integer|nil
+--- @return boolean
 function M.is_digit_byte(b) return b and b >= BYTE_DIGIT_0 and b <= BYTE_DIGIT_9 end
 -- Letter OR digit OR underscore.
+--- @param b integer|nil
+--- @return boolean
 function M.is_alnum_byte(b) return M.is_alpha_byte(b) or M.is_digit_byte(b) end
 
 -- String-based wrappers (kept for callers that already have a single-char string; the byte versions are what the hot loops should call).
+--- @param c integer|string
+--- @return boolean
 function M.is_space(c)
 	if type(c) == "number" then return M.is_space_byte(c) end
 	return c == " "  or c == "\t" or c == "\n" or c == "\r" or c == "\v" or c == "\f"
 end
+--- @param c integer|string|nil
+--- @return boolean
 function M.is_alpha(c)
 	if type(c) == "number" then return M.is_alpha_byte(c) end
 	if not c or #c == 0 then return false end
@@ -143,10 +240,14 @@ function M.is_alpha(c)
 	if     c >= "A" and c <= "Z" then return true  end
 	return c == "_"
 end
+--- @param c integer|string|nil
+--- @return boolean
 function M.is_digit(c)
 	if type(c) == "number" then return M.is_digit_byte(c) end
 	return c and c >= "0" and c <= "9"
 end
+--- @param c integer|string|nil
+--- @return boolean
 function M.is_alnum(c) return M.is_alpha(c) or M.is_digit(c) end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -154,8 +255,12 @@ function M.is_alnum(c) return M.is_alpha(c) or M.is_digit(c) end
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Trim leading and trailing whitespace from a string.
+--- @param s string
+--- @return string
 function M.trim(s)
+	--- @type integer
 	local a = 1;  while a <= #s and M.is_space_byte(s:byte(a)) do a = a + 1 end
+	--- @type integer
 	local b = #s; while b >= a  and M.is_space_byte(s:byte(b)) do b = b - 1 end
 	return s:sub(a, b)
 end
@@ -166,6 +271,7 @@ end
 --- @param start    integer  -- optional 1-indexed start (default 1)
 --- @return integer|nil
 function M.find_byte(haystack, target, start)
+	--- @type integer
 	for pos = start or 1, #haystack do
 		if haystack:byte(pos) == target then return pos end
 	end
@@ -173,9 +279,14 @@ function M.find_byte(haystack, target, start)
 end
 
 -- Returns the directory portion of a path.
+--- @param path Path
+--- @return Path
 function M.dirname(path)
+	--- @type integer
 	local last_sep = 0
+	--- @type integer
 	for pos = 1, #path do
+		--- @type integer
 		local b = path:byte(pos)
 		if    b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
 	end
@@ -184,14 +295,22 @@ function M.dirname(path)
 end
 
 -- Returns the basename of a path, with the file extension stripped.
+--- @param path Path
+--- @return string
 function M.basename_no_ext(path)
+	--- @type integer
 	local last_sep = 0
+	--- @type integer
 	for pos = 1, #path do
+		--- @type integer
 		local b = path:byte(pos)
 		if    b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
 	end
+	--- @type integer
 	local a        = last_sep + 1
+	--- @type integer
 	local last_dot = #path + 1
+	--- @type integer
 	for pos = #path, a, -1 do
 		if path:byte(pos) == BYTE_DOT then last_dot = pos; break end
 	end
@@ -200,10 +319,14 @@ end
 
 --- Parse the lexical root without changing display spelling.
 --- UNC server/share names are part of the immutable root; drive-relative paths remain distinct from drive-absolute paths.
+--- @param input string
+--- @return PathRoot
 local function parse_path_root(input)
+	--- @type string|nil
 	local drive = input:match("^(%a:)")
 	if drive then
 		if input:sub(3, 3) == "/" then
+			--- @type string
 			local rest = input:sub(4)
 			while rest:sub(1, 1) == "/" do rest = rest:sub(2) end
 			return { kind = "drive_absolute", prefix = drive .. "/", rest = rest, anchored = true }
@@ -212,21 +335,28 @@ local function parse_path_root(input)
 	end
 
 	if input:sub(1, 2) == "//" then
+		--- @type integer
 		local server_start = 3
+		--- @type integer|nil
 		local server_end   = M.find_byte(input, BYTE_SLASH, server_start)
 		if not server_end or server_end == server_start then
 			error("UNC path requires //server/share: " .. input, 3)
 		end
+		--- @type string
 		local server      = input:sub(server_start, server_end - 1)
+		--- @type integer
 		local share_start = server_end + 1
 		while input:sub(share_start, share_start) == "/" do
 			share_start = share_start + 1
 		end
+		--- @type integer
 		local share_end = M.find_byte(input, BYTE_SLASH, share_start) or (#input + 1)
 		if share_end == share_start then
 			error("UNC path requires //server/share: " .. input, 3)
 		end
+		--- @type string
 		local share = input:sub(share_start, share_end - 1)
+		--- @type string
 		local rest  = input:sub(share_end + 1)
 		while rest:sub(1, 1) == "/" do rest = rest:sub(2) end
 		return {
@@ -238,6 +368,7 @@ local function parse_path_root(input)
 	end
 
 	if input:sub(1, 1) == "/" then
+		--- @type string
 		local rest = input:sub(2)
 		while rest:sub(1, 1) == "/" do rest = rest:sub(2) end
 		return { kind = "posix_absolute", prefix = "/", rest = rest, anchored = true }
@@ -253,8 +384,11 @@ function M.normalize_path(path)
 	if type(path) ~= "string" then error("normalize_path requires a string path", 2) end
 	if path == "" then return "" end
 
+	--- @type PathRoot
 	local root     = parse_path_root(path:gsub("\\", "/"))
+	--- @type string[]
 	local segments = {}
+	--- @type string
 	for segment in root.rest:gmatch("[^/]+") do
 		if segment == "." then
 			-- no-op
@@ -269,6 +403,7 @@ function M.normalize_path(path)
 		end
 	end
 
+	--- @type string
 	local tail = table.concat(segments, "/")
 	if root.kind == "relative"       then return tail ~= "" and tail or "." end
 	if root.kind == "drive_relative" then return root.prefix .. tail end
@@ -276,8 +411,12 @@ function M.normalize_path(path)
 	return root.prefix .. tail
 end
 
+--- @param path Path
+--- @return Path
 local function absolute_normalized_path(path)
+	--- @type Path
 	local normalized = M.normalize_path(path)
+	--- @type PathRoot
 	local root       = parse_path_root(normalized)
 	if root.kind == "drive_relative" then
 		error("drive-relative path cannot be resolved without a per-drive cwd: " .. normalized, 3)
@@ -291,11 +430,14 @@ end
 --- @param path Path
 --- @return string
 function M.canonical_path_key(path)
+	--- @type Path
 	local normalized = M.normalize_path(path)
+	--- @type PathRoot
 	local root       = parse_path_root(normalized)
 	if root.kind == "drive_relative" then
 		error("canonical_path_key cannot compare drive-relative path: " .. normalized, 2)
 	end
+	--- @type string
 	local key = absolute_normalized_path(normalized):lower()
 	if #key > 3 and key:sub(-1) == "/" then key = key:sub(1, -2) end
 	return key
@@ -308,14 +450,22 @@ end
 -- File contents intentionally use io.open below.
 -- LuaFileSystem handles path metadata, directory iteration, the current directory, and mkdir;
 -- it does not expose file-content read/write streams.
+--- @param path Path
+--- @return string
 function M.read_file(path)
+	--- @type file*|nil
 	local  f = io.open(path, "r")
 	if not f then error("Cannot open " .. path) end
+	--- @type string
 	local content = f:read("*a"); f:close()
 	return content
 end
 
+--- @param path Path
+--- @param content string
+--- @return nil
 function M.write_file(path, content)
+	--- @type file*|nil
 	local  f = io.open(path, "w")
 	if not f then error("Cannot write " .. path) end
 	f:write(content); f:close()
@@ -325,12 +475,15 @@ end
 --- (text mode would convert LF -> CRLF, breaking byte-identical diffs against git-tracked gen/*.h files which are stored as LF).
 --- @param path string
 --- @param content string
+--- @return nil
 function M.write_file_lf(path, content)
+	--- @type file*|nil
 	local  f = io.open(path, "wb")
 	if not f then error("Cannot write " .. path) end
 	f:write(content); f:close()
 end
 
+--- @type table<string, string>  -- bag: input path -> absolute path
 local _absolute_path_cache = {}
 
 --- Convert a (possibly relative) path to an absolute path, using CWD if needed.
@@ -343,22 +496,29 @@ function M.to_absolute_path(path)
 	if _absolute_path_cache[path] then return _absolute_path_cache[path] end
 	if #path >= 2 and path:sub(2, 2) == ":" then
 		-- Already absolute; normalize slashes for consistency.
+		--- @type string
 		local result = (path:gsub("/", "\\"))
 		_absolute_path_cache[path] = result
 		return result
 	end
+	--- @type string|nil
 	local  cwd = lfs.currentdir()
 	if not cwd then _absolute_path_cache[path] = path; return path end
 	cwd = cwd:gsub("/", "\\")
+	--- @type string
 	local tail   = (path:gsub("/", "\\"))
+	--- @type string
 	local result = cwd .. "\\" .. tail
 	_absolute_path_cache[path] = result
 	return result
 end
 
 -- Cache of directories already verified to exist in this process.
+--- @type table<string, boolean>  -- bag: dir path -> already ensured
 local _ensured_dirs = {}
 
+--- @param path Path
+--- @return nil
 function M.ensure_dir(path)
 	if _ensured_dirs[path] then return end
 	_ensured_dirs[path] = true
@@ -370,10 +530,12 @@ end
 --- Group a list of `SourceFile`-shaped records by their `dir` field.
 --- Used by the annotation / static-analysis / report passes to partition sources into per-DIRECTORY (per-module) buckets before emitting per-module reports.
 --- Insertion order is preserved within each bucket (matches source order in `corpus.source_order`).
---- @param sources table[]          -- list of source records (each having a `dir` string field)
---- @return table<string, table[]>  -- map of `dir` -> sources in that dir
+--- @param sources SourceFile[]
+--- @return table<string, SourceFile[]>
 function M.group_sources_by_dir(sources)
+	--- @type table<string, SourceFile[]>
 	local by_dir = {}
+	--- @type integer, SourceFile
 	for _, src in ipairs(sources) do
 		by_dir[src.dir] = by_dir[src.dir] or {}
 		table.insert(by_dir[src.dir], src)
@@ -387,15 +549,25 @@ end
 
 -- Skip a string or C-style comment starting at position `pos`.
 -- Returns the position just past the construct, or `pos` unchanged if no string/comment starts there.
+--- @param s string
+--- @param pos integer
+--- @return integer
 function M.skip_str_or_cmt(s, pos) return lpeg.match(lpeg_str_or_cmt_pat, s, pos) or pos end
 
 -- Skip whitespace AND C-style comments starting at position `pos`.
 -- LPeg-backed; ~5-10x faster than a hand-rolled byte-by-byte walker.
+--- @param s string
+--- @param pos integer
+--- @return integer
 function M.skip_ws_and_cmt(s, pos) return lpeg.match(lpeg_ws_and_cmt_pat, s, pos) or pos end
 
 -- Read a C-style identifier (alpha followed by zero+ alnum) starting at position `pos`. 
 -- Returns the identifier string + the position just past it, or nil + pos if no identifier starts here.
+--- @param s string
+--- @param pos integer
+--- @return string|nil, integer
 function M.read_ident(s, pos)
+	--- @type string|nil
 	local result = lpeg.match(lpeg_ident_pat, s, pos)
 	if    result then return result, pos + #result end
 	return nil, pos
@@ -403,16 +575,26 @@ end
 
 -- Read a balanced-delimited group (parens, braces, or brackets) starting at position `pos`.
 -- Returns the inner content (between the delimiters) + the position just past the closing delimiter, or nil + pos if `s[pos]` isn't `open_char`.
+--- @param s string
+--- @param open_char string
+--- @param close_char string
+--- @param pos integer
+--- @return string|nil, integer
 function M.read_balanced(s, open_char, close_char, pos)
+	--- @type integer
 	local open_byte = open_char:byte()
 	if s:byte(pos) ~= open_byte then return nil, pos end
 	-- scan: <open_char>
 	pos = pos + 1
 	-- scan: <open_char> <inner...>
+	--- @type integer
 	local len   = #s
+	--- @type integer
 	local depth = 1
+	--- @type integer
 	local a     = pos
 	while pos <= len and depth > 0 do
+		--- @type integer
 		local c = s:byte(pos)
 		if c == open_byte then
 			depth = depth + 1
@@ -424,6 +606,7 @@ function M.read_balanced(s, open_char, close_char, pos)
 			pos = pos + 1
 			-- scan: <open_char> <inner...> <close_char> (depth=depth)
 		else
+			--- @type integer
 			local nx = M.skip_str_or_cmt(s, pos)
 			if nx > pos then
 				-- scan: <open_char> <inner...> <str|cmt>
@@ -438,22 +621,39 @@ function M.read_balanced(s, open_char, close_char, pos)
 end
 
 -- Convenience specializations of read_balanced.
+--- @param s string
+--- @param pos integer
+--- @return string|nil, integer
 M.read_parens   = function(s, pos) return M.read_balanced(s, "(", ")", pos) end
+--- @param s string
+--- @param pos integer
+--- @return string|nil, integer
 M.read_braces   = function(s, pos) return M.read_balanced(s, "{", "}", pos) end
+--- @param s string
+--- @param pos integer
+--- @return string|nil, integer
 M.read_brackets = function(s, pos) return M.read_balanced(s, "[", "]", pos) end
 
 -- Scan forward from position `start` until we find a specific single byte `target`, transparently stepping over balanced parens/braces/brackets.
 -- Returns the position of `target`, or nil if not found.
+--- @param s string
+--- @param target string
+--- @param start integer
+--- @return integer|nil
 function M.scan_to_char(s, target, start)
+	--- @type integer
 	local target_byte = target:byte()
+	--- @type integer
 	local pos = start
 	while pos <= #s do
+		--- @type integer
 		local   c = s:byte(pos)
 		if      c == target_byte      then return pos end                                          -- scan: ... <target found> | <skipping to target>
 		if      c == BYTE_OPEN_PAREN  then local _, a = M.read_balanced(s, "(", ")", pos); pos = a -- scan: ... ( <balanced> ) ...
 		elseif  c == BYTE_OPEN_BRACE  then local _, a = M.read_balanced(s, "{", "}", pos); pos = a -- scan: ... { <balanced> } ...
 		elseif  c == BYTE_OPEN_BRACK  then local _, a = M.read_balanced(s, "[", "]", pos); pos = a -- scan: ... [ <balanced> ] ...
 		else
+			--- @type integer
 			local nx = M.skip_str_or_cmt(s, pos)
 			pos      = (nx > pos) and nx or (pos + 1)
 			-- scan: ... <str|cmt skipped> ...
@@ -465,31 +665,48 @@ end
 -- If `s[pos]` is `#`, skip to the end of the preprocessor directive line (past the newline).
 -- Returns the position past the newline, or nil if `s[pos]` is not `#`.
 -- scan: #<directive>\n -> past the newline
+--- @param s string
+--- @param pos integer
+--- @return integer|nil
 function M.skip_preprocessor_line(s, pos)
 	if s:byte(pos) ~= 35 then return nil end  -- '#'
+	--- @type integer
 	local scan = pos
+	--- @type integer
 	local len  = #s
 	while scan <= len and s:byte(scan) ~= BYTE_NEWLINE do scan = scan + 1 end
 	return scan + 1
 end
 
+--- @param byte integer
+--- @return boolean
 local function is_horizontal_space(byte)
 	return byte == BYTE_SPACE or byte == BYTE_TAB or byte == BYTE_CR or byte == BYTE_VT or byte == BYTE_FF
 end
 
+--- @param source string
+--- @param first integer
+--- @param after_last integer
+--- @return boolean
 local function segment_has_newline(source, first, after_last)
+	--- @type integer
 	for pos = first, after_last - 1 do 
 		if source:byte(pos) == BYTE_NEWLINE then return true end 
 	end
 	return false
 end
 
+--- @param source string
+--- @param pos integer
+--- @return integer|nil
 local function skip_directive_space(source, pos)
 	while pos <= #source do
+		--- @type integer
 		local byte = source:byte(pos)
 		if is_horizontal_space(byte) then
 			pos = pos + 1
 		elseif byte == BYTE_SLASH and source:byte(pos + 1) == BYTE_STAR then
+			--- @type integer
 			local after = M.skip_str_or_cmt(source, pos)
 			if after == pos or segment_has_newline(source, pos, after) then return nil end
 			pos = after
@@ -504,14 +721,23 @@ end
 
 --- Apply C line splicing once for the include scanner.
 --- Every retained logical byte maps back to its original physical byte offset and one-based physical line so diagnostics preserve source-as-written evidence.
+--- @param source string
+--- @return string, integer[], integer[]
 local function splice_c_lines(source)
+	--- @type string[]
 	local logical_bytes = {}
+	--- @type integer[]
 	local physical_pos  = {}
+	--- @type integer[]
 	local physical_line = {}
+	--- @type integer
 	local pos            = 1
+	--- @type integer
 	local line           = 1
 	while pos <= #source do
+		--- @type integer
 		local byte = source:byte(pos)
+		--- @type integer|nil
 		local splice_len = nil
 		if byte == BYTE_BACKSLASH and source:byte(pos + 1) == BYTE_NEWLINE then
 			splice_len = 2
@@ -523,6 +749,7 @@ local function splice_c_lines(source)
 			pos  = pos + splice_len
 			line = line + 1
 		else
+			--- @type integer
 			local logical_pos = #logical_bytes + 1
 			logical_bytes[logical_pos] = source:sub(pos, pos)
 			physical_pos [logical_pos] = pos
@@ -539,7 +766,7 @@ end
 --- Interpreted records retain original physical include text and line numbers.
 --- Angle includes and include-like text inside comments/strings are ignored.
 --- @param source_text string
---- @return table[] -- ordered `{path, include_path, include_text, line}` records
+--- @return QuotedInclude[]
 function M.parse_direct_quoted_includes(source_text)
 	if type(source_text) ~= "string" then
 		error("parse_direct_quoted_includes requires source text", 2)
@@ -547,11 +774,16 @@ function M.parse_direct_quoted_includes(source_text)
 
 	-- Each arm's effect on (pos, line_leading) is annotated at the branch site.
 	-- Arm order: newline / horiz-space / '//' / '/*' / '"' / '\'' / '#' / default.
+	--- @type string, integer[], integer[]
 	local logical_text, physical_pos, physical_line = splice_c_lines(source_text)
+	--- @type QuotedInclude[]
 	local includes     = {}
+	--- @type integer
 	local pos          = 1
+	--- @type boolean
 	local line_leading = true
 	while pos <= #logical_text do
+		--- @type integer
 		local byte = logical_text:byte(pos)
 		if    byte == BYTE_NEWLINE then
 			-- line break; refresh leading-whitespace state for next line.
@@ -562,11 +794,13 @@ function M.parse_direct_quoted_includes(source_text)
 			pos = pos + 1
 		elseif byte == BYTE_SLASH and logical_text:byte(pos + 1) == BYTE_SLASH then
 			-- '//' line comment: skip_str_or_cmt walks to EOL on its own, so no separate newline scan is needed here.
+			--- @type integer
 			local after = M.skip_str_or_cmt(logical_text, pos)
 			-- pos := after when the skipper agrees, else single-byte advance.
 			pos = (after > pos) and after or (pos + 1)
 		elseif byte == BYTE_SLASH and logical_text:byte(pos + 1) == BYTE_STAR then
 			-- '/*' block comment.
+			--- @type integer
 			local after = M.skip_str_or_cmt(logical_text, pos)
 			if after <= pos then
 				-- skipper refused (unterminated /*). Treat this byte as ordinary content: step one, mark non-leading.
@@ -574,6 +808,7 @@ function M.parse_direct_quoted_includes(source_text)
 				pos          = pos + 1
 			else
 				-- jump past the closing '*/'. The span may cross lines, so rescan for embedded '\n' to refresh line_leading.
+				--- @type integer
 				for scan = pos, after - 1 do
 					if logical_text:byte(scan) == BYTE_NEWLINE then line_leading = true end
 				end
@@ -582,13 +817,16 @@ function M.parse_direct_quoted_includes(source_text)
 		elseif byte == BYTE_DQUOTE or byte == BYTE_SQUOTE then
 			-- enter + leave the string literal in one skip; literal bodies cannot contain a directive regardless of what they look like.
 			line_leading = false
+			--- @type integer
 			local after  = M.skip_str_or_cmt(logical_text, pos)
 			pos          = (after > pos) and after or (pos + 1)
 		elseif byte == 35 and line_leading then -- '#' at line head
 			-- Sequential pre-checks; any one failing falls through to ::not_include:: (single-byte advance).
 			-- Full success pushes the record and jumps to ::directive_done:: without ever entering the not-include path.
 			-- (All locals are pre-declared at the top of this arm because Lua forbids a goto from crossing a local declaration into its scope.)
+			--- @type integer, integer, integer|nil, string|nil, integer, integer
 			local hash_pos, directive_line, scan, ident, after_ident, after_quote
+			--- @type string, integer, integer
 			local include_path, physical_first, physical_last
 			hash_pos       = pos
 			directive_line = physical_line[hash_pos] or 1
@@ -633,20 +871,31 @@ function M.parse_direct_quoted_includes(source_text)
 	return includes
 end
 
+--- @param path Path
+--- @param wanted string
+--- @return boolean
 local function path_has_segment(path, wanted)
+	--- @type string
 	for segment in M.normalize_path(path):gmatch("[^/]+") do
 		if segment:lower() == wanted then return true end
 	end
 	return false
 end
 
+--- @param candidate_key string
+--- @param root_key string
+--- @return boolean
 local function canonical_key_is_within(candidate_key, root_key)
 	if candidate_key == root_key then return true end
+	--- @type string
 	local prefix = root_key .. "/"
 	return candidate_key:sub(1, #prefix) == prefix
 end
 
+--- @param path Path
+--- @return SourceFile
 local function load_source_record(path)
+	--- @type Path
 	local normalized = absolute_normalized_path(path)
 	return {
 		path     = normalized,
@@ -659,8 +908,8 @@ end
 --- Resolve a unity source corpus without recursive discovery.
 --- The root is loaded first; only its direct quoted includes are considered, in source order.
 --- Candidate A is root-directory relative and candidate B is `<project_root>/code` relative.
---- @param options table -- `{unity_root=Path, project_root=Path}`
---- @return table
+--- @param options ResolveOptions
+--- @return Corpus
 function M.resolve_source_corpus(options)
 	if type(options) ~= "table" then error("resolve_source_corpus requires options", 2) end
 	if type(options.unity_root) ~= "string" or options.unity_root == "" then
@@ -670,12 +919,19 @@ function M.resolve_source_corpus(options)
 		error("resolve_source_corpus requires options.project_root", 2)
 	end
 
+	--- @type Path
 	local project_root    = absolute_normalized_path(options.project_root)
+	--- @type Path
 	local code_root       = M.normalize_path(project_root .. "/code")
+	--- @type string
 	local code_root_key   = M.canonical_path_key(code_root)
+	--- @type SourceFile
 	local root            = load_source_record(options.unity_root)
+	--- @type SourceFile[]
 	local source_order    = { root }
+	--- @type table<Path, SourceFile>
 	local sources_by_path = { [M.canonical_path_key(root.path)] = root, }
+	--- @type SourceResolver
 	local resolver = {
 		resolved = {
 			{
@@ -693,13 +949,21 @@ function M.resolve_source_corpus(options)
 		shadowed = {},
 	}
 
+	--- @type integer, QuotedInclude
 	for _, include in ipairs(M.parse_direct_quoted_includes(root.text)) do
+		--- @type Path
 		local candidate_a = absolute_normalized_path(root.dir .. "/" .. include.path)
+		--- @type Path
 		local candidate_b = absolute_normalized_path(code_root .. "/" .. include.path)
+		--- @type string
 		local key_a       = M.canonical_path_key(candidate_a)
+		--- @type string
 		local key_b       = M.canonical_path_key(candidate_b)
+		--- @type boolean
 		local inside_a    = canonical_key_is_within(key_a, code_root_key)
+		--- @type boolean
 		local inside_b    = canonical_key_is_within(key_b, code_root_key)
+		--- @type ResolverEvidence
 		local evidence = {
 			include_path = include.path,
 			include_text = include.include_text,
@@ -724,10 +988,15 @@ function M.resolve_source_corpus(options)
 			resolver.skipped[#resolver.skipped + 1] = evidence
 		else
 			-- Boundary checks above deliberately precede every filesystem probe.
+			--- @type boolean
 			local exists_a = inside_a and lfs.attributes(candidate_a, "mode") == "file"
+			--- @type boolean
 			local exists_b = inside_b and ((key_b == key_a and exists_a) or lfs.attributes(candidate_b, "mode") == "file")
+			--- @type Path|nil
 			local selected     = nil
+			--- @type string|nil
 			local selected_key = nil
+			--- @type string|nil
 			local disposition  = nil
 			if exists_a then
 				selected     = candidate_a
@@ -765,6 +1034,7 @@ function M.resolve_source_corpus(options)
 					evidence.duplicate_of = sources_by_path[selected_key].path
 					resolver.skipped[#resolver.skipped + 1] = evidence
 				else
+					--- @type SourceFile
 					local source = load_source_record(selected)
 					evidence.disposition                      = disposition
 					source_order[#source_order + 1]           = source
@@ -789,21 +1059,32 @@ end
 -- Split a brace-body into top-level comma-separated tokens. Honors nested parens/braces/brackets and skips strings/comments.
 -- Splits at top-level NEWLINES and SEMICOLONS too, AND emits a token break after a top-level comment/string.
 -- Pure-comment / pure-string chunks contribute 0 words.
+--- @param body string
+--- @return string[]
 function M.split_top_level_commas(body)
+	--- @type string[]
 	local tokens      = {}
+	--- @type integer
 	local pos         = 1
+	--- @type integer
 	local body_len    = #body
+	--- @type integer
 	local token_start = 1
 
 	-- True iff `chunk` contains any non-whitespace, non-comment, non-string content (i.e., real token material).
 	-- Walks through ws + comments individually so a chunk like "  /* trailing */ shift_lleft(...)" is correctly classified as having real content (the macro call).
+	--- @param chunk string
+	--- @return boolean
 	local function has_real_content(chunk)
+		--- @type integer
 		local scan = 1
+		--- @type integer
 		local len  = #chunk
 		while scan <= len do
 			if M.is_space_byte(chunk:byte(scan)) then
 				scan = scan + 1
 			else
+				--- @type integer
 				local nx = M.skip_str_or_cmt(chunk, scan)
 				if nx > scan then
 					scan = nx  -- skipped a comment or string
@@ -815,8 +1096,11 @@ function M.split_top_level_commas(body)
 		return false
 	end
 
+	--- @param end_pos integer
+	--- @return nil
 	local function emit(end_pos)
 		if end_pos >= token_start then
+			--- @type string
 			local chunk = body:sub(token_start, end_pos)
 			if M.trim(chunk) ~= "" then
 				if has_real_content(chunk) then
@@ -834,6 +1118,7 @@ function M.split_top_level_commas(body)
 	end
 
 	while pos <= body_len do
+		--- @type integer
 		local  c = body:byte(pos)
 		if     c == BYTE_OPEN_PAREN then local _, a = M.read_parens(body, pos);   pos = a -- scan: ... ( <balanced> ...
 		elseif c == BYTE_OPEN_BRACE then local _, a = M.read_braces(body, pos);   pos = a -- scan: ... { <balanced> ...
@@ -854,6 +1139,7 @@ function M.split_top_level_commas(body)
 			pos         = pos + 1
 			token_start = pos
 		else
+			--- @type integer
 			local nx = M.skip_str_or_cmt(body, pos)
 			if nx > pos then
 				-- scan: ... <str|cmt> ...
@@ -874,26 +1160,34 @@ end
 -- Section 4: tokenize_body + build_body_line_index (shared, memoized)
 -- ════════════════════════════════════════════════════════════════════════════
 
+--- @type table<string, BodyToken[]>  -- bag: body text -> tokens
 local _tokenize_body_cache   = {}
+--- @type table<string, table<integer, integer>>  -- bag: body text -> offset-to-line
 local _body_line_index_cache = {}
 
 --- Tokenize the body inner-text into a flat list of `{tok, rel}` pairs.
 --- `tok` is the trimmed token string; `rel` is the byte offset within `body`.
 --- Memoized on the body string — first call pays O(body_len), subsequent calls return cached.
 --- @param body string
---- @return table[]  -- {{tok=string, rel=integer}, ...}
+--- @return BodyToken[]
 function M.tokenize_body(body)
 	if _tokenize_body_cache[body] ~= nil then return _tokenize_body_cache[body] end
+	--- @type BodyToken[]
 	local out = {}
+	--- @type integer
 	local len = #body
+	--- @type integer
 	local rel = 1
 	while rel <= len do
+		--- @type integer
 		local ws_end = M.skip_ws_and_cmt(body, rel)
 		if ws_end > rel then rel = ws_end end
 		if rel    > len then break end
 
+		--- @type integer
 		local scan = rel
 		while scan <= len do
+			--- @type integer
 			local c = body:byte(scan)
 			-- Terminator bytes (delimit a token at the top level): ',' = 0x2C, '\n' = 0x0A, ';' = 0x3B.
 			-- These also appear as separators between argument lists inside the parens/braces/brackets, so we stop the scan when we hit any of them.
@@ -902,10 +1196,12 @@ function M.tokenize_body(body)
 			if     c == BYTE_SEMI    then break end
 			-- Line-comment '// ... \n' (0x2F 0x2F): skip to (and past) the next newline, or to end-of-body.
 			if     c == BYTE_SLASH and body:byte(scan + 1) == BYTE_SLASH then
+				--- @type integer|nil
 				local nl = M.find_byte(body, BYTE_NEWLINE, scan)
 				scan = nl and (nl + 1) or (len + 1)
 			-- Block-comment '/* ... */' (0x2F 0x2A): skip to (and past) the matching '*/', or to end-of-body.
 			elseif c == BYTE_SLASH and body:byte(scan + 1) == BYTE_STAR then
+				--- @type integer|nil
 				local close = body:find("*/", scan + 2, true)
 				scan = close and (close + 2) or (len + 1)
 			-- Group opener bytes (consume the balanced group via the matching reader): '(' = 0x28, '{' = 0x7B, '[' = 0x5B.
@@ -919,10 +1215,12 @@ function M.tokenize_body(body)
 				scan = scan + 1
 			end
 		end
+		--- @type string
 		local tok = M.trim(body:sub(rel, scan - 1))
 		if tok ~= "" then out[#out + 1] = { tok = tok, rel = rel } end
 		if scan <= len then
 			scan = scan + 1
+			--- @type integer
 			local w = M.skip_ws_and_cmt(body, scan)
 			if    w > scan then scan = w end
 		end
@@ -935,12 +1233,16 @@ end
 --- Build a line-index: count `\n` chars from offset 1 up to the offset; that count + 1 is the line number (1-based).
 --- Memoized on the body string.
 --- @param body string
---- @return table  -- index[pos] = line_number
+--- @return table<integer, integer>  -- bag: byte offset -> 1-based line
 function M.build_body_line_index(body)
 	if _body_line_index_cache[body] ~= nil then return _body_line_index_cache[body] end
+	--- @type table<integer, integer>  -- bag: byte offset -> 1-based line
 	local index = {}
+	--- @type integer
 	local len   = #body
+	--- @type integer
 	local newline_count = 0
+	--- @type integer
 	for  pos = 1, len do
 		if pos > 1 then
 			index[pos] = newline_count + 1
@@ -960,20 +1262,33 @@ end
 -- Section 5: load_word_counts
 -- ════════════════════════════════════════════════════════════════════════════
 
+--- @param metadata_path Path
+--- @return WordCounts
 function M.load_word_counts(metadata_path)
+	--- @type WordCounts
 	local counts  = {}
+	--- @type string
 	local content = M.read_file(metadata_path)
+	--- @type integer
 	local len     = #content
+	--- @type integer
 	local pos     = 1
+	--- @type string
 	local prefix  = "WORD_COUNT("
 	while pos <= len do
+		--- @type integer|nil
 		local nl       = M.find_byte(content, BYTE_NEWLINE, pos)
+		--- @type integer
 		local line_end = nl or (len + 1)
+		--- @type string
 		local line     = content:sub(pos, line_end - 1)
 		-- scan: WORD_COUNT(<name>, <N>)
+		--- @type string
 		local trimmed  = M.trim(line)
 		if trimmed:sub(1, #prefix) == prefix and trimmed:sub(-1) == ")" then
+			--- @type string
 			local inner = trimmed:sub(#prefix + 1, #trimmed - 1)
+			--- @type integer|nil
 			local comma = M.find_byte(inner, BYTE_COMMA, 1)
 			if comma then
 				counts[M.trim(inner:sub(1, comma - 1))] =
@@ -989,9 +1304,14 @@ end
 -- Section 6: LineIndex (constant-time line lookup)
 -- ══════════════════════════════════════════════════
 
+--- @param source string
+--- @return LineIndexFn
 function M.LineIndex(source)
+	--- @type integer[]
 	local positions = {}
+	--- @type integer
 	local n         = 0
+	--- @type integer
 	for pos = 1, #source do
 		if source:byte(pos) == BYTE_NEWLINE then
 			n = n + 1
@@ -999,9 +1319,13 @@ function M.LineIndex(source)
 		end
 	end
 	-- (internal) Binary-search for the line number containing query_pos.
+	--- @param query_pos integer
+	--- @return integer
 	local function line_of(query_pos)
+		--- @type integer, integer
 		local lo,   hi = 1, n
 		while lo <= hi do
+			--- @type integer
 			local mid = math.floor((lo + hi) / 2)
 			if positions[mid] <= query_pos then lo = mid + 1
 			else                                hi = mid - 1 end

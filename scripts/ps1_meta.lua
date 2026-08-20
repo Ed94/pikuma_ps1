@@ -19,7 +19,9 @@
 -- fall back to `debug.getinfo(1, "S").source` when this file is being dofile()'d or require()'d (in which case `arg[0]` is the *caller's* path).
 -- That single statement: (a) sets `package.path` + `package.cpath`, (b) at the bottom returns `require("duffle")`.
 -- So the dofile's return value is the duffle module.
+--- @type boolean
 local _is_entry_script = arg and arg[0] and arg[0]:match("ps1_meta%.lua$") ~= nil
+--- @type string
 local _bootstrap_src
 if _is_entry_script then
 	_bootstrap_src = arg[0]
@@ -28,6 +30,7 @@ else
 	-- strip the leading "@" so the directory match works in both cases.
 	_bootstrap_src = debug.getinfo(1, "S").source:sub(2)
 end
+--- @type DuffleExport
 local duffle = dofile((_bootstrap_src:match("(.*[/\\])") or "./") .. "duffle_paths.lua")
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -35,18 +38,24 @@ local duffle = dofile((_bootstrap_src:match("(.*[/\\])") or "./") .. "duffle_pat
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Exit codes (per the --help text and the post-build summary convention).
+--- @type integer
 local EXIT_OK                  = 0
+--- @type integer
 local EXIT_VALIDATION_ERRORS   = 1
+--- @type integer
 local EXIT_INTERNAL_ERROR      = 2
 
 -- Default --out-root value if not provided.
+--- @type string
 local DEFAULT_OUT_ROOT         = "build/gen"
 
 -- Sentinel for "all passes" in `PASS_FLAG_TO_NAME`. Distinguishes `--all` from the per-pass flags (which map to individual pass names).
+--- @type string
 local ALL_PASSES_SENTINEL      = "__all__"
 
 -- Sentinel key for the pass-flag dispatcher in `FLAG_HANDLERS`. 
 -- The actual pass names are looked up via `PASS_FLAG_TO_NAME`, not direct dispatch, so this key never matches a real flag.
+--- @type string
 local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -60,38 +69,84 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 --- @field deps   string[]     -- Names of upstream passes
 --- @field groups string[]?    -- OPTIONAL build-phase groups this pass is a root of (e.g. { "pre-link" }, { "post-link" }); absent ⇒ dependency-only
 
---- @class SourceFile
---- @field path     string  -- Absolute path to the source file
---- @field text     string  -- Full source text
---- @field dir      string  -- Directory containing the source
---- @field basename string  -- Filename without extension
+--- @class Corpus
+--- @field unity_root              string|nil
+--- @field project_root            string
+--- @field code_root               string
+--- @field source_order            SourceFile[]
+--- @field sources_by_path         table<Path, SourceFile>
+--- @field sources_by_dir          table<string, SourceFile[]>
+--- @field atoms_by_name           table<AtomName, AtomEntry>
+--- @field binds_by_name           table<string, BindsEntry>
+--- @field atom_infos              AtomInfoEntry[]
+--- @field register_alias_registry table<string, AliasEntry>
+--- @field type_name_registry      table<string, TypeNameEntry>
+--- @field atom_views              table<AtomName, AtomViewEntry>
+--- @field atom_ctxs               table<AtomName, AtomCtxEntry>
+--- @field atom_phases             table<string, AtomPhaseGroup>
+--- @field word_counts             WordCounts
+--- @field components              table<string, ComponentDef>
+--- @field component_body_index    table<string, ComponentBodyEntry>
+--- @field collisions              CorpusCollision[]
+--- @field resolver                SourceResolver
+--- @field component_atom_infos    AtomInfoEntry[]|nil
+--- @field atom_auto_regs          table<AtomName, table<string, string>>|nil
+--- @field phase_auto_regs         table<string, table<string, string>>|nil
+--- @field reg_use_schemas         table<string, RegUseSchema>|nil
+--- @field reg_use_errors          RegUseError[]|nil
+--- @field static_analysis_results table<string, AtomAnalysis>|nil
+--- @field tape_chains             table<string, TapeChain>|nil
+
+--- @class PassShared
+--- @field corpus Corpus
+
+--- @class PassFlags
+--- @field gdb_runtime     boolean|nil
+--- @field dwarf_injection boolean|nil
+--- @field elf_path        string|nil
 
 --- @class PassCtx
---- @field metadata_path      string                 -- Path to word_count.metadata.h
---- @field shared             table                  -- Cross-pass shared state
---- @field shared.corpus      table                  -- Authored-source/project projection
---- @field out_root           string                 -- Output root (e.g. "build/gen")
---- @field project_root       string                 -- PS1 repository root
---- @field flags              table                  -- CLI flags + per-pass stash
---- @field verbose            boolean                -- If true, log diagnostic info
+--- @field metadata_path string                 -- Path to word_count.metadata.h
+--- @field shared        PassShared             -- Cross-pass shared state
+--- @field out_root      string                 -- Output root (e.g. "build/gen")
+--- @field project_root  string                 -- PS1 repository root
+--- @field flags         PassFlags              -- CLI flags + per-pass stash
+--- @field verbose       boolean                -- If true, log diagnostic info
 
---- @class Finding
+--- @class PassFinding
 --- @field line integer  -- Source line (or 0 for pass-level)
 --- @field msg  string   -- Finding message
 
+--- @class PassOutputEntry
+--- @field kind string
+--- @field path string
+
 --- @class PassResult
---- @field outputs  PassOutputEntry[] -- Emitted file paths
---- @field errors   Finding[]         -- Build-stops (per-pass kind policy)
---- @field warnings Finding[]         -- Informational
+--- @field outputs  PassOutputEntry[]
+--- @field errors   PassFinding[]         -- Build-stops (per-pass kind policy)
+--- @field warnings PassFinding[]         -- Informational
+--- @field info     CheckFinding[]|nil    -- static_analysis only
 
 --- @class ParsedArgs
---- @field requested_set string[]   -- Pass names to run (explicit --all expanded)
---- @field sources       string[]   -- Exact --source values, retained in CLI order
---- @field unity_root    string|nil -- --unity-root value; mutually exclusive with sources
---- @field metadata      string     -- --metadata value
---- @field out_root      string     -- --out-root value (default "build/gen")
---- @field project_root  string     -- PS1 repository root (derived from metadata by default)
---- @field verbose       boolean    -- If true, log diagnostic info
+--- @field requested_set string[]       -- Pass names to run (explicit --all expanded)
+--- @field sources       string[]       -- Exact --source values, retained in CLI order
+--- @field unity_root    string|nil     -- --unity-root value; mutually exclusive with sources
+--- @field metadata      string         -- --metadata value
+--- @field out_root      string         -- --out-root value (default "build/gen")
+--- @field project_root  string         -- PS1 repository root (derived from metadata by default)
+--- @field verbose       boolean        -- If true, log diagnostic info
+--- @field flags         PassFlags|nil  -- Per-pass stash; copied onto PassCtx.flags
+
+--- @alias FlagHandler fun(args: ParsedArgs, argv: string[]|nil, arg_idx: integer|nil): integer|nil
+
+--- @class PassModule
+--- @field run fun(ctx: PassCtx): PassResult
+
+--- @class Ps1MetaMod
+--- @field PASSES                  table<string, PassDescriptor>
+--- @field PASS_KIND_STOP_ON_ERROR table<string, boolean>
+--- @field parse_args              fun(argv: string[]): ParsedArgs
+--- @field build_ctx               fun(args: ParsedArgs): PassCtx
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PASSES Table
@@ -104,6 +159,7 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__"
 -- A row without a `groups` entry is dependency-only: it runs only when a transitive dep requests it, 
 -- but it remains directly requestable through its explicit CLI flag (e.g. --atoms-source-map, --scan-source).
 
+--- @type table<string, PassDescriptor>
 local PASSES = {
 	["scan-source"] = {
 		module = "passes.scan_source",
@@ -174,9 +230,12 @@ local PASSES = {
 --- @param group_name string  -- Build-phase group ("pre-link" | "post-link")
 --- @return string[]          -- Sorted root pass names belonging to that group
 local function roots_for_group(group_name)
+	--- @type string[]
 	local names = {}
+	--- @type string, PassDescriptor
 	for name, pass in pairs(PASSES) do
 		if pass.groups then
+			--- @type integer, string
 			for _, g in ipairs(pass.groups) do
 				if g == group_name then
 					names[#names + 1] = name
@@ -194,12 +253,15 @@ end
 --- cannot silently fall through to pre-link (or any other default) and dispatch nothing.
 --- @param args ParsedArgs
 --- @param group_name string
+--- @return nil
 local function request_roots_for_group(args, group_name)
+	--- @type string[]
 	local roots = roots_for_group(group_name)
 	if #roots == 0 then
 		error(string.format("ps1_meta: build-phase group %q has zero roots in PASSES; check PASSES rows for a `groups = { %q }` field"
 			, group_name, group_name))
 	end
+	--- @type integer, string
 	for _, name in ipairs(roots) do
 		args.requested_set[#args.requested_set + 1] = name
 	end
@@ -208,6 +270,7 @@ end
 -- Pass-kind taxonomy: findings always print. No pass kind stops the build.
 -- Report severity is independent from process exit policy.
 -- Adding a new pass kind requires listing it here explicitly; an unknown kind must not silently fall back to "true".
+--- @type table<string, boolean>  -- bag: pass kind -> stop-on-error
 local PASS_KIND_STOP_ON_ERROR = {
 	["shared"]        = false,
 	["header-output"] = false,
@@ -220,6 +283,7 @@ local PASS_KIND_STOP_ON_ERROR = {
 -- Per-pass flags (e.g. --word-counts); phase flags (--pre-link, --post-link, --all) are within FLAG_HANDLERS because they own side effects or invoke group-derivation logic.
 -- dwarf-injection is *also* a per-pass opt-in flag, but its selection + opt-in state are both owned by the explicit FLAG_HANDLERS entry below
 -- (it sets args.flags.dwarf_injection and appends "dwarf-injection" to requested_set), so it is intentionally absent from this table.
+--- @type table<string, string>  -- bag: CLI flag -> pass name or ALL_PASSES_SENTINEL
 local PASS_FLAG_TO_NAME = {
 	["--word-counts"]       = "word-counts",
 	["--components"]        = "components",
@@ -235,10 +299,14 @@ local PASS_FLAG_TO_NAME = {
 --- Append every pass name to args.requested_set.
 --- Names are derived from PASSES (no parallel name list); used by --all and by any caller that wants the full closure.
 --- @param args ParsedArgs
+--- @return nil
 local function request_all_passes(args)
+	--- @type string[]
 	local names = {}
+	--- @type string
 	for name in pairs(PASSES) do names[#names + 1] = name end
 	table.sort(names)
+	--- @type integer, string
 	for _, n in ipairs(names) do
 		args.requested_set[#args.requested_set + 1] = n
 	end
@@ -246,6 +314,7 @@ end
 
 -- Per-flag handlers. Each handler takes (args, argv, arg_idx) and returns the new arg_idx (so multi-arg flags like --source FILE advance it). 
 -- Returning nil + os.exit() handles termination flags (--help). 
+--- @type table<string, FlagHandler>
 local FLAG_HANDLERS = {}
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -253,6 +322,7 @@ local FLAG_HANDLERS = {}
 -- ════════════════════════════════════════════════════════════════════════════
 
 --- Print the CLI usage to stdout and exit 0.
+--- @return nil
 local function print_help()
 	io.write([[
 ps1_meta.lua - Tape-atom metaprogram orchestrator
@@ -302,6 +372,7 @@ EXAMPLES:
 ]])
 end
 
+--- @type table<string, string>  -- bag: flag -> value metavar
 local FLAG_VALUE_NAMES = {
 	["--source"]       = "FILE",
 	["--unity-root"]   = "FILE",
@@ -311,8 +382,15 @@ local FLAG_VALUE_NAMES = {
 	["--elf"]          = "PATH",
 }
 
+--- @param argv    string[]
+--- @param arg_idx integer
+--- @param flag    string
+--- @return string
+--- @return integer
 local function require_flag_value(argv, arg_idx, flag)
+	--- @type string|nil
 	local value      = argv[arg_idx + 1]
+	--- @type boolean
 	local next_known = type(value) == "string"
 		and (FLAG_HANDLERS[value] ~= nil or PASS_FLAG_TO_NAME[value] ~= nil)
 	if value == nil or next_known then
@@ -327,30 +405,59 @@ end
 -- Populated AFTER print_help so the --help handler can reference it as an upvalue (Lua resolves locals at closure-call time, 
 -- but if the closure is defined before the local, it falls back to _G). 
 
+--- @param args ParsedArgs
+--- @return nil
 FLAG_HANDLERS["--help"]    = function(args) print_help(); os.exit(0) end
+--- @param args ParsedArgs
+--- @return nil
 FLAG_HANDLERS["--verbose"] = function(args) args.verbose = true      end
 
+--- @param args    ParsedArgs
+--- @param argv    string[]
+--- @param arg_idx integer
+--- @return integer
 FLAG_HANDLERS["--source"] = function(args, argv, arg_idx)
+	--- @type string, integer
 	local value, value_idx = require_flag_value(argv, arg_idx, "--source")
 	args.sources[#args.sources + 1] = value
 	return value_idx
 end
+--- @param args    ParsedArgs
+--- @param argv    string[]
+--- @param arg_idx integer
+--- @return integer
 FLAG_HANDLERS["--unity-root"] = function(args, argv, arg_idx)
+	--- @type string, integer
 	local value, value_idx = require_flag_value(argv, arg_idx, "--unity-root")
 	args.unity_root = value
 	return value_idx
 end
+--- @param args    ParsedArgs
+--- @param argv    string[]
+--- @param arg_idx integer
+--- @return integer
 FLAG_HANDLERS["--metadata"] = function(args, argv, arg_idx)
+	--- @type string, integer
 	local value, value_idx = require_flag_value(argv, arg_idx, "--metadata")
 	args.metadata = value
 	return value_idx
 end
+--- @param args    ParsedArgs
+--- @param argv    string[]
+--- @param arg_idx integer
+--- @return integer
 FLAG_HANDLERS["--out-root"] = function(args, argv, arg_idx)
+	--- @type string, integer
 	local value, value_idx = require_flag_value(argv, arg_idx, "--out-root")
 	args.out_root = value
 	return value_idx
 end
+--- @param args    ParsedArgs
+--- @param argv    string[]
+--- @param arg_idx integer
+--- @return integer
 FLAG_HANDLERS["--project-root"] = function(args, argv, arg_idx)
+	--- @type string, integer
 	local value, value_idx = require_flag_value(argv, arg_idx, "--project-root")
 	args.project_root = value
 	return value_idx
@@ -358,11 +465,18 @@ end
 
 -- Per-pass stash flags. Read by `passes/atoms_source_map.lua` to opt into the post-link gdb-runtime emission.
 -- Same shape as the existing per-flag handlers. mutates `args.flags` (which propagates into `ctx.flags`).
+--- @param args ParsedArgs
+--- @return nil
 FLAG_HANDLERS["--gdb-runtime"] = function(args)
 	args.flags = args.flags or {}
 	args.flags.gdb_runtime = true
 end
+--- @param args    ParsedArgs
+--- @param argv    string[]
+--- @param arg_idx integer
+--- @return integer
 FLAG_HANDLERS["--elf"] = function(args, argv, arg_idx)
+	--- @type string, integer
 	local value, value_idx = require_flag_value(argv, arg_idx, "--elf")
 	args.flags = args.flags or {}
 	args.flags.elf_path = value
@@ -370,6 +484,8 @@ FLAG_HANDLERS["--elf"] = function(args, argv, arg_idx)
 end
 -- Enable DWARF injection (default OFF). Opts in to the post-link pass and sets the flag in one shot.
 -- The explicit handler below owns both selection and opt-in state, so --dwarf-injection is intentionally absent from PASS_FLAG_TO_NAME.
+--- @param args ParsedArgs
+--- @return nil
 FLAG_HANDLERS["--dwarf-injection"] = function(args)
 	args.flags                 = args.flags or {}
 	args.flags.dwarf_injection = true
@@ -377,12 +493,16 @@ FLAG_HANDLERS["--dwarf-injection"] = function(args)
 end
 -- Build-phase flags: --pre-link and --post-link request the roots of their declared groups (see roots_for_group).
 -- topo_sort closes transitive deps from those roots; dispatch_passes runs every pass in the resolved closure without phase-filtering.
+--- @param args ParsedArgs
+--- @return nil
 FLAG_HANDLERS["--pre-link"] = function(args)
 	request_roots_for_group(args, "pre-link")
 end
 -- Batch post-link phase: gdb-runtime + dwarf-injection in one luajit cold start.
 -- Sets the same opt-in flags as --gdb-runtime + --dwarf-injection and selects the post-link build-phase group.
 -- elf is required; parse_args enforces it after all flags are parsed.
+--- @param args ParsedArgs
+--- @return nil
 FLAG_HANDLERS["--post-link"]      = function(args)
 	args.flags = args.flags or {}
 	args.flags.gdb_runtime     = true
@@ -393,7 +513,11 @@ end
 -- `--dwarf-injection` also emits atom-local debug data.
 
 -- Pass-flag handler. Reads the closed-set table, expands --all, appends to requested_set.
+--- @param args ParsedArgs
+--- @param a    string
+--- @return nil
 FLAG_HANDLERS[PASS_FLAG_DISPATCH_KEY] = function(args, a)
+	--- @type string|nil
 	local name = PASS_FLAG_TO_NAME[a]
 	if name == ALL_PASSES_SENTINEL then
 		request_all_passes(args)
@@ -406,6 +530,7 @@ end
 --- @param argv string[]
 --- @return ParsedArgs
 local function parse_args(argv)
+	--- @type ParsedArgs
 	local args = {
 		requested_set = {},
 		sources       = {},
@@ -416,9 +541,12 @@ local function parse_args(argv)
 		verbose       = false,
 	}
 
+	--- @type integer
 	local pos = 1
 	while pos <= #argv do
+		--- @type string
 		local a       = argv[pos]
+		--- @type FlagHandler|nil
 		local handler = FLAG_HANDLERS[a]
 		if handler then
 			pos = handler(args, argv, pos) or pos
@@ -444,13 +572,16 @@ local function parse_args(argv)
 	-- `<repo>/code/duffle/word_count.metadata.h` is the canonical metadata location. 
 	-- `project_root` names `<repo>`; the resolver derives `<project_root>/code` separately.
 	if not args.project_root then
+		--- @type string
 		local metadata_dir = duffle.dirname(duffle.normalize_path(args.metadata))
+		--- @type string
 		local code_root    = duffle.dirname(metadata_dir)
 		args.project_root  = duffle.dirname(code_root)
 	else
 		args.project_root = duffle.normalize_path(args.project_root)
 	end
 
+	--- @type boolean
 	local has_unity = type(args.unity_root) == "string" and args.unity_root ~= ""
 	if has_unity and #args.sources > 0 then
 		io.stderr:write("ps1_meta: --unity-root FILE and --source FILE are mutually exclusive\n")
@@ -464,9 +595,13 @@ local function parse_args(argv)
 	-- Post-link opt-ins (--gdb-runtime, --dwarf-injection) write output that depends on the linked ELF.
 	-- Without --elf the metaprogram can't satisfy those requests, so refuse loud and early.
 	-- This covers the explicit --post-link batch, --dwarf-injection by itself, and --gdb-runtime by itself.
+	--- @type PassFlags
 	local flags      = args.flags or {}
+	--- @type string|nil
 	local elf_path   = flags.elf_path
+	--- @type boolean
 	local has_elf    = type(elf_path) == "string" and #elf_path > 0
+	--- @type boolean
 	local post_links = flags.gdb_runtime or flags.dwarf_injection
 	if post_links and not has_elf then
 		io.stderr:write("ps1_meta: --elf PATH is required for post-link output\n")
@@ -486,8 +621,11 @@ end
 --- @param args ParsedArgs
 --- @return PassCtx
 local function build_ctx(args)
+	--- @type string
 	local normalized_project_root  = duffle.normalize_path(args.project_root)
+	--- @type string
 	local project_root             = normalized_project_root
+	--- @type boolean
 	local project_root_is_absolute = normalized_project_root:match("^%a:/")
 		or normalized_project_root:sub(1, 2) == "//"
 		or normalized_project_root:sub(1, 1) == "/"
@@ -499,8 +637,10 @@ local function build_ctx(args)
 		-- Do not route POSIX/UNC/drive-absolute paths through to_absolute_path.
 		duffle.canonical_path_key(project_root)
 	end
+	--- @type Corpus
 	local resolution
 	if args.unity_root then
+		--- @type boolean, Corpus|string
 		local ok_resolve, resolved = pcall(duffle.resolve_source_corpus, {
 			unity_root   = args.unity_root,
 			project_root = project_root,
@@ -511,27 +651,36 @@ local function build_ctx(args)
 		end
 		resolution = resolved
 	else
+		--- @type SourceFile[]
 		local source_order    = {}
+		--- @type table<Path, SourceFile>
 		local sources_by_path = {}
+		--- @type SourceResolver
 		local resolver = {
 			resolved = {},
 			skipped  = {},
 			shadowed = {},
 		}
+		--- @type integer, string
 		for _, input_path in ipairs(args.sources) do
+			--- @type string
 			local path = duffle.normalize_path(input_path)
+			--- @type boolean, string
 			local key_ok, key_or_error = pcall(duffle.canonical_path_key, path)
 			if not key_ok then
 				error("ps1_meta: invalid --source " .. input_path .. ": " .. tostring(key_or_error), 0)
 			end
+			--- @type file*|nil
 			local file = io.open(path, "r")
 			if not file then
 				io.stderr:write("ps1_meta: cannot open --source " .. input_path .. "\n")
 				os.exit(EXIT_INTERNAL_ERROR)
 			end
+			--- @type string
 			local text = file:read("*a")
 			file:close()
 			
+			--- @type SourceFile
 			local source = {
 				path     = path,
 				text     = text,
@@ -539,6 +688,7 @@ local function build_ctx(args)
 				basename = duffle.basename_no_ext(path),
 			}
 			source_order[#source_order + 1] = source
+			--- @type string
 			local key = key_or_error
 			if not sources_by_path[key] then sources_by_path[key] = source end
 			resolver.resolved[#resolver.resolved + 1] = {
@@ -563,6 +713,7 @@ local function build_ctx(args)
 		}
 	end
 
+	--- @type Corpus
 	local corpus = {
 		unity_root              = resolution.unity_root,
 		project_root            = resolution.project_root,
@@ -584,6 +735,7 @@ local function build_ctx(args)
 		collisions              = {},
 		resolver                = resolution.resolver,
 	}
+	--- @type PassCtx
 	local ctx = {
 		metadata_path = args.metadata,
 		shared        = { corpus = corpus },
@@ -613,14 +765,20 @@ end
 --- Keeping these blocks local makes the topological sort self-contained.
 local function topo_sort(passes, requested_set)
 	-- Dependency closure: include every pass transitively required by `requested_set`.
+	--- @type table<string, boolean>  -- bag: pass name -> needed
 	local needed = {}
+	--- @type integer, string
 	for _, name in ipairs(requested_set) do needed[name] = true end
+	--- @type boolean
 	local changed = true
 	while changed do
 		changed = false
+		--- @type string, boolean
 		for name, _ in pairs(needed) do
+			--- @type PassDescriptor
 			local pass = passes[name]
 			if not pass then error("unknown pass '" .. name .. "' requested") end
+			--- @type integer, string
 			for _, dep in ipairs(pass.deps) do
 				if not needed[dep] then
 					needed[dep] = true
@@ -631,9 +789,13 @@ local function topo_sort(passes, requested_set)
 	end
 
 	-- In-degree calculation: count each needed pass's needed dependencies.
+	--- @type table<string, integer>  -- bag: pass name -> in-degree
 	local in_degree = {}
+	--- @type string, boolean
 	for name, _ in pairs(needed) do in_degree[name] = 0 end
+	--- @type string, boolean
 	for name, _ in pairs(needed) do
+		--- @type integer, string
 		for _, dep in ipairs(passes[name].deps) do
 			if needed[dep] then
 				in_degree[name] = in_degree[name] + 1
@@ -642,7 +804,9 @@ local function topo_sort(passes, requested_set)
 	end
 
 	-- Ready-queue seeding: add zero-in-degree passes in deterministic order.
+	--- @type string[]
 	local ready = {}
+	--- @type string, integer
 	for name, deg in pairs(in_degree) do
 		if deg == 0 then ready[#ready + 1] = name end
 	end
@@ -650,12 +814,16 @@ local function topo_sort(passes, requested_set)
 
 	-- Ready-queue drain: decrement dependents when each pass is emitted.
 	-- Newly-zero-degree passes are inserted back into the ready queue (kept sorted).
+	--- @type string[]
 	local order = {}
 	while #ready > 0 do
+		--- @type string
 		local just_finished = table.remove(ready, 1)
 		order[#order + 1] = just_finished
+		--- @type string, boolean
 		for name, _ in pairs(needed) do
 			if name ~= just_finished then
+				--- @type integer, string
 				for _, dep in ipairs(passes[name].deps) do
 					if dep == just_finished then
 						in_degree[name] = in_degree[name] - 1
@@ -672,9 +840,12 @@ local function topo_sort(passes, requested_set)
 	-- Cycle detection: if `order` doesn't include all needed passes, some are stuck with in_degree > 0
 	-- (the cycle closed on itself before Kahn could process them).
 	-- Without this check, a fully-closed cycle (e.g. A -> B -> A) would silently return an empty order list, leaving the orchestrator to dispatch nothing.
+	--- @type integer
 	local needed_count = 0
+	--- @type string
 	for _ in pairs(needed) do needed_count = needed_count + 1 end  -- count hash entries; Lua's #t doesn't work
 	if #order ~= needed_count then
+		--- @type string, integer
 		for name, deg in pairs(in_degree) do
 			if deg > 0 then
 				error("dependency cycle detected involving pass '" .. name .. "'")
@@ -696,8 +867,10 @@ end
 --- @param result    PassResult
 --- @return boolean
 local function report_validation_errors(pass_name, pass, result)
+	--- @type boolean
 	local has_errors = result.errors and #result.errors > 0
 	if not has_errors then return false end
+	--- @type integer, PassFinding
 	for _, e in ipairs(result.errors) do
 		io.stderr:write(string.format("[%s] line %d: %s\n", pass_name, e.line or 0, e.msg or ""))
 	end
@@ -709,10 +882,15 @@ end
 --- @param order string[]
 --- @return boolean  -- true if any validation errors were reported
 local function dispatch_passes(ctx, order)
+	--- @type boolean
 	local had_errors = false
+	--- @type integer, string
 	for _, pass_name in ipairs(order) do
+		--- @type PassDescriptor
 		local pass   = PASSES[pass_name]
+		--- @type PassModule
 		local mod    = require(pass.module)
+		--- @type PassResult
 		local result = mod.run(ctx)
 		if report_validation_errors(pass_name, pass, result) then
 			had_errors = true
@@ -723,14 +901,21 @@ end
 
 --- Main entry point. Runs the requested passes in dep-topological order.
 --- @param argv string[]
+--- @return nil
 local function main(argv)
+	--- @type boolean, string|nil
 	local ok, err = pcall(function()
+		--- @type ParsedArgs
 		local args = parse_args(argv)
+		--- @type PassCtx
 		local ctx  = build_ctx(args)
 		
+		--- @type string[]
 		local requested = args.requested_set
+		--- @type string[]
 		local closed    = topo_sort(PASSES, requested)
 
+		--- @type boolean
 		local had_errors = dispatch_passes(ctx, closed)
 		if had_errors then os.exit(EXIT_VALIDATION_ERRORS) end
 	end)
@@ -746,6 +931,7 @@ end
 -- Module export for in-process consumers (tests that dofile this script).
 -- The conditional `main(...)` call below only fires when this file is invoked as the entry script (arg[0] ends in "ps1_meta.lua");
 -- in dofile() mode (test's arg[0] does not match), main() is skipped and the chunk returns `_M` to the caller.
+--- @type Ps1MetaMod
 local _M = {
 	PASSES                   = PASSES,
 	PASS_KIND_STOP_ON_ERROR  = PASS_KIND_STOP_ON_ERROR,
