@@ -450,7 +450,7 @@ local DEFAULT_BASENAME = "hello_gte" ---@type string
 
 --- DieSchema / FORM_WRITERS / atom-table records live on this file.
 --- SourceFile, Path, AtomName: see duffle.lua.
---- Corpus, PassCtx, PassResult, PassFlags, PassShared, PassFinding: see ps1_meta.lua.
+--- Corpus, PassCtx, PassResult, PassFlags, PassShared, Finding: see ps1_meta.lua.
 --- AtomEntry, AliasEntry, TypeNameEntry, TypeField, AtomInfoEntry, BindsEntry,
 --- AtomViewEntry, AtomCtxEntry, AtomPhaseGroup, SourceScan, RegTypeOverride: see scan_source.lua.
 --- AtomPaths, WordEvent, BodyToken: see emission_model.lua.

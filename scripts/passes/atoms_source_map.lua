@@ -595,8 +595,8 @@ end
 --- @return PassResult
 function M.run(ctx)
 	local outputs  = {} ---@type PassOutputEntry[]
-	local errors   = {} ---@type PassFinding[]
-	local warnings = {} ---@type PassFinding[]
+	local errors   = {} ---@type Finding[]
+	local warnings = {} ---@type Finding[]
 
 	local corpus = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
 	if type(corpus) ~= "table" or type(corpus.source_order) ~= "table" then

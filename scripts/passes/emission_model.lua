@@ -1,7 +1,7 @@
 --- passes/emission_model.lua: Per-atom emission projection.
 ---
 --- The `emission-model` pass owns `atom.paths`, the canonical per-atom mutable surface for atoms and raw atoms with bodies in `ctx.shared.corpus.source_order`.
---- For each atom, the pass invokes `duffle.project_emission(body_text, component_index, word_counts, components)`.
+--- For each atom, the pass invokes `duffle.project_emission(body_text, components, word_counts, components)`.
 --- It stores the ordered `items` stream plus the dense `word_events` / `markers` / `invocations` views on `atom.paths`.
 ---
 --- Public boundary:
@@ -92,17 +92,7 @@
 --- @field consuming_encoder string|nil
 --- @field consuming_arg_pos integer|nil
 
---- @class EmitError
---- @field kind        string
---- @field line        integer|nil
---- @field msg         string
---- @field source      string|nil
---- @field schema_name string|nil
-
---- @class EmitWarning
---- @field kind string
---- @field line integer|nil
---- @field msg  string
+-- Finding: see ps1_meta.lua
 
 --- @class AtomPaths
 --- @field tokens       BodyToken[]
@@ -111,8 +101,8 @@
 --- @field word_events  WordEvent[]
 --- @field markers      EmissionMarker[]
 --- @field invocations  InvocationRecord[]
---- @field errors       EmitError[]
---- @field warnings     EmitWarning[]
+--- @field errors       Finding[]
+--- @field warnings     Finding[]
 
 --- @class EmissionModelPass
 --- @field run fun(ctx: PassCtx): PassResult
@@ -136,7 +126,7 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")          
 --   * ROOT invocations (`inv.parent_id == 0`) receive body-relative `call_line` values directly from `M.LineIndex(body_text)` in the walker.
 --     The source `line_of` closure supplies physical lines at the close site, so this function converts each root value exactly once.
 --   * INNER invocations (`inv.parent_id ~= 0`) receive physical `call_line` values directly from the COMPONENT's `line_of` in the walker.
---     Recursive descent forwards that closure through `corpus.component_body_index[name].line_of`; those values arrive physical and remain unchanged.
+--     Recursive descent forwards that closure through `corpus.components[name].line_of`; those values arrive physical and remain unchanged.
 --
 -- After this function, every `inv.call_line` is physical. DWARF and provenance output read it directly.
 -- The word-event loop forwards the already-physical `outer_inv.call_line` into `we.call_line` for words inside an invocation.
@@ -155,7 +145,7 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 	-- The walker assigns line 2 to the body's first content line because line 1 is the trailing `\n` after `{`. Body-text line k therefore maps to `root_body_line + (k - 1)`.
 	-- `body_off - 1` points at the opening `{`, whose line index identifies the header line. `body_off` points after `{` and would shift every word row forward by one line.
 	local root_body_line  = root_line_of(atom_record.body_off - 1) or atom_record.line or 0 ---@type integer
-	local component_index = corpus.component_body_index or {}                               ---@type table<string, ComponentBodyEntry>
+	local components = corpus.components or {}                                              ---@type table<string, Component>
 	local word_items      = {}                                                              ---@type EmissionItem[]
 
 	for _, item in ipairs(projection.items) do ---@type integer, EmissionItem
@@ -176,7 +166,7 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 			local inner_id  = ids[#ids]                                     ---@type integer
 			local inner_inv = inner_id and projection.invocations[inner_id] ---@type InvocationRecord|nil
 			if inner_inv then
-				local component = component_index[inner_inv.component_name] ---@type ComponentBodyEntry|nil
+				local component = components[inner_inv.component_name] ---@type Component|nil
 				if component and component.line_of then
 					-- Walker used `comp.line_of`, which is the source's physical LineIndex. item.line is already physical.
 					return item.line or 0
@@ -257,13 +247,13 @@ end
 local function project_atom(atom_record, src, corpus)
 	local body  = atom_record.body or ""            ---@type string
 	local wc    = corpus.word_counts or {}          ---@type WordCounts
-	local cbi   = corpus.component_body_index or {} ---@type table<string, ComponentBodyEntry>
+	local comps = corpus.components or {}           ---@type table<string, Component>
 	local schema = nil                              ---@type RegUseSchema|nil
 	if atom_record.reg_use_schema_name then
 		schema = corpus.reg_use_schemas and corpus.reg_use_schemas[atom_record.reg_use_schema_name]
 	end
 	-- That construction site stamps `invocation.debug_skip` while appending each record to `proj.invocations`.
-	local proj  = duffle.project_emission(body, cbi, wc, corpus.components, { ---@type EmissionProjection
+	local proj  = duffle.project_emission(body, comps, wc, comps, { ---@type EmissionProjection
 		reg_use_schema = schema,
 		reg_use_param  = atom_record.reg_use_param_name,
 		atom_name      = atom_record.name,
@@ -271,13 +261,22 @@ local function project_atom(atom_record, src, corpus)
 	})
 	if atom_record.reg_use_schema_name and not schema then
 		proj.errors[#proj.errors + 1] = {
-			kind = "reguse_missing_schema",
-			msg  = string.format("RegUse schema %q is missing", atom_record.reg_use_schema_name),
+			kind        = "error",
+			check       = "reguse_missing_schema",
+			msg         = string.format("RegUse schema %q is missing", atom_record.reg_use_schema_name),
+			schema_name = atom_record.reg_use_schema_name,
 		}
 	end
-	for _, err in ipairs(corpus.reg_use_errors or {}) do ---@type integer, EmitError
+	for _, err in ipairs(corpus.reg_use_errors or {}) do ---@type integer, RegUseError
 		if err.schema_name == atom_record.reg_use_schema_name then
-			proj.errors[#proj.errors + 1] = err
+			proj.errors[#proj.errors + 1] = {
+				kind        = "error",
+				check       = err.kind,
+				line        = err.line or err.source_line or 0,
+				msg         = err.msg or "",
+				source      = err.source or err.source_file,
+				schema_name = err.schema_name,
+			}
 		end
 	end
 	local paths = { ---@type AtomPaths
@@ -303,8 +302,8 @@ end
 --- @return PassResult
 function M.run(ctx)
 	local outputs  = {} ---@type PassOutputEntry[]
-	local errors   = {} ---@type EmitError[]
-	local warnings = {} ---@type EmitWarning[]
+	local errors   = {} ---@type Finding[]
+	local warnings = {} ---@type Finding[]
 
 	local corpus = ctx and ctx.shared and ctx.shared.corpus ---@type Corpus|nil
 	if type(corpus)              ~= "table" then error("emission_model: ctx.shared.corpus is required (canonical projection)", 0) end
@@ -322,20 +321,24 @@ function M.run(ctx)
 			return
 		end
 		local proj = project_atom(atom, src, corpus) ---@type EmissionProjection
-		for _, e in ipairs(proj.errors) do           ---@type integer, EmitError
-			-- Preserve `kind` (cycle / count_mismatch / unbalanced) so readers dispatch on the diagnostic class and leave the message string as display text.
+		for _, e in ipairs(proj.errors) do           ---@type integer, Finding
+			-- Finding.kind is severity. Finding.check holds the diagnostic code
+			-- (cycle / count_mismatch / unbalanced / reguse_*).
 			errors[#errors + 1] = {
-				kind   = e.kind,
-				line   = e.line,
-				msg    = e.msg,
-				source = e.source or src.path,
+				kind        = "error",
+				check       = e.check,
+				line        = e.line,
+				msg         = e.msg,
+				source      = e.source or src.path,
+				schema_name = e.schema_name,
 			}
 		end
-		for _, w in ipairs(proj.warnings) do ---@type integer, EmitWarning
+		for _, w in ipairs(proj.warnings) do ---@type integer, Finding
 			warnings[#warnings + 1] = {
-				kind = w.kind,
-				line = w.line,
-				msg  = w.msg,
+				kind  = "warning",
+				check = w.check,
+				line  = w.line,
+				msg   = w.msg,
 			}
 		end
 	end

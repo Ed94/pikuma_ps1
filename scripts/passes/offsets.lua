@@ -137,7 +137,7 @@ end
 ---   missing `consuming_encoder` -> ERROR. A lone top-level `atom_offset` is not a branch.
 --- @param labels   table<string, integer>
 --- @param branches OffsetBranch[]
---- @param errors   PassFinding[]
+--- @param errors   Finding[]
 --- @return BranchOffset[]
 local function compute_offsets(labels, branches, errors)
 	local results = {}               ---@type BranchOffset[]
@@ -259,7 +259,7 @@ local M = {} ---@type OffsetsPass
 --- @param ctx     PassCtx
 --- @param dir     string
 --- @param sources SourceFile[]
---- @param errors  PassFinding[]
+--- @param errors  Finding[]
 --- @return string|nil
 local function process_directory(ctx, dir, sources, errors)
 	local atoms_data = {} ---@type AtomData[]
@@ -297,8 +297,8 @@ end
 --- @return PassResult
 function M.run(ctx)
 	local outputs  = {} ---@type OffsetOutput[]
-	local errors   = {} ---@type PassFinding[]
-	local warnings = {} ---@type PassFinding[]
+	local errors   = {} ---@type Finding[]
+	local warnings = {} ---@type Finding[]
 
 	local corpus = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
 	if type(corpus) ~= "table" then

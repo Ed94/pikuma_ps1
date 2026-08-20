@@ -1,6 +1,6 @@
 --- passes/components.lua — Component-macro header generator.
 ---
---- Ownership: `corpus.word_counts`, `corpus.components`, and `corpus.component_body_index`.
+--- Ownership: `corpus.word_counts` and `corpus.components`.
 --- Scanner owns `declaration_comment` and `debug_skip` on each declaration record; this pass projects both forward.
 ---
 --- Reads the pre-scanned SourceScan payload from `duffle.scan_source` for `MipsAtomComp_(ac_X)` and `MipsAtomComp_Proc_(ac_X, { body })` declarations (kind="comp_bare" / "comp_proc"),
@@ -56,20 +56,24 @@ local MACS_FILENAME   = "macs.h" ---@type string
 -- SourceScan, AtomEntry, CorpusCollision, CollisionSite: see scan_source.lua
 -- BodyToken: see emission_model.lua
 -- WordCounts: see word_count_eval.lua
--- ComponentBodyEntry: see duffle_emit.lua
 -- InstructionRow, GteCommandRow: see duffle_isa.lua
 
 --- @class Component
---- @field name        string         -- Atom name (without `ac_` prefix)
---- @field body        string         -- Brace-delimited body (without the braces)
---- @field body_off    integer|nil    -- Byte offset of body[1] in source
---- @field body_tokens BodyToken[]|nil
---- @field args        string|nil     -- Function-args string (function form only)
---- @field arg_names   string[]|nil   -- Formal names with leading `ab` dropped
---- @field line        integer        -- Source line of the declaration
---- @field comment     string|nil     -- Scanner-owned `declaration_comment`; the components pass reads it from the scanner record
---- @field kind        string         -- "comp_bare" | "comp_proc"  (atom_proc is NOT a component — see `project_components`)
---- @field debug_skip  boolean        -- Mirror of `a.debug_skip` (scanner-owned); true iff a bare `atom_dbg_skip` marker immediately preceded the declaration
+--- @field name         string         -- Atom name (without `ac_` prefix)
+--- @field body         string         -- Brace-delimited body (without the braces)
+--- @field body_off     integer|nil    -- Byte offset of body[1] in source
+--- @field body_tokens  BodyToken[]|nil
+--- @field args         string|nil     -- Function-args string (function form only)
+--- @field arg_names    string[]|nil   -- Formal names with leading `ab` dropped
+--- @field line         integer        -- Source line of the declaration
+--- @field comment      string|nil     -- Scanner-owned `declaration_comment`; the components pass reads it from the scanner record
+--- @field kind         string         -- "comp_bare" | "comp_proc"  (atom_proc is NOT a component — see `project_components`)
+--- @field debug_skip   boolean        -- Mirror of `a.debug_skip` (scanner-owned); true iff a bare `atom_dbg_skip` marker immediately preceded the declaration
+--- @field path         string|nil     -- Slash-normalized source path (collision sites)
+--- @field source       string|nil     -- Absolute source path (emit)
+--- @field line_of      (fun(pos: integer): integer)|nil
+--- @field cycle_cost   integer|nil    -- From metadata[c.name]; nil when the body was not costed
+--- @field gp0_contrib  integer|nil    -- From metadata[c.name]; nil when the body was not costed
 
 --- @class ComponentMeta
 --- @field cycle_cost  integer
@@ -800,16 +804,7 @@ local function update_canonical_word_counts(corpus, components, counts)
 	end
 end
 
---- @class ComponentDef
---- @field name        string      -- Bare name (without ac_/mac_ prefix)
---- @field line        integer     -- Definition source line (line of `MipsAtomComp_(ac_X)` / `MipsAtomComp_Proc_(ac_X, ...)`)
---- @field path        string      -- Absolute source path of the definition
---- @field kind        string      -- "comp_bare" | "comp_proc"  (atom_proc is NOT a component)
---- @field debug_skip  boolean     -- Mirror of the scanner-owned `a.debug_skip`; consumers read this directly
---- @field cycle_cost  integer|nil -- From metadata[c.name]; nil when the body was not costed
---- @field gp0_contrib integer|nil -- From metadata[c.name]; nil when the body was not costed
-
---- (internal) Populate `corpus.components` with this source's components-by-name map.
+--- (internal) Populate `corpus.components` with this source's one component row per bare name.
 --- First declaration wins; later declarations of the same bare name are dropped and recorded as a collision via `corpus.collisions` (kind = "component").
 --- The pass does NOT write to `ctx.shared.components`.
 --- No parallel skip map is built here; consumers that need the per-component skip state read `corpus.components[name].debug_skip` directly.
@@ -818,28 +813,29 @@ end
 --- @param src        SourceFile
 --- @param components Component[]
 --- @param metadata   ComponentMetaMap
+--- @param scan       SourceScan
 --- @return nil
-local function update_canonical_components(corpus, src, components, metadata)
-	local rel_path = src.path:gsub("\\", "/") ---@type string
-	for _, c in ipairs(components) do         ---@type integer, Component
+local function update_canonical_components(corpus, src, components, metadata, scan)
+	local rel_path = src.path:gsub("\\", "/")               ---@type string
+	local line_of  = scan and scan.line_of                  ---@type (fun(pos: integer): integer)|nil
+	for _, c in ipairs(components) do                       ---@type integer, Component
 		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`).
 		-- The atoms_source_map pass looks up components by bare name from the corpus;
 		-- `mac_` prefix lives at the call-site identifier and is stripped before lookup.
 		local m = metadata and metadata[c.name] or nil ---@type ComponentMeta|nil
 		if corpus.components[c.name] == nil then
-			corpus.components[c.name] = {
-				name        = c.name,
-				line        = c.line,
-				path        = rel_path,
-				kind        = c.kind or "comp_bare",
-				debug_skip  = c.debug_skip == true,
-				cycle_cost  = m and m.cycle_cost  or nil,
-				gp0_contrib = m and m.gp0_contrib or nil,
-			}
+			c.path        = rel_path
+			c.source      = src.path
+			c.line_of     = line_of
+			c.kind        = c.kind or "comp_bare"
+			c.debug_skip  = c.debug_skip == true
+			c.cycle_cost  = m and m.cycle_cost  or nil
+			c.gp0_contrib = m and m.gp0_contrib or nil
+			corpus.components[c.name] = c
 		else
 			-- A second declaration of the same bare name: record a typed collision so static-analysis + the report can surface it.
 			-- Identical-shape declarations (same path + line) reuse the first-wins entry without a collision record.
-			local existing = corpus.components[c.name] ---@type ComponentDef
+			local existing = corpus.components[c.name] ---@type Component
 			if existing.path ~= rel_path or existing.line ~= c.line then
 				local kind       = c.kind or "comp_bare"        ---@type string
 				local first_kind = existing.kind or "comp_bare" ---@type string
@@ -856,37 +852,12 @@ local function update_canonical_components(corpus, src, components, metadata)
 	end
 end
 
---- (internal) Populate `corpus.component_body_index` with this source's body index entries.
---- First declaration wins; later declarations are dropped (no separate collision record: the components collision is already surfaced by `update_canonical_components`).
---- The pass writes to `corpus.component_body_index` only (the corpus owns this projection).
---- @param corpus     Corpus
---- @param src        SourceFile
---- @param components Component[]
---- @param scan       SourceScan
---- @return nil
-local function update_canonical_component_body_index(corpus, src, components, scan)
-	local line_of = scan and scan.line_of ---@type (fun(pos: integer): integer)|nil
-	for _, c in ipairs(components) do     ---@type integer, Component
-		if corpus.component_body_index[c.name] == nil then
-			corpus.component_body_index[c.name] = {
-				body_tokens = c.body_tokens,
-				body_off    = c.body_off,
-				line_of     = line_of,
-				source      = src.path,
-				declaration = c.line,
-				kind        = c.kind,
-				arg_names   = c.arg_names,
-			}
-		end
-	end
-end
-
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
 	local outputs  = {} ---@type MacsOutput[]
-	local errors   = {} ---@type PassFinding[]
-	local warnings = {} ---@type PassFinding[]
+	local errors   = {} ---@type Finding[]
+	local warnings = {} ---@type Finding[]
 
 	-- Corpus ownership gate.
 	local corpus = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
@@ -904,8 +875,7 @@ function M.run(ctx)
 
 	-- Projection ownership:
 	--   * `corpus.word_counts["mac_"..name]` — current component count
-	--   * `corpus.components[name]`         — bare-name component definition
-	--   * `corpus.component_body_index[name]` — body / line_of / source index
+	--   * `corpus.components[name]`         — one row: body, line_of, source, cost
 	-- The pass writes to the corpus only; consumers read from the corpus directly.
 
 	-- Per-directory aggregation: every source in the same directory contributes to one `gen/macs.h`.
@@ -937,8 +907,7 @@ function M.run(ctx)
 				for _, src in ipairs(sources) do ---@type integer, SourceFile
 					local per_source = project_components(src.text, src.scan) or {} ---@type Component[]
 					if #per_source > 0 then
-						update_canonical_components(corpus, src, per_source, metadata_per_source[src])
-						update_canonical_component_body_index(corpus, src, per_source, src.scan)
+						update_canonical_components(corpus, src, per_source, metadata_per_source[src], src.scan)
 					end
 				end
 			end

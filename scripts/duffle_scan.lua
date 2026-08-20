@@ -59,6 +59,10 @@
 --- @field unity_root   Path
 --- @field project_root Path
 
+--- @class ExactResolveOptions
+--- @field sources      string[]
+--- @field project_root Path
+
 --- @alias LineIndexFn fun(query_pos: integer): integer
 
 --- @class DuffleScan
@@ -905,6 +909,61 @@ function M.resolve_source_corpus(options)
 
 	return {
 		unity_root      = root.path,
+		project_root    = project_root,
+		code_root       = code_root,
+		source_order    = source_order,
+		sources_by_path = sources_by_path,
+		sources_by_dir  = M.group_sources_by_dir(source_order),
+		resolver        = resolver,
+	}
+end
+
+--- Exact `--source` corpus. No include expansion. Paths stay as given (normalized).
+--- Same return shape as resolve_source_corpus.
+--- @param options ExactResolveOptions
+--- @return Corpus
+function M.resolve_exact_sources(options)
+	if type(options) ~= "table" then error("resolve_exact_sources requires options", 2) end
+	if type(options.project_root) ~= "string" or options.project_root == "" then
+		error("resolve_exact_sources requires options.project_root", 2)
+	end
+	local sources = options.sources ---@type string[]|nil
+	if type(sources) ~= "table" then error("resolve_exact_sources requires options.sources", 2) end
+
+	local project_root    = options.project_root ---@type Path
+	local code_root       = M.normalize_path(project_root .. "/code") ---@type Path
+	local source_order    = {} ---@type SourceFile[]
+	local sources_by_path = {} ---@type table<Path, SourceFile>
+	local resolver = { ---@type SourceResolver
+		resolved = {},
+		skipped  = {},
+		shadowed = {},
+	}
+	for _, input_path in ipairs(sources) do ---@type integer, string
+		local path = M.normalize_path(input_path) ---@type string
+		M.canonical_path_key(path)
+		local source = { ---@type SourceFile
+			path     = path,
+			text     = M.read_file(path),
+			dir      = M.dirname(path),
+			basename = M.basename_no_ext(path),
+		}
+		source_order[#source_order + 1] = source
+		local key = M.canonical_path_key(path) ---@type string
+		if not sources_by_path[key] then sources_by_path[key] = source end
+		resolver.resolved[#resolver.resolved + 1] = {
+			include_path  = path,
+			include_text  = nil,
+			root_source   = path,
+			root_line     = 1,
+			candidate_a   = path,
+			candidate_b   = nil,
+			selected_path = path,
+			disposition   = "exact",
+		}
+	end
+	return {
+		unity_root      = nil,
 		project_root    = project_root,
 		code_root       = code_root,
 		source_order    = source_order,

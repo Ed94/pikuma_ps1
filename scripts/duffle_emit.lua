@@ -11,20 +11,9 @@ for k, v in pairs(isa)  do M[k] = v end ---@type string, any
 -- Shared, memoized helpers: a single emitted-word event stream that every downstream pass reads from,
 -- built once from the pre-tokenized bodies.
 
---- @class ComponentBodyEntry
---- @field body_tokens    BodyToken[]
---- @field body_off       integer      -- byte offset of body[1] in `source`
---- @field line_of        fun(pos:integer):integer  -- byte-offset → 1-based line number in `source`
---- @field source         string       -- absolute path of the source containing the declaration
---- @field declaration    integer      -- 1-based line number of the MipsAtomComp_(ac_X) declaration
---- @field kind           string       -- "comp_bare" | "comp_proc"
---- @field arg_names      string[]|nil
---- @field sub_map        table<string, string>|nil  -- bag: formal -> substituted operand
-
 --- @class EmissionWalkCtx
---- @field component_index table<string, ComponentBodyEntry>
+--- @field components      table<string, Component>
 --- @field word_counts     WordCounts
---- @field components      table<string, ComponentDef>
 --- @field reg_use_schema  RegUseSchema|nil
 --- @field reg_use_param   string|nil
 --- @field atom_name       AtomName|nil
@@ -39,10 +28,12 @@ for k, v in pairs(isa)  do M[k] = v end ---@type string, any
 --- @field atom_name      AtomName|nil
 --- @field schema_name    string|nil
 
+-- Finding: see ps1_meta.lua
+
 --- @class DuffleEmit
 
 
--- The cross-source component-body index is owned by the corpus (`corpus.component_body_index`, populated by `passes/components.lua`).
+-- The cross-source component row is owned by the corpus (`corpus.components`, populated by `passes/components.lua`).
 -- Consumers (`passes/static_analysis.lua`, `passes/emission_model.lua`) read it directly; per-pass memoization helpers stay out of scope.
 
 -- ASCII byte constants used by split_call_args (kept local to keep Section 8 self-contained).
@@ -119,18 +110,18 @@ local E_MAC_PREFIX_LEN = 4      ---@type integer
 ---   * Known `mac_X(...)` calls: Recursively expand the indexed component body, including nested components. Every event from the expansion carries:
 ---     - `source` / `line` = the COMPONENT'S source path + the line of the token within the component body (i.e. "definition site").
 ---     - `call_source` / `call_line` = the ROOT atom's source path + call-site line, PRESERVED across recursion so nested events still point at the original root.
----   * Unknown `mac_X` (not in `component_index`): fall back to `word_counts[ident]` if present; otherwise emit one opaque event so the cycle budget accounts for the word.
+---   * Unknown `mac_X` (not in `components`): fall back to `word_counts[ident]` if present; otherwise emit one opaque event so the cycle budget accounts for the word.
 ---   * Marker Tokens (`atom_label(...)` / `atom_offset(...)`): Zero events (they are pure metaprogram hints).
 ---
 --- Cycle protection: a per-expansion `visiting` set tracks components currently on the expansion stack;
---- a re-entry produces a deterministic `{kind = "cycle", ...}` error and aborts that branch (does NOT hang, does NOT recurse).
+--- a re-entry produces a deterministic `{check = "cycle", ...}` error and aborts that branch (does NOT hang, does NOT recurse).
 ---
---- Pure: reads `body_entry` / `component_index` / `word_counts`. Memoization is the caller's responsibility.
+--- Pure: reads `body_entry` / `components` / `word_counts`. Memoization is the caller's responsibility.
 --- Callers wanting `word_events` / `word_event_errors` precomputed for many atoms should memoize them per atom.
---- @param body_entry       ComponentBodyEntry
---- @param component_index  table<string, ComponentBodyEntry>
---- @param word_counts      WordCounts
---- @return WordEvent[], EmitError[]
+--- @param body_entry   Component
+--- @param components   table<string, Component>
+--- @param word_counts  WordCounts
+--- @return WordEvent[], Finding[]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section 11: project_emission (per-atom emission projection)
@@ -141,7 +132,7 @@ local E_MAC_PREFIX_LEN = 4      ---@type integer
 -- The items stream is the single ordered source of truth; `word_events` and `markers` are dense views over it.
 --
 -- The helper below operates on a body string (not a body_entry) so the pass can call it without depending on the older SourceScan / body_off conventions.
--- component_index argument is reserved for recursive component expansion.
+-- `components` is the recursive expansion map (`corpus.components`).
 -- word_counts table is authored-metadata + current-component count table.
 
 --- @class EmissionProjection
@@ -149,8 +140,8 @@ local E_MAC_PREFIX_LEN = 4      ---@type integer
 --- @field word_events WordEvent[]
 --- @field markers     EmissionMarker[]
 --- @field invocations InvocationRecord[] -- dense view of items where kind == "invoke_begin"|"invoke_end"
---- @field errors      EmitError[]
---- @field warnings    EmitWarning[]
+--- @field errors      Finding[]
+--- @field warnings    Finding[]
 
 --- @class InvocationRecord
 --- Lives at `atom.paths.invocations[*]`. Constructed once at the single invocation-construction site
@@ -171,7 +162,7 @@ local E_MAC_PREFIX_LEN = 4      ---@type integer
 --- @field end_word        integer  -- 1-based items index of the `invoke_end` item (set by `emit_invoke_end`)
 --- @field word_count      integer  -- Number of `word` items emitted between `start_word` and `end_word` (inclusive)
 --- @field debug_skip      boolean  -- `debug_skip` stamp; true iff `corpus.components[name].debug_skip` is true at construction. Always boolean (never `nil`).
---- @field errors          EmitError[]
+--- @field errors          Finding[]
 
 -- Internal recursive walker. The items stream holds every emitted event in order; `word_events`, `markers`,
 -- `invocations`, `errors`, `warnings` are dense views / side outputs appended alongside.
@@ -187,9 +178,9 @@ local E_MAC_PREFIX_LEN = 4      ---@type integer
 --   * Unknown uncounted macros emit one opaque word + one warning. Unknown metadata-backed macros (entry in `word_counts`) emit the declared word count, no warning.
 --   * Cycle detection uses an active DFS stack (`visiting`); a cycle appends a construction error to BOTH the projection errors and the cycle invocation's own errors,
 --     then breaks out without recursing (the cycle entry still receives an invocation ID + paired `invoke_begin` / `invoke_end` items, so the boundary invariant is preserved).
---   * Component declared-count mismatch (declared vs. measured) is a construction error (kind = "count_mismatch"); recorded on the invocation record and pass-level errors list.
+--   * Component declared-count mismatch (declared vs. measured) is a construction error (check = "count_mismatch"); recorded on the invocation record and pass-level errors list.
 --   * Final boundary check: if any invocation is still open at end of walk, surface a "unbalanced" construction error.
---- @param root_body_entry ComponentBodyEntry
+--- @param root_body_entry Component
 --- @param ctx_table EmissionWalkCtx
 --- @return EmissionProjection
 local function _project_emission_inner(root_body_entry, ctx_table)
@@ -197,8 +188,8 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	local word_events = {} ---@type WordEvent[]
 	local markers     = {} ---@type EmissionMarker[]
 	local invocations = {} ---@type InvocationRecord[]
-	local errors      = {} ---@type EmitError[]
-	local warnings    = {} ---@type EmitWarning[]
+	local errors      = {} ---@type Finding[]
+	local warnings    = {} ---@type Finding[]
 
 	local word_idx         = 0  ---@type integer
 	local invocation_stack = {} ---@type InvocationRecord[] -- stack of currently-open invocation records
@@ -282,9 +273,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				gpr_keys[pos] = key
 				if unresolved then
 					errors[#errors + 1] = {
-						kind = "reguse_unresolved",
-						line = line,
-						msg  = string.format("RegUse operand %q does not resolve in schema %q",
+						kind  = "error",
+						check = "reguse_unresolved",
+						line  = line,
+						msg   = string.format("RegUse operand %q does not resolve in schema %q",
 							effective, (reg_use_schema and reg_use_schema.name) or "?"),
 					}
 				end
@@ -294,9 +286,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 						for _, wpos in ipairs(row.writes) do ---@type integer, integer
 							if wpos == pos then
 								errors[#errors + 1] = {
-									kind = "reguse_const_write",
-									line = line,
-									msg  = string.format("RegUse slot %q is Reg const; %s writes it",
+									kind  = "error",
+									check = "reguse_const_write",
+									line  = line,
+									msg   = string.format("RegUse slot %q is Reg const; %s writes it",
 										slot, encoder),
 								}
 							end
@@ -541,15 +534,14 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		-- The stamp is resolved from the `corpus.components[name]` registry (passed in via `ctx_table.components` by `emission_model.run`), 
 		-- Unmarked components stamp `false` (not `nil`) so consumers can dispatch on the boolean without nil checks.
 		--
-		-- The walker has already found the component body in `ctx_table.component_index[component_name]`, so the matching entry MUST exist in `ctx_table.components[component_name]`
-		-- (both registries are populated from the same source by the components pass).
+		-- The walker has already found the component body in `ctx_table.components[component_name]`.
 		-- A missing entry is a corpus-plumbing bug; we fail loudly here rather than silently stamp `false` and mask the regression.
-		local  components    = ctx_table.components                             ---@type table<string, ComponentDef>|nil
-		local  component_def = components and components[component_name] or nil ---@type ComponentDef|nil
+		local  components    = ctx_table.components                             ---@type table<string, Component>|nil
+		local  component_def = components and components[component_name] or nil ---@type Component|nil
 		if not component_def then
 			error("duffle.emit_invoke_begin: component " .. string.format("%q", component_name)
-				.. " is present in `component_index` (the walker matched a `mac_" .. component_name .. "()` call) but absent from `components` (the canonical corpus.components registry). "
-				.. "This is a corpus-plumbing bug — the components pass must populate corpus.components[name] for every component it puts in corpus.component_body_index[name]. " 
+				.. " is present in the walk (the walker matched a `mac_" .. component_name .. "()` call) but absent from `components` (the canonical corpus.components registry). "
+				.. "This is a corpus-plumbing bug — the components pass must populate corpus.components[name] for every expanded component. "
 				.. "The emission pass refuses to silently stamp `debug_skip = false` for a missing registry entry."
 				, 0
 			)
@@ -621,9 +613,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		local canon = M.gte_canon(ident) ---@type string
 		if    canon ~= ident and wc and wc[canon] then return wc[canon] end
 		warnings[#warnings + 1] = {
-			kind = "uncounted",
-			line = tok_line,
-			msg  = string.format("project_emission: opaque word emitted for %q (no entry in word_counts or component_index)", 
+			kind  = "warning",
+			check = "uncounted",
+			line  = tok_line,
+			msg   = string.format("project_emission: opaque word emitted for %q (no entry in word_counts or components)", 
 			ident),
 		}
 		return 1
@@ -634,19 +627,19 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	-- walk_root_call_text:      Outermost `mac_X(...)` token text (preserved across recursion).
 	-- walk_immediate_call_text: IMMEDIATE outer `mac_X(...)` token text for words emitted in this body — nil for the root atom body.
 	-- Two trackers are propagated as separate parameters so words deep inside nested expansions correctly identify both their immediate call site and the outermost call site.
---- @param body_entry ComponentBodyEntry
+--- @param body_entry Component
 --- @param walk_parent_inv_id integer
 --- @param walk_root_call_text string|nil
 --- @param walk_immediate_call_text string|nil
+--- @param sub_map table<string, string>|nil
 --- @return nil
 	local function walk_body_entry(body_entry, walk_parent_inv_id,
-		walk_root_call_text, walk_immediate_call_text)
+		walk_root_call_text, walk_immediate_call_text, sub_map)
 		local tokens     = body_entry.body_tokens or {}          ---@type BodyToken[]
 		local body_off   = body_entry.body_off or 0              ---@type integer
 		local line_of    = body_entry.line_of or M.LineIndex("") ---@type LineIndexFn
 		local def_source = body_entry.source or ""               ---@type string
-		local def_line   = body_entry.declaration or 0           ---@type integer
-		local sub_map    = body_entry.sub_map                    ---@type table<string, string>|nil
+		local def_line   = body_entry.line or 0                  ---@type integer
 		-- Per-token dispatch: each matched branch returns; only the fall-through
 		-- "opaque word" emit handles direct encoders + mac_X-without-component.
 --- @param bt BodyToken
@@ -715,8 +708,8 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				end
 			end
 			if ident:sub(1, 4) == "mac_" then
-				local bare = ident:sub(5)                    ---@type string
-				local comp = ctx_table.component_index[bare] ---@type ComponentBodyEntry|nil
+				local bare = ident:sub(5)                 ---@type string
+				local comp = ctx_table.components[bare]   ---@type Component|nil
 				if comp then
 					local invocation_root_call_text = walk_root_call_text or tok ---@type string
 					if ctx_table.visiting[bare] then
@@ -724,8 +717,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 						local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line) ---@type InvocationRecord
 						inv.parent_id = walk_parent_inv_id
 						inv.call_text = tok
-						local err = { ---@type EmitError
-							kind   = "cycle",
+						local err = { ---@type Finding
+							kind   = "error",
+							check  = "cycle",
 							msg    = string.format("project_emission: component cycle detected: %q", bare),
 							source = def_source,
 							line   = tok_line,
@@ -741,30 +735,24 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					inv.parent_id = walk_parent_inv_id
 					inv.call_text = tok
 					inv.def_path  = comp.source
-					inv.def_line  = comp.declaration
+					inv.def_line  = comp.line
 					-- Propagate trackers into the recursive walk:
 					--   immediate_call_text = this call's tok (the IMMEDIATE outer call for words emitted in this body)
 					--   root_call_text      = the OUTERMOST call (immutable across the recursion)
-					local formal_names = ctx_table.component_index[bare] ---@type string[]|nil
-						and ctx_table.component_index[bare].arg_names
-					local child_map = nil ---@type table<string, string>|nil
+					--   child_map           = per-invocation formal substitution; stays on the walk stack
+					local formal_names = comp.arg_names ---@type string[]|nil
+					local child_map = nil               ---@type table<string, string>|nil
 					if formal_names then
 						child_map = {}
 						for i, fname in ipairs(formal_names) do ---@type integer, string
 							child_map[fname] = apply_sub(sub_map, args[i])
 						end
 					end
-					walk_body_entry({
-							body_tokens = comp.body_tokens or {},
-							body_off    = comp.body_off or 0,
-							line_of     = comp.line_of,
-							source      = comp.source,
-							declaration = comp.declaration,
-							sub_map     = child_map,
-						},
+					walk_body_entry(comp,
 						inv.id,
 						invocation_root_call_text,
-						tok)
+						tok,
+						child_map)
 					ctx_table.visiting[bare] = nil
 					emit_invoke_end(inv)
 					-- Count `word` items inside [start_word, end_word].
@@ -780,8 +768,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					-- We compare against the measured word count.
 					local declared = ctx_table.word_counts["mac_" .. bare] ---@type integer|nil
 					if declared and wc_inside ~= declared then
-						local err = { ---@type EmitError
-							kind   = "count_mismatch",
+						local err = { ---@type Finding
+							kind   = "error",
+							check  = "count_mismatch",
 							msg    = string.format("project_emission: mac_%s declared=%d measured=%d", bare, declared, wc_inside),
 							source = def_source,
 							line   = tok_line,
@@ -791,7 +780,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					end
 					return
 				end
-				-- mac_X NOT in component_index: fall through to opaque emit.
+				-- mac_X NOT in components: fall through to opaque emit.
 			end
 			-- Direct encoder, or mac_X-without-component: resolve count + emit n words.
 			-- Resolve_count may emit a warning if the count is unresolved.
@@ -816,14 +805,15 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 
 	-- Walk first; the pass caller stamps the root call site for direct words after the projection returns.
 	-- For nested words the def_path / def_line already point at the component source and MUST be preserved (the stamping helper checks for that).
-	walk_body_entry(root_body_entry, 0, nil, nil)
+	walk_body_entry(root_body_entry, 0, nil, nil, nil)
 
 	-- Boundary check: every invoke_begin must have a matching invoke_end.
 	-- If anything is still open, surface a hard error.
 	if #invocation_stack > 0 then
 		errors[#errors + 1] = {
-			kind = "unbalanced",
-			msg  = string.format("project_emission: invocation boundaries not balanced (%d unclosed invocation(s) at end of walk)", #invocation_stack),
+			kind  = "error",
+			check = "unbalanced",
+			msg   = string.format("project_emission: invocation boundaries not balanced (%d unclosed invocation(s) at end of walk)", #invocation_stack),
 		}
 	end
 
@@ -850,7 +840,7 @@ end
 ---   * `mac_X(...)` calls: emit `invoke_begin` (zero-width), recurse into the component body, emit `invoke_end` (zero-width).
 ---     The component body's words land between the begin/end pair; one invocation record is allocated per call (monotonic ID per atom).
 ---   * Unknown uncounted macros emit 1 opaque word + one warning per occurrence.
----   * Tokens whose count cannot be resolved (e.g. `mac_unknown` not in word_counts and not in component_index) surface one
+---   * Tokens whose count cannot be resolved (e.g. `mac_unknown` not in word_counts and not in components) surface one
 ---     warning; cycle + count-mismatch + boundary violations are construction errors on `pass.errors`.
 ---
 --- Every emitted `word` carries: `i` (0-based word index), `encoder`, `args` (top-level args), `def_path`, `def_line`,
@@ -860,15 +850,15 @@ end
 --- for the open invocation stack at that word.
 ---
 --- @param body_text       string  -- the raw atom body string
---- @param component_index table<string, ComponentBodyEntry>
+--- @param component_index table<string, Component>
 --- @param word_counts     WordCounts
---- @param components      table<string, ComponentDef>
+--- @param components      table<string, Component>
 ---                                   `invocation.debug_skip`. A missing or non-table `components` raises a fail-loud error rather than silently falling back.
 --- @return EmissionProjection
 --- @param reg_use_ctx RegUseCtx|nil
 function M.project_emission(body_text, component_index, word_counts, components, reg_use_ctx)
-	-- The recursive walk delegates to `_project_emission_inner` so component bodies (which arrive as
-	-- `{body_tokens, body_off, line_of, source, declaration}` records from `corpus.component_body_index`)
+	-- The recursive walk delegates to `_project_emission_inner` so component bodies
+	-- (the `corpus.components` row: body_tokens / body_off / line_of / source / line)
 	-- re-enter the same walker with the same shared output state.
 	--
 	-- The walker is body-relative: it builds `line_of` from `body_text` and stamps body-relative line numbers (1..N)
@@ -898,17 +888,17 @@ function M.project_emission(body_text, component_index, word_counts, components,
 	end
 
 	local tokens = M.tokenize_body(body_text) ---@type BodyToken[]
+	local comps  = components or component_index or {} ---@type table<string, Component>
 	return _project_emission_inner({
 		body_tokens = tokens,
 		body_off    = 0,
 		line_of     = M.LineIndex(body_text),
 		source      = "",
-		declaration = 0,
+		line        = 0,
 	},
 	{
-		component_index = component_index or {},
+		components      = comps,
 		word_counts     = word_counts     or {},
-		components      = components,
 		reg_use_schema  = reg_use_ctx and reg_use_ctx.reg_use_schema,
 		reg_use_param   = reg_use_ctx and reg_use_ctx.reg_use_param,
 		atom_name       = reg_use_ctx and reg_use_ctx.atom_name,

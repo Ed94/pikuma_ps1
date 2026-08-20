@@ -88,7 +88,14 @@
 --- @field visibility_kind string
 --- @field evidence        HardwareRelationEvidence
 
+--- @class GprRole
+--- @field name     string
+--- @field pool     boolean
+--- @field optional boolean
+--- @field carrier  boolean
+
 --- @class DuffleIsa
+--- @field GPR_ROLE                    table<string, GprRole>
 --- @field TAPE_ATOM_MACROS            table<string, TapeAtomMacroRow>
 --- @field DELAY_MARKERS               table<string, boolean>
 --- @field INSTRUCTION                 table<string, InstructionRow>
@@ -110,6 +117,43 @@ local M = {} ---@type DuffleIsa
 
 -- Section 7: domain tables
 -- ════════════════════════════════════════════════════════════════════════════
+
+-- One GprRole row per name. Construction order is the auto_reg pool order,
+-- then R_AT, then the three carriers. Index by name into M.GPR_ROLE.
+--- @type table<string, GprRole>
+M.GPR_ROLE = {
+	{ name = "R_V0",          pool = true,  optional = true, carrier = false },
+	{ name = "R_V1",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T0",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T1",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T2",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T3",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T4",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T5",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T6",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T7",          pool = true,  optional = true, carrier = false },
+	{ name = "R_A0",          pool = true,  optional = true, carrier = false },
+	{ name = "R_A1",          pool = true,  optional = true, carrier = false },
+	{ name = "R_A2",          pool = true,  optional = true, carrier = false },
+	{ name = "R_A3",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S0",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S1",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S2",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S3",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S4",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S5",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S6",          pool = true,  optional = true, carrier = false },
+	{ name = "R_S7",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T8",          pool = true,  optional = true, carrier = false },
+	{ name = "R_T9",          pool = true,  optional = true, carrier = false },
+	{ name = "R_AT",          pool = false, optional = true, carrier = false },
+	{ name = "R_TapePtr",     pool = false, optional = true, carrier = true  },
+	{ name = "R_AtomJmp",     pool = false, optional = true, carrier = true  },
+	{ name = "R_ScratchBase", pool = false, optional = true, carrier = true  },
+}
+for _, row in ipairs(M.GPR_ROLE) do ---@type integer, GprRole
+	M.GPR_ROLE[row.name] = row
+end
 
 -- atom_info sub-calls: atom_bind, atom_reads, atom_writes, atom_view, atom_reg_types, atom_ctx, atom_phase.
 --- @type table<string, TapeAtomMacroRow>

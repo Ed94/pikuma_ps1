@@ -4,13 +4,13 @@
 ---   1. **Public utility** `M.count_token_words(token, wc)`: Used by `passes/offsets.lua`, `passes/annotation.lua`, and other passes.
 ---   2. **Pass entry** `M.run(ctx)`: Loads the authored `word_count.metadata.h` into `ctx.shared.corpus.word_counts` for downstream passes.
 ---      The generated `.macs.h` files are OUTPUT artifacts and are NOT inputs to this pass;
----      Current component counts are owned by `passes/components.lua` (which populates `corpus.word_counts` and `corpus.component_body_index`
+---      Current component counts are owned by `passes/components.lua` (which populates `corpus.word_counts` and `corpus.components`
 ---      AFTER computing each current count from the just-built body + `corpus.word_counts`).
 ---
 --- **Canonical contract**:
 ---   * `ctx.shared.corpus.word_counts` is the count table.
 ---   * `corpus.word_counts` is the sole count table. Consumers read `corpus.word_counts` directly.
----   * `ctx.shared.components` and `ctx.shared.component_body_index` are NOT created by this pass (projections only).
+---   * `ctx.shared.components` is NOT created by this pass (projections only).
 ---   * No `.macs.h` recursive discovery (no `scan_dir`, no scan cache, no `_invalidate_scan_cache`).
 ---
 --- **Conventions**: tabs (1/level), EmmyLua annotations, no regex,

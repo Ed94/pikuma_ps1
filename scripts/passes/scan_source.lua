@@ -118,6 +118,7 @@ local parse_enum_int_literal ---@type fun(text: string, start: integer): (intege
 --- @field ctx_atom           string|nil
 --- @field phase              string|nil
 --- @field info_line          integer
+--- @field errors             string[]|nil -- parse-time atom_info errors
 
 --- @class BindsEntry
 --- @field line   integer

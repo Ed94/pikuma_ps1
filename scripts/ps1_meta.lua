@@ -76,8 +76,7 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__" ---@type string
 --- @field atom_ctxs               table<AtomName, AtomCtxEntry>
 --- @field atom_phases             table<string, AtomPhaseGroup>
 --- @field word_counts             WordCounts
---- @field components              table<string, ComponentDef>
---- @field component_body_index    table<string, ComponentBodyEntry>
+--- @field components              table<string, Component>
 --- @field collisions              CorpusCollision[]
 --- @field resolver                SourceResolver
 --- @field component_atom_infos    AtomInfoEntry[]|nil
@@ -104,9 +103,43 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__" ---@type string
 --- @field flags         PassFlags              -- CLI flags + per-pass stash
 --- @field verbose       boolean                -- If true, log diagnostic info
 
---- @class PassFinding
---- @field line integer  -- Source line (or 0 for pass-level)
---- @field msg  string   -- Finding message
+--- CheckName: see static_analysis.lua. AtomName: see duffle.lua.
+--- @class Finding
+--- @field line         integer
+--- @field msg          string
+--- @field kind         string|nil     -- error | warning | info
+--- @field atom         AtomName|nil
+--- @field check        CheckName|nil
+--- @field source       string|nil     -- optional; emit/reguse path
+--- @field schema_name  string|nil     -- optional; emit/reguse
+
+--- @class PassScratch
+--- @field corpus                   Corpus|nil
+--- @field info_by_atom             table<string, AtomInfoEntry>|nil
+--- @field binds_index              table<string, BindsEntry>|nil
+--- @field atom_index               table<string, AtomEntry>|nil
+--- @field annot_counts             table<string, integer>|nil  -- bag
+--- @field types                    table<string, RegTypeDefault>|nil
+--- @field atom_views               table<string, AtomViewEntry>|nil
+--- @field seen_defaults            table<string, integer>|nil  -- bag
+--- @field seen_field               table<string, integer>|nil  -- bag
+--- @field _scan                    SourceScan|nil
+--- @field word_counts              WordCounts|nil
+--- @field register_alias_registry  table<string, AliasEntry>|nil
+--- @field type_name_registry       table<string, TypeNameEntry>|nil
+--- @field type_occurrences         RegTypeOccurrence[]|nil
+--- @field atom_infos_list          AtomInfoEntry[]|nil
+--- @field binds_list               BindsEntry[]|nil
+--- @field unknown_seen             table<string, integer>|nil  -- bag
+--- @field atoms                    AtomEntry[]|nil
+--- @field components_by_name       table<string, Component>|nil
+--- @field atoms_by_name            table<string, AtomEntry>|nil
+--- @field tape_chains              table<string, string[]>|nil
+--- @field source_order             SourceFile[]|nil
+--- @field component_atom_infos     AtomInfoEntry[]|nil
+--- @field atom_infos_all           AtomInfoEntry[]|nil
+--- @field gte_cr_alias_groups      GteCrAliasGroup[]|nil
+--- @field line_for_word_event      (fun(ev: WordEvent): integer)|nil
 
 --- @class PassOutputEntry
 --- @field kind string
@@ -114,9 +147,9 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__" ---@type string
 
 --- @class PassResult
 --- @field outputs  PassOutputEntry[]
---- @field errors   PassFinding[]         -- Build-stops (per-pass kind policy)
---- @field warnings PassFinding[]         -- Informational
---- @field info     CheckFinding[]|nil    -- static_analysis only
+--- @field errors   Finding[]         -- Build-stops (per-pass kind policy)
+--- @field warnings Finding[]         -- Informational
+--- @field info     Finding[]|nil     -- static_analysis only
 
 --- @class ParsedArgs
 --- @field requested_set string[]       -- Pass names to run (explicit --all expanded)
@@ -604,56 +637,15 @@ local function build_ctx(args)
 		end
 		resolution = resolved
 	else
-		local source_order    = {} ---@type SourceFile[]
-		local sources_by_path = {} ---@type table<Path, SourceFile>
-		local resolver = {         ---@type SourceResolver
-			resolved = {},
-			skipped  = {},
-			shadowed = {},
-		}
-		for _, input_path in ipairs(args.sources) do ---@type integer, string
-			local path = duffle.normalize_path(input_path)                      ---@type string
-			local key_ok, key_or_error = pcall(duffle.canonical_path_key, path) ---@type boolean, string
-			if not key_ok then
-				error("ps1_meta: invalid --source " .. input_path .. ": " .. tostring(key_or_error), 0)
-			end
-			local file = io.open(path, "r") ---@type file*|nil
-			if not file then
-				io.stderr:write("ps1_meta: cannot open --source " .. input_path .. "\n")
-				os.exit(EXIT_INTERNAL_ERROR)
-			end
-			local text = file:read("*a") ---@type string
-			file:close()
-			
-			local source = { ---@type SourceFile
-				path     = path,
-				text     = text,
-				dir      = duffle.dirname(path),
-				basename = duffle.basename_no_ext(path),
-			}
-			source_order[#source_order + 1] = source
-			local key = key_or_error ---@type string
-			if not sources_by_path[key] then sources_by_path[key] = source end
-			resolver.resolved[#resolver.resolved + 1] = {
-				include_path  = path,
-				include_text  = nil,
-				root_source   = nil,
-				root_line     = nil,
-				candidate_a   = path,
-				candidate_b   = nil,
-				selected_path = path,
-				disposition   = "exact",
-			}
+		local ok_exact, exact = pcall(duffle.resolve_exact_sources, { ---@type boolean, Corpus|string
+			sources      = args.sources,
+			project_root = project_root,
+		})
+		if not ok_exact then
+			io.stderr:write("ps1_meta: cannot resolve --source: " .. tostring(exact) .. "\n")
+			os.exit(EXIT_INTERNAL_ERROR)
 		end
-		resolution = {
-			unity_root      = nil,
-			project_root    = project_root,
-			code_root       = duffle.normalize_path(project_root .. "/code"),
-			source_order    = source_order,
-			sources_by_path = sources_by_path,
-			sources_by_dir  = duffle.group_sources_by_dir(source_order),
-			resolver        = resolver,
-		}
+		resolution = exact
 	end
 
 	local corpus = { ---@type Corpus
@@ -673,7 +665,6 @@ local function build_ctx(args)
 		atom_phases             = {},
 		word_counts             = {},
 		components              = {},
-		component_body_index    = {},
 		collisions              = {},
 		resolver                = resolution.resolver,
 	}
@@ -791,7 +782,7 @@ end
 local function report_validation_errors(pass_name, pass, result)
 	local has_errors = result.errors and #result.errors > 0 ---@type boolean
 	if not has_errors then return false end
-	for _, e in ipairs(result.errors) do ---@type integer, PassFinding
+	for _, e in ipairs(result.errors) do ---@type integer, Finding
 		io.stderr:write(string.format("[%s] line %d: %s\n", pass_name, e.line or 0, e.msg or ""))
 	end
 	return PASS_KIND_STOP_ON_ERROR[pass.kind] == true

@@ -28,8 +28,8 @@
 
 --- @class AutoRegResult
 --- @field outputs  AutoRegOutput[]
---- @field errors   PassFinding[]
---- @field warnings PassFinding[]
+--- @field errors   Finding[]
+--- @field warnings Finding[]
 
 --- @class AutoRegPass
 --- @field run  fun(ctx: PassCtx): AutoRegResult
@@ -37,6 +37,7 @@
 
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
 local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
+local isa            = require("duffle_isa")                                      ---@type DuffleIsa
 
 --- ════════════════════════════════════════════════════════════════════════════
 --- THE GPR ALLOCATION POOL — what's allocatable, and (more importantly) WHY
@@ -54,15 +55,12 @@ local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")          
 ---   R_K0/K1       (codes 26-27) — Kernel / interrupt handler reserves. Never touched by user code.
 ---   R_GP/SP/FP/RA (codes 28-31) — R_SP/R_FP/R_RA are tape-runtime carriers between tape_enter and tape_exit; R_GP stays the host global pointer.
 ---
-local POOL = { ---@type GprIdent[]
-	"R_V0", "R_V1",
-	"R_T0", "R_T1", "R_T2", "R_T3",
-	"R_T4", "R_T5", "R_T6", "R_T7",
-	"R_A0", "R_A1", "R_A2", "R_A3",
-	"R_S0", "R_S1", "R_S2", "R_S3",
-	"R_S4", "R_S5", "R_S6", "R_S7",
-	"R_T8", "R_T9",
-}
+local POOL = {} ---@type GprIdent[]
+for _, row in ipairs(isa.GPR_ROLE) do ---@type integer, GprRole
+	if row.pool then
+		POOL[#POOL + 1] = row.name
+	end
+end
 
 -- Map from integer MIPS GPR code (the `code` field on AliasEntry) to the physical GPR ident in POOL.
 -- The standard MIPS O32 ABI register numbering matches mips.h's R_*_Code #defines (mips.h).
@@ -94,7 +92,7 @@ end
 --- @param phase_label string
 --- @param decls table<string, string>  -- bag: auto-reg symbol -> decl payload
 --- @return GprAllocMap
---- @return PassFinding[]
+--- @return Finding[]
 local function allocate_phase(phase_label, decls)
 	-- Deep-copy POOL into a fresh sequence table. The original `table.unpack and table.unpack(POOL) or { unpack(POOL) }`
 	-- idiom wraps the unpacked values in a single inner table under LuaJIT 5.1 (`table.unpack` is nil; the `or` returns one value),
@@ -102,7 +100,7 @@ local function allocate_phase(phase_label, decls)
 	local pool   = {}                                ---@type GprIdent[]
 	for i = 1, #POOL do pool[i] = POOL[i] end        ---@type integer
 	local result = {}                                ---@type GprAllocMap
-	local errors = {}                                ---@type PassFinding[]
+	local errors = {}                                ---@type Finding[]
 	for _, sym in ipairs(stable_sort_keys(decls)) do ---@type integer, string
 		local next_gpr = table.remove(pool, 1) ---@type GprIdent|nil
 		if not next_gpr then
@@ -226,8 +224,8 @@ local M = {} ---@type AutoRegPass
 --- @return AutoRegResult
 function M.run(ctx)
 	local outputs  = {} ---@type AutoRegOutput[]
-	local errors   = {} ---@type PassFinding[]
-	local warnings = {} ---@type PassFinding[]
+	local errors   = {} ---@type Finding[]
+	local warnings = {} ---@type Finding[]
 
 	local corpus = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
 	if type(corpus) ~= "table" then
@@ -244,12 +242,12 @@ function M.run(ctx)
 	-- 1. Allocate phase pools first (phase declarations take precedence over per-atom declarations).
 	local phase_allocations = {}                                     ---@type table<string, GprAllocMap>  -- bag: phase_label -> alloc map
 	for phase_label, decls in pairs(corpus.phase_auto_regs or {}) do ---@type string, table<string, string>
-		local mapping, errs = allocate_phase(phase_label, decls) ---@type GprAllocMap, PassFinding[]
+		local mapping, errs = allocate_phase(phase_label, decls) ---@type GprAllocMap, Finding[]
 		for sym, gpr in pairs(mapping) do                        ---@type string, GprIdent
 			phase_allocations[phase_label]      = phase_allocations[phase_label] or {}
 			phase_allocations[phase_label][sym] = gpr
 		end
-		for _, e in ipairs(errs) do ---@type integer, PassFinding
+		for _, e in ipairs(errs) do ---@type integer, Finding
 			errors[#errors + 1] = e
 		end
 	end

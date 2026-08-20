@@ -54,36 +54,17 @@ local PASS_NAME = "report" ---@type string
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- SourceFile: see duffle.lua
--- PassCtx, PassResult, PassFinding, PassOutputEntry: see ps1_meta.lua
+-- PassCtx, PassResult, Finding, PassOutputEntry: see ps1_meta.lua
 -- AtomEntry, SourceScan, BindsEntry, AtomInfoEntry, AliasEntry,
 -- AtomPhaseGroup, AtomViewEntry, AtomCtxEntry, CorpusCollision: see scan_source.lua
--- CheckFinding, AtomAnalysis: see static_analysis.lua
+-- AtomAnalysis: see static_analysis.lua
 -- WordCounts: see word_count_eval.lua
--- ComponentBodyEntry: see duffle_emit.lua
+-- Component: see components.lua
 -- AtomPaths, WordEvent: see emission_model.lua
 -- GprAllocMap: see auto_reg.lua
 
 -- Shapes produced by `passes/annotation.lua`'s `M.validate()`.
-
---- @class AnnotEntry
---- @field line    integer     -- Source line
---- @field macro   string      -- Macro name (e.g. "atom_reads")
---- @field name    string      -- Atom name (if a `name(...)` was given)
---- @field kind    string      -- "atom_info" | "atom_bind" | ...
---- @field binds   string|nil  -- Binds_X name if any
---- @field reads   string[]    -- R_* names (read targets)
---- @field writes  string[]    -- R_* names (write targets)
---- @field error   string|nil  -- Error message if annotation was malformed
-
---- @class BindsField
---- @field name   string   -- Field name
---- @field offset integer  -- Byte offset within the Binds_X struct
-
---- @class BindsStruct
---- @field name   string         -- Struct name (e.g. "Binds_Floor")
---- @field line   integer        -- Source line of the typedef
---- @field bytes  integer        -- Total byte size
---- @field fields BindsField[]   -- The field list
+-- Binds_* rows are BindsEntry (scan_source.lua). Report reads src.scan.binds.
 
 --- @class MacroEntry
 --- @field name  string   -- Macro name (e.g. "WORD_COUNT(my_macro, 4)")
@@ -93,12 +74,12 @@ local PASS_NAME = "report" ---@type string
 --- @class AnnotationResult
 --- @field source   string         -- Set by this pass; original source path
 --- @field atoms    AtomEntry[]    -- Atom declarations in this source
---- @field annots   AnnotEntry[]   -- Annotation entries
+--- @field annots   AtomInfoEntry[]   -- Annotation entries
 --- @field macros   MacroEntry[]   -- Macro word-count declarations
---- @field binds    BindsStruct[]  -- Binds_* struct declarations
---- @field errors   PassFinding[]  -- Errors from validation
---- @field warnings PassFinding[]  -- Warnings from validation
---- @field info     PassFinding[]  -- Info summary (not rendered here)
+--- @field binds    BindsEntry[]   -- Binds_* struct declarations
+--- @field errors   Finding[]  -- Errors from validation
+--- @field warnings Finding[]  -- Warnings from validation
+--- @field info     Finding[]  -- Info summary (not rendered here)
 
 --- @class ModuleEntry
 --- @field dir          string   -- Absolute directory path
@@ -196,7 +177,7 @@ local PASS_NAME = "report" ---@type string
 --- @field sources  SourceFile[]
 --- @field decls    AtomEntry[]
 --- @field schemas  RegUseSchema[]
---- @field findings CheckFinding[]
+--- @field findings Finding[]
 --- @field corpus   Corpus
 
 --- @class SectionRenderer
@@ -424,11 +405,11 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_components(add, view)
-	local rows = {}                                                        ---@type ComponentReportRow[]
-	local index = (view.corpus and view.corpus.component_body_index) or {} ---@type table<string, ComponentBodyEntry>
-	for _, a in ipairs(view.decls) do                                      ---@type integer, AtomEntry
+	local rows = {}                                                 ---@type ComponentReportRow[]
+	local index = (view.corpus and view.corpus.components) or {}    ---@type table<string, Component>
+	for _, a in ipairs(view.decls) do                               ---@type integer, AtomEntry
 		if a.kind == "comp_bare" or a.kind == "comp_proc" then
-			local idx = index[a.name] or {}  ---@type ComponentBodyEntry
+			local idx = index[a.name] or {}  ---@type Component
 			local args = idx.arg_names or {} ---@type string[]
 			rows[#rows + 1] = {
 				name = a.name,
@@ -698,8 +679,8 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_findings(add, view)
-	local by_atom = {}                         ---@type table<string, CheckFinding[]>
-	for _, f in ipairs(view.findings or {}) do ---@type integer, CheckFinding
+	local by_atom = {}                         ---@type table<string, Finding[]>
+	for _, f in ipairs(view.findings or {}) do ---@type integer, Finding
 		local key = f.atom or "?" ---@type string
 		by_atom[key] = by_atom[key] or {}
 		by_atom[key][#by_atom[key] + 1] = f
@@ -707,11 +688,11 @@ local function render_section_findings(add, view)
 	if next(by_atom) == nil then add("_(none)_"); add(""); return end
 	local seen = {} ---@type table<string, boolean>  -- bag: atom name already emitted
 	--- @param name string
-	--- @param fs CheckFinding[]
+	--- @param fs Finding[]
 	--- @return nil
 	local function emit(name, fs)
 		add("### " .. name)
-		for _, f in ipairs(fs) do ---@type integer, CheckFinding
+		for _, f in ipairs(fs) do ---@type integer, Finding
 			local msg = f.msg or ""                                       ---@type string
 			local slot = slot_suffix(f.gpr_key or f.producer_destination) ---@type string|nil
 			if slot and not msg:find("(slot ", 1, true) then
@@ -766,11 +747,12 @@ local HIDDEN_UNLESS_WRITTEN = { ---@type table<string, boolean>  -- bag: GPR key
 	R_AT = true, R_TapePtr = true, R_AtomJmp = true,
 }
 
-local PHYSICAL_GPR = { ---@type table<string, boolean>  -- bag: physical GPR alias -> true
-	R_T0 = true, R_T1 = true, R_T2 = true, R_T3 = true,
-	R_T4 = true, R_T5 = true, R_T6 = true, R_T7 = true,
-	R_V0 = true, R_V1 = true,
-}
+local PHYSICAL_GPR = {} ---@type table<string, boolean>  -- bag: physical GPR alias -> true
+for _, row in ipairs(duffle.GPR_ROLE) do ---@type integer, GprRole
+	if row.pool then
+		PHYSICAL_GPR[row.name] = true
+	end
+end
 
 --- @param atom AtomEntry
 --- @param key string
@@ -945,7 +927,7 @@ local function render_module_meta_report(view)
 		n_macros = n_macros + #((src.scan and src.scan.macros) or {})
 	end
 	local n_err, n_warn, n_info = 0, 0, 0      ---@type integer, integer, integer
-	for _, f in ipairs(view.findings or {}) do ---@type integer, CheckFinding
+	for _, f in ipairs(view.findings or {}) do ---@type integer, Finding
 		if     f.kind == "error"   then n_err  = n_err  + 1
 		elseif f.kind == "warning" then n_warn = n_warn + 1
 		else                            n_info = n_info + 1
@@ -1087,7 +1069,7 @@ function M.run(ctx)
 			n_macros = n_macros + #((src.scan and src.scan.macros) or {})
 		end
 		local n_err, n_warn, n_info = 0, 0, 0      ---@type integer, integer, integer
-		for _, f in ipairs(view.findings or {}) do ---@type integer, CheckFinding
+		for _, f in ipairs(view.findings or {}) do ---@type integer, Finding
 			if     f.kind == "error"   then n_err  = n_err  + 1
 			elseif f.kind == "warning" then n_warn = n_warn + 1
 			else                            n_info = n_info + 1

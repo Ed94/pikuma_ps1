@@ -31,9 +31,8 @@ local M    = {}                     ---@type DuffleExport
 --- @field binds_by_name           table<string,   BindsEntry>
 --- @field atoms_by_name           table<AtomName, AtomEntry>
 --- @field atom_infos              AtomInfoEntry[]
---- @field components              table<string, ComponentDef>
+--- @field components              table<string, Component>
 --- @field component_atom_infos    AtomInfoEntry[]|nil
---- @field component_body_index    table<string, ComponentBodyEntry>
 --- @field tape_chains             table<string, TapeChain>|nil
 --- @field source_order            SourceFile[]
 --- @field collisions              CorpusCollision[]
@@ -70,7 +69,6 @@ function M.corpus_view(ctx)
 		atom_infos              = corpus.atom_infos              or {},
 		components              = corpus.components              or {},
 		component_atom_infos    = corpus.component_atom_infos    or {},
-		component_body_index    = corpus.component_body_index    or {},
 		tape_chains             = corpus.tape_chains             or {},
 		source_order            = corpus.source_order            or {},
 		collisions              = corpus.collisions              or {},
@@ -80,12 +78,12 @@ end
 --- @param rules    CheckRule[]
 --- @param phase    string
 --- @param item     AtomEntry|SourceFile
---- @param pipe_ctx PipeCtx
---- @param findings CheckFinding[]
+--- @param pipe_ctx PassScratch
+--- @param findings Finding[]
 --- @return nil
 function M.run_check_rules(rules, phase, item, pipe_ctx, findings)
 	for _, rule in ipairs(rules) do ---@type integer, CheckRule
-		local fn = rule[phase] ---@type (fun(item: AtomEntry|SourceFile, pipe_ctx: PipeCtx, findings: CheckFinding[]): nil)|nil
+		local fn = rule[phase] ---@type (fun(item: AtomEntry|SourceFile, pipe_ctx: PassScratch, findings: Finding[]): nil)|nil
 		if    fn then fn(item, pipe_ctx, findings) end
 	end
 end
