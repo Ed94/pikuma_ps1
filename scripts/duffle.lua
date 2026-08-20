@@ -6,7 +6,7 @@
 local scan = require("duffle_scan") ---@type DuffleExport
 local isa  = require("duffle_isa")  ---@type DuffleExport
 local emit = require("duffle_emit") ---@type DuffleExport
-local M    = {} ---@type DuffleExport
+local M    = {}                     ---@type DuffleExport
 
 --- @alias Path      string
 --- @alias LineNum   integer

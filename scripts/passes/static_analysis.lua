@@ -61,34 +61,34 @@
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- Atom declaration + component declaration identifiers.
-local ATOM_DECL        = "MipsAtom_" ---@type string
-local ATOM_COMP        = "MipsAtomComp_" ---@type string
+local ATOM_DECL        = "MipsAtom_"          ---@type string
+local ATOM_COMP        = "MipsAtomComp_"      ---@type string
 local ATOM_COMP_PROC   = "MipsAtomComp_Proc_" ---@type string
 
 -- Marker-call identifiers inside atom bodies.
-local ATOM_LABEL        = "atom_label" ---@type string
+local ATOM_LABEL        = "atom_label"  ---@type string
 local ATOM_OFFSET       = "atom_offset" ---@type string
-local ATOM_INFO         = "atom_info" ---@type string
-local ATOM_BIND         = "atom_bind" ---@type string
-local ATOM_READS        = "atom_reads" ---@type string
+local ATOM_INFO         = "atom_info"   ---@type string
+local ATOM_BIND         = "atom_bind"   ---@type string
+local ATOM_READS        = "atom_reads"  ---@type string
 local ATOM_WRITES       = "atom_writes" ---@type string
-local ATOM_YIELD        = "mac_yield" ---@type string
+local ATOM_YIELD        = "mac_yield"   ---@type string
 local WORD_COUNT_PRAGMA = "WORD_COUNT(" ---@type string
 
 -- ASCII byte values used in tokenization.
-local BYTE_NEWLINE    = 10 ---@type integer
-local BYTE_HASH       = 35   ---@type integer -- '#'
-local BYTE_OPEN_PAREN = 40 ---@type integer
+local BYTE_NEWLINE    = 10  ---@type integer
+local BYTE_HASH       = 35  ---@type integer -- '#'
+local BYTE_OPEN_PAREN = 40  ---@type integer
 local BYTE_OPEN_BRACE = 123 ---@type integer
-local BYTE_OPEN_BRACK = 91 ---@type integer
-local BYTE_SEMI       = 59 ---@type integer
+local BYTE_OPEN_BRACK = 91  ---@type integer
+local BYTE_SEMI       = 59  ---@type integer
 
 -- Per-check output paths (relative to ctx.out_root).
 local OUTPUT_EXTENSION = ".static_analysis.txt" ---@type string
@@ -432,19 +432,19 @@ end
 -- UNANCHORED, the substring can appea anywhere in the token (e.g., `load_word(R_T0, R_TapePtr, O_(Binds_X, field))` matches at position ~24).
 -- The binds_name match is deferred to check_abi_handoff (which compares ev.o_arg1 == atom.info.binds).
 local O_PATTERN = "O_%(([%w_]+),%s*([%w_]+)%s*%)" ---@type string
-local S_PATTERN = "S_%(([%w_]+)%s*%)" ---@type string
+local S_PATTERN = "S_%(([%w_]+)%s*%)"             ---@type string
 
 -- jump_rel is already INSTRUCTION.kind == "branch". Branch flags come from duffle.instr(ident).kind.
 
 --- @param events WordEvent[]|nil
 --- @return nil
 local function stamp_event_fields(events)
-	local nop_run = 0 ---@type integer
+	local nop_run = 0                    ---@type integer
 	for _, ev in ipairs(events or {}) do ---@type integer, WordEvent
-		local ident           = ev.encoder or ev.ident or "" ---@type string
+		local ident           = ev.encoder or ev.ident or ""                                    ---@type string
 		local haystack        = (ev.call_text or "") .. " " .. table.concat(ev.args or {}, ",") ---@type string
-		local is_delay_marker = false ---@type boolean
-		local delay_marker    = nil ---@type string|nil
+		local is_delay_marker = false                                                           ---@type boolean
+		local delay_marker    = nil                                                             ---@type string|nil
 		if duffle.DELAY_MARKERS and duffle.DELAY_MARKERS[ident] then
 			is_delay_marker = true
 			delay_marker    = ident
@@ -456,23 +456,23 @@ local function stamp_event_fields(events)
 		-- mac_yield_tail is the lego-split terminator (addiu_self; jr R_AtomJmp; nop).
 		-- Treat it as a yield for the mac_yield_uniformity check.
 		local is_yield              = ident == "mac_yield" or ident == "mac_yield_tail" ---@type boolean
-		local is_atom_label         = false ---@type boolean
-		local label_name            = nil ---@type string|nil
-		local is_branch             = false ---@type boolean
-		local is_unconditional_jump = false ---@type boolean
-		local is_terminal_jump      = false ---@type boolean
-		local branch_label          = nil ---@type string|false|nil
-		local isa                   = duffle.instr(ident) ---@type InstructionRow|nil
-		local is_load               = isa and isa.kind == "load" ---@type boolean
-		local is_store_word         = ident == "store_word" ---@type boolean
+		local is_atom_label         = false                                             ---@type boolean
+		local label_name            = nil                                               ---@type string|nil
+		local is_branch             = false                                             ---@type boolean
+		local is_unconditional_jump = false                                             ---@type boolean
+		local is_terminal_jump      = false                                             ---@type boolean
+		local branch_label          = nil                                               ---@type string|false|nil
+		local isa                   = duffle.instr(ident)                               ---@type InstructionRow|nil
+		local is_load               = isa and isa.kind == "load"                        ---@type boolean
+		local is_store_word         = ident == "store_word"                             ---@type boolean
 
-		local mac_format_shape     = nil ---@type string|nil
-		local is_gte_store         = false ---@type boolean
-		local is_ot_tag            = false ---@type boolean
-		local writes_r_prim_cursor = false ---@type boolean
-		local reads_r_tape_ptr     = false ---@type boolean
+		local mac_format_shape     = nil      ---@type string|nil
+		local is_gte_store         = false    ---@type boolean
+		local is_ot_tag            = false    ---@type boolean
+		local writes_r_prim_cursor = false    ---@type boolean
+		local reads_r_tape_ptr     = false    ---@type boolean
 		local o_arg1, o_arg2       = nil, nil ---@type string|nil, string|nil
-		local s_arg1               = nil ---@type string|nil
+		local s_arg1               = nil      ---@type string|nil
 
 		if ident == "atom_label" then
 			is_atom_label = true
@@ -540,10 +540,10 @@ end
 --- @param atom AtomEntry
 --- @return nil
 local function stamp_raw_yield_handshake(atom)
-	local items  = atom.paths and atom.paths.items or {} ---@type EmissionItem[]
+	local items  = atom.paths and atom.paths.items or {}       ---@type EmissionItem[]
 	local events = atom.paths and atom.paths.word_events or {} ---@type WordEvent[]
-	local bd_after = {} ---@type table<integer, boolean>  -- bag
-	for idx, it in ipairs(items) do ---@type integer, EmissionItem
+	local bd_after = {}                                        ---@type table<integer, boolean>  -- bag
+	for idx, it in ipairs(items) do                            ---@type integer, EmissionItem
 		if it.kind == "word" then
 			local nxt = items[idx + 1] ---@type EmissionItem|nil
 			if nxt and nxt.kind == "delay" and nxt.name == "BdSlot_" then
@@ -552,9 +552,9 @@ local function stamp_raw_yield_handshake(atom)
 		end
 	end
 	for _, ev in ipairs(events) do ---@type integer, WordEvent
-		local enc  = ev.encoder or ev.ident or "" ---@type string
-		local args = ev.args or {} ---@type string[]
-		local rct  = ev.root_call_text or ev.call_text or "" ---@type string
+		local enc  = ev.encoder or ev.ident or ""                                          ---@type string
+		local args = ev.args or {}                                                         ---@type string[]
+		local rct  = ev.root_call_text or ev.call_text or ""                               ---@type string
 		local from_mac = type(rct) == "string" and rct:sub(1, #"mac_yield") == "mac_yield" ---@type boolean
 		if enc == "jump_reg" and args[1] == "R_AtomJmp" and bd_after[ev.i] and not from_mac then
 			ev.is_raw_yield_tail = true
@@ -627,12 +627,12 @@ local function is_cop2_consumer_of(consumer_event, destination, producer_rel)
 	-- (Reserved for future relations where the consumer literally reads the destination register;
 	-- not used by MTC2/CTC2 today because the "consumer" is a GTE command and its reads are not operand positions.)
 	local args = consumer_event.args or {} ---@type string[]
-	for _, pos in ipairs(args) do ---@type integer, integer
+	for _, pos in ipairs(args) do          ---@type integer, integer
 		if   pos == destination then return true end
 	end
 	-- Match via the command's input set: the consumer encoder resolves to a `gte_cmdw_*`
 	-- short form whose GTE_COMMAND.inputs includes the destination (or a fan-out target).
-	local gte       = duffle.gte(consumer_token) ---@type GteCommandRow|nil
+	local gte       = duffle.gte(consumer_token)       ---@type GteCommandRow|nil
 	local canonical = duffle.gte_canon(consumer_token) ---@type string
 	if gte or canonical:sub(1, 9) == "gte_cmdw_" then
 		local cmd_inputs = gte and gte.inputs ---@type string[]|nil
@@ -670,8 +670,8 @@ end
 --- @return boolean
 local function is_gpr_consumer_of(consumer_event, destination)
 	local consumer_token = consumer_event.encoder or consumer_event.ident ---@type string
-	local read_pos       = duffle.OPERAND_READ_POSITIONS or {} ---@type table<string, integer[]>
-	local positions      = read_pos[consumer_token] ---@type integer[]|nil
+	local read_pos       = duffle.OPERAND_READ_POSITIONS or {}            ---@type table<string, integer[]>
+	local positions      = read_pos[consumer_token]                       ---@type integer[]|nil
 	if not positions then return false end
 	for _, pos in ipairs(positions) do ---@type integer, integer
 		if gpr_identity(consumer_event, pos) == destination then return true end
@@ -715,9 +715,9 @@ local function bit_binary(left, right, operation)
 	local result = 0 ---@type integer
 	local place  = 1 ---@type integer
 	for _ = 1, 32 do ---@type integer
-		local left_bit  = left % 2 ---@type integer
+		local left_bit  = left % 2  ---@type integer
 		local right_bit = right % 2 ---@type integer
-		local take ---@type boolean
+		local take                  ---@type boolean
 		if     operation == "or"  then take = left_bit == 1 or right_bit == 1
 		elseif operation == "and" then take = left_bit == 1 and right_bit == 1
 		else                           take = left_bit ~= right_bit
@@ -863,7 +863,7 @@ local function evaluate_gpr_value_rule(rule, ev_args, gpr_values)
 	local op = VALUE_OPS[operation] ---@type fun(...): integer|nil
 	if not op then return nil end
 	if rule.sources then
-		local values = {} ---@type integer[]
+		local values = {}                              ---@type integer[]
 		for index, position in ipairs(rule.sources) do ---@type integer, integer
 			values[index] = constant_for_operand(gpr_values, ev_args[position])
 			if values[index] == nil then return nil end
@@ -881,10 +881,10 @@ end
 --- @param forward_state ForwardState
 --- @return nil
 local function apply_gpr_effects(ev, forward_state)
-	local ev_ident   = ev.encoder or ev.ident ---@type string
-	local ev_args    = ev.args or {} ---@type string[]
-	local gpr_values = forward_state.gpr_values ---@type table<string, GprLatticeSlot>
-	local isa        = duffle.instr(ev_ident) ---@type InstructionRow|nil
+	local ev_ident   = ev.encoder or ev.ident                           ---@type string
+	local ev_args    = ev.args or {}                                    ---@type string[]
+	local gpr_values = forward_state.gpr_values                         ---@type table<string, GprLatticeSlot>
+	local isa        = duffle.instr(ev_ident)                           ---@type InstructionRow|nil
 	local row        = isa and (isa.reads or isa.writes) and isa or nil ---@type InstructionRow|nil
 	if row == nil and duffle.gte(ev_ident) then
 		row = { reads = {}, writes = {} }
@@ -899,9 +899,9 @@ local function apply_gpr_effects(ev, forward_state)
 		return
 	end
 
-	local value_rule = isa and isa.value ---@type InstructionValue|nil
+	local value_rule = isa and isa.value                                                              ---@type InstructionValue|nil
 	local value      = value_rule and evaluate_gpr_value_rule(value_rule, ev_args, gpr_values) or nil ---@type integer|nil
-	for _, position in ipairs(row.writes or {}) do ---@type integer, integer
+	for _, position in ipairs(row.writes or {}) do                                                    ---@type integer, integer
 		local destination = gpr_identity(ev, position) ---@type string|nil
 		if destination then
 			if value_rule and position == value_rule.dest and value ~= nil then
@@ -941,9 +941,9 @@ end
 --- @return nil
 local function append_cu2_finding(atom, event, forward, transition, gap, kind, confidence, message)
 	local event_ident = event.encoder or event.ident or "?" ---@type string
-	local policy      = duffle.CU2_TRANSITION_POLICY or {} ---@type Cu2TransitionPolicy|DelaySlotPolicy|nil
-	local evidence    = policy.evidence or {} ---@type HardwareRelationEvidence
-	local event_line  = line_for_word_event(event) ---@type integer
+	local policy      = duffle.CU2_TRANSITION_POLICY or {}  ---@type Cu2TransitionPolicy|DelaySlotPolicy|nil
+	local evidence    = policy.evidence or {}               ---@type HardwareRelationEvidence
+	local event_line  = line_for_word_event(event)          ---@type integer
 	atom.paths.hazards[#atom.paths.hazards + 1] = {
 		check                = "transfer_hazards",
 		kind                 = kind,
@@ -987,8 +987,8 @@ local function stage_cu2_transition(ev_ident, ev_args, ev_word, ev_line, ev_sour
 	if    status_register ~= policy.status_register then return end
 
 	local status_value   = constant_for_operand(forward.gpr_values, ev_args[1]) ---@type integer|nil
-	local target_state   = "unknown" ---@type string
-	local target_enabled = nil ---@type boolean|nil
+	local target_state   = "unknown"                                            ---@type string
+	local target_enabled = nil                                                  ---@type boolean|nil
 	if status_value ~= nil then
 		target_enabled = bit_binary(status_value, policy.enable_bit, "and") ~= 0
 		target_state   = target_enabled and "enabled" or "disabled"
@@ -1022,8 +1022,8 @@ local function consume_cu2_transition(atom, event, ev_word, forward)
 	if not transition then return end
 
 	local gap        = ev_word - transition.producer_word - 1 ---@type integer
-	local target     = transition.target_state ---@type string
-	local event_line = line_for_word_event(event) ---@type integer
+	local target     = transition.target_state                ---@type string
+	local event_line = line_for_word_event(event)             ---@type integer
 	if target == "unknown" then
 		append_cu2_finding(atom, event, forward, transition, gap, "info", "unknown",
 			string.format("%s at line %d uses COP2 after an MTC0 Status write whose CU2 value is unknown (gap=%d, configured boundary=%d)"
@@ -1068,8 +1068,8 @@ end
 --- @return nil
 local function analyze_hardware_relations(atom)
 	local events      = atom.paths and atom.paths.word_events or {} ---@type WordEvent[]
-	local prior_state = atom.paths.forward_state ---@type ForwardState|nil
-	local seed_values = {} ---@type table<string, GprLatticeSlot>
+	local prior_state = atom.paths.forward_state                    ---@type ForwardState|nil
+	local seed_values = {}                                          ---@type table<string, GprLatticeSlot>
 	if prior_state and not prior_state._analysis_complete then
 		for register, slot in pairs(prior_state.gpr_values or {}) do ---@type string, GprLatticeSlot
 			if type(slot) == "table" and slot.kind == "constant" then
@@ -1097,13 +1097,13 @@ local function analyze_hardware_relations(atom)
 	atom.paths.relations     = {}
 	atom.paths.hazards       = {}
 
-	local hazards   = atom.paths.hazards ---@type CheckFinding[]
+	local hazards   = atom.paths.hazards   ---@type CheckFinding[]
 	local relations = atom.paths.relations ---@type RelationTouch[]
-	local pending   = forward.pending ---@type PendingProducer[]
+	local pending   = forward.pending      ---@type PendingProducer[]
 
 	local relations_table = duffle.HARDWARE_RELATIONS or {} ---@type HardwareRelationRow[]
 	-- Build a token-indexed lookup once per walker pass.
-	local rows_by_token = {} ---@type RelationRowsByToken
+	local rows_by_token = {}                 ---@type RelationRowsByToken
 	for _, row in ipairs(relations_table) do ---@type integer, HardwareRelationRow
 		local token = row.token ---@type string
 		if token then
@@ -1114,9 +1114,9 @@ local function analyze_hardware_relations(atom)
 
 	for _, ev in ipairs(events) do ---@type integer, WordEvent
 		local ev_ident  = ev.encoder   or ev.ident  or "?" ---@type string
-		local ev_line   = line_for_word_event(ev) ---@type integer
-		local ev_source = ev.def_path  or ev.source or "" ---@type string
-		local ev_args   = ev.args      or {} ---@type string[]
+		local ev_line   = line_for_word_event(ev)          ---@type integer
+		local ev_source = ev.def_path  or ev.source or ""  ---@type string
+		local ev_args   = ev.args      or {}               ---@type string[]
 		-- `word_events` use `i` as the 0-based word index across the entire expansion.
 		-- Default to 0 if the field is absent (the producer's own word).
 		local ev_word   = ev.i or 0 ---@type integer
@@ -1160,19 +1160,19 @@ local function analyze_hardware_relations(atom)
 			end,
 			overwrite_same_dest = function(ev, prod)
 				local ident = ev.encoder or ev.ident ---@type string
-				local args  = ev.args or {} ---@type string[]
+				local args  = ev.args or {}          ---@type string[]
 				return (ident == "gte_mv_to_data_r" or ident == "gte_mv_to_ctrl_r")
 					and args[2] == prod.destination
 			end,
 		}
 		for pending_idx = #pending, 1, -1 do ---@type integer
-			local prod     = pending[pending_idx] ---@type PendingProducer
-			local relation = prod.relation ---@type HardwareRelationRow
-			local match_fn = CONSUMER[relation.consumer] ---@type (fun(ev: WordEvent, prod: PendingProducer): boolean)|nil
+			local prod     = pending[pending_idx]            ---@type PendingProducer
+			local relation = prod.relation                   ---@type HardwareRelationRow
+			local match_fn = CONSUMER[relation.consumer]     ---@type (fun(ev: WordEvent, prod: PendingProducer): boolean)|nil
 			local is_match = match_fn and match_fn(ev, prod) ---@type boolean|nil
 			if is_match then
 				local gap      = ev_word - prod.word - 1 ---@type integer
-				local required = prod.required ---@type integer|nil
+				local required = prod.required           ---@type integer|nil
 				-- A following COP2 command waits at the transfer boundary.
 				-- Software nops are not required for that consumer class.
 				if is_gte_command(ev)
@@ -1271,7 +1271,7 @@ local function analyze_hardware_relations(atom)
 			for _, row in ipairs(rows) do ---@type integer, HardwareRelationRow
 				-- `stage = false` rows document a direction but do not create a later command-input producer (SWC2 and ordinary MTC0).
 				if row.stage ~= false then
-					local dest_arg    = row.writes and row.writes.arg ---@type integer|nil
+					local dest_arg    = row.writes and row.writes.arg                                         ---@type integer|nil
 					local destination = dest_arg and (gpr_identity(ev, dest_arg) or ev_args[dest_arg]) or nil ---@type string|nil
 					if destination then
 						-- Apply the destination_match filter when present.
@@ -1319,7 +1319,7 @@ local function analyze_hardware_relations(atom)
 			local canonical = canonical_command(ev_ident) ---@type string
 			if    canonical:sub(1, 9) == "gte_cmdw_" then
 				-- Update the post-command role state.
-				local gte_row     = duffle.gte(canonical) ---@type GteCommandRow|nil
+				local gte_row     = duffle.gte(canonical)       ---@type GteCommandRow|nil
 				local cmd_outputs = gte_row and gte_row.outputs ---@type GteCommandPort[]|nil
 				if cmd_outputs then
 					for _, out in ipairs(cmd_outputs) do ---@type integer, GteCommandPort
@@ -1393,7 +1393,7 @@ end
 --- @return nil
 local function check_transfer_hazards(atom, _pipe_ctx, findings)
 	local  hazards = atom.paths and atom.paths.hazards or {} ---@type CheckFinding[]
-	for _, hazard in ipairs(hazards) do ---@type integer, CheckFinding
+	for _, hazard in ipairs(hazards) do                      ---@type integer, CheckFinding
 		findings[#findings + 1] = hazard
 	end
 end
@@ -1412,9 +1412,9 @@ end
 --- @return nil
 local function check_gte_input_latch(atom, _pipe_ctx, findings)
 	local hazards = atom.paths and atom.paths.hazards or {} ---@type CheckFinding[]
-	for _, hazard in ipairs(hazards) do ---@type integer, CheckFinding
+	for _, hazard in ipairs(hazards) do                     ---@type integer, CheckFinding
 		if hazard.relation_id == "command_latch_input" then
-			local payload = {} ---@type CheckFinding
+			local payload = {}                              ---@type CheckFinding
 			for k, v in pairs(hazard) do payload[k] = v end ---@type string, string|integer|boolean|nil
 			payload.check = "gte_input_latch"
 			-- Surface `producer_command` on the emitted payload:
@@ -1459,11 +1459,11 @@ local function check_gte_role_mismatch(atom, _pipe_ctx, findings)
 		local ev_ident = ev.encoder ---@type string
 		if ev_ident == "gte_mv_from_data_r" then
 			local args = ev.args or {} ---@type string[]
-			local reg  = args[2] ---@type string
+			local reg  = args[2]       ---@type string
 			-- Find any post-command `latest_screen_xy` role entry recorded by a prior command.
 			-- The newest projected screen coordinate is recorded under the command name.
 			-- Reading from C2_SXY0 (the older projection slot) when a `latest_screen_xy` role was set to C2_SXY2 by RTPS / RTPT is a semantic mismatch.
-			local latest_screen_xy_entry = nil ---@type PostCommandRole|nil
+			local latest_screen_xy_entry = nil                     ---@type PostCommandRole|nil
 			for r, e in pairs(forward.post_command_roles or {}) do ---@type string, PostCommandRole
 				if e.role == "latest_screen_xy" then
 					latest_screen_xy_entry = e
@@ -1529,7 +1529,7 @@ end
 --- @return nil
 local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 	local forward = atom.paths and atom.paths.forward_state ---@type ForwardState
-	local events  = atom.paths.word_events or {} ---@type WordEvent[]
+	local events  = atom.paths.word_events or {}            ---@type WordEvent[]
 	-- GPR effects table used to resolve load destinations when classifying load-delay-slot nops.
 	if not events or #events == 0 then return end
 	-- Runtime-helper atoms / components (e.g. tape_exit, ac_yield) carry `debug_skip = true` from the bare
@@ -1538,12 +1538,12 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 
 	-- The walker does not currently snapshot the pending state per event; we replay the same forward walk cheaply here.
 	-- The replay is observation-only (no staging); the only output is one finding per non-BD-slot nop with its classification.
-	local pending_snapshot = {} ---@type PendingProducer[]
-	local prev_ev = nil ---@type WordEvent|nil
+	local pending_snapshot = {}            ---@type PendingProducer[]
+	local prev_ev = nil                    ---@type WordEvent|nil
 	for event_idx, ev in ipairs(events) do ---@type integer, WordEvent
-		local ev_ident = ev.encoder or "" ---@type string
-		local ev_args  = ev.args or {} ---@type string[]
-		local ev_word  = ev.i or 0 ---@type integer
+		local ev_ident = ev.encoder or ""        ---@type string
+		local ev_args  = ev.args or {}           ---@type string[]
+		local ev_word  = ev.i or 0               ---@type integer
 		local ev_line  = line_for_word_event(ev) ---@type integer
 
 		-- Classify the nop BEFORE its event is applied to the pending state.
@@ -1552,14 +1552,14 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 			-- (the nop after a branch/jump — covered by that check separately).
 			-- Every BD-slot nop is structural; this check never reports on it.
 			-- (The earlier `if not suppressed then is_bd_slot = true end` form inverted the suppression - the `mac_yield()` handshake's `jump_reg(R_AtomJmp)` was incorrectly flagged.)
-			local prev_ident   = prev_ev.encoder or "" ---@type string
+			local prev_ident   = prev_ev.encoder or ""    ---@type string
 			local prev_isa     = duffle.instr(prev_ident) ---@type InstructionRow|nil
-			local is_bd_slot   = prev_isa ---@type boolean|nil
+			local is_bd_slot   = prev_isa                 ---@type boolean|nil
 				and (prev_isa.kind == "branch" or prev_isa.kind == "jump" or prev_isa.kind == "call")
 				and prev_isa.delay_slot ~= false
 			if not is_bd_slot then
 				-- Find a pending modeled relation that this nop would retire.
-				local retired = nil ---@type PendingProducer|nil
+				local retired = nil                        ---@type PendingProducer|nil
 				for _, prod in ipairs(pending_snapshot) do ---@type integer, PendingProducer
 					if prod.required and (prod.word + prod.required + 1) > ev_word then
 						retired = prod
@@ -1569,14 +1569,14 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 				if retired then
 					-- Look ahead for the would-be consumer (the next emitted command or read after the nop that the relation would retire).
 					-- For an MTC2 -> command relation, the consumer is the next GTE command after the nop.
-					local would_be_consumer = nil ---@type string|nil
+					local would_be_consumer = nil         ---@type string|nil
 					for _, future_ev in ipairs(events) do ---@type integer, WordEvent
 						local f_word = future_ev.i or future_ev.word or 0 ---@type integer
 						if f_word > ev_word then
 							local f_ident   = future_ev.encoder or future_ev.ident or "" ---@type string
-							local f_args    = future_ev.args or {} ---@type string[]
-							local f_gte     = duffle.gte(f_ident) ---@type GteCommandRow|nil
-							local canonical = duffle.gte_canon(f_ident) ---@type string
+							local f_args    = future_ev.args or {}                       ---@type string[]
+							local f_gte     = duffle.gte(f_ident)                        ---@type GteCommandRow|nil
+							local canonical = duffle.gte_canon(f_ident)                  ---@type string
 							if canonical:sub(1, 9) == "gte_cmdw_" then
 								local cmd_inputs = f_gte and f_gte.inputs ---@type string[]|nil
 								if cmd_inputs then
@@ -1620,11 +1620,11 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 					local is_load_delay = prev_isa and prev_isa.kind == "load" ---@type boolean|nil
 					if    is_load_delay then
 						-- Determine the destination register from the load's `writes` field.
-						local prev_writes = prev_isa.writes or {} ---@type integer[]
-						local dest_pos    = prev_writes[1] ---@type integer|nil
+						local prev_writes = prev_isa.writes or {}                                                                                    ---@type integer[]
+						local dest_pos    = prev_writes[1]                                                                                           ---@type integer|nil
 						local load_dest   = dest_pos and (gpr_identity(prev_ev, dest_pos) or (prev_ev.args or {})[dest_pos]) or "<load-destination>" ---@type string
-						local authored    = dest_pos and (prev_ev.args or {})[dest_pos] or load_dest ---@type string
-						local shown       = authored ---@type string
+						local authored    = dest_pos and (prev_ev.args or {})[dest_pos] or load_dest                                                 ---@type string
+						local shown       = authored                                                                                                 ---@type string
 						if type(load_dest) == "string" and load_dest:sub(1, 7) == "reguse:" then
 							local slot = load_dest:match("([^:]+)$") ---@type GprLatticeSlot|nil
 							if slot then shown = authored .. " (slot " .. slot .. ")" end
@@ -1670,9 +1670,9 @@ local function check_hazard_nop_use(atom, _pipe_ctx, findings)
 		local canonical = duffle.gte_canon(ev_ident) ---@type string
 		if ev_ident == "gte_mv_to_data_r" or ev_ident == "gte_mv_to_ctrl_r" then
 			local relations_table = duffle.HARDWARE_RELATIONS or {} ---@type HardwareRelationRow[]
-			for _, row in ipairs(relations_table) do ---@type integer, HardwareRelationRow
+			for _, row in ipairs(relations_table) do                ---@type integer, HardwareRelationRow
 				if row.token == ev_ident and row.stage ~= false then
-					local dest_arg    = row.writes and row.writes.arg ---@type integer|nil
+					local dest_arg    = row.writes and row.writes.arg                                         ---@type integer|nil
 					local destination = dest_arg and (gpr_identity(ev, dest_arg) or ev_args[dest_arg]) or nil ---@type string|nil
 					if destination and (not row.destination_match or row.destination_match == destination) then
 						local required = row.visibility and row.visibility.required ---@type integer|nil
@@ -1749,18 +1749,18 @@ local function check_control_transfer_delay_slot_use(atom, pipe_ctx, findings)
 	for event_idx, event in ipairs(events) do ---@type integer, WordEvent
 		-- Canonical word_events use `encoder` as the leading identifier of the emitting token).
 		-- Focused inputs may supply `ident` when constructing isolated events.
-		local event_ident      = event.encoder or event.ident ---@type string
+		local event_ident      = event.encoder or event.ident           ---@type string
 		local slot_ident_field = event.encoder and "encoder" or "ident" ---@type string
-		local event_isa        = duffle.instr(event_ident) ---@type InstructionRow|nil
-		local policy           = event_isa ---@type Cu2TransitionPolicy|DelaySlotPolicy|nil
+		local event_isa        = duffle.instr(event_ident)              ---@type InstructionRow|nil
+		local policy           = event_isa                              ---@type Cu2TransitionPolicy|DelaySlotPolicy|nil
 			and (event_isa.kind == "branch" or event_isa.kind == "jump" or event_isa.kind == "call")
 			and event_isa.delay_slot ~= false
 			and { family = event_isa.kind, suppress_arg1 = event_isa.suppress_arg1 }
 		if policy then
-			local arg1       = event.args and event.args[1] or nil ---@type string|nil
+			local arg1       = event.args and event.args[1] or nil                        ---@type string|nil
 			local suppressed = policy.suppress_arg1 and policy.suppress_arg1[arg1] or nil ---@type string|nil
 			if not suppressed then
-				local slot       = events[event_idx + 1] ---@type GprLatticeSlot|nil
+				local slot       = events[event_idx + 1]                                ---@type GprLatticeSlot|nil
 				local slot_ident = slot and (slot.encoder or slot.ident) or "<missing>" ---@type string
 				if slot == nil or (slot.encoder or slot.ident) == "nop" then
 					-- Prefer `call_line` (the line of the `mac_X(...)` call site in the atom body) so the rendered
@@ -1826,14 +1826,14 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 	--- @param args        string[]
 	--- @return integer[]
 	local function net_reads(event_ident, args)
-		local effect    = duffle.instr(event_ident) ---@type InstructionRow|nil
+		local effect    = duffle.instr(event_ident)   ---@type InstructionRow|nil
 		local positions = read_positions[event_ident] ---@type integer[]|nil
 		if not positions then return {} end
 		local writes_set = {} ---@type table<integer, boolean>  -- bag
 		if effect and effect.writes then
 			for _, pos in ipairs(effect.writes) do writes_set[pos] = true end ---@type integer, integer
 		end
-		local net = {} ---@type integer[]
+		local net = {}                     ---@type integer[]
 		for _, pos in ipairs(positions) do ---@type integer, integer
 			if not writes_set[pos] then net[#net + 1] = pos end
 		end
@@ -1841,9 +1841,9 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 	end
 
 	for event_idx, event in ipairs(events) do ---@type integer, WordEvent
-		local event_ident = event.encoder or event.ident ---@type string
-		local args        = event.args or {} ---@type string[]
-		local event_isa   = duffle.instr(event_ident) ---@type InstructionRow|nil
+		local event_ident = event.encoder or event.ident           ---@type string
+		local args        = event.args or {}                       ---@type string[]
+		local event_isa   = duffle.instr(event_ident)              ---@type InstructionRow|nil
 		local is_load     = event_isa and event_isa.kind == "load" ---@type boolean
 
 		-- (1) Is this event reading a register that's still volatile from a previous load?
@@ -1857,7 +1857,7 @@ local function check_load_delay_slots(atom, pipe_ctx, findings)
 					local until_idx = volatile_until[reg] ---@type integer
 					if until_idx and event_idx <= until_idx then
 						local ev_line = line_for_word_event(event) ---@type integer
-						local authored = args[pos] or reg ---@type string
+						local authored = args[pos] or reg          ---@type string
 						findings[#findings + 1] = {
 							atom  = atom.name,
 							line  = ev_line,
@@ -1929,7 +1929,7 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 	--
 	-- The GTE pipeline-fill check applies to all 3 kinds (see check_gte_pipeline_fill). Only the mac_yield rule branches on kind.
 	local events = atom.paths.word_events or {} ---@type WordEvent[]
-	local n      = #events ---@type integer
+	local n      = #events                      ---@type integer
 
 	-- Emission sets is_yield on encoder mac_yield / mac_yield_tail.
 	-- Expanded component words keep the call_text lead; count one call, not every word.
@@ -1943,9 +1943,9 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 		return lead == "mac_yield" or lead == "mac_yield_tail"
 	end
 
-	local count    = 0 ---@type integer
-	local last_idx = 0 ---@type integer
-	local seen_inv = {} ---@type table<string|integer, boolean>  -- bag
+	local count    = 0   ---@type integer
+	local last_idx = 0   ---@type integer
+	local seen_inv = {}  ---@type table<string|integer, boolean>  -- bag
 	for ev_idx = 1, n do ---@type integer
 		local ev = events[ev_idx] ---@type WordEvent
 		if event_is_yield(ev) then
@@ -1990,9 +1990,9 @@ local function check_mac_yield_uniformity(atom, pipe_ctx, findings)
 		elseif last_idx < n then
 			-- 1 call, but not the last event. We DON'T fail if the post-event is just `nop` or `nop2`.
 			-- It's the standard "yield, then BD nop" idiom.
-			local post_non_nop = false ---@type boolean
+			local post_non_nop = false          ---@type boolean
 			for search_idx = last_idx + 1, n do ---@type integer
-				local ev  = events[search_idx] ---@type WordEvent
+				local ev  = events[search_idx]           ---@type WordEvent
 				local enc = ev.encoder or ev.ident or "" ---@type string
 				if (ev.nop_words or 0) == 0 and enc ~= "" then
 					post_non_nop = true
@@ -2060,25 +2060,25 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 
 	local events  = atom.paths.word_events or {} ---@type WordEvent[]
 	local invs    = atom.paths.invocations or {} ---@type InvocationRecord[]
-	local markers = atom.paths.markers or {} ---@type EmissionMarker[]
-	local n       = #events ---@type integer
-	local inv_n   = #invs ---@type integer
+	local markers = atom.paths.markers or {}     ---@type EmissionMarker[]
+	local n       = #events                      ---@type integer
+	local inv_n   = #invs                        ---@type integer
 
 	if n == 0 then return end
 
 	-- Build invocation lookup: inv_id -> inv record.
-	local inv_by_id = {} ---@type table<integer, InvocationRecord>
+	local inv_by_id = {}                                      ---@type table<integer, InvocationRecord>
 	for _, inv in ipairs(invs) do inv_by_id[inv.id] = inv end ---@type integer, InvocationRecord
 
 	-- Build label markers: name -> position (0-based word index of the next emitted word).
 	-- Marker records often have nil position; derive it from the items stream.
-	local label_pos = {} ---@type table<string, integer>
-	local pending_labels = {} ---@type string[]
+	local label_pos = {}                           ---@type table<string, integer>
+	local pending_labels = {}                      ---@type string[]
 	for _, it in ipairs(atom.paths.items or {}) do ---@type integer, EmissionItem
 		if it.kind == "label" and it.name then
 			pending_labels[#pending_labels + 1] = it.name
 		elseif it.kind == "word" then
-			local wi = it.i ---@type integer|nil
+			local wi = it.i                        ---@type integer|nil
 			for _, nm in ipairs(pending_labels) do ---@type integer, string
 				if wi ~= nil then label_pos[nm] = wi end
 			end
@@ -2107,7 +2107,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 	--- @param name string
 	--- @return boolean
 	local function call_names(ev, name)
-		local enc = ev.encoder or ev.ident or "" ---@type string
+		local enc = ev.encoder or ev.ident or ""            ---@type string
 		local rct = ev.root_call_text or ev.call_text or "" ---@type string
 		if enc == name or rct:sub(1, #name) == name then return true end
 		local bare = name:gsub("^mac_", "") ---@type string
@@ -2184,12 +2184,12 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		if not is_yield_load_first(ev, event_idx) then goto continue_rule1 end
 
 		local prev_i = skip_delay(event_idx - 1, -1) ---@type integer
-		local ev_word = ev.i or 0 ---@type integer
+		local ev_word = ev.i or 0                    ---@type integer
 		-- label_pos[name] = word index of the first word after that label (from items).
 		-- Fall-through load: atom_label(A) / mac_yield_load() / atom_label(B)
 		--   → label_pos[A] == ev_word and some label_pos[B] == ev_word + 1.
-		local prev_label = false ---@type string|nil
-		local next_label_pos = nil ---@type integer|nil
+		local prev_label = false          ---@type string|nil
+		local next_label_pos = nil        ---@type integer|nil
 		for _, pos in pairs(label_pos) do ---@type string, integer
 			if pos == ev_word then prev_label = true end
 			if pos == ev_word + 1 then next_label_pos = pos end
@@ -2200,10 +2200,10 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 
 		local  natural_fallthrough = prev_label and (next_label_pos ~= nil) ---@type boolean
 		if not natural_fallthrough then
-			local prev_ev = prev_i and events[prev_i] ---@type WordEvent|nil
+			local prev_ev = prev_i and events[prev_i]                                                                  ---@type WordEvent|nil
 			local prev_is_branch = prev_ev and ((prev_ev.kind == "branch") or (prev_ev.is_unconditional_jump == true)) ---@type boolean
 			if not prev_is_branch then
-				local prev_ident = prev_ev and (prev_ev.encoder or prev_ev.ident or "?") or "<none>" ---@type string
+				local prev_ident = prev_ev and (prev_ev.encoder or prev_ev.ident or "?") or "<none>"                     ---@type string
 				local next_ident = next_label_pos and ("atom_label at pos " .. next_label_pos) or "<no following label>" ---@type string
 				findings[#findings + 1] = {
 					atom  = atom.name,
@@ -2220,7 +2220,7 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 
 	-- ── Rule 2: `mac_yield_tail()` is valid if every path that reaches it already ran `mac_yield_load()`.
 	-- Build offset map for branch target resolution.
-	local offset_map = {} ---@type OffsetMapByEncoder
+	local offset_map = {}          ---@type OffsetMapByEncoder
 	for _, m in ipairs(markers) do ---@type integer, EmissionMarker
 		if m.kind == "offset" and m.consuming_encoder and m.target then
 			offset_map[m.consuming_encoder]           = offset_map[m.consuming_encoder] or {}
@@ -2233,12 +2233,12 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 	--- @return integer|nil
 	local function resolve_target(ev)
 		local enc     = ev.encoder or ev.ident or "" ---@type string
-		local off_map = offset_map[enc] ---@type OffsetTargetMap|nil
-		local args    = ev.args or {} ---@type string[]
+		local off_map = offset_map[enc]              ---@type OffsetTargetMap|nil
+		local args    = ev.args or {}                ---@type string[]
 		-- Find the last non-register arg as the target name.
 		local target_name = nil ---@type string|nil
 		for i = #args, 1, -1 do ---@type integer
-			local a       = tostring(args[i] or "") ---@type string
+			local a       = tostring(args[i] or "")                      ---@type string
 			local off_tgt = a:match("atom_offset%s*%([^,]+,%s*([%w_]+)") ---@type integer|nil
 			if off_tgt then
 				target_name = off_tgt
@@ -2282,8 +2282,8 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 	local function load_covers_tail(tail_event_idx)
 		local reached_without = false ---@type boolean
 		local reached_any     = false ---@type boolean
-		local path_n          = 0 ---@type integer
-		local MAX_PATHS       = 64 ---@type integer
+		local path_n          = 0     ---@type integer
+		local MAX_PATHS       = 64    ---@type integer
 
 		--- @param ev_idx   integer
 		--- @param saw_load boolean
@@ -2292,11 +2292,11 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 		local function dfs(ev_idx, saw_load, visited)
 			if path_n >= MAX_PATHS then return end
 			if visited[ev_idx] then return end
-			local vis = {} ---@type table<integer, boolean>  -- bag
+			local vis = {}                               ---@type table<integer, boolean>  -- bag
 			for k, v in pairs(visited) do vis[k] = v end ---@type string, string|integer|boolean|nil
 			vis[ev_idx] = true
 
-			local ev = events[ev_idx] ---@type WordEvent
+			local ev = events[ev_idx]                        ---@type WordEvent
 			local saw = saw_load or ev_is_load_first(ev_idx) ---@type boolean
 
 			-- BD slot (ev_idx + 1): if this is a branch, the BD slot always runs.
@@ -2367,8 +2367,8 @@ local function check_yield_load_tail_pairing(atom, _pipe_ctx, findings)
 
 		-- Find the preceding label marker (must be the atom_label just before this invocation).
 		-- The invocation starts at ev.i (0-based word index). Find the label marker whose position == ev.i.
-		local ev_word = ev.i or 0 ---@type integer
-		local prev_label_name = nil ---@type string|nil
+		local ev_word = ev.i or 0            ---@type integer
+		local prev_label_name = nil          ---@type string|nil
 		for name, pos in pairs(label_pos) do ---@type string, integer
 			if pos == ev_word then
 				prev_label_name = name
@@ -2442,7 +2442,7 @@ end
 local function check_abi_handoff(atom, pipe_ctx, findings)
 	local  info = pipe_ctx.info_by_atom[atom.name] ---@type AtomInfoEntry|nil
 	if not info or not info.binds then return end
-	local binds_name = info.binds ---@type string
+	local binds_name = info.binds                       ---@type string
 	local binds      = pipe_ctx.binds_index[binds_name] ---@type BindsEntry|nil
 	if not binds then
 		findings[#findings + 1] = {
@@ -2454,8 +2454,8 @@ local function check_abi_handoff(atom, pipe_ctx, findings)
 		return
 	end
 	local events          = atom.paths.word_events or {} ---@type WordEvent[]
-	local found_field_set = {} ---@type table<string, boolean>  -- bag
-	local found_advance   = false ---@type boolean
+	local found_field_set = {}                           ---@type table<string, boolean>  -- bag
+	local found_advance   = false                        ---@type boolean
 
 	-- Reads o_arg1 / o_arg2 / s_arg1 / reads_r_tape_ptr stamped on word_events.
 	for _, ev in ipairs(events) do ---@type integer, WordEvent
@@ -2523,18 +2523,18 @@ end
 --- @return nil
 local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	if atom.kind ~= "atom" and atom.kind ~= "atom_proc" then return end
-	local cmd_byte       = nil ---@type integer|nil
-	local cmd_line       = nil ---@type integer|nil
-	local contrib        = 0 ---@type integer
-	local saw_format     = false ---@type boolean
-	local saw_prim_write = false ---@type boolean
-	local saw_tag        = false ---@type boolean
+	local cmd_byte       = nil                               ---@type integer|nil
+	local cmd_line       = nil                               ---@type integer|nil
+	local contrib        = 0                                 ---@type integer
+	local saw_format     = false                             ---@type boolean
+	local saw_prim_write = false                             ---@type boolean
+	local saw_tag        = false                             ---@type boolean
 	local comps          = pipe_ctx.components_by_name or {} ---@type table<string, ComponentDef>
 
 	-- One gp0_contrib add per matching invocation. Inner store_word / gte_sw
 	-- expansions are already inside that number; do not walk them again.
 	for _, inv in ipairs(atom.paths.invocations or {}) do ---@type integer, InvocationRecord
-		local name  = inv.component_name or "" ---@type string
+		local name  = inv.component_name or ""          ---@type string
 		local shape = name:match("^format_(.+)_color$") ---@type string|nil
 		if shape then
 			if not cmd_byte and duffle.GP0_CMD_BY_SHAPE[shape] then
@@ -2573,7 +2573,7 @@ local function check_gpu_portstore_shape(atom, pipe_ctx, findings)
 	-- Invocation contrib is 0 when no matching mac_* ran. Then count
 	-- distinct PrimCursor stores. Skip this walk when contrib is non-zero.
 	if contrib == 0 then
-		local seen_field = {} ---@type table<string, boolean>  -- bag
+		local seen_field = {}                                ---@type table<string, boolean>  -- bag
 		for _, ev in ipairs(atom.paths.word_events or {}) do ---@type integer, WordEvent
 			local enc = ev.encoder or "" ---@type string
 			if enc == "store_word" or enc == "store_half" or enc == "store_byte" or enc == "gte_sw" then
@@ -2654,15 +2654,15 @@ end
 --- @param pipe_ctx PipeCtx
 --- @return nil
 local function analyze_atom_paths(atom, pipe_ctx)
-	local events  = atom.paths.word_events or {} ---@type WordEvent[]
-	local markers = atom.paths.markers or {} ---@type EmissionMarker[]
-	local n       = #events ---@type integer
+	local events  = atom.paths.word_events or {}            ---@type WordEvent[]
+	local markers = atom.paths.markers or {}                ---@type EmissionMarker[]
+	local n       = #events                                 ---@type integer
 	local comps_by_name = pipe_ctx.components_by_name or {} ---@type table<string, ComponentDef>
 
 	-- Build label map from markers: label name -> 0-based word index of the next emitted word.
 	local labels = {} ---@type table<string, integer>
 	-- Also build offset-marker lookup: [consuming_encoder][target] -> position (0-based word index).
-	local offset_map = {} ---@type OffsetMapByEncoder
+	local offset_map = {}          ---@type OffsetMapByEncoder
 	for _, m in ipairs(markers) do ---@type integer, EmissionMarker
 		if m.kind == "label" and m.name then
 			labels[m.name] = m.position
@@ -2676,12 +2676,12 @@ local function analyze_atom_paths(atom, pipe_ctx)
 	-- For invocations (`mac_*`): lookup `components_by_name[bare].cycle_cost`.
 	-- For non-invocations: lookup `instr(encoder).cycles` or `gte(encoder).cycles`.
 	-- Delay markers (GteDelay_ etc.) cost 0; unknown encoders cost UNKNOWN_INSTRUCTION_CYCLES.
-	local costs       = {} ---@type integer[]
-	local unknown_set = {} ---@type table<string, boolean>  -- bag
+	local costs       = {}  ---@type integer[]
+	local unknown_set = {}  ---@type table<string, boolean>  -- bag
 	for event_idx = 1, n do ---@type integer
-		local ev    = events[event_idx] ---@type WordEvent
+		local ev    = events[event_idx]            ---@type WordEvent
 		local enc   = ev.encoder or ev.ident or "" ---@type string
-		local cost ---@type integer
+		local cost                                 ---@type integer
 		-- Delay markers: GteDelay_ / LdSlot_ / BdSlot_ / DmaSlot_ prefix stripped by duffle_emit;
 		-- but the event's ident still has the prefix if the encoder was not resolved.
 		-- If the encoder is a known delay-marker prefix, cost is 0.
@@ -2690,7 +2690,7 @@ local function analyze_atom_paths(atom, pipe_ctx)
 		end
 		if cost == nil then
 			if enc:sub(1, 4) == "mac_" then
-				local bare = enc:sub(5) ---@type string
+				local bare = enc:sub(5)          ---@type string
 				local comp = comps_by_name[bare] ---@type ComponentDef|AtomEntry|nil
 				if comp and comp.cycle_cost ~= nil then
 					cost = comp.cycle_cost
@@ -2699,7 +2699,7 @@ local function analyze_atom_paths(atom, pipe_ctx)
 					unknown_set[enc] = true
 				end
 			else
-				local isa = duffle.instr(enc) ---@type InstructionRow|nil
+				local isa = duffle.instr(enc)   ---@type InstructionRow|nil
 				local gte_cmd = duffle.gte(enc) ---@type GteCommandRow|nil
 				cost = (isa and isa.cycles) or (gte_cmd and gte_cmd.cycles)
 				if cost == nil then
@@ -2736,12 +2736,12 @@ local function analyze_atom_paths(atom, pipe_ctx)
 	--- @param event_idx integer
 	--- @return integer|nil
 	local function resolve_target(event_idx)
-		local ev   = events[event_idx] ---@type WordEvent
+		local ev   = events[event_idx]            ---@type WordEvent
 		local enc  = ev.encoder or ev.ident or "" ---@type string
-		local args = ev.args or {} ---@type string[]
+		local args = ev.args or {}                ---@type string[]
 		-- Try offset marker first.
 		local off_map = offset_map[enc] ---@type OffsetTargetMap|nil
-		local target_name = nil ---@type string|nil
+		local target_name = nil         ---@type string|nil
 		if off_map then
 			-- Extract the label name from args. The offset arg is the last arg or a named field.
 			for i = #args, 1, -1 do ---@type integer
@@ -2776,7 +2776,7 @@ local function analyze_atom_paths(atom, pipe_ctx)
 			return {}, true  -- path ends here
 		end
 		if is_branch(event_idx) then
-			local succ       = {} ---@type integer[]
+			local succ       = {}                        ---@type integer[]
 			local target_pos = resolve_target(event_idx) ---@type integer|nil
 			if is_unconditional_jump(event_idx) then
 				-- Unconditional absolute jump: BD slot absorbed; single successor — the taken path.
@@ -2804,11 +2804,11 @@ local function analyze_atom_paths(atom, pipe_ctx)
 	end
 
 	-- DFS through all paths. Track cycle sum, visited set (per path), and path count.
-	local MAX_PATHS  = 64 ---@type integer
+	local MAX_PATHS  = 64        ---@type integer
 	local cycles_min = math.huge ---@type number
-	local cycles_max = -1 ---@type number
-	local path_count = 0 ---@type integer
-	local has_loops  = false ---@type boolean
+	local cycles_max = -1        ---@type number
+	local path_count = 0         ---@type integer
+	local has_loops  = false     ---@type boolean
 	--- @param event_idx integer
 	--- @param acc       integer
 	--- @param visited   table<integer, boolean>
@@ -2856,12 +2856,12 @@ local function analyze_atom_paths(atom, pipe_ctx)
 	if cycles_min == math.huge then cycles_min = 0 end
 	if cycles_max == -1        then cycles_max = 0 end
 
-	local unknown_list = {} ---@type string[]
+	local unknown_list = {}                                                                  ---@type string[]
 	for macro_name in pairs(unknown_set) do unknown_list[#unknown_list + 1] = macro_name end ---@type string
 	table.sort(unknown_list)
 
 	-- branch_count: number of branch events (conditional + unconditional-with-offset).
-	local branch_count = 0 ---@type integer
+	local branch_count = 0  ---@type integer
 	for event_idx = 1, n do ---@type integer
 		if is_branch(event_idx) then branch_count = branch_count + 1 end
 	end
@@ -2887,7 +2887,7 @@ end
 --- @param findings CheckFinding[]
 --- @return nil
 local function check_per_atom_cycle_budget(atom, pipe_ctx, findings)
-	local p = atom.paths or {} ---@type AtomPaths
+	local p = atom.paths or {}                       ---@type AtomPaths
 	for _, name in ipairs(p.unknown_macros or {}) do ---@type integer, string
 		local lead = name and name:match("^([%w_]+)") ---@type string|nil
 		if duffle.DELAY_MARKERS and lead and duffle.DELAY_MARKERS[lead] then
@@ -2952,7 +2952,7 @@ local function check_enum_alias_membership(_src, pipe_ctx, findings)
 	--     All four are checked against the same registry; the per-rule dispatch iterates `ai` once and covers all three locations
 	--     so we don't re-walk atom_infos for each sub-check.
 	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do ---@type integer, AtomInfoEntry
-		local info_line = ai.info_line or 0 ---@type integer
+		local info_line = ai.info_line or 0  ---@type integer
 		local atom_name = ai.atom_name or "" ---@type string
 		if ai.reg_type_overrides then
 			for reg in pairs(ai.reg_type_overrides) do ---@type string
@@ -3005,8 +3005,8 @@ end
 --- @return nil
 local function check_atom_type_consistency(_src, pipe_ctx, findings)
 	local type_registry = pipe_ctx.type_name_registry or {} ---@type table<string, TypeNameEntry>
-	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do ---@type integer, AtomInfoEntry
-		local info_line = ai.info_line or 0 ---@type integer
+	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do  ---@type integer, AtomInfoEntry
+		local info_line = ai.info_line or 0  ---@type integer
 		local atom_name = ai.atom_name or "" ---@type string
 		if ai.reg_type_overrides then
 			for reg, ov in pairs(ai.reg_type_overrides) do ---@type string, RegTypeOverride
@@ -3093,19 +3093,19 @@ end
 --- @return nil
 local function check_binds_no_substruct_deref(_src, pipe_ctx, findings)
 	local type_registry = pipe_ctx.type_name_registry or {} ---@type table<string, TypeNameEntry>
-	for _, a in ipairs(pipe_ctx.atoms or {}) do ---@type integer, string
+	for _, a in ipairs(pipe_ctx.atoms or {}) do             ---@type integer, string
 		local events = a.paths and a.paths.word_events or {} ---@type WordEvent[]
-		for _, ev in ipairs(events) do ---@type integer, WordEvent
+		for _, ev in ipairs(events) do                       ---@type integer, WordEvent
 			if (ev.is_load or ev.is_store_word)
 				and ev.o_arg1 and ev.o_arg2 then
-				local type_name  = ev.o_arg1 ---@type string|nil
-				local field_name = ev.o_arg2 ---@type string|nil
+				local type_name  = ev.o_arg1         ---@type string|nil
+				local field_name = ev.o_arg2         ---@type string|nil
 				local body_line  = ev.line or a.line ---@type integer
 
-				local type_entry = resolve_type_with_fields(type_name, type_registry, 1) ---@type TypeNameEntry|nil
+				local type_entry = resolve_type_with_fields(type_name, type_registry, 1)              ---@type TypeNameEntry|nil
 				local no_fields  = not type_entry or not type_entry.fields or #type_entry.fields == 0 ---@type boolean
-				local raw_entry  = type_registry[type_name] ---@type TypeNameEntry|nil
-				local is_typedef_to_struct = raw_entry ---@type boolean
+				local raw_entry  = type_registry[type_name]                                           ---@type TypeNameEntry|nil
+				local is_typedef_to_struct = raw_entry                                                ---@type boolean
 					and raw_entry.kind == "typedef"
 					and raw_entry.underlying_type
 					and type_registry[raw_entry.underlying_type]
@@ -3159,7 +3159,7 @@ end
 --- @return GteCrAliasGroup|nil
 local function find_alias_pair_for(alias_name, duffle)
 	local groups = (duffle and duffle.GTE_CR_ALIAS_GROUPS) or {} ---@type GteCrAliasGroup[]
-	for _, group in ipairs(groups) do ---@type integer, GteCrAliasGroup
+	for _, group in ipairs(groups) do                            ---@type integer, GteCrAliasGroup
 		for _, name in ipairs(group[2] or {}) do ---@type integer, string
 			if name == alias_name then return group end
 		end
@@ -3194,7 +3194,7 @@ end
 local function ctrl_writes_in_atom(atom)
 	local fs = atom.paths and atom.paths.forward_state ---@type ForwardState|nil
 	if fs and fs.c2_ctrl_writes then return fs.c2_ctrl_writes end
-	local out = {} ---@type C2CtrlWrite[]
+	local out = {}                                                        ---@type C2CtrlWrite[]
 	for _, ev in ipairs((atom.paths and atom.paths.word_events) or {}) do ---@type integer, WordEvent
 		if (ev.encoder or "") == "gte_mv_to_ctrl_r" then
 			local alias = ev.args and ev.args[2] ---@type string|nil
@@ -3234,7 +3234,7 @@ local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 
 	-- Encoder is gte_mv_to_ctrl_r / gte_mv_from_ctrl_r. Alias lives in ev.args
 	-- (or call_text), not a sibling token.
-	local touched = {} ---@type table<string, C2CtrlWrite[]>
+	local touched = {}             ---@type table<string, C2CtrlWrite[]>
 	for _, ev in ipairs(events) do ---@type integer, WordEvent
 		local ident = ev.encoder or ev.ident ---@type string
 		if ident == "gte_mv_to_ctrl_r" or ident == "gte_mv_from_ctrl_r" then
@@ -3257,8 +3257,8 @@ local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 
 	-- Fire one warning per group touched with 2+ distinct aliases.
 	for slot, hits in pairs(touched) do ---@type string, C2CtrlWrite[]
-		local seen     = {} ---@type table<string, boolean>  -- bag
-		local distinct = {} ---@type C2CtrlWrite[]
+		local seen     = {}         ---@type table<string, boolean>  -- bag
+		local distinct = {}         ---@type C2CtrlWrite[]
 		for _, h in ipairs(hits) do ---@type integer, C2CtrlWrite
 			if not seen[h.alias] then
 				seen[h.alias]           = true
@@ -3266,7 +3266,7 @@ local function check_gte_cr_alias_writes(atom, pipe_ctx, findings)
 			end
 		end
 		if #distinct >= 2 then
-			local aliases = {} ---@type string[]
+			local aliases = {}                                                  ---@type string[]
 			for _, d in ipairs(distinct) do aliases[#aliases + 1] = d.alias end ---@type integer, C2CtrlWrite
 			findings[#findings + 1] = {
 				atom  = atom.name or "",
@@ -3295,7 +3295,7 @@ local function check_rtdiagonal_completeness(atom, _pipe_ctx, findings)
 	local line_in_body = atom.paths and atom.paths.line_in_body ---@type table<integer, integer>
 	if not next(tokens) then return end
 	local strict = os.getenv("GTE_RT_DIAGONAL_STRICT") == "1" ---@type boolean
-	for _, token in ipairs(tokens) do ---@type integer, string
+	for _, token in ipairs(tokens) do                         ---@type integer, string
 		local ident = (token.tok or ""):match("^([%w_]+)") ---@type string
 		if ident == "gte_cmdw_mvmva" then
 			findings[#findings + 1] = {
@@ -3327,8 +3327,8 @@ local function check_gte_cr_TR_naming(atom, _pipe_ctx, findings)
 	local tokens       = atom.paths and atom.paths.tokens or {} ---@type string[]
 	local line_in_body = atom.paths and atom.paths.line_in_body ---@type table<integer, integer>
 	if not next(tokens) then return end
-	local touched    = false ---@type table<string, C2CtrlWrite[]>
-	local first_line = 0 ---@type integer|nil
+	local touched    = false          ---@type table<string, C2CtrlWrite[]>
+	local first_line = 0              ---@type integer|nil
 	for _, token in ipairs(tokens) do ---@type integer, string
 		local ident = (token.tok or ""):match("^([%w_]+)") ---@type string
 		if    ident and ident:match("^gte_cr_TR[XYZ]$") then
@@ -3362,22 +3362,22 @@ local function check_gte_cr_alias_writes_xatom(src, pipe_ctx, findings)
 	-- Walk tape chains once (first source only). Atoms in no chain stay per-atom.
 	local first = pipe_ctx.source_order and pipe_ctx.source_order[1] ---@type SourceFile|nil
 	if    first and src ~= first then return end
-	local atoms_by_name = pipe_ctx.atoms_by_name or {} ---@type table<string, AtomEntry>
+	local atoms_by_name = pipe_ctx.atoms_by_name or {}    ---@type table<string, AtomEntry>
 	for _, chain in ipairs(pipe_ctx.tape_chains or {}) do ---@type integer, string[]
-		local slot_state = {} ---@type table<string, C2CtrlWrite|nil>
+		local slot_state = {}           ---@type table<string, C2CtrlWrite|nil>
 		for _, name in ipairs(chain) do ---@type integer, string
 			local atom = atoms_by_name[name] ---@type AtomEntry
 			if atom then
 				atom.paths               = atom.paths or {}
 				atom.paths.forward_state = atom.paths.forward_state or {}
-				local outgoing = {} ---@type C2CtrlWrite[]
+				local outgoing = {}                    ---@type C2CtrlWrite[]
 				for slot, prev in pairs(slot_state) do ---@type string, C2CtrlWrite|nil
 					outgoing[slot] = prev
 				end
 				for _, w in ipairs(ctrl_writes_in_atom(atom)) do ---@type integer, C2CtrlWrite
 					local group = find_alias_pair_for(w.alias, duffle) ---@type GteCrAliasGroup|nil
 					if group then
-						local slot = group[1] ---@type GprLatticeSlot|nil
+						local slot = group[1]         ---@type GprLatticeSlot|nil
 						local prev = slot_state[slot] ---@type string|C2CtrlWrite|nil
 						if prev and prev.alias ~= w.alias and prev.atom ~= atom.name then
 							findings[#findings + 1] = {
@@ -3402,7 +3402,7 @@ end
 --- @param src table<string, PostCommandRole>
 --- @return table<string, PostCommandRole>
 local function copy_forward_map(src)
-	local out = {} ---@type table<string, boolean>  -- bag
+	local out = {}                           ---@type table<string, boolean>  -- bag
 	for k, v in pairs(src) do out[k] = v end ---@type string, PostCommandRole
 	return out
 end
@@ -3411,7 +3411,7 @@ end
 --- @param rel       GtePackedSlotRelation
 --- @return boolean
 local function packed_pair_is_wrong(first_idx, rel)
-	local i1 = first_idx[rel.first] ---@type integer
+	local i1 = first_idx[rel.first]  ---@type integer
 	local i2 = first_idx[rel.second] ---@type integer
 	return i1 and i2 and i2 < i1
 end
@@ -3422,7 +3422,7 @@ end
 --- @param findings CheckFinding[]
 --- @return nil
 local function emit_packed_finding(atom, writes, rel, findings)
-	local line = atom.line ---@type integer
+	local line = atom.line        ---@type integer
 	for _, w in ipairs(writes) do ---@type integer, C2CtrlWrite
 		if w.alias == rel.second or w.alias == rel.first then
 			line = w.line
@@ -3448,9 +3448,9 @@ end
 local function check_gte_packed_writes(src, pipe_ctx, findings)
 	local first = pipe_ctx.source_order and pipe_ctx.source_order[1] ---@type SourceFile|nil
 	if    first and src ~= first then return end
-	local atoms_by_name = pipe_ctx.atoms_by_name or {} ---@type table<string, AtomEntry>
+	local atoms_by_name = pipe_ctx.atoms_by_name or {}           ---@type table<string, AtomEntry>
 	local relations     = duffle.GTE_PACKED_SLOT_RELATIONS or {} ---@type RelationTouch[]
-	local seen = {} ---@type table<string, boolean>  -- bag
+	local seen = {}                                              ---@type table<string, boolean>  -- bag
 
 	--- @param atom      AtomEntry
 	--- @param first_idx integer
@@ -3459,9 +3459,9 @@ local function check_gte_packed_writes(src, pipe_ctx, findings)
 	local function ingest_atom(atom, first_idx, idx)
 		atom.paths               = atom.paths or {}
 		atom.paths.forward_state = atom.paths.forward_state or {}
-		local writes = ctrl_writes_in_atom(atom) ---@type PackedWrite[]
+		local writes = ctrl_writes_in_atom(atom)   ---@type PackedWrite[]
 		local before = copy_forward_map(first_idx) ---@type integer
-		for _, w in ipairs(writes) do ---@type integer, C2CtrlWrite
+		for _, w in ipairs(writes) do              ---@type integer, C2CtrlWrite
 			idx = idx + 1
 			if first_idx[w.alias] == nil then first_idx[w.alias] = idx end
 		end
@@ -3475,8 +3475,8 @@ local function check_gte_packed_writes(src, pipe_ctx, findings)
 	end
 
 	for _, chain in ipairs(pipe_ctx.tape_chains or {}) do ---@type integer, string[]
-		local first_idx = {} ---@type integer
-		local idx       = 0 ---@type integer
+		local first_idx = {}            ---@type integer
+		local idx       = 0             ---@type integer
 		for _, name in ipairs(chain) do ---@type integer, string
 			local atom = atoms_by_name[name] ---@type AtomEntry
 			if atom then
@@ -3533,11 +3533,11 @@ end
 --- @return string[]
 local function later_rt_ctc2_names(events, start_i, dest)
 	for j = start_i, #events do ---@type integer
-		local later     = events[j] ---@type WordEvent
+		local later     = events[j]           ---@type WordEvent
 		local later_enc = later.encoder or "" ---@type string
 		if later_enc:match("^gte_cmdw_") then return false end
 		if later_enc == "gte_mv_to_ctrl_r" then
-			local later_src   = ctc2_event_src(later) ---@type string|nil
+			local later_src   = ctc2_event_src(later)   ---@type string|nil
 			local later_alias = ctc2_event_alias(later) ---@type string|nil
 			if later_src == dest and later_alias and later_alias:match("^gte_cr_RT") then
 				return true
@@ -3573,13 +3573,13 @@ local function walk_ctc2_atom(atom, live, findings)
 		for i, ev in ipairs(events) do ---@type integer, WordEvent
 			local enc = ev.encoder or "" ---@type string
 			if enc == "gte_mv_to_ctrl_r" then
-				local src   = ctc2_event_src(ev) ---@type string|nil
+				local src   = ctc2_event_src(ev)   ---@type string|nil
 				local alias = ctc2_event_alias(ev) ---@type string|nil
 				if src and alias and alias:match("^gte_cr_RT") then
 					live[src] = { gpr = src, alias = alias, atom = atom.name }
 				end
 			elseif enc == "load_word" then
-				local dest = ctc2_event_src(ev) ---@type string|nil
+				local dest = ctc2_event_src(ev)  ---@type string|nil
 				local rec  = dest and live[dest] ---@type Ctc2LiveRec|nil
 				if rec then
 					local from_other = rec.atom ~= atom.name ---@type boolean
@@ -3594,28 +3594,28 @@ local function walk_ctc2_atom(atom, live, findings)
 		end
 	else
 		local tokens = atom.paths.tokens or {} ---@type string[]
-		for i, t in ipairs(tokens) do ---@type integer, string
-			local tok   = t.tok or "" ---@type string
+		for i, t in ipairs(tokens) do          ---@type integer, string
+			local tok   = t.tok or ""                  ---@type string
 			local ident = tok:match("^([%w_]+)") or "" ---@type string
 			if ident == "gte_mv_to_ctrl_r" then
 				local src   = tok:match("%(%s*([%w_]+)") ---@type string|nil
-				local alias = ctrl_alias_from_text(tok) ---@type string|nil
+				local alias = ctrl_alias_from_text(tok)  ---@type string|nil
 				if src and alias and alias:match("^gte_cr_RT") then
 					live[src] = { gpr = src, alias = alias, atom = atom.name }
 				end
 			elseif ident == "load_word" then
 				local dest = tok:match("%(%s*([%w_]+)") ---@type string|nil
-				local rec  = dest and live[dest] ---@type Ctc2LiveRec|nil
+				local rec  = dest and live[dest]        ---@type Ctc2LiveRec|nil
 				if rec then
 					local from_other = rec.atom ~= atom.name ---@type boolean
-					local later      = false ---@type string[]
-					for j = i + 1, #tokens do ---@type integer
-						local later_tok   = tokens[j].tok or "" ---@type string
+					local later      = false                 ---@type string[]
+					for j = i + 1, #tokens do                ---@type integer
+						local later_tok   = tokens[j].tok or ""                ---@type string
 						local later_ident = later_tok:match("^([%w_]+)") or "" ---@type string
 						if later_ident:match("^gte_cmdw_") then break end
 						if later_ident == "gte_mv_to_ctrl_r" then
 							local later_src   = later_tok:match("%(%s*([%w_]+)") ---@type string|nil
-							local later_alias = ctrl_alias_from_text(later_tok) ---@type string|nil
+							local later_alias = ctrl_alias_from_text(later_tok)  ---@type string|nil
 							if later_src == dest and later_alias and later_alias:match("^gte_cr_RT") then
 								later = true
 								break
@@ -3642,10 +3642,10 @@ end
 local function check_ctc2_chain_source_preservation(src, pipe_ctx, findings)
 	local first = pipe_ctx.source_order and pipe_ctx.source_order[1] ---@type SourceFile|nil
 	if first and src ~= first then return end
-	local atoms_by_name = pipe_ctx.atoms_by_name or {} ---@type table<string, AtomEntry>
-	local seen          = {} ---@type table<string, boolean>  -- bag
+	local atoms_by_name = pipe_ctx.atoms_by_name or {}    ---@type table<string, AtomEntry>
+	local seen          = {}                              ---@type table<string, boolean>  -- bag
 	for _, chain in ipairs(pipe_ctx.tape_chains or {}) do ---@type integer, string[]
-		local live = {} ---@type table<string, Ctc2LiveRec>
+		local live = {}                 ---@type table<string, Ctc2LiveRec>
 		for _, name in ipairs(chain) do ---@type integer, string
 			local atom = atoms_by_name[name] ---@type AtomEntry
 			if atom then
@@ -3671,20 +3671,20 @@ end
 --- @return nil
 local function check_immediate_field_width(atom, pipe_ctx, findings)
 	local events              = atom.paths and atom.paths.word_events or {} ---@type WordEvent[]
-	local line_for_word_event = pipe_ctx.line_for_word_event ---@type (fun(ev: WordEvent): integer)|nil
-	for _, ev in ipairs(events) do ---@type integer, WordEvent
+	local line_for_word_event = pipe_ctx.line_for_word_event                ---@type (fun(ev: WordEvent): integer)|nil
+	for _, ev in ipairs(events) do                                          ---@type integer, WordEvent
 		local ev_ident = ev.encoder or ev.ident or "?" ---@type string
-		local isa      = duffle.instr(ev_ident) ---@type InstructionRow|nil
-		local rules    = isa and isa.imm ---@type InstructionImm[]|nil
+		local isa      = duffle.instr(ev_ident)        ---@type InstructionRow|nil
+		local rules    = isa and isa.imm               ---@type InstructionImm[]|nil
 		if rules then
-			local ev_args = ev.args or {} ---@type string[]
+			local ev_args = ev.args or {}                                                ---@type string[]
 			local ev_line = line_for_word_event and line_for_word_event(ev) or atom.line ---@type integer
-			for _, rule in ipairs(rules) do ---@type integer, InstructionImm
+			for _, rule in ipairs(rules) do                                              ---@type integer, InstructionImm
 				local arg_str = ev_args[rule.arg] ---@type string|nil
 				if arg_str then
 					local value = parse_integer_literal(arg_str) ---@type integer|nil
 					if value then
-						local width     = rule.width ---@type integer
+						local width     = rule.width          ---@type integer
 						local is_signed = rule.signed == true ---@type boolean
 						-- parse_integer_literal returns a U4-wrapped value in [0, 2^32).
 						-- For signed fields, re-interpret the high bit as the sign.
@@ -3703,8 +3703,8 @@ local function check_immediate_field_width(atom, pipe_ctx, findings)
 						-- For unsigned fields, a negative C literal (high bit set in U4)
 						-- is valid if the low `width` bits fit — IMM_MASK truncates it.
 						-- Flag as a warning (code smell), not an error.
-						local check_value  = is_signed and signed_value or value ---@type integer
-						local field_max    = bit.lshift(1, width) - 1 ---@type integer
+						local check_value  = is_signed and signed_value or value                                                                    ---@type integer
+						local field_max    = bit.lshift(1, width) - 1                                                                               ---@type integer
 						local low_bits_fit = (value % (bit.lshift(1, width))) == value or (is_signed and signed_value >= lo and signed_value <= hi) ---@type boolean
 						if is_signed then
 							if signed_value < lo or signed_value > hi then
@@ -3756,9 +3756,9 @@ end
 -- R_TapePtr / R_AtomJmp are reserved carriers; yield always touches them,
 -- so they are optional in the contract unless the atom listed them.
 -- R_ScratchBase stays required when used.
-local auto_reg = require("passes.auto_reg") ---@type AutoRegPass
+local auto_reg = require("passes.auto_reg")                                        ---@type AutoRegPass
 local OPTIONAL_CONTRACT_GPRS = { R_AT = true, R_TapePtr = true, R_AtomJmp = true } ---@type table<string, boolean>  -- bag
-for _, name in ipairs(auto_reg.POOL) do ---@type integer, string
+for _, name in ipairs(auto_reg.POOL) do                                            ---@type integer, string
 	OPTIONAL_CONTRACT_GPRS[name] = true
 end
 
@@ -3792,7 +3792,7 @@ end
 --- @return table<string, boolean>, table<string, boolean>
 local function collect_gpr_traffic(atom_or_tokens)
 	local reads, writes = {}, {} ---@type table<string, boolean>, table<string, boolean>  -- bag
-	local events = {} ---@type WordEvent[]
+	local events = {}            ---@type WordEvent[]
 	if type(atom_or_tokens) == "table" then
 		if atom_or_tokens.paths and atom_or_tokens.paths.word_events then
 			events = atom_or_tokens.paths.word_events
@@ -3835,7 +3835,7 @@ end
 --- @param list string[]|nil
 --- @return table<string, boolean>
 local function gpr_set_from_list(list)
-	local s = {} ---@type table<string, boolean>  -- bag
+	local s = {}                         ---@type table<string, boolean>  -- bag
 	for _, name in ipairs(list or {}) do ---@type integer, string
 		if type(name) == "string" then s[name] = true end
 	end
@@ -3854,7 +3854,7 @@ end
 --- @param s table<string, boolean>
 --- @return string[]
 local function gpr_set_keys(s)
-	local keys = {} ---@type string[]|nil
+	local keys = {}                              ---@type string[]|nil
 	for k in pairs(s) do keys[#keys + 1] = k end ---@type string
 	table.sort(keys)
 	return keys
@@ -3872,27 +3872,27 @@ local function check_atom_calls_inferred_traffic(atom, pipe_ctx, findings)
 	if #(info.reads or {}) == 0 and #(info.writes or {}) == 0 then return end
 
 	local tokens        = (atom.paths and atom.paths.tokens) or atom.body_tokens ---@type BodyToken[]|Token[]
-	local reads, writes = collect_gpr_traffic(atom) ---@type table<string, boolean>, table<string, boolean>  -- bag
-	for _, t in ipairs(tokens or {}) do ---@type integer, string
+	local reads, writes = collect_gpr_traffic(atom)                              ---@type table<string, boolean>, table<string, boolean>  -- bag
+	for _, t in ipairs(tokens or {}) do                                          ---@type integer, string
 		local ident = ((t.tok or t) or ""):match("^([%w_]+)") or "" ---@type string
 		if ident:sub(1, 4) == "mac_" then
-			local bare      = ident:sub(5) ---@type string
-			local idx       = pipe_ctx.component_body_index and pipe_ctx.component_body_index[bare] ---@type ComponentBodyEntry|nil
-			local comp      = (pipe_ctx.components_by_name or {})[bare] or (pipe_ctx.atoms_by_name or {})[bare] ---@type ComponentDef|AtomEntry|nil
+			local bare      = ident:sub(5)                                                                                     ---@type string
+			local idx       = pipe_ctx.component_body_index and pipe_ctx.component_body_index[bare]                            ---@type ComponentBodyEntry|nil
+			local comp      = (pipe_ctx.components_by_name or {})[bare] or (pipe_ctx.atoms_by_name or {})[bare]                ---@type ComponentDef|AtomEntry|nil
 			local body_toks = (idx and idx.body_tokens) or (comp and (comp.body_tokens or (comp.paths and comp.paths.tokens))) ---@type BodyToken[]|nil
-			local cr, cw    = collect_gpr_traffic(body_toks) ---@type table<string, boolean>, table<string, boolean>  -- bag
-			for k in pairs(cr) do reads [k] = true end ---@type string
-			for k in pairs(cw) do writes[k] = true end ---@type string
+			local cr, cw    = collect_gpr_traffic(body_toks)                                                                   ---@type table<string, boolean>, table<string, boolean>  -- bag
+			for k in pairs(cr) do reads [k] = true end                                                                         ---@type string
+			for k in pairs(cw) do writes[k] = true end                                                                         ---@type string
 		end
 	end
 
-	local decl_r = gpr_set_from_list(info.reads) ---@type table<string, boolean>  -- bag
+	local decl_r = gpr_set_from_list(info.reads)  ---@type table<string, boolean>  -- bag
 	local decl_w = gpr_set_from_list(info.writes) ---@type table<string, boolean>  -- bag
 	--- @param inferred table<string, boolean>
 	--- @param declared table<string, boolean>
 	--- @return table<string, boolean>
 	local function keep_inferred(inferred, declared)
-		local out = {} ---@type table<string, boolean>  -- bag
+		local out = {}              ---@type table<string, boolean>  -- bag
 		for k in pairs(inferred) do ---@type string
 			if k == "R_0" or OPTIONAL_CONTRACT_GPRS[k] then
 				if declared[k] then out[k] = true end
@@ -3929,14 +3929,14 @@ local function check_component_self_consistency(src, pipe_ctx, findings)
 	if    first and src ~= first then return end
 	local infos         = pipe_ctx.component_atom_infos or {} ---@type AtomInfoEntry[]
 	local atoms_by_name = pipe_ctx.atoms_by_name        or {} ---@type table<string, AtomEntry>
-	for _, ai in ipairs(infos) do ---@type integer, AtomInfoEntry
-		local name = ai.atom_name or ai.name ---@type string
+	for _, ai in ipairs(infos) do                             ---@type integer, AtomInfoEntry
+		local name = ai.atom_name or ai.name      ---@type string
 		local atom = name and atoms_by_name[name] ---@type AtomEntry
 		if atom and not atom.debug_skip then
 			local tokens        = (atom.paths and atom.paths.tokens) or atom.body_tokens ---@type BodyToken[]|Token[]
-			local reads, writes = collect_gpr_traffic(tokens) ---@type table<string, boolean>, table<string, boolean>  -- bag
-			local decl_r        = gpr_set_from_list(ai.reads) ---@type table<string, boolean>  -- bag
-			local decl_w        = gpr_set_from_list(ai.writes) ---@type table<string, boolean>  -- bag
+			local reads, writes = collect_gpr_traffic(tokens)                            ---@type table<string, boolean>, table<string, boolean>  -- bag
+			local decl_r        = gpr_set_from_list(ai.reads)                            ---@type table<string, boolean>  -- bag
+			local decl_w        = gpr_set_from_list(ai.writes)                           ---@type table<string, boolean>  -- bag
 			if not gpr_set_eq(decl_r, reads) or not gpr_set_eq(decl_w, writes) then
 				findings[#findings + 1] = {
 					atom  = name,
@@ -4028,11 +4028,11 @@ local function validate(ctx, src, corpus_pipe_ctx)
 
 	-- Read atoms + binds + atom_infos from the pre-scanned SourceScan payload.
 	-- The scan was done once upstream by duffle.scan_source(); this pass is pure.
-	local atoms      = scan.atoms ---@type AtomEntry[]
+	local atoms      = scan.atoms      ---@type AtomEntry[]
 	local atom_infos = scan.atom_infos ---@type AtomInfoEntry[]
 
 	-- Build per-source Binds_* index. Local to validate() — no cross-source sharing.
-	local binds_index = {} ---@type table<string, BindsEntry>
+	local binds_index = {}            ---@type table<string, BindsEntry>
 	for _, b in ipairs(scan.binds) do ---@type integer, BindsEntry
 		binds_index[b.name] = b
 	end
@@ -4050,7 +4050,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	--   register_alias_registry  — R_X -> {name, code, has_atom_reg, source_line} from corpus-wide merge
 	--   type_name_registry       — T -> {name, kind, fields, ...} from corpus-wide merge
 	-- All registry fields are READ from the corpus (the dep-closed scan-source merge); this pass never re-parses.
-	local info_by_atom = {} ---@type table<string, AtomInfoEntry>
+	local info_by_atom = {}              ---@type table<string, AtomInfoEntry>
 	for _, info in ipairs(atom_infos) do ---@type integer, CheckFinding[]
 		info_by_atom[info.atom_name] = info
 	end
@@ -4089,7 +4089,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	---
 	--- Canonical contract: `atom.paths` and `atom.paths.word_events` MUST be populated by `passes/emission_model.run(ctx)` before this pass runs.
 	--- The `atom.paths.word_events` projection is owned by the emission-model pass; static-analysis reads it directly.
-	local findings = {} ---@type CheckFinding[]
+	local findings = {}          ---@type CheckFinding[]
 	for _, a in ipairs(atoms) do ---@type integer, AtomEntry
 		if a.paths == nil then
 			error("static_analysis: a.paths is nil; emit emission-model first")
@@ -4128,9 +4128,9 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	-- The `info` list returned here is finding-level only; scan/cycle summary lines go into `summaries`.
 	-- An invalid/missing kind is a hard error (no silent fallback to info); this prevents typos like
 	-- kind="warn" or omitted kind fields from being misclassified as info in the rendered report.
-	local errors   = {} ---@type CheckFinding[]
-	local warnings = {} ---@type CheckFinding[]
-	local info     = {} ---@type CheckFinding[]
+	local errors   = {}             ---@type CheckFinding[]
+	local warnings = {}             ---@type CheckFinding[]
+	local info     = {}             ---@type CheckFinding[]
 	for _, f in ipairs(findings) do ---@type integer, CheckFinding
 		-- Preserve the diagnostic context so focused tests + the renderer can route by the originating check or relation id.
 		-- Hazard readers (transfer_hazards) populate `f.check`, `f.relation_id`, `f.semantic`, `f.direction`, `f.producer_destination`, `f.gap`, `f.required`, `f.evidence_confidence`, etc.;
@@ -4186,10 +4186,10 @@ local function validate(ctx, src, corpus_pipe_ctx)
 
 	-- Path-aware cycle-budget summary line. Per-path min/max totals.
 	if #atoms > 0 then
-		local total_min     = 0 ---@type integer
-		local total_max     = 0 ---@type integer
-		local max_atom_cyc  = 0 ---@type integer
-		local max_atom_name = nil ---@type string|nil
+		local total_min     = 0      ---@type integer
+		local total_max     = 0      ---@type integer
+		local max_atom_cyc  = 0      ---@type integer
+		local max_atom_name = nil    ---@type string|nil
 		for _, a in ipairs(atoms) do ---@type integer, AtomEntry
 			local p   = a.paths or {} ---@type AtomPaths
 			total_min = total_min + (p.cycles_min or 0)
@@ -4236,7 +4236,7 @@ function M.run(ctx)
 	-- Build the corpus-wide pipe_ctx ONCE per pass run.
 	-- The pipe_ctx is shared across every validate() invocation in this M.run so cross-source visibility is constant.
 	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx) ---@type PipeCtx
-	local corpus          = ctx.shared.corpus ---@type Corpus
+	local corpus          = ctx.shared.corpus          ---@type Corpus
 
 	-- Aggregate per-DIRECTORY (per-module).
 	-- One static_analysis.txt per source-directory, emitted only if the directory contains at least one atom.
@@ -4248,12 +4248,12 @@ function M.run(ctx)
 		-- Run validate() against every source in this directory; accumulate atoms / findings / errors / warnings.
 		-- The validate() function does its own per-source analysis (Binds indexing, atom discovery, all checks)
 		-- and attaches path-aware cycle data to each atom it finds.
-		local all_atoms     = {} ---@type AtomEntry[]
-		local all_findings  = {} ---@type CheckFinding[]
-		local dir_errors    = {} ---@type CheckFinding[]
-		local dir_warnings  = {} ---@type CheckFinding[]
-		local dir_info      = {} ---@type CheckFinding[]
-		local dir_summaries = {} ---@type ScanSummary[]
+		local all_atoms     = {}             ---@type AtomEntry[]
+		local all_findings  = {}             ---@type CheckFinding[]
+		local dir_errors    = {}             ---@type CheckFinding[]
+		local dir_warnings  = {}             ---@type CheckFinding[]
+		local dir_info      = {}             ---@type CheckFinding[]
+		local dir_summaries = {}             ---@type ScanSummary[]
 		for _, src in ipairs(dir_sources) do ---@type integer, SourceFile
 			local result = validate(ctx, src, corpus_pipe_ctx) ---@type ValidateResult
 			-- Tag each atom with its source so the render step can prefix the atom line with "<filename>:"

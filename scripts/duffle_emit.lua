@@ -1,14 +1,9 @@
 --- duffle_emit.lua — project_emission + decl finders.
---- @type DuffleScan
-local scan = require("duffle_scan")
---- @type DuffleIsa
-local isa  = require("duffle_isa")
---- @type DuffleEmit
-local M = {}
---- @type string, any
-for k, v in pairs(scan) do M[k] = v end
---- @type string, any
-for k, v in pairs(isa)  do M[k] = v end
+local scan = require("duffle_scan")     ---@type DuffleScan
+local isa  = require("duffle_isa")      ---@type DuffleIsa
+local M = {}                            ---@type DuffleEmit
+for k, v in pairs(scan) do M[k] = v end ---@type string, any
+for k, v in pairs(isa)  do M[k] = v end ---@type string, any
 
 -- Section 8: Cross-source component-body index + word-event expansion
 -- ════════════════════════════════════════════════════════════════════════════
@@ -51,22 +46,15 @@ for k, v in pairs(isa)  do M[k] = v end
 -- Consumers (`passes/static_analysis.lua`, `passes/emission_model.lua`) read it directly; per-pass memoization helpers stay out of scope.
 
 -- ASCII byte constants used by split_call_args (kept local to keep Section 8 self-contained).
---- @type integer
-local E_BYTE_OPEN_PAREN  = 0x28
---- @type integer
-local E_BYTE_OPEN_BRACE  = 0x7B
---- @type integer
-local E_BYTE_OPEN_BRACK  = 0x5B
---- @type integer
-local E_BYTE_DQUOTE      = 0x22
---- @type integer
-local E_BYTE_SQUOTE      = 0x27
---- @type integer
-local E_BYTE_COMMA       = 0x2C
+local E_BYTE_OPEN_PAREN  = 0x28 ---@type integer
+local E_BYTE_OPEN_BRACE  = 0x7B ---@type integer
+local E_BYTE_OPEN_BRACK  = 0x5B ---@type integer
+local E_BYTE_DQUOTE      = 0x22 ---@type integer
+local E_BYTE_SQUOTE      = 0x27 ---@type integer
+local E_BYTE_COMMA       = 0x2C ---@type integer
 
 -- Map an open-delimiter byte to its matching close string for read_balanced.
---- @type table<integer, string>  -- bag: open-delimiter byte -> close string
-local E_OPEN_CLOSE = {
+local E_OPEN_CLOSE = { ---@type table<integer, string>  -- bag: open-delimiter byte -> close string
 	[E_BYTE_OPEN_PAREN] = ")",
 	[E_BYTE_OPEN_BRACE] = "}",
 	[E_BYTE_OPEN_BRACK] = "]",
@@ -79,23 +67,16 @@ local E_OPEN_CLOSE = {
 --- @param inner string
 --- @return string[]
 local function split_call_args(inner)
---- @type string[]
-	local args = {}
+	local args = {} ---@type string[]
 	if not inner or inner == "" then return args end
---- @type integer
-	local pos   = 1
---- @type integer
-	local len   = #inner
---- @type integer
-	local start = 1
+	local pos   = 1      ---@type integer
+	local len   = #inner ---@type integer
+	local start = 1      ---@type integer
 	while pos <= len do
---- @type integer
-		local c     = inner:byte(pos)
---- @type string|nil
-		local close = E_OPEN_CLOSE[c]
+		local c     = inner:byte(pos) ---@type integer
+		local close = E_OPEN_CLOSE[c] ---@type string|nil
 		if close then
---- @type integer, integer
-			local _, after = M.read_balanced(inner, string.char(c), close, pos)
+			local _, after = M.read_balanced(inner, string.char(c), close, pos) ---@type integer, integer
 			pos = after
 		elseif c == E_BYTE_DQUOTE or c == E_BYTE_SQUOTE then
 			pos = M.skip_str_or_cmt(inner, pos)
@@ -116,23 +97,18 @@ end
 --- @param tok string
 --- @return string, string[]
 local function token_ident_and_args(tok)
---- @type string|nil, integer
-	local  ident, after = M.read_ident(tok, 1)
+	local  ident, after = M.read_ident(tok, 1) ---@type string|nil, integer
 	if not ident then return "?", {} end
---- @type integer
-	local paren_pos = M.skip_ws_and_cmt(tok, after)
+	local paren_pos = M.skip_ws_and_cmt(tok, after) ---@type integer
 	if tok:sub(paren_pos, paren_pos) ~= "(" then return ident, {} end
---- @type string|nil
-	local  inner = M.read_parens(tok, paren_pos)
+	local  inner = M.read_parens(tok, paren_pos) ---@type string|nil
 	if not inner then return ident, {} end
 	return ident, split_call_args(inner)
 end
 
 -- The macro-name prefix that marks a `mac_X(...)` component invocation.
---- @type string
-local E_MAC_PREFIX     = "mac_"
---- @type integer
-local E_MAC_PREFIX_LEN = 4
+local E_MAC_PREFIX     = "mac_" ---@type string
+local E_MAC_PREFIX_LEN = 4      ---@type integer
 
 --- Expand a body entry into the flat sequence of emitted machine-word events.
 ---
@@ -217,38 +193,24 @@ local E_MAC_PREFIX_LEN = 4
 --- @param ctx_table EmissionWalkCtx
 --- @return EmissionProjection
 local function _project_emission_inner(root_body_entry, ctx_table)
---- @type EmissionItem[]
-	local items       = {}
---- @type WordEvent[]
-	local word_events = {}
---- @type EmissionMarker[]
-	local markers     = {}
---- @type InvocationRecord[]
-	local invocations = {}
---- @type EmitError[]
-	local errors      = {}
---- @type EmitWarning[]
-	local warnings    = {}
+	local items       = {} ---@type EmissionItem[]
+	local word_events = {} ---@type WordEvent[]
+	local markers     = {} ---@type EmissionMarker[]
+	local invocations = {} ---@type InvocationRecord[]
+	local errors      = {} ---@type EmitError[]
+	local warnings    = {} ---@type EmitWarning[]
 
---- @type integer
-	local word_idx         = 0
---- @type InvocationRecord[]
-	local invocation_stack = {}   -- stack of currently-open invocation records
---- @type integer
-	local next_inv_id      = 0
+	local word_idx         = 0  ---@type integer
+	local invocation_stack = {} ---@type InvocationRecord[] -- stack of currently-open invocation records
+	local next_inv_id      = 0  ---@type integer
 
---- @type RegUseSchema|nil
-	local reg_use_schema = ctx_table.reg_use_schema
---- @type string|nil
-	local reg_use_param  = ctx_table.reg_use_param
---- @type AtomName|nil
-	local atom_name      = ctx_table.atom_name
+	local reg_use_schema = ctx_table.reg_use_schema ---@type RegUseSchema|nil
+	local reg_use_param  = ctx_table.reg_use_param  ---@type string|nil
+	local atom_name      = ctx_table.atom_name      ---@type AtomName|nil
 
---- @type table<string, boolean>  -- bag: slot name -> readonly
-	local slot_readonly = {}
+	local slot_readonly = {} ---@type table<string, boolean>  -- bag: slot name -> readonly
 	if reg_use_schema then
---- @type integer, RegUseSlot
-		for _, slot in ipairs(reg_use_schema.slots or {}) do
+		for _, slot in ipairs(reg_use_schema.slots or {}) do ---@type integer, RegUseSlot
 			slot_readonly[slot.name] = slot.readonly == true
 		end
 	end
@@ -259,13 +221,10 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	local function apply_sub(sub_map, operand)
 		if not (sub_map and type(operand) == "string") then return operand end
 		if sub_map[operand] then return sub_map[operand] end
---- @type integer|nil
-		local dot = operand:find(".", 1, true)
+		local dot = operand:find(".", 1, true) ---@type integer|nil
 		if dot then
---- @type string
-			local head = operand:sub(1, dot - 1)
---- @type string|nil
-			local mapped = sub_map[head]
+			local head = operand:sub(1, dot - 1) ---@type string
+			local mapped = sub_map[head]         ---@type string|nil
 			if type(mapped) == "string" then
 				return mapped .. operand:sub(dot)
 			end
@@ -279,23 +238,18 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		if type(operand) ~= "string" then return nil end
 		if operand:sub(1, 2) == "R_" then return operand end
 		if not (reg_use_schema and reg_use_param) then return nil end
---- @type string
-		local prefix = reg_use_param .. "."
+		local prefix = reg_use_param .. "." ---@type string
 		if operand:sub(1, #prefix) ~= prefix then return nil end
---- @type string
-		local member_path = operand:sub(#prefix + 1)
---- @type string|nil
-		local  slot       = reg_use_schema.alias_to_slot[member_path]
+		local member_path = operand:sub(#prefix + 1)                  ---@type string
+		local  slot       = reg_use_schema.alias_to_slot[member_path] ---@type string|nil
 		if not slot then return nil, member_path end
 		return "reguse:" .. atom_name .. ":" .. slot, nil, slot
 	end
 
 --- @return integer[]
 	local function open_invocation_ids_snapshot()
---- @type integer[]
-		local ids = {}
---- @type integer, InvocationRecord
-		for _, inv in ipairs(invocation_stack) do
+		local ids = {}                            ---@type integer[]
+		for _, inv in ipairs(invocation_stack) do ---@type integer, InvocationRecord
 			ids[#ids + 1] = inv.id
 		end
 		return ids
@@ -312,27 +266,19 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 --- @param sub_map table<string, string>|nil
 --- @return nil
 	local function emit_word(encoder, args, line, word_call_text, def_source_now, def_line_now, immediate_call_text, root_call_text_w, sub_map)
---- @type integer[]
-		local inv_ids   = open_invocation_ids_snapshot()
---- @type integer
-		local outermost = inv_ids[1] or 0
+		local inv_ids   = open_invocation_ids_snapshot() ---@type integer[]
+		local outermost = inv_ids[1] or 0                ---@type integer
 		-- For words emitted at the root atom body, `immediate_call_text` is nil and the walker's `word_call_text` (the word's own token, e.g. "nop") becomes the effective call_text.
 		-- For words emitted inside a component expansion, `immediate_call_text` is the immediate outer `mac_X(...)` token text;
 		-- The call that triggered the body expansion we're currently walking.
---- @type string|nil
-		local eff_call_text      = immediate_call_text or word_call_text
---- @type string|nil
-		local eff_root_call_text = root_call_text_w
---- @type string[]|nil
-		local gpr_keys           = nil
+		local eff_call_text      = immediate_call_text or word_call_text ---@type string|nil
+		local eff_root_call_text = root_call_text_w                      ---@type string|nil
+		local gpr_keys           = nil                                   ---@type string[]|nil
 		if reg_use_schema or sub_map then
 			gpr_keys = {}
---- @type integer, string
-			for pos, arg in ipairs(args or {}) do
---- @type any
-				local effective = apply_sub(sub_map, arg)
---- @type string|nil, string|nil, string|nil
-				local key, unresolved, slot = resolve_gpr_key(effective)
+			for pos, arg in ipairs(args or {}) do ---@type integer, string
+				local effective = apply_sub(sub_map, arg)                ---@type any
+				local key, unresolved, slot = resolve_gpr_key(effective) ---@type string|nil, string|nil, string|nil
 				gpr_keys[pos] = key
 				if unresolved then
 					errors[#errors + 1] = {
@@ -343,11 +289,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					}
 				end
 				if key and slot and slot_readonly[slot] then
---- @type InstructionRow|nil
-					local row = M.instr(encoder)
+					local row = M.instr(encoder) ---@type InstructionRow|nil
 					if row and row.writes then
---- @type integer, integer
-						for _, wpos in ipairs(row.writes) do
+						for _, wpos in ipairs(row.writes) do ---@type integer, integer
 							if wpos == pos then
 								errors[#errors + 1] = {
 									kind = "reguse_const_write",
@@ -364,26 +308,17 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		if not reg_use_schema then
 			gpr_keys = nil
 		end
---- @type InstructionRow|nil
-		local isa       = M.instr(encoder)
---- @type string
-		local isa_kind  = isa and isa.kind or "unknown"
---- @type integer
-		local nop_words = (encoder == "nop" and 1) or (encoder == "nop2" and 2) or 0
---- @type boolean
-		local is_yield  = (encoder == "mac_yield" or encoder == "mac_yield_tail")
---- @type string|nil
-		local gp0_shape = type(encoder) == "string"
+		local isa       = M.instr(encoder)                                           ---@type InstructionRow|nil
+		local isa_kind  = isa and isa.kind or "unknown"                              ---@type string
+		local nop_words = (encoder == "nop" and 1) or (encoder == "nop2" and 2) or 0 ---@type integer
+		local is_yield  = (encoder == "mac_yield" or encoder == "mac_yield_tail")    ---@type boolean
+		local gp0_shape = type(encoder) == "string"                                  ---@type string|nil
 			and encoder:match("^mac_format_([%w_]+)_color$")
 			or nil
---- @type boolean
-		local is_load               = (isa_kind == "load")
---- @type boolean
-		local is_branch             = (isa_kind == "branch")
---- @type boolean
-		local is_unconditional_jump = (encoder == "jump" or encoder == "call_addr")
---- @type boolean
-		local is_terminal_jump      = (encoder == "jump_reg" or encoder == "call_reg" or encoder == "jump_link")
+		local is_load               = (isa_kind == "load")                                                       ---@type boolean
+		local is_branch             = (isa_kind == "branch")                                                     ---@type boolean
+		local is_unconditional_jump = (encoder == "jump" or encoder == "call_addr")                              ---@type boolean
+		local is_terminal_jump      = (encoder == "jump_reg" or encoder == "call_reg" or encoder == "jump_link") ---@type boolean
 		items[#items + 1] = {
 			kind                     = "word",
 			encoder                  = encoder,
@@ -443,10 +378,8 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	local function emit_marker(kind, name, target, line,
 		immediate_call_text, root_call_text_w,
 		consuming_encoder, consuming_arg_pos)
---- @type integer[]
-		local inv_ids   = open_invocation_ids_snapshot()
---- @type integer
-		local outermost = inv_ids[1] or 0
+		local inv_ids   = open_invocation_ids_snapshot() ---@type integer[]
+		local outermost = inv_ids[1] or 0                ---@type integer
 		-- Markers carry the open invocation stack snapshot. `call_text` / `root_call_text` belong to words, not markers — markers are zero-width and skip per-word call-site attribution.
 		-- `consuming_encoder` + `consuming_arg_pos` carry the surrounding control-transfer instruction context
 		-- (e.g. `branch_le_zero` consuming its 3rd argument, or `jump` / `call_addr` consuming their only argument).
@@ -456,8 +389,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		if kind == "offset" and (consuming_encoder == nil or consuming_encoder == "") then
 			return
 		end
---- @type EmissionItem
-		local it = {
+		local it = { ---@type EmissionItem
 			kind                    = kind,
 			name                    = name,
 			line                    = line,
@@ -488,28 +420,21 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 --- @param to_pos integer
 --- @return integer
 	local function count_top_level_commas(tok, from_pos, to_pos)
---- @type integer
-		local depth  = 0
---- @type integer
-		local count  = 0
---- @type integer
-		local i      = from_pos
+		local depth  = 0        ---@type integer
+		local count  = 0        ---@type integer
+		local i      = from_pos ---@type integer
 		while i < to_pos do
---- @type string
-			local c = tok:sub(i, i)
+			local c = tok:sub(i, i) ---@type string
 			if c == "'" or c == '"' then
---- @type integer
-				local next_pos = M.skip_str_or_cmt(tok, i)
+				local next_pos = M.skip_str_or_cmt(tok, i) ---@type integer
 				i = (next_pos > i) and next_pos or (i + 1)
 			elseif c == "/" and tok:sub(i + 1, i + 1) == "/" then
 				-- line comment: skip to end of line
---- @type integer|nil
-				local nl = tok:find("\n", i, true)
+				local nl = tok:find("\n", i, true) ---@type integer|nil
 				i = (nl and nl + 1) or (#tok + 1)
 			elseif c == "/" and tok:sub(i + 1, i + 1) == "*" then
 				-- block comment: skip to matching */
---- @type integer|nil
-				local close = tok:find("*/", i + 2, true)
+				local close = tok:find("*/", i + 2, true) ---@type integer|nil
 				i = (close and close + 2) or (#tok + 1)
 			elseif c == "(" then
 				depth = depth + 1
@@ -532,11 +457,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 --- @param tok string
 --- @return integer|nil
 	local function find_consuming_paren(tok)
---- @type integer
-		local i = 1
+		local i = 1 ---@type integer
 		while i <= #tok do
---- @type string
-			local c = tok:sub(i, i)
+			local c = tok:sub(i, i) ---@type string
 			if    c == "(" then return i end
 			if not c:match("[%w_]") and c ~= " " then return nil end
 			i = i + 1
@@ -551,27 +474,22 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 	local function emit_embedded_markers(tok, tok_line, consuming_encoder)
 		-- When called with a non-nil `consuming_encoder`, the marker is nested inside that instruction's argument list.
 		-- We compute each marker's arg position by counting top-level commas between the consuming instruction's `(` and the marker's start.
---- @type integer|nil
-		local consuming_paren = nil
+		local consuming_paren = nil ---@type integer|nil
 		if consuming_encoder then consuming_paren = find_consuming_paren(tok) end
---- @type integer
-		local pos = 1
+		local pos = 1 ---@type integer
 		while pos <= #tok do
 			-- Trim leading whitespace and comments before each scan.
 			pos = M.skip_ws_and_cmt(tok, pos)
 			if pos > #tok then break end
---- @type string|nil, integer
-			local  ident, after = M.read_ident(tok, pos)
+			local  ident, after = M.read_ident(tok, pos) ---@type string|nil, integer
 			if not ident then
 				-- Not an ident: token is a string or comment; skip or one-step.
---- @type integer
-				local next_pos = M.skip_str_or_cmt(tok, pos)
+				local next_pos = M.skip_str_or_cmt(tok, pos) ---@type integer
 				pos = (next_pos > pos) and next_pos or (pos + 1)
 				goto continue_loop
 			end
 			if M.DELAY_MARKERS[ident] then
---- @type integer|nil
-				local arg_pos = nil
+				local arg_pos = nil ---@type integer|nil
 				if consuming_encoder and consuming_paren then
 					arg_pos = count_top_level_commas(tok, consuming_paren + 1, pos) + 1
 				end
@@ -585,10 +503,8 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				goto continue_loop
 			end
 			-- Marker ident: parse the (...) arguments.
---- @type integer
-			local open               = M.skip_ws_and_cmt(tok, after)
---- @type string|nil, integer
-			local inner, after_paren = M.read_parens(tok, open)
+			local open               = M.skip_ws_and_cmt(tok, after) ---@type integer
+			local inner, after_paren = M.read_parens(tok, open)      ---@type string|nil, integer
 			if not inner then
 				-- (...) Unreadable: fall back to non-marker behavior.
 				pos = after
@@ -598,13 +514,11 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			-- For embedded markers, propagate the consuming_encoder + the marker's arg position
 			-- (1-based) so `passes/offsets.lua` can dispatch per-consuming-instruction offset encoding.
 			-- Offset markers are emitted only when a consuming encoder is present.
---- @type integer|nil
-			local arg_pos = nil
+			local arg_pos = nil ---@type integer|nil
 			if consuming_encoder and consuming_paren then
 				arg_pos = count_top_level_commas(tok, consuming_paren + 1, pos) + 1
 			end
---- @type string[]
-			local args = split_call_args(inner)
+			local args = split_call_args(inner) ---@type string[]
 			if ident == "atom_label" then emit_marker("label",  args[1] or "", nil,           tok_line, nil, nil, consuming_encoder, arg_pos)
 			elseif consuming_encoder then emit_marker("offset", args[1] or "", args[2] or "", tok_line, nil, nil, consuming_encoder, arg_pos)
 			end
@@ -630,10 +544,8 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 		-- The walker has already found the component body in `ctx_table.component_index[component_name]`, so the matching entry MUST exist in `ctx_table.components[component_name]`
 		-- (both registries are populated from the same source by the components pass).
 		-- A missing entry is a corpus-plumbing bug; we fail loudly here rather than silently stamp `false` and mask the regression.
---- @type table<string, ComponentDef>|nil
-		local  components    = ctx_table.components
---- @type ComponentDef|nil
-		local  component_def = components and components[component_name] or nil
+		local  components    = ctx_table.components                             ---@type table<string, ComponentDef>|nil
+		local  component_def = components and components[component_name] or nil ---@type ComponentDef|nil
 		if not component_def then
 			error("duffle.emit_invoke_begin: component " .. string.format("%q", component_name)
 				.. " is present in `component_index` (the walker matched a `mac_" .. component_name .. "()` call) but absent from `components` (the canonical corpus.components registry). "
@@ -642,10 +554,8 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 				, 0
 			)
 		end
---- @type boolean
-		local debug_skip_stamp = component_def.debug_skip == true
---- @type InvocationRecord
-		local inv = {
+		local debug_skip_stamp = component_def.debug_skip == true ---@type boolean
+		local inv = {                                             ---@type InvocationRecord
 			id              = next_inv_id,
 			parent_id       = 0,         -- patched below by caller
 			kind            = inv_kind,
@@ -692,8 +602,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			word_index     = word_idx,
 			invocation_ids = open_invocation_ids_snapshot(),
 		}
---- @type integer
-		for i = #invocation_stack, 1, -1 do
+		for i = #invocation_stack, 1, -1 do ---@type integer
 			if invocation_stack[i] == inv then
 				table.remove(invocation_stack, i)
 				break
@@ -707,11 +616,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 --- @param tok_line integer
 --- @return integer
 	local function resolve_count(ident, tok_line)
---- @type WordCounts|nil
-		local wc = ctx_table.word_counts
+		local wc = ctx_table.word_counts ---@type WordCounts|nil
 		if    wc and wc[ident] then return wc[ident] end
---- @type string
-		local canon = M.gte_canon(ident)
+		local canon = M.gte_canon(ident) ---@type string
 		if    canon ~= ident and wc and wc[canon] then return wc[canon] end
 		warnings[#warnings + 1] = {
 			kind = "uncounted",
@@ -734,60 +641,45 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 --- @return nil
 	local function walk_body_entry(body_entry, walk_parent_inv_id,
 		walk_root_call_text, walk_immediate_call_text)
---- @type BodyToken[]
-		local tokens     = body_entry.body_tokens or {}
---- @type integer
-		local body_off   = body_entry.body_off or 0
---- @type LineIndexFn
-		local line_of    = body_entry.line_of or M.LineIndex("")
---- @type string
-		local def_source = body_entry.source or ""
---- @type integer
-		local def_line   = body_entry.declaration or 0
---- @type table<string, string>|nil
-		local sub_map    = body_entry.sub_map
+		local tokens     = body_entry.body_tokens or {}          ---@type BodyToken[]
+		local body_off   = body_entry.body_off or 0              ---@type integer
+		local line_of    = body_entry.line_of or M.LineIndex("") ---@type LineIndexFn
+		local def_source = body_entry.source or ""               ---@type string
+		local def_line   = body_entry.declaration or 0           ---@type integer
+		local sub_map    = body_entry.sub_map                    ---@type table<string, string>|nil
 		-- Per-token dispatch: each matched branch returns; only the fall-through
 		-- "opaque word" emit handles direct encoders + mac_X-without-component.
 --- @param bt BodyToken
 --- @return nil
 		local function process_token(bt)
---- @type string
-			local tok = M.trim(bt.tok or "")
+			local tok = M.trim(bt.tok or "") ---@type string
 			-- Substituted MipsCode args can carry // comments from the call site.
 			while tok ~= "" do
 				if tok:sub(1, 2) == "//" then
---- @type integer|nil
-					local nl = tok:find("\n")
+					local nl = tok:find("\n") ---@type integer|nil
 					tok = M.trim(nl and tok:sub(nl + 1) or "")
 				elseif tok:sub(1, 2) == "/*" then
---- @type integer|nil
-					local close = tok:find("*/", 3, true)
+					local close = tok:find("*/", 3, true) ---@type integer|nil
 					tok = M.trim(close and tok:sub(close + 2) or "")
 				else
 					break
 				end
 			end
 			if tok == "" then return end
---- @type string|nil, integer
-			local ident, after = M.read_ident(tok, 1)
+			local ident, after = M.read_ident(tok, 1) ---@type string|nil, integer
 			if not ident then ident = "?" end
---- @type string, string[]
-			local _, args  = token_ident_and_args(tok)
---- @type integer
-			local tok_line = line_of(body_off + bt.rel) or 0
+			local _, args  = token_ident_and_args(tok)       ---@type string, string[]
+			local tok_line = line_of(body_off + bt.rel) or 0 ---@type integer
 			if M.DELAY_MARKERS[ident] then
 				emit_marker("delay", ident, nil, tok_line)
---- @type string
-				local rest = tok:sub(after or (#tok + 1))
+				local rest = tok:sub(after or (#tok + 1)) ---@type string
 				while true do
 					rest = M.trim(rest)
 					if rest:sub(1, 2) == "//" then
---- @type integer|nil
-						local nl = rest:find("\n")
+						local nl = rest:find("\n") ---@type integer|nil
 						rest = nl and rest:sub(nl + 1) or ""
 					elseif rest:sub(1, 2) == "/*" then
---- @type integer|nil
-						local close = rest:find("*/", 3, true)
+						local close = rest:find("*/", 3, true) ---@type integer|nil
 						if not close then rest = ""; break end
 						rest = rest:sub(close + 2)
 					else
@@ -803,8 +695,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			-- Pass `ident` as the consuming instruction so `emit_embedded_markers` can compute each marker's arg position + record the consuming_encoder for the offsets pass.
 			-- Canonicalize `jump_rel` to `branch_equal` (its preprocessor-expanded form) so the `consuming_encoder` metadata in marker records is canonical. 
 			-- `jump_rel`: unconditional jump alias from `code/duffle/mips.h`.
---- @type string
-			local consuming_encoder_for_markers = (ident == "jump_rel") and "branch_equal" or ident
+			local consuming_encoder_for_markers = (ident == "jump_rel") and "branch_equal" or ident ---@type string
 			if ident ~= "atom_label" and ident ~= "atom_offset" then
 				emit_embedded_markers(tok, tok_line, consuming_encoder_for_markers)
 			end
@@ -817,29 +708,23 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			-- MipsCode formals (nop_slot1, …): the ident is a sub_map key.
 			-- Re-process the replacement token so load_word(...) becomes a real encoder.
 			if sub_map and type(sub_map[ident]) == "string" and sub_map[ident] ~= ident then
---- @type string
-				local repl = M.trim(sub_map[ident])
+				local repl = M.trim(sub_map[ident]) ---@type string
 				if repl ~= "" then
 					process_token({ tok = repl, rel = bt.rel })
 					return
 				end
 			end
 			if ident:sub(1, 4) == "mac_" then
---- @type string
-				local bare = ident:sub(5)
---- @type ComponentBodyEntry|nil
-				local comp = ctx_table.component_index[bare]
+				local bare = ident:sub(5)                    ---@type string
+				local comp = ctx_table.component_index[bare] ---@type ComponentBodyEntry|nil
 				if comp then
---- @type string
-					local invocation_root_call_text = walk_root_call_text or tok
+					local invocation_root_call_text = walk_root_call_text or tok ---@type string
 					if ctx_table.visiting[bare] then
 						-- Cycle: still allocate inv_id, emit zero-width begin/end, record the cycle error; do NOT recurse.
---- @type InvocationRecord
-						local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
+						local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line) ---@type InvocationRecord
 						inv.parent_id = walk_parent_inv_id
 						inv.call_text = tok
---- @type EmitError
-						local err = {
+						local err = { ---@type EmitError
 							kind   = "cycle",
 							msg    = string.format("project_emission: component cycle detected: %q", bare),
 							source = def_source,
@@ -852,8 +737,7 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					end
 					-- First visit: descend + count + count_mismatch-check below.
 					ctx_table.visiting[bare] = true
---- @type InvocationRecord
-					local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line)
+					local inv = emit_invoke_begin(comp.kind or "comp_bare", bare, tok, invocation_root_call_text, def_source, tok_line) ---@type InvocationRecord
 					inv.parent_id = walk_parent_inv_id
 					inv.call_text = tok
 					inv.def_path  = comp.source
@@ -861,15 +745,12 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					-- Propagate trackers into the recursive walk:
 					--   immediate_call_text = this call's tok (the IMMEDIATE outer call for words emitted in this body)
 					--   root_call_text      = the OUTERMOST call (immutable across the recursion)
---- @type string[]|nil
-					local formal_names = ctx_table.component_index[bare]
+					local formal_names = ctx_table.component_index[bare] ---@type string[]|nil
 						and ctx_table.component_index[bare].arg_names
---- @type table<string, string>|nil
-					local child_map = nil
+					local child_map = nil ---@type table<string, string>|nil
 					if formal_names then
 						child_map = {}
---- @type integer, string
-						for i, fname in ipairs(formal_names) do
+						for i, fname in ipairs(formal_names) do ---@type integer, string
 							child_map[fname] = apply_sub(sub_map, args[i])
 						end
 					end
@@ -887,12 +768,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					ctx_table.visiting[bare] = nil
 					emit_invoke_end(inv)
 					-- Count `word` items inside [start_word, end_word].
---- @type integer
-					local wc_inside = 0
---- @type integer
-					for i = inv.start_word, inv.end_word do
---- @type EmissionItem|nil
-						local it = items[i]
+					local wc_inside = 0                     ---@type integer
+					for i = inv.start_word, inv.end_word do ---@type integer
+						local it = items[i] ---@type EmissionItem|nil
 						if it and it.kind == "word" then
 							wc_inside = wc_inside + 1
 						end
@@ -900,11 +778,9 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 					inv.word_count = wc_inside
 					-- count_mismatch is a construction error: word_counts["mac_X"] is the declared count populated by the components pass; 
 					-- We compare against the measured word count.
---- @type integer|nil
-					local declared = ctx_table.word_counts["mac_" .. bare]
+					local declared = ctx_table.word_counts["mac_" .. bare] ---@type integer|nil
 					if declared and wc_inside ~= declared then
---- @type EmitError
-						local err = {
+						local err = { ---@type EmitError
 							kind   = "count_mismatch",
 							msg    = string.format("project_emission: mac_%s declared=%d measured=%d", bare, declared, wc_inside),
 							source = def_source,
@@ -919,18 +795,14 @@ local function _project_emission_inner(root_body_entry, ctx_table)
 			end
 			-- Direct encoder, or mac_X-without-component: resolve count + emit n words.
 			-- Resolve_count may emit a warning if the count is unresolved.
---- @type integer
-			local n         = resolve_count(ident, tok_line)
---- @type string
-			local out_ident = (ident == "nop2") and "nop" or ident
---- @type integer
-			for _ = 1, n do
+			local n         = resolve_count(ident, tok_line)       ---@type integer
+			local out_ident = (ident == "nop2") and "nop" or ident ---@type string
+			for _ = 1, n do                                        ---@type integer
 				emit_word(out_ident, args, tok_line, tok, def_source, def_line, walk_immediate_call_text, walk_root_call_text, sub_map)
 			end
 		end
 		
---- @type integer, BodyToken
-		for _, bt in ipairs(tokens) do
+		for _, bt in ipairs(tokens) do ---@type integer, BodyToken
 			process_token(bt)
 		end
 	end
@@ -1025,8 +897,7 @@ function M.project_emission(body_text, component_index, word_counts, components,
 		}
 	end
 
---- @type BodyToken[]
-	local tokens = M.tokenize_body(body_text)
+	local tokens = M.tokenize_body(body_text) ---@type BodyToken[]
 	return _project_emission_inner({
 		body_tokens = tokens,
 		body_off    = 0,
@@ -1064,26 +935,21 @@ end
 --- @param slice_mips_code_len integer
 --- @return string|nil, string|nil
 function M.find_function_decl_for(source, before_pos, slice_mips_code_len)
---- @type integer
-	local search_pos = 1
---- @type integer|nil
-	local last_match = nil
+	local search_pos = 1   ---@type integer
+	local last_match = nil ---@type integer|nil
 	while true do
---- @type integer|nil
-		local found = source:find("Slice_MipsCode", search_pos, true)
+		local found = source:find("Slice_MipsCode", search_pos, true) ---@type integer|nil
 		if not found or found >= before_pos then break end
 		last_match = found
 		search_pos = found + slice_mips_code_len
 	end
 	if not last_match then return nil, nil end
 
---- @type integer
-	local pos = last_match + slice_mips_code_len
+	local pos = last_match + slice_mips_code_len ---@type integer
 	while pos < before_pos do
 		-- skip whitespace
 		while pos <= #source do
---- @type string
-			local c = source:sub(pos, pos)
+			local c = source:sub(pos, pos) ---@type string
 			if c == " " or c == "\t" or c == "\n" or c == "\r" then
 				pos = pos + 1
 			else
@@ -1099,22 +965,18 @@ function M.find_function_decl_for(source, before_pos, slice_mips_code_len)
 		end
 		-- skip block comments
 		if source:sub(pos, pos + 1) == "/*" then
---- @type integer|nil
-			local  close = source:find("*/", pos + 2, true)
+			local  close = source:find("*/", pos + 2, true) ---@type integer|nil
 			if not close then break end
 			pos = close + 2
 			goto continue
 		end
 		-- try to read an ident
---- @type string|nil, integer
-		local  ident, ident_end = M.read_ident(source, pos)
+		local  ident, ident_end = M.read_ident(source, pos) ---@type string|nil, integer
 		if not ident then break end
 		-- check if the next non-ws char after ident is "("
---- @type integer
-		local next_pos = M.skip_ws_and_cmt(source, ident_end)
+		local next_pos = M.skip_ws_and_cmt(source, ident_end) ---@type integer
 		if source:sub(next_pos, next_pos) == "(" then
---- @type string|nil
-			local inner = M.read_parens(source, next_pos)
+			local inner = M.read_parens(source, next_pos) ---@type string|nil
 			if inner then
 				return ident, inner
 			end
@@ -1145,27 +1007,22 @@ end
 --- @param mips_atom_ptr_len integer
 --- @return string|nil, string|nil, string|nil, integer|nil
 function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
---- @type integer
-	local search_pos = 1
---- @type integer|nil
-	local last_match = nil
+	local search_pos = 1   ---@type integer
+	local last_match = nil ---@type integer|nil
 	while true do
 		-- plain=true: "*" is literal, no escaping needed
---- @type integer|nil
-		local  found = source:find("MipsAtom*", search_pos, true)
+		local  found = source:find("MipsAtom*", search_pos, true) ---@type integer|nil
 		if not found or found >= before_pos then break end
 		last_match = found
 		search_pos = found + mips_atom_ptr_len
 	end
 	if not last_match then return nil, nil end
 
---- @type integer
-	local pos = last_match + mips_atom_ptr_len
+	local pos = last_match + mips_atom_ptr_len ---@type integer
 	while pos < before_pos do
 		-- skip whitespace
 		while pos <= #source do
---- @type string
-			local c = source:sub(pos, pos)
+			local c = source:sub(pos, pos) ---@type string
 			if c == " " or c == "\t" or c == "\n" or c == "\r" then
 				pos = pos + 1
 			else
@@ -1181,22 +1038,18 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 		end
 		-- skip block comments
 		if source:sub(pos, pos + 1) == "/*" then
---- @type integer|nil
-			local  close = source:find("*/", pos + 2, true)
+			local  close = source:find("*/", pos + 2, true) ---@type integer|nil
 			if not close then break end
 			pos = close + 2
 			goto continue
 		end
 		-- try to read an ident
---- @type string|nil, integer
-		local  ident, ident_end = M.read_ident(source, pos)
+		local  ident, ident_end = M.read_ident(source, pos) ---@type string|nil, integer
 		if not ident then break end
 		-- check if the next non-ws char after ident is "("
---- @type integer
-		local next_pos = M.skip_ws_and_cmt(source, ident_end)
+		local next_pos = M.skip_ws_and_cmt(source, ident_end) ---@type integer
 		if source:sub(next_pos, next_pos) == "(" then
---- @type string|nil, integer
-			local inner, after_paren = M.read_parens(source, next_pos)
+			local inner, after_paren = M.read_parens(source, next_pos) ---@type string|nil, integer
 			if inner then
 				return ident, inner, ident, after_paren
 			end
@@ -1209,3 +1062,4 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 end
 
 return M
+

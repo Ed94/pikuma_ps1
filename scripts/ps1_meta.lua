@@ -20,7 +20,7 @@
 -- That single statement: (a) sets `package.path` + `package.cpath`, (b) at the bottom returns `require("duffle")`.
 -- So the dofile's return value is the duffle module.
 local _is_entry_script = arg and arg[0] and arg[0]:match("ps1_meta%.lua$") ~= nil ---@type boolean
-local _bootstrap_src ---@type string
+local _bootstrap_src                                                              ---@type string
 if _is_entry_script then
 	_bootstrap_src = arg[0]
 else
@@ -220,7 +220,7 @@ local PASSES = { ---@type table<string, PassDescriptor>
 --- @param group_name string  -- Build-phase group ("pre-link" | "post-link")
 --- @return string[]          -- Sorted root pass names belonging to that group
 local function roots_for_group(group_name)
-	local names = {} ---@type string[]
+	local names = {}                   ---@type string[]
 	for name, pass in pairs(PASSES) do ---@type string, PassDescriptor
 		if pass.groups then
 			for _, g in ipairs(pass.groups) do ---@type integer, string
@@ -284,7 +284,7 @@ local PASS_FLAG_TO_NAME = { ---@type table<string, string>  -- bag: CLI flag -> 
 --- @param args ParsedArgs
 --- @return nil
 local function request_all_passes(args)
-	local names = {} ---@type string[]
+	local names = {}                                          ---@type string[]
 	for name in pairs(PASSES) do names[#names + 1] = name end ---@type string
 	table.sort(names)
 	for _, n in ipairs(names) do ---@type integer, string
@@ -366,7 +366,7 @@ local FLAG_VALUE_NAMES = { ---@type table<string, string>  -- bag: flag -> value
 --- @return string
 --- @return integer
 local function require_flag_value(argv, arg_idx, flag)
-	local value      = argv[arg_idx + 1] ---@type string|nil
+	local value      = argv[arg_idx + 1]       ---@type string|nil
 	local next_known = type(value) == "string" ---@type boolean
 		and (FLAG_HANDLERS[value] ~= nil or PASS_FLAG_TO_NAME[value] ~= nil)
 	if value == nil or next_known then
@@ -511,7 +511,7 @@ local function parse_args(argv)
 
 	local pos = 1 ---@type integer
 	while pos <= #argv do
-		local a       = argv[pos] ---@type string
+		local a       = argv[pos]        ---@type string
 		local handler = FLAG_HANDLERS[a] ---@type FlagHandler|nil
 		if handler then
 			pos = handler(args, argv, pos) or pos
@@ -538,7 +538,7 @@ local function parse_args(argv)
 	-- `project_root` names `<repo>`; the resolver derives `<project_root>/code` separately.
 	if not args.project_root then
 		local metadata_dir = duffle.dirname(duffle.normalize_path(args.metadata)) ---@type string
-		local code_root    = duffle.dirname(metadata_dir) ---@type string
+		local code_root    = duffle.dirname(metadata_dir)                         ---@type string
 		args.project_root  = duffle.dirname(code_root)
 	else
 		args.project_root = duffle.normalize_path(args.project_root)
@@ -557,10 +557,10 @@ local function parse_args(argv)
 	-- Post-link opt-ins (--gdb-runtime, --dwarf-injection) write output that depends on the linked ELF.
 	-- Without --elf the metaprogram can't satisfy those requests, so refuse loud and early.
 	-- This covers the explicit --post-link batch, --dwarf-injection by itself, and --gdb-runtime by itself.
-	local flags      = args.flags or {} ---@type PassFlags
-	local elf_path   = flags.elf_path ---@type string|nil
+	local flags      = args.flags or {}                             ---@type PassFlags
+	local elf_path   = flags.elf_path                               ---@type string|nil
 	local has_elf    = type(elf_path) == "string" and #elf_path > 0 ---@type boolean
-	local post_links = flags.gdb_runtime or flags.dwarf_injection ---@type boolean
+	local post_links = flags.gdb_runtime or flags.dwarf_injection   ---@type boolean
 	if post_links and not has_elf then
 		io.stderr:write("ps1_meta: --elf PATH is required for post-link output\n")
 		os.exit(EXIT_INTERNAL_ERROR)
@@ -580,8 +580,8 @@ end
 --- @return PassCtx
 local function build_ctx(args)
 	local normalized_project_root  = duffle.normalize_path(args.project_root) ---@type string
-	local project_root             = normalized_project_root ---@type string
-	local project_root_is_absolute = normalized_project_root:match("^%a:/") ---@type boolean
+	local project_root             = normalized_project_root                  ---@type string
+	local project_root_is_absolute = normalized_project_root:match("^%a:/")   ---@type boolean
 		or normalized_project_root:sub(1, 2) == "//"
 		or normalized_project_root:sub(1, 1) == "/"
 	if not project_root_is_absolute then
@@ -606,13 +606,13 @@ local function build_ctx(args)
 	else
 		local source_order    = {} ---@type SourceFile[]
 		local sources_by_path = {} ---@type table<Path, SourceFile>
-		local resolver = { ---@type SourceResolver
+		local resolver = {         ---@type SourceResolver
 			resolved = {},
 			skipped  = {},
 			shadowed = {},
 		}
 		for _, input_path in ipairs(args.sources) do ---@type integer, string
-			local path = duffle.normalize_path(input_path) ---@type string
+			local path = duffle.normalize_path(input_path)                      ---@type string
 			local key_ok, key_or_error = pcall(duffle.canonical_path_key, path) ---@type boolean, string
 			if not key_ok then
 				error("ps1_meta: invalid --source " .. input_path .. ": " .. tostring(key_or_error), 0)
@@ -706,9 +706,9 @@ end
 --- Keeping these blocks local makes the topological sort self-contained.
 local function topo_sort(passes, requested_set)
 	-- Dependency closure: include every pass transitively required by `requested_set`.
-	local needed = {} ---@type table<string, boolean>  -- bag: pass name -> needed
+	local needed = {}                                               ---@type table<string, boolean>  -- bag: pass name -> needed
 	for _, name in ipairs(requested_set) do needed[name] = true end ---@type integer, string
-	local changed = true ---@type boolean
+	local changed = true                                            ---@type boolean
 	while changed do
 		changed = false
 		for name, _ in pairs(needed) do ---@type string, boolean
@@ -724,7 +724,7 @@ local function topo_sort(passes, requested_set)
 	end
 
 	-- In-degree calculation: count each needed pass's needed dependencies.
-	local in_degree = {} ---@type table<string, integer>  -- bag: pass name -> in-degree
+	local in_degree = {}                                    ---@type table<string, integer>  -- bag: pass name -> in-degree
 	for name, _ in pairs(needed) do in_degree[name] = 0 end ---@type string, boolean
 	for name, _ in pairs(needed) do                         ---@type string, boolean
 		for _, dep in ipairs(passes[name].deps) do ---@type integer, string
@@ -735,7 +735,7 @@ local function topo_sort(passes, requested_set)
 	end
 
 	-- Ready-queue seeding: add zero-in-degree passes in deterministic order.
-	local ready = {} ---@type string[]
+	local ready = {}                     ---@type string[]
 	for name, deg in pairs(in_degree) do ---@type string, integer
 		if deg == 0 then ready[#ready + 1] = name end
 	end
@@ -765,8 +765,8 @@ local function topo_sort(passes, requested_set)
 	-- Cycle detection: if `order` doesn't include all needed passes, some are stuck with in_degree > 0
 	-- (the cycle closed on itself before Kahn could process them).
 	-- Without this check, a fully-closed cycle (e.g. A -> B -> A) would silently return an empty order list, leaving the orchestrator to dispatch nothing.
-	local needed_count = 0 ---@type integer
-	for _ in pairs(needed) do needed_count = needed_count + 1 end  ---@type string -- count hash entries; Lua's #t doesn't work
+	local needed_count = 0                                        ---@type integer
+	for _ in pairs(needed) do needed_count = needed_count + 1 end ---@type string -- count hash entries; Lua's #t doesn't work
 	if #order ~= needed_count then
 		for name, deg in pairs(in_degree) do ---@type string, integer
 			if deg > 0 then
@@ -802,11 +802,11 @@ end
 --- @param order string[]
 --- @return boolean  -- true if any validation errors were reported
 local function dispatch_passes(ctx, order)
-	local had_errors = false ---@type boolean
+	local had_errors = false             ---@type boolean
 	for _, pass_name in ipairs(order) do ---@type integer, string
 		local pass   = PASSES[pass_name]    ---@type PassDescriptor
 		local mod    = require(pass.module) ---@type PassModule
-		local result = mod.run(ctx) ---@type PassResult
+		local result = mod.run(ctx)         ---@type PassResult
 		if report_validation_errors(pass_name, pass, result) then
 			had_errors = true
 		end

@@ -34,7 +34,7 @@
 -- Load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd). 
 -- Sets package.path + package.cpath then returns duffle.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
 
 -- ELF32 / DWARF / atoms-source-map utilities (post-link debug-info injection).
 -- Sister module to duffle.lua — contains the format-constant tables (ELF32 byte offsets, DWARF opcodes, etc.) and the I/O helpers
@@ -55,27 +55,27 @@ local sleb128 = elf_dwarf.sleb128 ---@type fun(n: integer): string
 -- All values lifted from `elf_dwarf.DWARF_LINE_OPS` + `elf_dwarf.DWARF5_RNGLISTS`.
 -- Local aliases preserve the code's readability
 -- (e.g. `DW_LNS_copy` reads better than `elf_dwarf.DWARF_LINE_OPS.DW_LNS_copy` in an emitter body).
-local DWARF_LINE_OPS      = elf_dwarf.DWARF_LINE_OPS ---@type DwarfLineOps
-local DWARF5_RNGLISTS     = elf_dwarf.DWARF5_RNGLISTS ---@type Dwarf5Rnglists
+local DWARF_LINE_OPS      = elf_dwarf.DWARF_LINE_OPS      ---@type DwarfLineOps
+local DWARF5_RNGLISTS     = elf_dwarf.DWARF5_RNGLISTS     ---@type Dwarf5Rnglists
 local MIPS_BYTES_PER_WORD = elf_dwarf.MIPS_BYTES_PER_WORD ---@type integer
 
-local DW_LNS_copy         = DWARF_LINE_OPS.DW_LNS_copy ---@type integer
-local DW_LNS_advance_pc   = DWARF_LINE_OPS.DW_LNS_advance_pc ---@type integer
+local DW_LNS_copy         = DWARF_LINE_OPS.DW_LNS_copy         ---@type integer
+local DW_LNS_advance_pc   = DWARF_LINE_OPS.DW_LNS_advance_pc   ---@type integer
 local DW_LNS_advance_line = DWARF_LINE_OPS.DW_LNS_advance_line ---@type integer
-local DW_LNS_set_file     = DWARF_LINE_OPS.DW_LNS_set_file ---@type integer
-local DW_LNS_negate_stmt  = DWARF_LINE_OPS.DW_LNS_negate_stmt ---@type integer
-local DW_LNS_extended     = DWARF_LINE_OPS.DW_LNS_extended ---@type integer
+local DW_LNS_set_file     = DWARF_LINE_OPS.DW_LNS_set_file     ---@type integer
+local DW_LNS_negate_stmt  = DWARF_LINE_OPS.DW_LNS_negate_stmt  ---@type integer
+local DW_LNS_extended     = DWARF_LINE_OPS.DW_LNS_extended     ---@type integer
 local DW_LNE_end_sequence = DWARF_LINE_OPS.DW_LNE_end_sequence ---@type integer
-local DW_LNE_set_address  = DWARF_LINE_OPS.DW_LNE_set_address ---@type integer
+local DW_LNE_set_address  = DWARF_LINE_OPS.DW_LNE_set_address  ---@type integer
 
-local DW_RLE_end_of_list   = DWARF5_RNGLISTS.end_of_list ---@type integer
+local DW_RLE_end_of_list   = DWARF5_RNGLISTS.end_of_list  ---@type integer
 local DW_RLE_start_length  = DWARF5_RNGLISTS.start_length ---@type integer
 
 -- File-index lookup for the existing main line unit (Unit 2).
 -- Populated at pass start by `init_file_index_lookup(elf_path)` from the runtime ELF (see `elf_dwarf.read_line_unit_file_table`).
-local _file_index_by_basename    = nil  ---@type table<string, integer>|nil  -- bag -- [basename] = 1-based line-table file index
-local _file_path_by_index        = nil  ---@type table<integer, string>|nil  -- bag -- [1-based index] = full source path (diagnostics / future consumers)
-local _default_atom_source_index = nil  ---@type integer -- any valid index used in opaque-row fallbacks
+local _file_index_by_basename    = nil ---@type table<string, integer>|nil  -- bag -- [basename] = 1-based line-table file index
+local _file_path_by_index        = nil ---@type table<integer, string>|nil  -- bag -- [1-based index] = full source path (diagnostics / future consumers)
+local _default_atom_source_index = nil ---@type integer -- any valid index used in opaque-row fallbacks
 
 -- RR_<R_Name> debug-visible variables come from the merged register_alias_registry filtered to aliases whose code is a valid MIPS GPR 0..31
 -- (see collect_per_source_registries + by_alias in build_inserted_children).
@@ -86,16 +86,16 @@ local _default_atom_source_index = nil  ---@type integer -- any valid index used
 -- DW_OP_bregN would describe a memory location addressed from a register; the breg form would make gdb dereference the atom register value rather than display it.
 
 -- New abbreviation codes (100+ to avoid collision with gcc's existing 1-60+ codes).
-local ABBREV_CU          = 0x64   ---@type integer -- 100: DW_TAG_compile_unit
-local ABBREV_SUBPROGRAM  = 0x65   ---@type integer -- 101: DW_TAG_subprogram
-local ABBREV_VARIABLE    = 0x66   ---@type integer -- 102: DW_TAG_variable with DW_AT_type = ref4 to U4
-local ABBREV_STRUCT_TYPE = 0x67   ---@type integer -- 103: DW_TAG_structure_type with children (Binds_X mirror)
-local ABBREV_MEMBER      = 0x68   ---@type integer -- 104: DW_TAG_member no children (DW_AT_type = ref4 to U4 base)
-local ABBREV_BIND_VAR    = 0x69   ---@type integer -- 105: DW_TAG_variable no children + DW_AT_type = ref4 (the bind_args variable)
-local ABBREV_BASE_TYPE   = 0x6A   ---@type integer -- 106: DW_TAG_base_type no children (U4)
+local ABBREV_CU          = 0x64 ---@type integer -- 100: DW_TAG_compile_unit
+local ABBREV_SUBPROGRAM  = 0x65 ---@type integer -- 101: DW_TAG_subprogram
+local ABBREV_VARIABLE    = 0x66 ---@type integer -- 102: DW_TAG_variable with DW_AT_type = ref4 to U4
+local ABBREV_STRUCT_TYPE = 0x67 ---@type integer -- 103: DW_TAG_structure_type with children (Binds_X mirror)
+local ABBREV_MEMBER      = 0x68 ---@type integer -- 104: DW_TAG_member no children (DW_AT_type = ref4 to U4 base)
+local ABBREV_BIND_VAR    = 0x69 ---@type integer -- 105: DW_TAG_variable no children + DW_AT_type = ref4 (the bind_args variable)
+local ABBREV_BASE_TYPE   = 0x6A ---@type integer -- 106: DW_TAG_base_type no children (U4)
 -- Component step-into (DW_TAG_inlined_subroutine + abstract DW_TAG_subprogram).
-local ABBREV_ABSTRACT_SUBPROGRAM = 0x6B   ---@type integer -- 107: DW_TAG_subprogram (abstract — no low_pc/high_pc); for each unique mac_X component
-local ABBREV_INLINED_SUBROUTINE  = 0x6C   ---@type integer -- 108: DW_TAG_inlined_subroutine with children (per-component invocation range)
+local ABBREV_ABSTRACT_SUBPROGRAM = 0x6B ---@type integer -- 107: DW_TAG_subprogram (abstract — no low_pc/high_pc); for each unique mac_X component
+local ABBREV_INLINED_SUBROUTINE  = 0x6C ---@type integer -- 108: DW_TAG_inlined_subroutine with children (per-component invocation range)
 -- Bind_args uses DW_FORM_sec_offset → .debug_loclists for PC-ranged liveness 
 -- (each field transitions from tape memory to GPR at load_pc + 8 = MIPS I load-delay slot boundary).
 local ABBREV_BIND_VAR_LOCLIST = 0x6D   ---@type integer -- 109: DW_TAG_variable no children + DW_AT_type = ref4 + DW_AT_location = sec_offset
@@ -213,26 +213,26 @@ local DW_TAG_pointer_type    = 0x0F ---@type integer
 -- Component step-into.
 local DW_TAG_inlined_subroutine = 0x1D ---@type integer
 
-local DW_AT_name             = 0x03 ---@type integer
-local DW_AT_low_pc           = 0x11 ---@type integer
-local DW_AT_high_pc          = 0x12 ---@type integer
-local DW_AT_language         = 0x13 ---@type integer
-local DW_AT_location         = 0x02 ---@type integer
-local DW_AT_comp_dir         = 0x1B ---@type integer
-local DW_AT_byte_size        = 0x0B ---@type integer
-local DW_AT_encoding         = 0x3E   ---@type integer -- DWARF5 §7.7.1: DW_AT_encoding for the DW_ATE_unsigned base type
+local DW_AT_name             = 0x03     ---@type integer
+local DW_AT_low_pc           = 0x11     ---@type integer
+local DW_AT_high_pc          = 0x12     ---@type integer
+local DW_AT_language         = 0x13     ---@type integer
+local DW_AT_location         = 0x02     ---@type integer
+local DW_AT_comp_dir         = 0x1B     ---@type integer
+local DW_AT_byte_size        = 0x0B     ---@type integer
+local DW_AT_encoding         = 0x3E     ---@type integer -- DWARF5 §7.7.1: DW_AT_encoding for the DW_ATE_unsigned base type
 local DW_AT_data_member_location = 0x38 ---@type integer
-local DW_AT_type             = 0x49 ---@type integer
-local DW_AT_linkage_name     = 0x6E   ---@type integer -- DWARF5 §7.7.1: DW_AT_linkage_name with DW_FORM_string
-local DW_AT_external         = 0x3F   ---@type integer -- marks a variable/function as externally visible
+local DW_AT_type             = 0x49     ---@type integer
+local DW_AT_linkage_name     = 0x6E     ---@type integer -- DWARF5 §7.7.1: DW_AT_linkage_name with DW_FORM_string
+local DW_AT_external         = 0x3F     ---@type integer -- marks a variable/function as externally visible
 -- Inlined_subroutine + abstract_origin attributes.
 local DW_AT_abstract_origin  = 0x31 ---@type integer
 local DW_AT_call_file        = 0x58 ---@type integer
 local DW_AT_call_line        = 0x59 ---@type integer
-local DW_AT_inline           = 0x20   ---@type integer -- DWARF5 §7.7.1: DW_AT_inline (used by abstract subprogram for the mac_X() components)
+local DW_AT_inline           = 0x20 ---@type integer -- DWARF5 §7.7.1: DW_AT_inline (used by abstract subprogram for the mac_X() components)
 -- decl_file + decl_line on the abstract subprogram so consumers can resolve an abstract origin back to its definition site even when no inlined_subroutine instance currently maps to it.
-local DW_AT_decl_file        = 0x3A   ---@type integer -- DWARF5 §7.7.1: DW_AT_decl_file (1-based file index into the CU's file table)
-local DW_AT_decl_line        = 0x3B   ---@type integer -- DWARF5 §7.7.1: DW_AT_decl_line
+local DW_AT_decl_file        = 0x3A ---@type integer -- DWARF5 §7.7.1: DW_AT_decl_file (1-based file index into the CU's file table)
+local DW_AT_decl_line        = 0x3B ---@type integer -- DWARF5 §7.7.1: DW_AT_decl_line
 
 -- Replaced the hardcoded `ATOM_SOURCE_FILE_INDEX = 11` and the `PROVENANCE_BASENAME_TO_FILE_INDEX` table below with a runtime lookup
 -- (`init_file_index_lookup` + `resolve_provenance_file_index`) that reads the actual `.debug_line` file table from the post-link ELF.
@@ -284,7 +284,7 @@ local function resolve_provenance_file_index(path)
 	local normalized = path:gsub("\\", "/") ---@type string
 	-- Take the last path component (the basename).
 	local basename = normalized:match("([^/]+)$") or normalized ---@type string
-	local idx      = _file_index_by_basename[basename] ---@type integer|nil
+	local idx      = _file_index_by_basename[basename]          ---@type integer|nil
 	if idx ~= nil then return idx end
 	-- Last-resort exact-path match (handles paths that don't reduce to a known basename).
 	for i, p in pairs(_file_path_by_index) do ---@type integer, string
@@ -299,13 +299,13 @@ end
 
 local DW_FORM_addr           = 0x01 ---@type integer
 local DW_FORM_data1          = 0x0B ---@type integer
-local DW_FORM_string         = 0x08   ---@type integer -- inline null-terminated
-local DW_FORM_strp           = 0x0E   ---@type integer -- 4-byte offset into .debug_str
-local DW_FORM_exprloc        = 0x18   ---@type integer -- length-prefixed (ULEB128) DW_OP bytes
-local DW_FORM_ref4           = 0x13   ---@type integer -- 4-byte offset within the same .debug_info CU
-local DW_FORM_udata          = 0x0F   ---@type integer -- ULEB128 (DW_AT_byte_size for struct_type, DW_AT_data_member_location for member)
-local DW_FORM_implicit_const = 0x21   ---@type integer -- DWARF5 §7.5.6: abbrev declaration carries a SLEB constant (used by the abbrev-table walker)
-local DW_FORM_sec_offset     = 0x17   ---@type integer -- 4-byte section-relative offset (into .debug_loclists / .debug_rnglists)
+local DW_FORM_string         = 0x08 ---@type integer -- inline null-terminated
+local DW_FORM_strp           = 0x0E ---@type integer -- 4-byte offset into .debug_str
+local DW_FORM_exprloc        = 0x18 ---@type integer -- length-prefixed (ULEB128) DW_OP bytes
+local DW_FORM_ref4           = 0x13 ---@type integer -- 4-byte offset within the same .debug_info CU
+local DW_FORM_udata          = 0x0F ---@type integer -- ULEB128 (DW_AT_byte_size for struct_type, DW_AT_data_member_location for member)
+local DW_FORM_implicit_const = 0x21 ---@type integer -- DWARF5 §7.5.6: abbrev declaration carries a SLEB constant (used by the abbrev-table walker)
+local DW_FORM_sec_offset     = 0x17 ---@type integer -- 4-byte section-relative offset (into .debug_loclists / .debug_rnglists)
 
 -- DW_OP_reg0 + DW_OP_piece are declared above (lines 114-116) alongside the other DWARF5 §7.7.3 loclist opcodes.
 
@@ -337,26 +337,26 @@ local function build_debug_loclists_section(atom_table, registries)
 	-- When absent we emit just the section terminator (a single DW_LLE_end_of_list byte); the .debug_loclists section stays non-empty so the linker accepts it,
 	-- and `bind_args` will be emitted with no loclist PC range (readelf will display it as having no .debug_loclists entries).
 	local tape_alias_entry = registries.register_alias_registry and registries.register_alias_registry["R_TapePtr"] ---@type AliasEntry|nil
-	local tape_reg = tape_alias_entry and tape_alias_entry.code ---@type integer
-	local parts = {} ---@type string[]
-	for _, atom in ipairs(atom_table) do ---@type integer, DwarfAtom
+	local tape_reg = tape_alias_entry and tape_alias_entry.code                                                     ---@type integer
+	local parts = {}                                                                                                ---@type string[]
+	for _, atom in ipairs(atom_table) do                                                                            ---@type integer, DwarfAtom
 		if atom.rbind and tape_reg then
-			local fields        = atom.rbind.fields or {} ---@type TypeField[]
-			local regs          = atom.rbind.regs or {} ---@type DwarfLoadPair[]
-			local n_fields      = #fields ---@type integer
+			local fields        = atom.rbind.fields or {}                          ---@type TypeField[]
+			local regs          = atom.rbind.regs or {}                            ---@type DwarfLoadPair[]
+			local n_fields      = #fields                                          ---@type integer
 			local last_load_pc  = atom.addr + (n_fields - 1) * MIPS_BYTES_PER_WORD ---@type integer
-			local transition_pc = last_load_pc + MIPS_LOAD_DELAY_BYTES ---@type integer
-			local tape_pieces   = {} ---@type string[]
-			for _, f in ipairs(fields) do ---@type integer, TypeField
-				local offset      = f.offset or 0 ---@type integer
+			local transition_pc = last_load_pc + MIPS_LOAD_DELAY_BYTES             ---@type integer
+			local tape_pieces   = {}                                               ---@type string[]
+			for _, f in ipairs(fields) do                                          ---@type integer, TypeField
+				local offset      = f.offset or 0             ---@type integer
 				local offset_sleb = elf_dwarf.sleb128(offset) ---@type string
 				-- (DW_OP_bregN, SLEB128(offset), DW_OP_piece, ULEB128(U4_BYTE_SIZE))
 				-- 4 = U4_BYTE_SIZE: each piece is sizeof(uint32_t) on MIPS32.
 				table.insert(tape_pieces, string.char(DW_OP_breg0 + tape_reg) .. offset_sleb .. string.char(DW_OP_piece) .. uleb128(U4_BYTE_SIZE))
 			end
 			local tape_expr  = table.concat(tape_pieces) ---@type string
-			local gpr_pieces = {} ---@type string[]
-			for _, pair in ipairs(regs) do ---@type integer, DwarfLoadPair
+			local gpr_pieces = {}                        ---@type string[]
+			for _, pair in ipairs(regs) do               ---@type integer, DwarfLoadPair
 				-- (DW_OP_regN, DW_OP_piece, ULEB128(4)) — one piece per GPR-resident field.
 		-- The 4 = U4_BYTE_SIZE: each piece is sizeof(uint32_t) on MIPS32.
 		table.insert(gpr_pieces, string.char(DW_OP_reg0 + pair.reg) .. string.char(DW_OP_piece) .. uleb128(U4_BYTE_SIZE))
@@ -376,9 +376,9 @@ local function build_debug_loclists_section(atom_table, registries)
 	-- Loclist unit header (DWARF5 §7.7.2):
 	--   unit_length(4) + version(2) + address_size(1) + segment_size(1) + offset_entry_count(4) = 12 bytes header.
 	--   version = 5 (DWARF5); address_size = 4 (MIPS32); segment_size = 0; offset_entry_count = 0 (we use DW_LLE_start_length, not offsets).
-	local LOCLIST_HEADER_SIZE = 12 ---@type integer
-	local body        = table.concat(parts) ---@type string
-	local unit_length = LOCLIST_HEADER_SIZE - 4 + #body  ---@type integer -- -4 because unit_length excludes itself
+	local LOCLIST_HEADER_SIZE = 12                          ---@type integer
+	local body        = table.concat(parts)                 ---@type string
+	local unit_length = LOCLIST_HEADER_SIZE - 4 + #body     ---@type integer -- -4 because unit_length excludes itself
 	local header      = elf_dwarf.write_u32_le(unit_length) ---@type string
 		.. elf_dwarf.write_u16_le(5)    -- DWARF5
 		.. string.char(U4_BYTE_SIZE)     -- address_size
@@ -401,11 +401,11 @@ end
 -- @param atom_table DwarfAtom[]  -- list of atoms with .rbind set
 -- @return table<string, integer>  -- bag: atom name -> offset_in_section
 local function compute_loclists_offsets(atom_table)
-	local LOCLIST_ENTRY_HEADER_SIZE = 1 + 4 + 1  ---@type integer -- DW_LLE_start_length(1) + addr(4) + uleb_length(1)
-	local offsets = {} ---@type table<string, integer>  -- bag
+	local LOCLIST_ENTRY_HEADER_SIZE = 1 + 4 + 1 ---@type integer -- DW_LLE_start_length(1) + addr(4) + uleb_length(1)
+	local offsets = {}                          ---@type table<string, integer>  -- bag
 	-- Loclist unit header (DWARF5 §7.7.2): unit_length(4) + version(2) + address_size(1) + segment_size(1) + offset_entry_count(4) = 12 bytes.
 	-- The unit_length itself is not counted in the unit_length value, so the body starts at byte 12.
-	local cursor = 4 + 2 + 1 + 1 + 4  ---@type integer -- = 12
+	local cursor = 4 + 2 + 1 + 1 + 4     ---@type integer -- = 12
 	for _, atom in ipairs(atom_table) do ---@type integer, DwarfAtom
 		if atom.rbind then
 			offsets[atom.name] = cursor
@@ -414,14 +414,14 @@ local function compute_loclists_offsets(atom_table)
 			--   1 (DW_LLE_start_length) + 4 (PC) + 1 (uleb length prefix) + sum(tape_piece_size(field.offset))
 			--   + 1 (DW_LLE_start_length) + 4 (transition_pc) + 1 (uleb length prefix) + n_fields * 3 (gpr pieces)
 			--   + 1 (DW_LLE_end_of_list)
-			local tape_pieces_size = 0 ---@type integer
+			local tape_pieces_size = 0                     ---@type integer
 			for _, f in ipairs(atom.rbind.fields or {}) do ---@type integer, TypeField
 				tape_pieces_size = tape_pieces_size + tape_piece_size(f.offset or 0)
 			end
-			local gpr_pieces_size   = n_fields * 3  ---@type integer -- each gpr piece: DW_OP_regN(1) + DW_OP_piece(1) + uleb(4)(1) = 3 bytes
+			local gpr_pieces_size   = n_fields * 3                          ---@type integer -- each gpr piece: DW_OP_regN(1) + DW_OP_piece(1) + uleb(4)(1) = 3 bytes
 			local tape_entry = LOCLIST_ENTRY_HEADER_SIZE + tape_pieces_size ---@type integer
-			local gpr_entry  = LOCLIST_ENTRY_HEADER_SIZE + gpr_pieces_size ---@type integer
-			local body_len   = tape_entry + gpr_entry + 1  ---@type integer -- +1 for DW_LLE_end_of_list
+			local gpr_entry  = LOCLIST_ENTRY_HEADER_SIZE + gpr_pieces_size  ---@type integer
+			local body_len   = tape_entry + gpr_entry + 1                   ---@type integer -- +1 for DW_LLE_end_of_list
 			cursor = cursor + body_len
 		end
 	end
@@ -430,7 +430,7 @@ end
 
 -- Default name for the synthetic CU (so VSCode lists it as a known source).
 local DEFAULT_CU_NAME     = "tape_atom_locals" ---@type string
-local DEFAULT_CU_COMP_DIR = "." ---@type string
+local DEFAULT_CU_COMP_DIR = "."                ---@type string
 
 -- SECTION_WRITERS owns the .bin output path templates.
 
@@ -558,11 +558,11 @@ local DEFAULT_BASENAME = "hello_gte" ---@type string
 --- @field data string
 
 --- @class DwarfInjectionPass
---- @field run                                  fun(ctx: PassCtx): PassResult
---- @field compute_loclists_offsets_for_test    fun(atom_table: DwarfAtom[]): table<string, integer>
+--- @field run                                   fun(ctx: PassCtx): PassResult
+--- @field compute_loclists_offsets_for_test     fun(atom_table: DwarfAtom[]): table<string, integer>
 --- @field build_debug_loclists_section_for_test fun(atom_table: DwarfAtom[], registries: DwarfRegistries): string
---- @field tape_piece_size_for_test             fun(offset: integer): integer
---- @field build_atom_table_for_test            fun(corpus: Corpus, addrs: table<string, NmAddr>): DwarfAtom[]
+--- @field tape_piece_size_for_test              fun(offset: integer): integer
+--- @field build_atom_table_for_test             fun(corpus: Corpus, addrs: table<string, NmAddr>): DwarfAtom[]
 
 
 --- Project the corpus registries into the shape the section builders expect.
@@ -585,7 +585,7 @@ local function collect_per_source_registries(corpus)
 	-- `passes.scan_source.lua` has already folded every per-source scan into the corpus tables, so no per-source iteration is needed here.
 	-- `atom_infos` is preserved byte-for-byte with no filtering; consumers consult `corpus.atoms_by_name`
 	-- themselves when they need to know whether a particular atom_info corresponds to an actual atom record.
-	local atom_infos_list = {} ---@type AtomInfoEntry[]
+	local atom_infos_list = {}                                   ---@type AtomInfoEntry[]
 	for _, ai in ipairs((corpus and corpus.atom_infos) or {}) do ---@type integer, AtomInfoEntry
 		atom_infos_list[#atom_infos_list + 1] = ai
 	end
@@ -660,7 +660,7 @@ local function build_atom_sequence(atom)
 	local function set_address(addr)
 		-- Per DWARF5 §6.2.5.3: marker(0) + size(ULEB128, includes sub_opcode byte) + sub_opcode + payload
 		-- For set_address: size = 1 (sub_opcode) + 4 (addr) = 5
-		local addr_bytes = elf_dwarf.write_u32_le(addr) ---@type string
+		local addr_bytes = elf_dwarf.write_u32_le(addr)                  ---@type string
 		local sub_size   = string.char(DW_LNE_set_address) .. addr_bytes ---@type string
 		return string.char(DW_LNS_extended) .. uleb128(#sub_size) .. sub_size
 	end
@@ -714,12 +714,12 @@ local function build_atom_sequence(atom)
 	-- `start_pos` / `end_pos` are 0-based emitted-word positions stamped at construction/close time by `duffle.emit_invoke_begin` / `duffle.emit_invoke_end`;
 	-- Missing values are a corpus-plumbing bug, so we let the index expression fail loud with arithmetic-on-nil rather than silently producing `0+1=1` for a missing start_pos.
 	local invs          = atom.invocations or {} ---@type InvocationRecord[]
-	local innermost_idx = {} ---@type table<integer, InvocationRecord|nil>  -- bag
-	local ancestry_idx  = {} ---@type table<integer, InvocationRecord[]>  -- bag
-	for idx = 1, #atom.entries do ---@type integer
+	local innermost_idx = {}                     ---@type table<integer, InvocationRecord|nil>  -- bag
+	local ancestry_idx  = {}                     ---@type table<integer, InvocationRecord[]>  -- bag
+	for idx = 1, #atom.entries do                ---@type integer
 		innermost_idx[idx] = nil
 		ancestry_idx[idx]  = {}
-		local active = {} ---@type InvocationRecord[]
+		local active = {}             ---@type InvocationRecord[]
 		for _, inv in ipairs(invs) do ---@type integer, InvocationRecord
 			if idx >= inv.start_pos + 1 and idx <= inv.end_pos + 1 then
 				active[#active + 1] = inv
@@ -746,11 +746,11 @@ local function build_atom_sequence(atom)
 	-- This is the value the multi-row PC's body_lines[1] row must reference for source-order display: `anc.body_lines[1]` is the line of the FIRST WORD 
 	-- (which for an outer whose body starts with a nested expansion is inside the inner's expansion = wrong for display purposes);
 	-- `anc.body_first_line` is the body's first content line in the parent's source (= correct for display).
-	local body_first_line_of = {} ---@type table<integer, integer>  -- bag
+	local body_first_line_of = {}     ---@type table<integer, integer>  -- bag
 	for _, top_inv in ipairs(invs) do ---@type integer, InvocationRecord
 		local earliest_nested_call_line = nil ---@type integer
 		local earliest_nested_start_pos = nil ---@type integer
-		for _, cand in ipairs(invs) do ---@type integer, InvocationRecord
+		for _, cand in ipairs(invs) do        ---@type integer, InvocationRecord
 			if cand.parent_id == top_inv.id and cand.call_line ~= nil then
 				if earliest_nested_start_pos == nil or cand.start_pos < earliest_nested_start_pos then
 					earliest_nested_start_pos = cand.start_pos
@@ -808,7 +808,7 @@ local function build_atom_sequence(atom)
 	local call_file_idx = resolve_provenance_file_index(atom.src_path) ---@type integer
 
 	-- --- Atom entry (idx 1) -------------------------------------------------
-	local entry_1         = atom.entries[1] ---@type DwarfAtomWord
+	local entry_1         = atom.entries[1]  ---@type DwarfAtomWord
 	local entry_1_ancestry = ancestry_idx[1] ---@type InvocationRecord[]
 
 	-- If atom entry 1 starts inside an invocation, walk the ancestry and emit a call-site row + (when applicable)
@@ -842,7 +842,7 @@ local function build_atom_sequence(atom)
 
 	-- --- Subsequent entries (idx 2..N) --------------------------------------
 	for idx = 2, #atom.entries do ---@type integer|nil
-		local entry = atom.entries[idx] ---@type DwarfAtomWord
+		local entry = atom.entries[idx]  ---@type DwarfAtomWord
 		local inv   = innermost_idx[idx] ---@type InvocationRecord
 
 		-- Advance PC by 1 .word (4 bytes on MIPS).
@@ -946,7 +946,7 @@ local function build_atom_table(corpus, addrs)
 		-- Build the dense entries list from `word_events`.
 		--   `word_events[i].i`  = the 0-based `.word` position
 		--   `call_line`         = the root atom's physical source line for that word (stamped by emission_model)
-		local entries = {} ---@type DwarfAtomWord[]
+		local entries = {}                    ---@type DwarfAtomWord[]
 		for idx, ev in ipairs(word_events) do ---@type integer, WordEvent
 			entries[#entries + 1] = {
 				pos  = ev.i or (idx - 1),
@@ -990,7 +990,7 @@ local function build_atom_table(corpus, addrs)
 	-- Cross-ref with the nm symbol table; atoms absent from `addrs` are skipped
 	-- (an atom declared in source but not emitted as a symbol is a metaprogram or atom-info bug, not a source-correlation bug — emit_no_emit would catch it upstream).
 	for _, src in ipairs((corpus and corpus.source_order) or {}) do ---@type integer, SourceFile
-		local src_path = src.path or "" ---@type string
+		local src_path = src.path or ""                              ---@type string
 		for _, atom_rec in ipairs(((src.scan or {}).atoms) or {}) do ---@type integer, AtomEntry
 			local info = addrs[atom_rec.name or atom_rec.raw_name] ---@type NmAddr|nil
 			if info then
@@ -1018,7 +1018,7 @@ end
 --- @param atom_table DwarfAtom[]
 --- @return table<string, DwarfComponentSite>
 local function collect_component_defs(atom_table)
-	local out = {} ---@type table<string, DwarfComponentSite>  -- bag
+	local out = {}                       ---@type table<string, DwarfComponentSite>  -- bag
 	for _, atom in ipairs(atom_table) do ---@type integer, DwarfAtom
 		for _, inv in ipairs(atom.invocations or {}) do ---@type integer, InvocationRecord
 			if not out[inv.component_name] then
@@ -1065,14 +1065,14 @@ end
 --- @param registries  DwarfRegistries    -- Merged registries from collect_per_source_registries
 --- @return DwarfLoadPair[]             -- List of {reg = <MIPS index>, field = <field name>}
 local function parse_body_load_pairs(body_tokens, binds_name, registries)
-	local pairs = {} ---@type DwarfLoadPair[]
+	local pairs = {}                                                                    ---@type DwarfLoadPair[]
 	local reg_index_by_name = (registries and registries.register_alias_registry) or {} ---@type table<string, AliasEntry>  -- bag
 	-- One regex that matches any of: load_word, load_half, load_half_u, load_byte, load_byte_u, gte_lw, gte_lwc2.
 	-- The captured ident is `kind`; `inner` holds the parens body for arg parsing.
 	local load_pattern = "^(load_word|load_half|load_half_u|load_byte|load_byte_u|gte_lw|gte_lwc2)%s*%((.*)%)$" ---@type string
-	for _, t in ipairs(body_tokens or {}) do ---@type integer, BodyToken
+	for _, t in ipairs(body_tokens or {}) do                                                                    ---@type integer, BodyToken
 		local tok         = duffle.trim(t.tok or "") ---@type string
-		local kind, inner = tok:match(load_pattern) ---@type string|nil, string|nil
+		local kind, inner = tok:match(load_pattern)  ---@type string|nil, string|nil
 		if kind then
 			local args = duffle.split_top_level_commas(inner) ---@type string[]
 			-- Expected shape for an rbind piece-chain load: (R_<reg>, R_TapePtr, O_(Binds_<X>, FieldName))
@@ -1083,7 +1083,7 @@ local function parse_body_load_pairs(body_tokens, binds_name, registries)
 				local third_arg = duffle.trim(args[3]) ---@type string
 				-- Match O_(Binds_<X>, FieldName)
 				local b, f = third_arg:match("^O_%((Binds_[%w_]+)%s*,%s*(.-)%s*%)$") ---@type string|nil, string|nil
-				local alias_entry = reg_index_by_name[reg_name] ---@type AliasEntry|nil
+				local alias_entry = reg_index_by_name[reg_name]                      ---@type AliasEntry|nil
 				if b and b == binds_name and alias_entry and alias_entry.code then
 					pairs[#pairs + 1] = {
 						reg   = alias_entry.code,
@@ -1118,7 +1118,7 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 	-- Index binds by struct name; consume `scan.binds[i].fields` directly.
 	-- The scan-source pass emits each Binds_X's fields as {[type_name, pointer_depth, offset, byte_size, ...]},
 	-- so this pass builds the rbind_structs entry without re-parsing.
-	local binds_by_name = {} ---@type table<string, BindsEntry>  -- bag
+	local binds_by_name = {}                                        ---@type table<string, BindsEntry>  -- bag
 	for _, src in ipairs((corpus and corpus.source_order) or {}) do ---@type integer, SourceFile
 		local scan = src.scan ---@type SourceScan|nil
 		if scan then
@@ -1139,7 +1139,7 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 	end
 
 	-- Walk every atom_info; if `binds` is set, find the atom body_tokens + parse load_word pairs.
-	local body_tokens_by_atom = {} ---@type table<string, BodyToken[]>  -- bag
+	local body_tokens_by_atom = {}                                  ---@type table<string, BodyToken[]>  -- bag
 	for _, src in ipairs((corpus and corpus.source_order) or {}) do ---@type integer, SourceFile
 		local scan = src.scan ---@type SourceScan|nil
 		if    scan then
@@ -1149,7 +1149,7 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 		end
 	end
 
-	local ai_by_atom = {} ---@type table<string, AtomInfoEntry>  -- bag
+	local ai_by_atom = {}                                           ---@type table<string, AtomInfoEntry>  -- bag
 	for _, src in ipairs((corpus and corpus.source_order) or {}) do ---@type integer, SourceFile
 		local scan = src.scan ---@type SourceScan|nil
 		if scan then
@@ -1161,7 +1161,7 @@ local function parse_rbind_atoms(corpus, atom_table, registries)
 
 	for atom_name, ai in pairs(ai_by_atom) do ---@type string, AtomInfoEntry
 		if ai.binds then
-			local struct    = rbind_structs[ai.binds] ---@type DwarfRbindStruct|nil
+			local struct    = rbind_structs[ai.binds]        ---@type DwarfRbindStruct|nil
 			local body_toks = body_tokens_by_atom[atom_name] ---@type BodyToken[]|nil
 			if struct and body_toks then
 				local pairs = parse_body_load_pairs(body_toks, ai.binds, registries) ---@type DwarfLoadPair[]
@@ -1208,9 +1208,9 @@ local function build_dwarf_line_section(existing, atom_table)
 	if #atom_table == 0 then return existing end
 
 	-- Build the sequences.
-	local sequences = {} ---@type string[]
+	local sequences = {}                                                                           ---@type string[]
 	for _, atom in ipairs(atom_table) do sequences[#sequences + 1] = build_atom_sequence(atom) end ---@type integer, DwarfAtom
-	local appended = table.concat(sequences) ---@type string
+	local appended = table.concat(sequences)                                                       ---@type string
 
 	-- Walk DWARF32 line units and retain the final unit's bounds.
 	-- The main C CU points at this final unit (DW_AT_stmt_list = 0x5b in today's ELF).
@@ -1226,7 +1226,7 @@ local function build_dwarf_line_section(existing, atom_table)
 	end
 	if unit_pos ~= #existing or not last_pos then return existing end
 
-	local new_length       = last_length + #appended ---@type integer
+	local new_length       = last_length + #appended            ---@type integer
 	local new_length_bytes = elf_dwarf.write_u32_le(new_length) ---@type string
 
 	return existing:sub(1, last_pos)
@@ -1272,8 +1272,8 @@ local function build_dwarf_aranges_section(existing, atom_table)
 
 	-- Walk all units and emit each one (preserving existing structure).
 	-- For the LAST unit, replace the terminator with my entries + new term.
-	local result       = {} ---@type string[]
-	local i            = 0  ---@type integer -- zero-based wire offset
+	local result       = {}    ---@type string[]
+	local i            = 0     ---@type integer -- zero-based wire offset
 	local is_last_unit = false ---@type boolean
 
 	while i < #existing do
@@ -1285,21 +1285,21 @@ local function build_dwarf_aranges_section(existing, atom_table)
 			return existing
 		end
 
-		local unit_start    = i ---@type integer
+		local unit_start    = i          ---@type integer
 		local unit_end_excl = i + 4 + ul ---@type integer
 		is_last_unit = (unit_end_excl == #existing)
 
 		if is_last_unit then
 			-- The old terminator is replaced by entries + a new terminator, so net section growth (and unit_length growth) is entries only.
 			local added_bytes  = #atom_table * elf_dwarf.DWARF4_ARANGES.entry_size ---@type integer
-			local new_ul       = ul + added_bytes ---@type integer
-			local new_ul_bytes = elf_dwarf.write_u32_le(new_ul) ---@type string
+			local new_ul       = ul + added_bytes                                  ---@type integer
+			local new_ul_bytes = elf_dwarf.write_u32_le(new_ul)                    ---@type string
 			-- Emit everything EXCEPT the last 8 bytes (terminator).
 			result[#result + 1] = new_ul_bytes
 				.. existing:sub(i + 5, unit_end_excl - elf_dwarf.DWARF4_ARANGES.terminator_size)
 			-- Append my atom entries.
 			for _, atom in ipairs(atom_table) do ---@type integer, DwarfAtom
-				local a    = atom.addr ---@type integer
+				local a    = atom.addr       ---@type integer
 				local size = atom.size_bytes ---@type integer
 				result[#result + 1] = elf_dwarf.write_u32_le(a) .. elf_dwarf.write_u32_le(size)
 			end
@@ -1337,10 +1337,10 @@ end
 local function build_dwarf_rnglists_section(existing, atom_table)
 	if #existing <= elf_dwarf.DWARF5_RNGLISTS.first_entry_offset or #atom_table == 0 then return existing end
 
-	local unit_length        = elf_dwarf.read_u32_le(existing, elf_dwarf.DWARF5_RNGLISTS.unit_length_offset) ---@type integer
-	local version            = elf_dwarf.read_u16_le(existing, elf_dwarf.DWARF5_RNGLISTS.version_offset) ---@type integer
-	local address_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.addr_size_offset + 1) ---@type integer
-	local segment_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.seg_size_offset + 1) ---@type integer
+	local unit_length        = elf_dwarf.read_u32_le(existing, elf_dwarf.DWARF5_RNGLISTS.unit_length_offset)  ---@type integer
+	local version            = elf_dwarf.read_u16_le(existing, elf_dwarf.DWARF5_RNGLISTS.version_offset)      ---@type integer
+	local address_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.addr_size_offset + 1)                  ---@type integer
+	local segment_size       = existing:byte(elf_dwarf.DWARF5_RNGLISTS.seg_size_offset + 1)                   ---@type integer
 	local offset_entry_count = elf_dwarf.read_u32_le(existing, elf_dwarf.DWARF5_RNGLISTS.offset_count_offset) ---@type integer
 
 	if unit_length + 4 ~= #existing
@@ -1352,14 +1352,14 @@ local function build_dwarf_rnglists_section(existing, atom_table)
 		return existing
 	end
 
-	local entries = {} ---@type string[]
+	local entries = {}                   ---@type string[]
 	for _, atom in ipairs(atom_table) do ---@type integer, DwarfAtom
 		entries[#entries + 1] = string.char(DW_RLE_start_length)
 			.. elf_dwarf.write_u32_le(atom.addr)
 			.. uleb128(atom.size_bytes)
 	end
-	local appended         = table.concat(entries) ---@type string
-	local new_length       = unit_length + #appended ---@type integer
+	local appended         = table.concat(entries)              ---@type string
+	local new_length       = unit_length + #appended            ---@type integer
 	local new_length_bytes = elf_dwarf.write_u32_le(new_length) ---@type string
 
 	return new_length_bytes
@@ -1390,16 +1390,16 @@ end
 --- @param rbind DwarfRbind  -- {regs = {{reg, field}, ...}, fields = {{name, offset}, ...}, bytes = N}
 --- @return string  -- the exprloc byte sequence (length-prefixed)
 local function piece_chain_exprloc(rbind)
-	local op_bytes             = {} ---@type string[]
-	local field_offset_by_name = {} ---@type table<string, integer>  -- bag
+	local op_bytes             = {}     ---@type string[]
+	local field_offset_by_name = {}     ---@type table<string, integer>  -- bag
 	for _, f in ipairs(rbind.fields) do ---@type integer, TypeField
 		field_offset_by_name[f.name] = f.offset
 	end
 	local next_offset = rbind.bytes ---@type integer
-	for i = #rbind.regs, 1, -1 do  ---@type integer -- walk backwards to know each piece's size
-		local pair = rbind.regs[i] ---@type DwarfLoadPair
+	for i = #rbind.regs, 1, -1 do   ---@type integer -- walk backwards to know each piece's size
+		local pair = rbind.regs[i]                         ---@type DwarfLoadPair
 		local off  = field_offset_by_name[pair.field] or 0 ---@type integer
-		local size ---@type integer
+		local size                                         ---@type integer
 		if i == #rbind.regs then
 			size = next_offset - off
 		else
@@ -1416,9 +1416,9 @@ local function piece_chain_exprloc(rbind)
 		next_offset = off
 	end
 	-- We built it back-to-front; reverse it.
-	local rev = {} ---@type string[]
+	local rev = {}                                              ---@type string[]
 	for i = #op_bytes, 1, -1 do rev[#rev + 1] = op_bytes[i] end ---@type integer
-	local op = table.concat(rev) ---@type string
+	local op = table.concat(rev)                                ---@type string
 	return uleb128(#op) .. op
 end
 
@@ -1440,10 +1440,10 @@ end
 -- "math.floor(/16) instead of bit.rshift for LuaJIT 2.1 compat" comment at line 352).
 
 -- DWARF5 compile-unit header constants.
-local DW_VERSION_5       = 5 ---@type integer
-local DW_UT_compile      = 0x01 ---@type integer
-local DWARF32_TERMINATOR = 0xFFFFFFFF  ---@type integer -- sentinel for DWARF64 marker
-local CU_HEADER_SIZE     = 12            ---@type integer -- 4 + 2 + 1 + 1 + 4
+local DW_VERSION_5       = 5          ---@type integer
+local DW_UT_compile      = 0x01       ---@type integer
+local DWARF32_TERMINATOR = 0xFFFFFFFF ---@type integer -- sentinel for DWARF64 marker
+local CU_HEADER_SIZE     = 12         ---@type integer -- 4 + 2 + 1 + 1 + 4
 
 --- Walk .debug_info to find the FINAL compilation unit, validate it as a DWARF5 32-bit compile-unit, and extract its bounds + abbrev-table offset.
 --- Returns nil on any layout mismatch. Callers fall back to existing sections.
@@ -1467,7 +1467,7 @@ local function find_main_cu_layout(existing)
 	local buf_len = #existing ---@type integer
 	if    buf_len < CU_HEADER_SIZE then return nil end
 
-	local pos               = 0 ---@type integer
+	local pos               = 0   ---@type integer
 	local main_cu_start     = nil ---@type integer
 	local main_cu_end_excl  = nil ---@type integer
 	while pos + 4 <= buf_len do
@@ -1489,10 +1489,10 @@ local function find_main_cu_layout(existing)
 	--   [6]      unit_type
 	--   [7]      address_size
 	--   [8..11]  debug_abbrev_offset
-	local hdr          = main_cu_start + 4 ---@type integer
-	local version      = elf_dwarf.read_u16_le(existing, hdr) ---@type integer
-	local unit_type    = existing:byte(hdr + 2 + 1) ---@type integer
-	local address_size = existing:byte(hdr + 3 + 1) ---@type integer
+	local hdr          = main_cu_start + 4                        ---@type integer
+	local version      = elf_dwarf.read_u16_le(existing, hdr)     ---@type integer
+	local unit_type    = existing:byte(hdr + 2 + 1)               ---@type integer
+	local address_size = existing:byte(hdr + 3 + 1)               ---@type integer
 	local abbrev_off   = elf_dwarf.read_u32_le(existing, hdr + 4) ---@type integer
 	if version ~= DW_VERSION_5 or unit_type ~= DW_UT_compile or address_size ~= 4 then
 		return nil
@@ -1673,7 +1673,7 @@ local function build_new_strings(atom_table, registries)
 	-- The CU name + comp_dir are the first two strings (offsets 0 and N1).
 	-- Then each unique atom name + each register name follows.
 	local strings = {} ---@type string[]
-	local map = {} ---@type table<string, integer>  -- bag
+	local map = {}     ---@type table<string, integer>  -- bag
 
 	-- CU name at offset 0 in the new blob
 	strings[#strings + 1] = DEFAULT_CU_NAME .. "\0"
@@ -1698,7 +1698,7 @@ local function build_new_strings(atom_table, registries)
 	-- filtered to MIPS GPR 0..31 — the same filter that build_inserted_children applies
 	-- for the RR_<name> locals, so .debug_str entries stay in sync with .debug_info).
 	-- Lua's pairs() is non-deterministic; sort the alias names first so the emitted .debug_str bytes are byte-identical across runs.
-	local sorted_alias_names = {} ---@type string[]
+	local sorted_alias_names = {}                                           ---@type string[]
 	for r_name, alias in pairs(registries.register_alias_registry or {}) do ---@type string, AliasEntry|nil
 		if alias.code and alias.code >= 0 and alias.code <= 31 then
 			sorted_alias_names[#sorted_alias_names + 1] = r_name
@@ -1775,13 +1775,13 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	-- by_alias_order: sorted list of by_alias keys, for deterministic iteration order.
 	-- Lua's pairs() order is implementation-defined and varies between runs; without sorting, the per-atom variable emission order
 	-- would be non-deterministic and the .debug_info bytes would differ across builds.
-	local by_alias = {} ---@type table<string, AliasEntry>  -- bag
+	local by_alias = {}                                                     ---@type table<string, AliasEntry>  -- bag
 	for r_name, alias in pairs(registries.register_alias_registry or {}) do ---@type string, AliasEntry|nil
 		if alias.code and alias.code >= 0 and alias.code <= 31 then
 			by_alias[r_name] = alias
 		end
 	end
-	local by_alias_order = {} ---@type string[]
+	local by_alias_order = {}                                                         ---@type string[]
 	for r_name in pairs(by_alias) do by_alias_order[#by_alias_order + 1] = r_name end ---@type string
 	table.sort(by_alias_order)
 
@@ -1790,7 +1790,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	--- @param atoms DwarfAtom[]
 	--- @return table<string, DwarfAtom>
 	local function build_atom_name_index(atoms)
-		local m = {} ---@type table<string, DwarfAtom>  -- bag
+		local m = {}                       ---@type table<string, DwarfAtom>  -- bag
 		for _, a in ipairs(atoms or {}) do ---@type integer, AliasEntry|nil
 			if a and a.name then m[a.name] = a end
 		end
@@ -1861,7 +1861,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		local row = DIE_SCHEMA[schema_name] ---@type DieSchema
 		emit(uleb128(row.abbrev))
 		for _, attr in ipairs(row.attrs) do ---@type integer, DieSchemaAttr
-			local v = values[attr.key] ---@type string|integer
+			local v = values[attr.key]        ---@type string|integer
 			local w = FORM_WRITERS[attr.form] ---@type DieFormWriter
 			if not w then error("emit_die: unknown form " .. tostring(attr.form)) end
 			w(emit, v)
@@ -1898,7 +1898,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	-- Always include the base_type "unsigned int" as the U4 target.
 	type_offsets["U4"] = base_type_section_offset
 	-- Collect every unique (type_name, max_pointer_depth) used by any rbind field.
-	local used_typed_views = {}  ---@type table<string, integer>  -- bag -- { [type_name] = max_depth }
+	local used_typed_views = {}          ---@type table<string, integer>  -- bag -- { [type_name] = max_depth }
 	for _, atom in ipairs(atom_table) do ---@type integer, DwarfAtom
 		if atom.rbind and atom.rbind.fields then
 			for _, f in ipairs(atom.rbind.fields) do ---@type integer, TypeField
@@ -1912,7 +1912,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		end
 	end
 	-- Sort for deterministic emission.
-	local sorted_typed_types = {} ---@type string[]
+	local sorted_typed_types = {}                                                             ---@type string[]
 	for tn in pairs(used_typed_views) do sorted_typed_types[#sorted_typed_types + 1] = tn end ---@type string
 	table.sort(sorted_typed_types)
 	-- For each non-U4 type, emit a typedef (DW_TAG_typedef) named after the type and referencing the base_type "unsigned int" (4 bytes).
@@ -1938,7 +1938,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			return nil
 		end
 		if entry.byte_size == nil then return nil end
-		local members = {} ---@type DwarfTypeLayoutMember[]
+		local members = {}                  ---@type DwarfTypeLayoutMember[]
 		for _, f in ipairs(entry.fields) do ---@type integer, TypeField
 			if f.offset == nil or f.byte_size == nil then return nil end
 			members[#members + 1] = {
@@ -2028,7 +2028,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	end
 	for _, tn in ipairs(sorted_typed_types) do ---@type integer, string
 		if tn ~= "U4" then
-			local depth = used_typed_views[tn] ---@type integer
+			local depth = used_typed_views[tn]           ---@type integer
 			local struct_offset = emit_struct_layout(tn) ---@type integer
 			if not struct_offset then
 				local innermost_offset = next_offset() ---@type integer
@@ -2084,8 +2084,8 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	type_chain_offsets["U4|1"] = u4_chain_offset
 
 	-- 2) Emit one DW_TAG_structure_type per unique Binds_X.
-	local struct_section_offsets = {} ---@type table<string, integer>  -- bag
-	local sorted_struct_names    = {} ---@type string[]
+	local struct_section_offsets = {}                                                      ---@type table<string, integer>  -- bag
+	local sorted_struct_names    = {}                                                      ---@type string[]
 	for k in pairs(rbind_structs) do sorted_struct_names[#sorted_struct_names + 1] = k end ---@type string
 	table.sort(sorted_struct_names)
 	for _, binds_name in ipairs(sorted_struct_names) do ---@type integer, string
@@ -2119,13 +2119,13 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	--    Each abstract DIE is a CU-level child (sibling of the per-atom subprograms below).
 	--    The abstract DIE's section offset is later used by inlined_subroutine DIEs (which embed `DW_AT_abstract_origin = ref4 → abstract DIE`).
 	--    Each abstract DIE also carries DW_AT_decl_file + DW_AT_decl_line pointing at the component's definition site (file path + body line).
-	local component_defs     = collect_component_defs(atom_table) ---@type table<string, DwarfComponentSite>  -- bag
-	local abstract_offsets   = {}  ---@type table<string, integer>  -- bag -- name -> section offset
-	local sorted_comp_names  = {} ---@type string[]
+	local component_defs     = collect_component_defs(atom_table)                             ---@type table<string, DwarfComponentSite>  -- bag
+	local abstract_offsets   = {}                                                             ---@type table<string, integer>  -- bag -- name -> section offset
+	local sorted_comp_names  = {}                                                             ---@type string[]
 	for name in pairs(component_defs) do sorted_comp_names[#sorted_comp_names + 1] = name end ---@type string
 	table.sort(sorted_comp_names)
 	-- DW_INL_inlined (1) = "this subroutine was inlined" — accurate for the mac_* components.
-	local DW_INL_inlined = 0x01 ---@type integer
+	local DW_INL_inlined = 0x01                      ---@type integer
 	for _, comp_name in ipairs(sorted_comp_names) do ---@type integer, string
 		local def = component_defs[comp_name] ---@type DwarfComponentSite
 		abstract_offsets[comp_name] = next_offset()
@@ -2159,10 +2159,10 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 	--   (e) enum-site atom_type(<T>) default:       register_alias_registry[R_Name].default_type  (per-alias fallback declared in lottes_tape.h)
 	--   (f) void* fallback:                         the void_chain_offset built in section 1b; gdb renders `(void *) 0x...` (hex)
 	-- An R_Name absent from the registry AND missed by all of (a..e) skips emission for that alias entirely.
-		local atom_view_ctx_fields   = nil  ---@type table<string, TypeField>|nil  -- bag -- populated by step (b); map field_name -> field entry
-		local reg_to_field_ctx       = nil  ---@type table<integer, string>|nil  -- bag -- populated by step (b); map GPR index -> field name
-		local atom_view_phase_fields = nil  ---@type table<string, TypeField>|nil  -- bag -- populated by step (d); map field_name -> field entry
-		local reg_to_field_phase     = nil  ---@type table<integer, string>|nil  -- bag -- populated by step (d); map GPR index -> field name
+		local atom_view_ctx_fields   = nil ---@type table<string, TypeField>|nil  -- bag -- populated by step (b); map field_name -> field entry
+		local reg_to_field_ctx       = nil ---@type table<integer, string>|nil  -- bag -- populated by step (b); map GPR index -> field name
+		local atom_view_phase_fields = nil ---@type table<string, TypeField>|nil  -- bag -- populated by step (d); map field_name -> field entry
+		local reg_to_field_phase     = nil ---@type table<integer, string>|nil  -- bag -- populated by step (d); map GPR index -> field name
 		-- atom-name -> atom lookup is precomputed once as atom_by_name_global.
 		local field_type_by_name = {} ---@type table<string, TypeField>  -- bag
 		if atom.rbind and atom.rbind.fields then
@@ -2194,7 +2194,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		end
 		-- step (d) inputs: this atom's `atom_phase(<label>)`. Find the FIRST atom in the same phase group that has its own rbind
 		-- and is in source-order (declared before this atom in any source file); locate it via the per-atom_info entry whose phase == this atom's name.
-		local my_phase_label = nil ---@type string|nil
+		local my_phase_label = nil                          ---@type string|nil
 		for _, ai in ipairs(registries.atom_infos or {}) do ---@type integer, AtomInfoEntry
 			if ai.atom_name == atom.name and ai.phase then
 				my_phase_label = ai.phase
@@ -2240,7 +2240,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			--- @param alias_code integer
 			--- @return integer|nil
 			function(r_name, alias_code)
-				local ctx_field_name = reg_to_field_ctx and reg_to_field_ctx[alias_code] ---@type string|nil
+				local ctx_field_name = reg_to_field_ctx and reg_to_field_ctx[alias_code]                                ---@type string|nil
 				local ctx_f          = ctx_field_name and atom_view_ctx_fields and atom_view_ctx_fields[ctx_field_name] ---@type TypeField|nil
 				if    ctx_f and ctx_f.pointer_depth and ctx_f.pointer_depth > 0 then
 					return type_chain_offsets[ctx_f.type_name .. "|" .. ctx_f.pointer_depth]
@@ -2251,7 +2251,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			--- @param alias_code integer
 			--- @return integer|nil
 			function(r_name, alias_code)
-				local field_name = reg_to_field[alias_code] ---@type string|nil
+				local field_name = reg_to_field[alias_code]                     ---@type string|nil
 				local f         = field_name and field_type_by_name[field_name] ---@type TypeField|nil
 				if    f and f.pointer_depth and f.pointer_depth > 0 then
 					return type_chain_offsets[f.type_name .. "|" .. f.pointer_depth]
@@ -2262,7 +2262,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 			--- @param alias_code integer
 			--- @return integer|nil
 			function(r_name, alias_code)
-				local phase_field_name = reg_to_field_phase and reg_to_field_phase[alias_code] ---@type string|nil
+				local phase_field_name = reg_to_field_phase and reg_to_field_phase[alias_code]                                    ---@type string|nil
 				local phase_f          = phase_field_name and atom_view_phase_fields and atom_view_phase_fields[phase_field_name] ---@type TypeField|nil
 				if    phase_f and phase_f.pointer_depth and phase_f.pointer_depth > 0 then
 					return type_chain_offsets[phase_f.type_name .. "|" .. phase_f.pointer_depth]
@@ -2282,11 +2282,11 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 
 		-- Iterate `by_alias` in sorted order; Lua's pairs() is non-deterministic, so sorting ensures byte-identical DWARF output across builds.
 		for _, r_name in ipairs(by_alias_order) do ---@type integer, string
-			local alias      = by_alias[r_name] ---@type AliasEntry|nil
+			local alias      = by_alias[r_name]                ---@type AliasEntry|nil
 			local rr_name    = "RR_" .. strip_r_prefix(r_name) ---@type string
-			local alias_code = alias.code ---@type integer
-			local type_offset = type_chain_offsets["void|1"] ---@type integer
-			for _, step in ipairs(PRECEDENCE_STEPS) do ---@type integer, DwarfPrecedenceStep
+			local alias_code = alias.code                      ---@type integer
+			local type_offset = type_chain_offsets["void|1"]   ---@type integer
+			for _, step in ipairs(PRECEDENCE_STEPS) do         ---@type integer, DwarfPrecedenceStep
 				local candidate = step(r_name, alias_code) ---@type integer
 				if candidate then type_offset = candidate; break end
 			end
@@ -2303,7 +2303,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 		-- Two PC ranges cover every field: [atom.addr, last_load+8) describes each field as tape memory (DW_OP_bregN + offset) piece,
 		-- and [last_load+8, atom.end) describes each field as a GPR (DW_OP_regN) piece.
 		if atom.rbind then
-			local binds_name      = atom.rbind.binds ---@type string
+			local binds_name      = atom.rbind.binds                 ---@type string
 			local loclists_offset = loclists_offsets[atom.name] or 0 ---@type integer
 			emit_die("bind_var_loclist", {
 				name     = "bind_args",
@@ -2322,7 +2322,7 @@ local function build_inserted_children(main_cu_offset, main_cu_end_excl, atom_ta
 					-- This invocation emits no inlined_subroutine DIE; the whole-PC-range non-statement rows in .debug_line provide full skip semantics.
 					-- Stepping from the preceding atom statement lands at the first unskipped row after this invocation's range.
 				else
-					local inv_low  = atom.addr + inv.start_pos * MIPS_BYTES_PER_WORD ---@type integer
+					local inv_low  = atom.addr + inv.start_pos * MIPS_BYTES_PER_WORD     ---@type integer
 					local inv_high = atom.addr + (inv.end_pos + 1) * MIPS_BYTES_PER_WORD ---@type integer
 					emit_die("inlined_subroutine", {
 						abstract_origin = ref4_of(abstract_offsets[inv.component_name]),
@@ -2368,7 +2368,7 @@ local function build_debug_abbrev_section(existing, main_abbrev_offset)
 	-- Duplicate the main table declarations, excluding its terminating 0 byte.
 	-- (1-indexed sub: existing:sub(main_abbrev_offset + 1, table_end) reads bytes from 0-based [main_abbrev_offset .. table_end - 1].)
 	local main_table_dup = existing:sub(main_abbrev_offset + 1, table_end) ---@type string
-	local new_abbrevs    = build_new_abbrev()  ---@type string -- includes its own terminating 0
+	local new_abbrevs    = build_new_abbrev()                              ---@type string -- includes its own terminating 0
 
 	-- The MAIN CU's debug_abbrev_offset points to the duplicate's start (= #existing).
 	-- Codes 100..106 follow the duplicate's declarations inside that same table.
@@ -2407,12 +2407,12 @@ end
 local function build_debug_info_section(existing, main_cu_start, main_cu_end_excl, new_abbrev_offset, atom_table, rbind_structs, loclists_offsets, registries)
 	-- 1) Build the inserted children bytes (just before the main CU's root terminator).
 	local inserted     = build_inserted_children(main_cu_start, main_cu_end_excl, atom_table, rbind_structs, loclists_offsets, registries) ---@type string
-	local inserted_len = #inserted ---@type integer
+	local inserted_len = #inserted                                                                                                         ---@type integer
 
 	-- 2) Patch main CU's unit_length += inserted_len.
 	local old_unit_length       = elf_dwarf.read_u32_le(existing, main_cu_start) ---@type integer
-	local new_unit_length       = old_unit_length + inserted_len ---@type integer
-	local new_unit_length_bytes = elf_dwarf.write_u32_le(new_unit_length) ---@type string
+	local new_unit_length       = old_unit_length + inserted_len                 ---@type integer
+	local new_unit_length_bytes = elf_dwarf.write_u32_le(new_unit_length)        ---@type string
 
 	-- 3) Patch main CU's debug_abbrev_offset (bytes [main_cu_start + 8 .. + 11]).
 	local new_abbrev_offset_bytes = elf_dwarf.write_u32_le(new_abbrev_offset) ---@type string
@@ -2425,8 +2425,8 @@ local function build_debug_info_section(existing, main_cu_start, main_cu_end_exc
 	--      [main_cu_start + 8 .. + 11]              debug_abbrev_offset (PATCHED)
 	--      [main_cu_start + 12 .. main_cu_end_excl - 2]   existing DIE bytes, unchanged
 	--      [main_cu_end_excl - 1]                   root children-terminator, unchanged 0
-	local pre_end         = main_cu_end_excl - 2  ---@type integer -- 0-based end of existing DIE bytes (inclusive)
-	local root_terminator = main_cu_end_excl - 1  ---@type integer -- 0-based position of the final 0 byte
+	local pre_end         = main_cu_end_excl - 2 ---@type integer -- 0-based end of existing DIE bytes (inclusive)
+	local root_terminator = main_cu_end_excl - 1 ---@type integer -- 0-based position of the final 0 byte
 
 	return existing:sub(1, main_cu_start)                    -- crt CU
 		.. new_unit_length_bytes                               -- patched unit_length (4 bytes)
@@ -2487,10 +2487,10 @@ local SECTION_WRITERS = { ---@type table<string, DwarfSectionPathWriter>
 --- @param basename string  -- output file basename (e.g. "hello_gte")
 --- @return table<string, string>[]  -- bag: one <section>_bin -> path per row
 local function write_sections(results, ctx, basename)
-	local outputs = {} ---@type table<string, string>[]  -- bag: one <section>_bin -> path per row
+	local outputs = {}             ---@type table<string, string>[]  -- bag: one <section>_bin -> path per row
 	for _, r in ipairs(results) do ---@type integer, DwarfSectionBlob
 		local path = SECTION_WRITERS[r.name](ctx.out_root, basename) ---@type string
-		local  f   = io.open(path, "wb") ---@type file*|nil
+		local  f   = io.open(path, "wb")                             ---@type file*|nil
 		if not f then
 			io.stderr:write(string.format("[dwarf_injection] failed to open %s for write\n", path))
 		else
@@ -2545,11 +2545,11 @@ function M.run(ctx)
 	-- Skip state lives in `corpus.atoms_by_name[*].debug_skip` (whole-atom) and `atom.paths.invocations[*].debug_skip` (per-invocation).
 	-- `corpus` is the sole canonical source projection.
 	local corpus     = (ctx.shared and ctx.shared.corpus) or {} ---@type Corpus
-	local registries = collect_per_source_registries(corpus) ---@type DwarfRegistries
+	local registries = collect_per_source_registries(corpus)    ---@type DwarfRegistries
 	-- Read nm symbols (the ONLY disk-side input to the atom table) and join them against `corpus.atoms_by_name` + `atom.paths` for word rows + invocation ancestry.
 	-- Disk source-map/provenance text is not consulted (those are diagnostic artifacts; semantic inputs are in memory).
 	local addrs      = elf_dwarf.read_nm(ctx.flags.elf_path) ---@type table<string, NmAddr>  -- bag
-	local atom_table = build_atom_table(corpus, addrs) ---@type DwarfAtom[]
+	local atom_table = build_atom_table(corpus, addrs)       ---@type DwarfAtom[]
 
 	-- Detect rbind atoms + index Binds_* struct fields from the corpus.
 	-- The merged registries are threaded through so parse_body_load_pairs resolves R_<reg> via register_alias_registry.
@@ -2573,13 +2573,13 @@ function M.run(ctx)
 
 		-- Step 0: layout validation. Bail out safely if the .debug_info layout doesn't match what we expect (crt CU + DWARF5 main CU + final 0 byte).
 		-- A layout mismatch means the gcc emission changed; the safest response is to leave existing sections unchanged and emit no synthetic data, so the build's debug-info step never silently produces broken DWARF.
-		local existing_info   = existing_sections[".debug_info"]   or "" ---@type string
-		local existing_abbrev = existing_sections[".debug_abbrev"] or "" ---@type string
+		local existing_info   = existing_sections[".debug_info"]   or ""                               ---@type string
+		local existing_abbrev = existing_sections[".debug_abbrev"] or ""                               ---@type string
 		local main_cu_start, main_cu_end_excl, main_abbrev_offset = find_main_cu_layout(existing_info) ---@type integer|nil, integer|nil, integer|nil
 		if not main_cu_start then
 			io.stderr:write("[dwarf_injection] layout validation failed; writing existing sections unchanged\n")
 			local existing_str = existing_sections[".debug_str"] or "" ---@type string
-			local results_safe = { ---@type DwarfSectionBlob[]
+			local results_safe = {                                     ---@type DwarfSectionBlob[]
 				{ name = "debug_info",     data = existing_info },
 				{ name = "debug_abbrev",   data = existing_abbrev },
 				{ name = "debug_str",      data = existing_str },

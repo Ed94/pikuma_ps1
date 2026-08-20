@@ -24,7 +24,7 @@
 -- Uses `debug.getinfo` to find this file's own directory, so it works both standalone and when require'd from the orchestrator.
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Type declarations

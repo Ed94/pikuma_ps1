@@ -23,7 +23,7 @@
 -- Bootstrap: load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir  = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle          = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
+local duffle          = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -31,20 +31,20 @@ local duffle          = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type
 
 -- Atom component declaration identifiers.
 local ATOM_COMP_PROC  = "MipsAtomComp_Proc_" ---@type string
-local MIPS_ATOM       = "Slice_MipsCode"  ---@type string -- prefix on the function declaration that wraps an AtomComp_Proc_
+local MIPS_ATOM       = "Slice_MipsCode"     ---@type string -- prefix on the function declaration that wraps an AtomComp_Proc_
 
 -- Component-name prefixes.
 local AC_PREFIX       = "ac_"  ---@type string -- arg to MipsAtomComp_(ac_X); the X is the atom name
-local AC_PREFIX_LEN   = 3 ---@type integer
+local AC_PREFIX_LEN   = 3      ---@type integer
 local MAC_PREFIX      = "mac_" ---@type string -- prefix on generated macros; the rest is the atom name
-local MAC_PREFIX_LEN  = 4 ---@type integer
+local MAC_PREFIX_LEN  = 4      ---@type integer
 
 -- ASCII byte values used in tokenization.
 local BYTE_NEWLINE    = 10 ---@type integer
 local BYTE_SLASH      = 47 ---@type integer
 
 -- Output gen subdirectory + filename (per-directory aggregation; the directory name is the namespace).
-local GEN_SUBDIR      = "gen" ---@type string
+local GEN_SUBDIR      = "gen"    ---@type string
 local MACS_FILENAME   = "macs.h" ---@type string
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -126,9 +126,9 @@ end
 --- @return string[]|nil
 local function extract_arg_names(args_str)
 	if not args_str or args_str == "" then return nil end
-	local names  = {} ---@type string[]
+	local names  = {}                                      ---@type string[]
 	local tokens = duffle.split_top_level_commas(args_str) ---@type string[]
-	for _, tok in ipairs(tokens) do ---@type integer, string
+	for _, tok in ipairs(tokens) do                        ---@type integer, string
 		local trimmed = duffle.trim(tok) ---@type string
 		if trimmed ~= "" then
 			-- Strip trailing block comment (/* ... */) from the token, if present.
@@ -151,7 +151,7 @@ local function extract_arg_names(args_str)
 					end
 				end
 				-- Now scan back from close_pos for the `/*` opener (slashes are at close_pos-1 and close_pos-2).
-				local opener_pos = nil ---@type integer|nil
+				local opener_pos = nil     ---@type integer|nil
 				local scan = close_pos - 3 ---@type integer
 				while scan >= 1 do
 					if trimmed:sub(scan, scan + 1) == "/*" then
@@ -240,7 +240,7 @@ end
 --- @param scan   SourceScan
 --- @return Component[]
 local function project_components(source, scan)
-	local out = {} ---@type Component[]
+	local out = {}                    ---@type Component[]
 	for _, a in ipairs(scan.atoms) do ---@type integer, AtomEntry
 		-- Only `MipsAtomComp_(ac_X)` (kind="comp_bare") and `MipsAtomComp_Proc_(ac_X, ...)` (kind="comp_proc")
 		-- are COMPONENTS — they get inlined via `mac_<name>` aliases inside atom bodies.
@@ -286,8 +286,8 @@ end
 --- @param s string
 --- @return string
 local function convert_line_comments_to_block(s)
-	local result = s ---@type string
-	local pos    = 1 ---@type integer
+	local result = s       ---@type string
+	local pos    = 1       ---@type integer
 	local len    = #result ---@type integer
 	while pos <= len do
 		local is_double_slash = result:byte(pos) == BYTE_SLASH ---@type boolean
@@ -300,9 +300,9 @@ local function convert_line_comments_to_block(s)
 			while eol <= len and result:byte(eol) ~= BYTE_NEWLINE do
 				eol = eol + 1
 			end
-			local before  = result:sub(1, pos - 1) ---@type string
-			local comment = result:sub(pos + 2, eol - 1)  ---@type string -- skip the `//`
-			local after ---@type string
+			local before  = result:sub(1, pos - 1)       ---@type string
+			local comment = result:sub(pos + 2, eol - 1) ---@type string -- skip the `//`
+			local after                                  ---@type string
 			if eol <= len and result:byte(eol) == BYTE_NEWLINE then
 				after = " */" .. result:sub(eol)  -- keep the newline
 			else
@@ -361,7 +361,7 @@ local function word_count_rec(name, comp_by_name, wc, cache)
 	if cache[name] ~= nil then return cache[name] end
 	cache[name] = -1  -- mark in-progress (cycle detection)
 	local cc = comp_by_name[name] ---@type Component|nil
-	local n ---@type integer
+	local n                       ---@type integer
 	if cc then
 		n = 0
 		local tokens = cc.body_tokens ---@type BodyToken[]
@@ -412,11 +412,11 @@ end
 --- @param wc         WordCounts
 --- @return table<string, integer>  -- bag: bare component name -> word count
 local function count_all_components(components, wc)
-	local comp_by_name = {} ---@type table<string, Component>
+	local comp_by_name = {}                                           ---@type table<string, Component>
 	for _, cc in ipairs(components) do comp_by_name[cc.name] = cc end ---@type integer, Component
-	local cache        = {} ---@type table<string, integer>  -- bag: memo; -1 in-progress sentinel
-	local counts       = {} ---@type table<string, integer>  -- bag: bare name -> word count
-	for _, c in ipairs(components) do ---@type integer, Component
+	local cache        = {}                                           ---@type table<string, integer>  -- bag: memo; -1 in-progress sentinel
+	local counts       = {}                                           ---@type table<string, integer>  -- bag: bare name -> word count
+	for _, c in ipairs(components) do                                 ---@type integer, Component
 		counts[c.name] = word_count_rec(c.name, comp_by_name, wc, cache)
 	end
 	return counts
@@ -446,10 +446,10 @@ local function component_meta_rec(name, comp_by_name, latency, cache)
 	if cache[name] ~= nil then return cache[name] end
 	cache[name] = { cycle_cost = -1, gp0_contrib = -1 }
 	local cc = comp_by_name[name] ---@type Component|nil
-	local cycle_cost ---@type integer
-	local gp0_contrib ---@type integer
+	local cycle_cost              ---@type integer
+	local gp0_contrib             ---@type integer
 	if cc then
-		local skip_cycle = (name == "yield") ---@type boolean
+		local skip_cycle = (name == "yield")                   ---@type boolean
 		local skip_gp0   = name:match("^insert_ot_tag") ~= nil ---@type boolean
 		cycle_cost  = 0
 		gp0_contrib = 0
@@ -460,7 +460,7 @@ local function component_meta_rec(name, comp_by_name, latency, cache)
 				if trimmed ~= "" then
 					local ident = duffle.read_ident(trimmed, 1) ---@type string|nil
 					if    ident and ident:sub(1, MAC_PREFIX_LEN) == MAC_PREFIX then
-						local nested = ident:sub(MAC_PREFIX_LEN + 1) ---@type string
+						local nested = ident:sub(MAC_PREFIX_LEN + 1)                                 ---@type string
 						local nested_meta = component_meta_rec(nested, comp_by_name, latency, cache) ---@type ComponentMeta
 						if not skip_cycle then
 							cycle_cost = cycle_cost + nested_meta.cycle_cost
@@ -471,7 +471,7 @@ local function component_meta_rec(name, comp_by_name, latency, cache)
 					else
 						if not skip_cycle then
 							local isa = duffle.instr(ident) ---@type InstructionRow|nil
-							local gte = duffle.gte(ident) ---@type GteCommandRow|nil
+							local gte = duffle.gte(ident)   ---@type GteCommandRow|nil
 							cycle_cost = cycle_cost + ((isa and isa.cycles) or (gte and gte.cycles) or latency[ident] or 1)
 						end
 						if not skip_gp0 then
@@ -506,11 +506,11 @@ end
 --- @param latency    table<string, integer>  -- bag: ident -> cycle cost
 --- @return ComponentMetaMap
 local function compute_components_metadata(components, latency)
-	local comp_by_name = {} ---@type table<string, Component>
+	local comp_by_name = {}                                           ---@type table<string, Component>
 	for _, cc in ipairs(components) do comp_by_name[cc.name] = cc end ---@type integer, Component
-	local cache = {} ---@type ComponentMetaMap
-	local out   = {} ---@type ComponentMetaMap
-	for _, c in ipairs(components) do ---@type integer, Component
+	local cache = {}                                                  ---@type ComponentMetaMap
+	local out   = {}                                                  ---@type ComponentMetaMap
+	for _, c in ipairs(components) do                                 ---@type integer, Component
 		out[c.name] = component_meta_rec(c.name, comp_by_name, latency, cache)
 	end
 	return out
@@ -526,7 +526,7 @@ end
 --- @return string[]
 local function split_comment_lines(s)
 	local out   = {} ---@type string[]
-	local pos   = 1 ---@type integer
+	local pos   = 1  ---@type integer
 	local s_len = #s ---@type integer
 	while pos <= s_len do
 		local nl = s:find("\n", pos, true) ---@type integer|nil
@@ -690,9 +690,9 @@ local function build_component_lines(c, counts)
 		end
 	end
 
-	local tokens = duffle.split_top_level_commas(c.body) ---@type string[]
+	local tokens = duffle.split_top_level_commas(c.body)         ---@type string[]
 	for i = 1, #tokens do tokens[i] = duffle.trim(tokens[i]) end ---@type integer
-	local sig = signature_from_args(c.args) ---@type string
+	local sig = signature_from_args(c.args)                      ---@type string
 	-- Direct lookup against the per-source precomputed `counts` table (built once by count_all_components).
 	local n   = counts[c.name] ---@type integer
 
@@ -718,7 +718,7 @@ end
 --- @return string[]
 local function header_boilerplate(dir, sources)
 	local source_lines = { "// Directory: " .. duffle.to_absolute_path(dir) .. "/" } ---@type string[]
-	for _, src in ipairs(sources) do ---@type integer, SourceFile
+	for _, src in ipairs(sources) do                                                 ---@type integer, SourceFile
 		source_lines[#source_lines + 1] = "//   source: " .. duffle.to_absolute_path(src.path)
 	end
 	local source_blob = table.concat(source_lines, "\n") ---@type string
@@ -749,7 +749,7 @@ end
 --- @return string  -- Output directory
 --- @return string  -- Full output path
 local function compute_macs_h_path(dir)
-	local  out_dir  = dir .. "/" .. GEN_SUBDIR ---@type string
+	local  out_dir  = dir .. "/" .. GEN_SUBDIR        ---@type string
 	local  out_path = out_dir .. "/" .. MACS_FILENAME ---@type string
 	return out_dir, out_path
 end
@@ -764,7 +764,7 @@ end
 --- @return string|nil -- Path to the written file (nil if no components)
 local function emit_component_macros_h(ctx, dir, sources, components, counts)
 	if #components == 0 then return nil end
-	local out_dir, out_path = compute_macs_h_path(dir) ---@type string, string
+	local out_dir, out_path = compute_macs_h_path(dir)         ---@type string, string
 	local lines             = header_boilerplate(dir, sources) ---@type string[]
 
 	for _, c in ipairs(components) do ---@type integer, Component
@@ -791,7 +791,7 @@ end
 --- @param counts     table<string, integer>  -- bag: bare component name -> word count
 --- @return nil
 local function update_canonical_word_counts(corpus, components, counts)
-	local wc = corpus.word_counts ---@type WordCounts
+	local wc = corpus.word_counts     ---@type WordCounts
 	for _, c in ipairs(components) do ---@type integer, Component
 		local key = "mac_" .. c.name ---@type string
 		if wc[key] == nil then
@@ -821,7 +821,7 @@ end
 --- @return nil
 local function update_canonical_components(corpus, src, components, metadata)
 	local rel_path = src.path:gsub("\\", "/") ---@type string
-	for _, c in ipairs(components) do ---@type integer, Component
+	for _, c in ipairs(components) do         ---@type integer, Component
 		-- Keyed by bare name (e.g. `yield`, `load_tri_indices`).
 		-- The atoms_source_map pass looks up components by bare name from the corpus;
 		-- `mac_` prefix lives at the call-site identifier and is stripped before lookup.
@@ -841,7 +841,7 @@ local function update_canonical_components(corpus, src, components, metadata)
 			-- Identical-shape declarations (same path + line) reuse the first-wins entry without a collision record.
 			local existing = corpus.components[c.name] ---@type ComponentDef
 			if existing.path ~= rel_path or existing.line ~= c.line then
-				local kind       = c.kind or "comp_bare" ---@type string
+				local kind       = c.kind or "comp_bare"        ---@type string
 				local first_kind = existing.kind or "comp_bare" ---@type string
 				corpus.collisions[#corpus.collisions + 1] = {
 					kind              = "component",
@@ -866,7 +866,7 @@ end
 --- @return nil
 local function update_canonical_component_body_index(corpus, src, components, scan)
 	local line_of = scan and scan.line_of ---@type (fun(pos: integer): integer)|nil
-	for _, c in ipairs(components) do ---@type integer, Component
+	for _, c in ipairs(components) do     ---@type integer, Component
 		if corpus.component_body_index[c.name] == nil then
 			corpus.component_body_index[c.name] = {
 				body_tokens = c.body_tokens,
@@ -911,14 +911,14 @@ function M.run(ctx)
 	-- Per-directory aggregation: every source in the same directory contributes to one `gen/macs.h`.
 	-- The directory itself is the namespace. `corpus.sources_by_dir` preserves source-order within each bucket (matches `corpus.source_order`).
 	local sources_by_dir = corpus.sources_by_dir or duffle.group_sources_by_dir(corpus.source_order) ---@type table<string, SourceFile[]>
-	for dir, sources in pairs(sources_by_dir) do ---@type string, SourceFile[]
+	for dir, sources in pairs(sources_by_dir) do                                                     ---@type string, SourceFile[]
 		-- Aggregate components from every source in this directory.
 		-- `project_components` returns nil for sources with no `MipsAtomComp_` declarations; we skip those.
 		local aggregated_components = {} ---@type Component[]
 		local metadata_per_source   = {} ---@type table<SourceFile, ComponentMetaMap>
 		for _, src in ipairs(sources) do ---@type integer, SourceFile
 			local per_source = project_components(src.text, src.scan) or {} ---@type Component[]
-			for _, c in ipairs(per_source) do ---@type integer, Component
+			for _, c in ipairs(per_source) do                               ---@type integer, Component
 				aggregated_components[#aggregated_components + 1] = c
 			end
 			if #per_source > 0 then
@@ -928,7 +928,7 @@ function M.run(ctx)
 		if #aggregated_components > 0 then
 			-- Compute word counts across the aggregated set. `corpus.word_counts` carries the
 			-- same-source + prior-directory entries so the recursive lookup sees both.
-			local counts    = count_all_components(aggregated_components, corpus.word_counts) ---@type table<string, integer>  -- bag: bare name -> word count
+			local counts    = count_all_components(aggregated_components, corpus.word_counts)           ---@type table<string, integer>  -- bag: bare name -> word count
 			local macs_path = emit_component_macros_h(ctx, dir, sources, aggregated_components, counts) ---@type string|nil
 			if macs_path then
 				outputs[#outputs + 1] = { macs_h = macs_path }

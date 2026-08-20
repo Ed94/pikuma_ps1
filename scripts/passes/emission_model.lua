@@ -123,7 +123,7 @@ local M = {} ---@type EmissionModelPass
 -- Bootstrap: load `duffle_paths.lua` via debug.getinfo so the module works standalone (run as `luajit passes/emission_model.lua`) and when require'd from the orchestrator.
 -- ─────────────────────────────────────────────────────────────────────────
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
 
 -- ─────────────────────────────────────────────────────────────────────────
 -- Helpers
@@ -155,8 +155,8 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 	-- The walker assigns line 2 to the body's first content line because line 1 is the trailing `\n` after `{`. Body-text line k therefore maps to `root_body_line + (k - 1)`.
 	-- `body_off - 1` points at the opening `{`, whose line index identifies the header line. `body_off` points after `{` and would shift every word row forward by one line.
 	local root_body_line  = root_line_of(atom_record.body_off - 1) or atom_record.line or 0 ---@type integer
-	local component_index = corpus.component_body_index or {} ---@type table<string, ComponentBodyEntry>
-	local word_items      = {} ---@type EmissionItem[]
+	local component_index = corpus.component_body_index or {}                               ---@type table<string, ComponentBodyEntry>
+	local word_items      = {}                                                              ---@type EmissionItem[]
 
 	for _, item in ipairs(projection.items) do ---@type integer, EmissionItem
 		if item.kind == "word" then word_items[#word_items + 1] = item end
@@ -173,7 +173,7 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 		-- The innermost open invocation identifies which line index the walker used.
 		-- A component `line_of` makes `item.line` physical; the atom's `body_text` line index makes it body-relative.
 		if ids and #ids > 0 then
-			local inner_id  = ids[#ids] ---@type integer
+			local inner_id  = ids[#ids]                                     ---@type integer
 			local inner_inv = inner_id and projection.invocations[inner_id] ---@type InvocationRecord|nil
 			if inner_inv then
 				local component = component_index[inner_inv.component_name] ---@type ComponentBodyEntry|nil
@@ -191,7 +191,7 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 	-- Stamp the root source path onto invocation records whose `call_path` the walker left empty.
 	-- The walker passes `body_entry.source` to `emit_invoke_begin`; `M.project_emission` creates the root `body_entry` with source `""`, leaving its `call_path` empty.
 	-- This stamp gives every invocation a physical `call_path` matching `passes/atoms_source_map.lua`'s in-memory provenance projection.
-	local root_path = src.path or "" ---@type string
+	local root_path = src.path or ""                ---@type string
 	for _, inv in ipairs(projection.invocations) do ---@type integer, InvocationRecord
 		if inv.call_path == nil or inv.call_path == "" then
 			inv.call_path = root_path
@@ -212,9 +212,9 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 	-- Component words already carry physical `item.line` values from the walker's COMPONENT line index, so `body_line_for` returns them unchanged.
 	for _, inv in ipairs(projection.invocations) do ---@type integer, InvocationRecord
 		local sw  = inv.start_word ---@type integer
-		local ew  = inv.end_word ---@type integer
-		local bls = {} ---@type integer[]
-		for i = sw, ew do ---@type integer
+		local ew  = inv.end_word   ---@type integer
+		local bls = {}             ---@type integer[]
+		for i = sw, ew do          ---@type integer
 			local it = projection.items and projection.items[i] ---@type EmissionItem|nil
 			if    it and it.kind == "word" then
 				local fake_event = { invocation_ids = { inv.id } } ---@type WordEvent
@@ -233,8 +233,8 @@ local function stamp_root_provenance(projection, atom_record, src, corpus)
 		item.line    = body_line
 		we.body_line = body_line
 
-		local call_line = body_line ---@type integer
-		local outer_id  = we.outermost_invocation_id or 0 ---@type integer
+		local call_line = body_line                        ---@type integer
+		local outer_id  = we.outermost_invocation_id or 0  ---@type integer
 		local outer_inv = projection.invocations[outer_id] ---@type InvocationRecord|nil
 		if outer_inv then
 			-- `outer_inv.call_line` is physical after the conversion loop above, so use it directly.
@@ -255,10 +255,10 @@ end
 --- @param corpus Corpus
 --- @return EmissionProjection
 local function project_atom(atom_record, src, corpus)
-	local body  = atom_record.body or "" ---@type string
-	local wc    = corpus.word_counts or {} ---@type WordCounts
+	local body  = atom_record.body or ""            ---@type string
+	local wc    = corpus.word_counts or {}          ---@type WordCounts
 	local cbi   = corpus.component_body_index or {} ---@type table<string, ComponentBodyEntry>
-	local schema = nil ---@type RegUseSchema|nil
+	local schema = nil                              ---@type RegUseSchema|nil
 	if atom_record.reg_use_schema_name then
 		schema = corpus.reg_use_schemas and corpus.reg_use_schemas[atom_record.reg_use_schema_name]
 	end
@@ -322,7 +322,7 @@ function M.run(ctx)
 			return
 		end
 		local proj = project_atom(atom, src, corpus) ---@type EmissionProjection
-		for _, e in ipairs(proj.errors) do ---@type integer, EmitError
+		for _, e in ipairs(proj.errors) do           ---@type integer, EmitError
 			-- Preserve `kind` (cycle / count_mismatch / unbalanced) so readers dispatch on the diagnostic class and leave the message string as display text.
 			errors[#errors + 1] = {
 				kind   = e.kind,
@@ -344,7 +344,7 @@ function M.run(ctx)
 	-- Recognized kinds (atom | atom_proc | raw_atom | comp_bare | comp_proc) each receive the atom.paths projection via duffle.project_emission.
 	-- Components are macros inlined into atom bodies; focused tests and isolated component analyses consume atom.paths directly.
 	for _, src in ipairs(corpus.source_order) do ---@type integer, SourceFile
-		local scan = src.scan or {} ---@type SourceScan
+		local scan = src.scan or {}                ---@type SourceScan
 		for _, atom in ipairs(scan.atoms or {}) do ---@type integer, AtomEntry
 			process_atom(atom, src)
 		end

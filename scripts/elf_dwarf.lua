@@ -392,7 +392,7 @@ end
 --- @return integer
 function M.read_sleb128_at(buf, pos)
 	local value, shift = 0, 0 ---@type integer, integer
-	local len = #buf ---@type integer
+	local len = #buf          ---@type integer
 	while pos < len do
 		local b = buf:byte(pos + 1) ---@type integer
 		value = value + (b % 0x80) * (2 ^ shift)
@@ -451,7 +451,7 @@ end
 --- @return string
 local function read_c_string_at(buf, off)
 	local len   = #buf ---@type integer
-	local start = off ---@type integer
+	local start = off  ---@type integer
 	while off < len and buf:byte(off + 1) ~= 0 do off = off + 1 end
 	return buf:sub(start + 1, off)
 end
@@ -466,7 +466,7 @@ end
 local function parse_abbrev_table(table_bytes, table_start)
 	local table_end = M.find_abbrev_table_end(table_bytes, table_start) ---@type integer|nil
 	if not table_end then return nil, "no terminator" end
-	local decls = {} ---@type AbbrevDecl[]
+	local decls = {}        ---@type AbbrevDecl[]
 	local pos = table_start ---@type integer
 	while pos < table_end do
 		local  code, code_end = M.read_uleb128_at(table_bytes, pos) ---@type integer|nil, integer
@@ -667,7 +667,7 @@ function M.read_ref_sig8(buf, pos) return M.read_u32_le(buf, pos), M.read_u32_le
 --- @param target_sig_hi integer     -- high 4 bytes (LE) of the desired signature
 --- @return integer|nil, integer|nil -- unit offset, type_offset within the unit
 function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
-	local pos         = 0 ---@type integer
+	local pos         = 0     ---@type integer
 	local section_len = #info ---@type integer
 	while pos + 4 < section_len do
 		local unit_length = M.read_u32_le(info, pos) ---@type integer
@@ -675,7 +675,7 @@ function M.find_type_unit_by_signature(info, target_sig_lo, target_sig_hi)
 			return nil, nil  -- DWARF64 not supported
 		end
 		-- unit_length is the body size, NOT including the 4-byte unit_length field itself.
-		local body_start = pos + 4 ---@type integer
+		local body_start = pos + 4                  ---@type integer
 		local body_end   = body_start + unit_length ---@type integer
 		if body_end > section_len then
 			return nil, nil  -- malformed
@@ -754,11 +754,11 @@ end
 function M.read_elf_sections(elf_path, section_names)
 	-- Initialize result with all requested names set to "" so callers can do `sections[X] 
 	-- or ""` for missing sections without nil-checks.
-	local result = {} ---@type table<string, string>
+	local result = {}                                             ---@type table<string, string>
 	for _, name in ipairs(section_names) do result[name] = "" end ---@type integer, string
 
 	-- O(1) lookup set.
-	local wanted = {} ---@type table<string, boolean>  -- bag: requested section name -> true
+	local wanted = {}                                               ---@type table<string, boolean>  -- bag: requested section name -> true
 	for _, name in ipairs(section_names) do wanted[name] = true end ---@type integer, string
 
 	-- Existence check (lfs.attributes avoids an io.open-vs-fail race).
@@ -1006,7 +1006,7 @@ end
 --- @param n integer  -- any integer (negative allowed)
 --- @return string
 function M.sleb128(n)
-	local bytes = {} ---@type string[]
+	local bytes = {}   ---@type string[]
 	local more  = true ---@type boolean
 	while more do
 		local b = n % (LEB_DATA_MASK + 1) ---@type integer -- extract low 7 bits
@@ -1045,8 +1045,8 @@ end
 --- @return integer
 function M.sleb128_size(n)
 	local more  = true ---@type boolean
-	local bytes = 0 ---@type integer
-	local v     = n ---@type integer
+	local bytes = 0    ---@type integer
+	local v     = n    ---@type integer
 	while more do
 		local b = v % (LEB_DATA_MASK + 1) ---@type integer -- extract low 7 bits
 		v = (v - b) / (LEB_DATA_MASK + 1) -- arithmetic shift right by 7
@@ -1091,8 +1091,8 @@ end
 --- @return table<integer, string>|nil
 function M.read_line_unit_file_table(elf_path)
 	local sections = M.read_elf_sections(elf_path, { ".debug_line", ".debug_line_str" }) ---@type table<string, string>
-	local line     = sections[".debug_line"] ---@type string
-	local lstr     = sections[".debug_line_str"] or "" ---@type string
+	local line     = sections[".debug_line"]                                             ---@type string
+	local lstr     = sections[".debug_line_str"] or ""                                   ---@type string
 	if not line or line == "" then
 		io.stderr:write("[elf_dwarf.read_line_unit_file_table] no .debug_line section in: " .. tostring(elf_path) .. "\n")
 		return nil
@@ -1115,7 +1115,7 @@ function M.read_line_unit_file_table(elf_path)
 	--- @return integer
 	local function read_form(buf, lstr_buf, p, form)
 		if form == M.DWARF5_DEBUG_LINE.form_line_strp then
-			local strp    = M.read_u32_le(buf, p) ---@type integer
+			local strp    = M.read_u32_le(buf, p)                                  ---@type integer
 			local end_pos = lstr_buf:find("\0", strp + 1, true) or (#lstr_buf + 1) ---@type integer
 			return lstr_buf:sub(strp + 1, end_pos - 1), p + M.DWARF5_DEBUG_LINE.form_strp_bytes
 		elseif form == M.DWARF5_DEBUG_LINE.form_string then
@@ -1159,7 +1159,7 @@ function M.read_line_unit_file_table(elf_path)
 			up = nul
 		end
 		local unit_basenames = {} ---@type table<integer, string>  -- bag: 1-based unit file index -> basename
-		local unit_paths = {} ---@type table<integer, string>  -- bag: 1-based unit file index -> full path
+		local unit_paths = {}     ---@type table<integer, string>  -- bag: 1-based unit file index -> full path
 		while up < body_end do
 			local nul = buf:find("\0", up + 1, true) or (body_end + 1) ---@type integer
 			if    nul > body_end or nul == up + 1 then up = nul break end
@@ -1168,8 +1168,8 @@ function M.read_line_unit_file_table(elf_path)
 			local didx,  up_next  = M.read_uleb128_at(buf, up); up = up_next  ---@type integer|nil, integer
 			local _time, up_next2 = M.read_uleb128_at(buf, up); up = up_next2 ---@type integer|nil, integer
 			local _size, up_next3 = M.read_uleb128_at(buf, up); up = up_next3 ---@type integer|nil, integer
-			local idx = #unit_basenames + 1 ---@type integer
-			local bs  = path:match("[^/\\]+$") or path ---@type string
+			local idx = #unit_basenames + 1                                   ---@type integer
+			local bs  = path:match("[^/\\]+$") or path                        ---@type string
 			unit_paths[idx]     = path
 			unit_basenames[idx] = bs
 			dirs[1] = dirs[1] or ""  -- safety: gcc emits "" sentinel dir at 0
@@ -1196,15 +1196,15 @@ function M.read_line_unit_file_table(elf_path)
 		up = up + (opcode_base - 1)  -- std_opcode_lengths
 		-- directories
 		local dir_format_count, after = M.read_uleb128_at(buf, up); up = after ---@type integer|nil, integer
-		local dir_formats = {} ---@type integer[]
-		for i = 1, dir_format_count do ---@type integer
+		local dir_formats = {}                                                 ---@type integer[]
+		for i = 1, dir_format_count do                                         ---@type integer
 			local f, a2 = M.read_uleb128_at(buf, up); up = a2 ---@type integer|nil, integer
 			dir_formats[i] = f
 		end
 		local dir_count, a3 = M.read_uleb128_at(buf, up); up = a3 ---@type integer|nil, integer
-		local dirs          = {} ---@type string[]
-		for i = 1, dir_count do ---@type integer
-			local combined = "" ---@type string
+		local dirs          = {}                                  ---@type string[]
+		for i = 1, dir_count do                                   ---@type integer
+			local combined = ""            ---@type string
 			for j = 1, dir_format_count do ---@type integer
 				local v, a4 = read_form(buf, lstr_buf, up, dir_formats[j]) ---@type string|integer|nil, integer
 				up = a4
@@ -1214,24 +1214,24 @@ function M.read_line_unit_file_table(elf_path)
 		end
 		-- file names
 		local file_format_count, after2 = M.read_uleb128_at(buf, up); up = after2 ---@type integer|nil, integer
-		local file_formats = {} ---@type integer[]
-		for i = 1, file_format_count do ---@type integer
+		local file_formats = {}                                                   ---@type integer[]
+		for i = 1, file_format_count do                                           ---@type integer
 			local f, a2 = M.read_uleb128_at(buf, up); up = a2 ---@type integer|nil, integer
 			file_formats[i] = f
 		end
 		local file_count, a3 = M.read_uleb128_at(buf, up); up = a3 ---@type integer|nil, integer
-		local unit_basenames = {} ---@type table<integer, string>  -- bag: 1-based unit file index -> basename
-		local unit_paths     = {} ---@type table<integer, string>  -- bag: 1-based unit file index -> full path
-		for i = 1, file_count do ---@type integer
-			local combined = "" ---@type string
-			local didx     = 0  ---@type integer
+		local unit_basenames = {}                                  ---@type table<integer, string>  -- bag: 1-based unit file index -> basename
+		local unit_paths     = {}                                  ---@type table<integer, string>  -- bag: 1-based unit file index -> full path
+		for i = 1, file_count do                                   ---@type integer
+			local combined = ""             ---@type string
+			local didx     = 0              ---@type integer
 			for j = 1, file_format_count do ---@type integer
 				local v, a4 = read_form(buf, lstr_buf, up, file_formats[j]) ---@type string|integer|nil, integer
 				up = a4
 				if j == 1 and type(v) == "string" then combined = v end
 				if j == 2 and type(v) == "number"  then didx  = v end
 			end
-			local idx = #unit_basenames + 1 ---@type integer
+			local idx = #unit_basenames + 1                    ---@type integer
 			local bs  = combined:match("[^/\\]+$") or combined ---@type string
 			unit_paths[idx]     = combined
 			unit_basenames[idx] = bs
@@ -1243,7 +1243,7 @@ function M.read_line_unit_file_table(elf_path)
 	end
 
 	--- Walk every line-program unit in the section.
-	local p = 0 ---@type integer
+	local p = 0               ---@type integer
 	local section_end = #line ---@type integer
 	while p + 4 <= section_end do
 		local unit_length = M.read_u32_le(line, p) ---@type integer
@@ -1255,11 +1255,11 @@ function M.read_line_unit_file_table(elf_path)
 		local body_end   = p + 4 + unit_length ---@type integer
 		if body_end > section_end then break end
 		local version = M.read_u16_le(line, body_start) ---@type integer
-		local unit_basenames, unit_paths ---@type table<integer, string>|nil, table<integer, string>|nil
+		local unit_basenames, unit_paths                ---@type table<integer, string>|nil, table<integer, string>|nil
 		if version >= 5 then
 			-- DWARF5 header: version(2) + addr_size(1) + seg_size(1) + header_length(4) + content
-			local header_length_offset = body_start + 6  ---@type integer -- past version(2) + addr_size(1) + seg_size(1) - wait that's wrong; past hdr len is at +6
-			local content_start        = body_start + 8  ---@type integer -- past version(2) + addr_size(1) + seg_size(1) + header_length(4)
+			local header_length_offset = body_start + 6 ---@type integer -- past version(2) + addr_size(1) + seg_size(1) - wait that's wrong; past hdr len is at +6
+			local content_start        = body_start + 8 ---@type integer -- past version(2) + addr_size(1) + seg_size(1) + header_length(4)
 			unit_basenames, unit_paths = parse_dwarf5_unit(line, lstr, content_start, body_end)
 		elseif version >= 2 then
 			-- DWARF2/3/4 header: version(2) + header_length(4) + content

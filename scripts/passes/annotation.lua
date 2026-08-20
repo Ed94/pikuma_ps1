@@ -11,7 +11,7 @@
 -- Bootstrap follows the entry scripts; `scripts/duffle_paths.lua` sets package.path and package.cpath. See `ps1_meta.lua` for the rationale.
 -- `debug.getinfo(1, "S").source` locates this file for standalone and orchestrated runs, then `duffle_paths.lua` returns the loaded `duffle` module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
 
 -- The annotation pass reads the source-derived registries from scan_source:
 --   * pipe_ctx.register_alias_registry — for atom_dbg_reg_default(R_X, ...) and atom_reg_types(R_X, ...) member-identity checks
@@ -140,7 +140,7 @@ end
 --- @return nil
 local function check_macro_word_drift(m, pipe_ctx, findings)
 	local wc = (pipe_ctx and pipe_ctx.word_counts) or {} ---@type WordCounts
-	local  declared = wc[m.name] ---@type integer|nil
+	local  declared = wc[m.name]                         ---@type integer|nil
 	if not declared then
 		findings.errors[#findings.errors + 1] = {
 			line = m.line,
@@ -169,7 +169,7 @@ end
 --- @return nil
 local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
 	-- Detect duplicate defaults using the ordered occurrence list (the out.types hash only retains the last declaration).
-	local seen_first_line = {} ---@type table<string, integer>  -- bag: register ident -> first source line
+	local seen_first_line = {}                               ---@type table<string, integer>  -- bag: register ident -> first source line
 	for _, occ in ipairs(pipe_ctx.type_occurrences or {}) do ---@type integer, RegTypeOccurrence
 		if seen_first_line[occ.reg] == nil then
 			seen_first_line[occ.reg] = occ.source_line
@@ -184,7 +184,7 @@ local function check_semantic_reg_defaults(_src, pipe_ctx, findings)
 	end
 	local reg_registry  = pipe_ctx.register_alias_registry or {} ---@type table<string, AliasEntry>
 	local type_registry = pipe_ctx.type_name_registry      or {} ---@type table<string, TypeNameEntry>
-	for reg, def in pairs(pipe_ctx.types or {}) do ---@type string, RegTypeDefault
+	for reg, def in pairs(pipe_ctx.types or {}) do               ---@type string, RegTypeDefault
 		if not reg_registry[reg] then
 			findings.errors[#findings.errors + 1] = {
 				line = def.source_line,
@@ -221,7 +221,7 @@ end
 local function check_atom_reg_types(_src, pipe_ctx, findings)
 	local reg_registry  = pipe_ctx.register_alias_registry or {} ---@type table<string, AliasEntry>
 	local type_registry = pipe_ctx.type_name_registry      or {} ---@type table<string, TypeNameEntry>
-	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do ---@type integer, AtomInfoEntry
+	for _, ai in ipairs(pipe_ctx.atom_infos_list or {}) do       ---@type integer, AtomInfoEntry
 		if ai.reg_type_overrides then
 			for reg, ov in pairs(ai.reg_type_overrides) do ---@type string, RegTypeOverride
 				if not reg_registry[reg] then
@@ -282,7 +282,7 @@ end
 --- @return nil
 local function check_binds_no_duplicate_fields(_src, pipe_ctx, findings)
 	for _, bs in ipairs(pipe_ctx.binds_list or {}) do ---@type integer, BindsEntry
-		local seen = {} ---@type table<string, integer>  -- bag: field name -> occurrence count
+		local seen = {}                        ---@type table<string, integer>  -- bag: field name -> occurrence count
 		for _, f in ipairs(bs.fields or {}) do ---@type integer, TypeField
 			seen[f.name] = (seen[f.name] or 0) + 1
 		end
@@ -375,7 +375,7 @@ local function check_wave_context_migration(_src, pipe_ctx, findings)
 	if not (pipe_ctx.types and next(pipe_ctx.types)) then return end
 	if not (pipe_ctx.atom_infos_list) then return end
 	local reg_registry = pipe_ctx.register_alias_registry or {} ---@type table<string, AliasEntry>
-	for _, ai in ipairs(pipe_ctx.atom_infos_list) do ---@type integer, AtomInfoEntry
+	for _, ai in ipairs(pipe_ctx.atom_infos_list) do            ---@type integer, AtomInfoEntry
 		if ai.reg_type_overrides then
 			for reg, _ in pairs(ai.reg_type_overrides) do ---@type string, RegTypeOverride
 				if not reg_registry[reg] then
@@ -428,8 +428,8 @@ local CHECK_RULES = { ---@type CheckRule[]
 --- @return PipeCtx
 local function build_corpus_pipe_ctx(ctx)
 	local view         = duffle.corpus_view(ctx) ---@type PipeCtx
-	local annot_counts = {} ---@type table<string, integer>  -- bag: atom name -> annotation count
-	for _, info in ipairs(view.atom_infos) do ---@type integer, AtomInfoEntry
+	local annot_counts = {}                      ---@type table<string, integer>  -- bag: atom name -> annotation count
+	for _, info in ipairs(view.atom_infos) do    ---@type integer, AtomInfoEntry
 		if info and info.atom_name then
 			annot_counts[info.atom_name] = (annot_counts[info.atom_name] or 0) + 1
 		end
@@ -467,7 +467,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 		register_alias_registry  = corpus_pipe_ctx.register_alias_registry,
 		type_name_registry       = corpus_pipe_ctx.type_name_registry,
 	}
-	local atoms = {} ---@type AtomEntry[]
+	local atoms = {}                  ---@type AtomEntry[]
 	for _, a in ipairs(scan.atoms) do ---@type integer, AtomEntry
 		if a.kind == "atom" or a.kind == "atom_proc" then
 			atoms[#atoms + 1] = a
@@ -503,7 +503,7 @@ local function validate(ctx, src, corpus_pipe_ctx)
 	-- scan_source records each marker in scan.debug_skip_markers; this loop validates each record independently and emits at most one error per marker.
 	-- Valid markers stamp `debug_skip = true` on the following atom or component declaration, which downstream consumers read directly.
 	local skip_markers = scan.debug_skip_markers or {} ---@type DebugSkipMarker[]
-	for _, marker in ipairs(skip_markers) do ---@type integer, DebugSkipMarker
+	for _, marker in ipairs(skip_markers) do           ---@type integer, DebugSkipMarker
 		duffle.run_check_rules(CHECK_RULES, "per_skip_marker", marker, pipe_ctx, findings)
 	end
 
@@ -554,17 +554,17 @@ function M.run(ctx)
 	-- Build the shared pipe_ctx once for this run; every validate() call sees the same cross-source registries.
 	-- The corpus owns the canonical cross-source registries; per-source scans retain body / declaration ownership.
 	local corpus_pipe_ctx = build_corpus_pipe_ctx(ctx) ---@type PipeCtx
-	local corpus          = ctx.shared.corpus ---@type Corpus
+	local corpus          = ctx.shared.corpus          ---@type Corpus
 
 	-- Group `corpus.sources_by_dir` by module, validate every source in each bucket, and emit one errors.h per directory.
 	local by_dir = (corpus and corpus.sources_by_dir) or {} ---@type table<string, SourceFile[]>
 
 	for dir, dir_sources in pairs(by_dir) do ---@type string, SourceFile[]
 		local dir_basename = dir:match("([^/\\]+)$") or dir ---@type string
-		local dir_atoms    = 0 ---@type integer
-		local dir_errors   = {} ---@type PassFinding[]
-		local dir_warnings = {} ---@type PassFinding[]
-		for _, src in ipairs(dir_sources) do ---@type integer, SourceFile
+		local dir_atoms    = 0                              ---@type integer
+		local dir_errors   = {}                             ---@type PassFinding[]
+		local dir_warnings = {}                             ---@type PassFinding[]
+		for _, src in ipairs(dir_sources) do                ---@type integer, SourceFile
 			local result  = validate(ctx, src, corpus_pipe_ctx) ---@type AnnotatedResult
 			result.source = src.path                           -- tag for downstream rendering
 			dir_atoms = dir_atoms + #result.atoms

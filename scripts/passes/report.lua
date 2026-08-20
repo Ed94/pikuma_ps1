@@ -19,7 +19,7 @@
 -- Bootstrap: Load `duffle_paths.lua` via `debug.getinfo(1, "S").source` (works both standalone + when require'd).
 -- duffle_paths.lua sets package.path then returns `require("duffle")` at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
 
 -- Load atoms_source_map for the `render_source_map` / `render_provenance` module functions (used by `render_module_atoms_md` to produce `<module>.atoms.md` without re-walking source tokens).
 -- The pass itself emits no per-source files anymore; we only consume the two pure renderers here.
@@ -32,13 +32,13 @@ local atoms_source_map = dofile(_bootstrap_dir .. "atoms_source_map.lua") ---@ty
 
 -- Section separators used in the rendered text reports.
 -- The thin rules are hand-tuned to align with the per-section content width; do not change without also checking the section renderers below.
-local RULE_THICK               = "========================================================" ---@type string
+local RULE_THICK               = "========================================================"                                                                                                      ---@type string
 local SECTION_HEADER_ATOMS     = "── Atoms ────────────────────────────────────────────────" ---@type string
-local SECTION_HEADER_ANNOTS    = "── Annotations ──────────────────────────────────────────" ---@type string
-local SECTION_HEADER_BINDS     = "── Binds_* structs ──────────────────────────────────────" ---@type string
-local SECTION_HEADER_MACROS    = "── Macro word-count declarations ─────────────────────────" ---@type string
-local SECTION_HEADER_ERRORS    = "── Errors ──────────────────────────────────────────────" ---@type string
-local SECTION_HEADER_WARNINGS  = "── Warnings ────────────────────────────────────────────" ---@type string
+local SECTION_HEADER_ANNOTS    = "── Annotations ──────────────────────────────────────────"             ---@type string
+local SECTION_HEADER_BINDS     = "── Binds_* structs ──────────────────────────────────────"                     ---@type string
+local SECTION_HEADER_MACROS    = "── Macro word-count declarations ─────────────────────────"                                              ---@type string
+local SECTION_HEADER_ERRORS    = "── Errors ──────────────────────────────────────────────"      ---@type string
+local SECTION_HEADER_WARNINGS  = "── Warnings ────────────────────────────────────────────"          ---@type string
 
 -- Lua pattern that captures the basename (last path segment) of a forward- or back-slash separated path.
 local BASENAME_PATTERN = "([^/\\]+)$" ---@type string
@@ -240,7 +240,7 @@ local function render_project_summary(all_results)
 		"|--------|-------|--------|-------|--------|----------|--------|----------|------|",
 	}
 	local totals = { atoms = 0, annots = 0, binds = 0, macros = 0, findings = 0, errors = 0, warnings = 0, info = 0 } ---@type ProjectSummaryTotals
-	for _, e in ipairs(all_results) do ---@type integer, ProjectSummaryRow
+	for _, e in ipairs(all_results) do                                                                                ---@type integer, ProjectSummaryRow
 		lines[#lines + 1] = string.format("| %s | %d | %d | %d | %d | %d | %d | %d | %d |"
 			, e.module, e.atoms, e.annots, e.binds, e.macros, e.findings, e.errors, e.warnings, e.info)
 		totals.atoms    = totals.atoms    + e.atoms
@@ -266,7 +266,7 @@ end
 --- @return string
 local function render_module_atoms_md(dir, dir_sources, wc)
 	local dir_basename = source_basename(dir) ---@type string
-	local lines        = { ---@type string[]
+	local lines        = {                    ---@type string[]
 		"# " .. dir_basename .. " — atoms (verbose source map)",
 		"> Per-word call-site + provenance. Auto-generated.",
 		"",
@@ -276,7 +276,7 @@ local function render_module_atoms_md(dir, dir_sources, wc)
 		lines[#lines + 1] = "## " .. src_name
 		lines[#lines + 1] = ""
 		-- For each atom with a projection, render its sourcemap + provenance.
-		local atoms_list = {} ---@type AtomEntry[]
+		local atoms_list = {}                                  ---@type AtomEntry[]
 		for _, atom in ipairs((src.scan or {}).atoms or {}) do ---@type integer, AtomEntry
 			if atom.paths then atoms_list[#atoms_list + 1] = atom end
 		end
@@ -290,7 +290,7 @@ local function render_module_atoms_md(dir, dir_sources, wc)
 			-- Per-source forward-slash path (same one `emit_atom_stanza` / `emit_provenance_stanza` would derive;
 			-- computed once per `## <source>` heading and reused by each atom's `WORD N CALL ...` field).
 			local rel_path = src.path:gsub("\\\\", "/") ---@type string
-			for _, atom in ipairs(atoms_list) do ---@type integer, AtomEntry
+			for _, atom in ipairs(atoms_list) do        ---@type integer, AtomEntry
 				lines[#lines + 1] = string.format(
 					"### atom: %s (line %d, %d words)",
 					atom.name, atom.line or 0, #((atom.paths or {}).word_events or {}))
@@ -325,7 +325,7 @@ end
 --- @return KindCounts
 local function count_kinds(decls)
 	local n = { atom = 0, atom_proc = 0, comp_bare = 0, comp_proc = 0 } ---@type KindCounts
-	for _, a in ipairs(decls or {}) do ---@type integer, AtomEntry
+	for _, a in ipairs(decls or {}) do                                  ---@type integer, AtomEntry
 		if n[a.kind] ~= nil then n[a.kind] = n[a.kind] + 1 end
 	end
 	return n
@@ -341,7 +341,7 @@ end
 --- @param view ModuleView
 --- @return table<string, boolean>
 local function decl_names(view)
-	local names = {} ---@type table<string, boolean>  -- bag: atom name -> true
+	local names = {}                        ---@type table<string, boolean>  -- bag: atom name -> true
 	for _, a in ipairs(view.decls or {}) do ---@type integer, AtomEntry
 		if a.name then names[a.name] = true end
 	end
@@ -353,7 +353,7 @@ end
 --- @return boolean
 local function path_in_module(path, view)
 	if type(path) ~= "string" or path == "" then return false end
-	local norm = path:gsub("\\", "/") ---@type string
+	local norm = path:gsub("\\", "/")             ---@type string
 	local dir  = (view.dir or ""):gsub("\\", "/") ---@type string
 	if dir ~= "" and (norm == dir or norm:sub(1, #dir + 1) == dir .. "/") then
 		return true
@@ -369,17 +369,17 @@ end
 --- @param corpus Corpus
 --- @return ModuleView
 local function build_module_view(dir, dir_sources, corpus)
-	local decls = {} ---@type AtomEntry[]
+	local decls = {}                           ---@type AtomEntry[]
 	for _, src in ipairs(dir_sources or {}) do ---@type integer, SourceFile
 		for _, a in ipairs((src.scan and src.scan.atoms) or {}) do ---@type integer, AtomEntry
 			if not a.source_path then a.source_path = src.path end
 			decls[#decls + 1] = a
 		end
 	end
-	local dir_basename = source_basename(dir) ---@type string
+	local dir_basename = source_basename(dir)                             ---@type string
 	local sa = (corpus.static_analysis_results or {})[dir_basename] or {} ---@type AtomAnalysis
-	local schemas = {} ---@type RegUseSchema[]
-	for name, schema in pairs(corpus.reg_use_schemas or {}) do ---@type string, RegUseSchema
+	local schemas = {}                                                    ---@type RegUseSchema[]
+	for name, schema in pairs(corpus.reg_use_schemas or {}) do            ---@type string, RegUseSchema
 		for _, a in ipairs(decls) do ---@type integer, AtomEntry
 			if a.reg_use_schema_name == name then
 				schemas[#schemas + 1] = schema
@@ -424,11 +424,11 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_components(add, view)
-	local rows = {} ---@type ComponentReportRow[]
+	local rows = {}                                                        ---@type ComponentReportRow[]
 	local index = (view.corpus and view.corpus.component_body_index) or {} ---@type table<string, ComponentBodyEntry>
-	for _, a in ipairs(view.decls) do ---@type integer, AtomEntry
+	for _, a in ipairs(view.decls) do                                      ---@type integer, AtomEntry
 		if a.kind == "comp_bare" or a.kind == "comp_proc" then
-			local idx = index[a.name] or {} ---@type ComponentBodyEntry
+			local idx = index[a.name] or {}  ---@type ComponentBodyEntry
 			local args = idx.arg_names or {} ---@type string[]
 			rows[#rows + 1] = {
 				name = a.name,
@@ -453,13 +453,13 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_reguse(add, view)
-	local wrote = false ---@type boolean
+	local wrote = false                            ---@type boolean
 	for _, schema in ipairs(view.schemas or {}) do ---@type integer, RegUseSchema
 		wrote = true
 		add(string.format("### %s", schema.name or "?"))
 		for _, slot in ipairs(schema.slots or {}) do ---@type integer, RegUseSlot
 			local aliases = table.concat(slot.aliases or { slot.name }, ", ") ---@type string
-			local ro = slot.readonly and " readonly" or "" ---@type string
+			local ro = slot.readonly and " readonly" or ""                    ---@type string
 			add(string.format("- slot `%s` aliases %s%s", slot.name, aliases, ro))
 		end
 		for _, a in ipairs(view.decls) do ---@type integer, AtomEntry
@@ -469,11 +469,11 @@ local function render_section_reguse(add, view)
 		end
 		add("")
 	end
-	local bound = {} ---@type table<string, boolean>  -- bag: schema name -> true
+	local bound = {}                               ---@type table<string, boolean>  -- bag: schema name -> true
 	for _, schema in ipairs(view.schemas or {}) do ---@type integer, RegUseSchema
 		if schema.name then bound[schema.name] = true end
 	end
-	local errors = {} ---@type RegUseError[]
+	local errors = {}                                                           ---@type RegUseError[]
 	for _, err in ipairs((view.corpus and view.corpus.reg_use_errors) or {}) do ---@type integer, RegUseError
 		if bound[err.schema_name] or path_in_module(err.source_file, view) then
 			errors[#errors + 1] = err
@@ -494,7 +494,7 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_annotations(add, view)
-	local rows = {} ---@type AnnotReportRow[]
+	local rows = {}                       ---@type AnnotReportRow[]
 	for _, src in ipairs(view.sources) do ---@type integer, SourceFile
 		for _, info in ipairs((src.scan and src.scan.atom_infos) or {}) do ---@type integer, AtomInfoEntry
 			rows[#rows + 1] = {
@@ -522,7 +522,7 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_component_annotations(add, view)
-	local rows = {} ---@type CompAnnotReportRow[]
+	local rows = {}                       ---@type CompAnnotReportRow[]
 	for _, src in ipairs(view.sources) do ---@type integer, SourceFile
 		for _, info in ipairs((src.scan and src.scan.component_atom_infos) or {}) do ---@type integer, AtomInfoEntry
 			rows[#rows + 1] = {
@@ -548,7 +548,7 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_binds(add, view)
-	local wrote = false ---@type boolean
+	local wrote = false                   ---@type boolean
 	for _, src in ipairs(view.sources) do ---@type integer, SourceFile
 		for _, b in ipairs((src.scan and src.scan.binds) or {}) do ---@type integer, BindsEntry
 			wrote = true
@@ -567,11 +567,11 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_phases(add, view)
-	local corpus = view.corpus or {} ---@type Corpus
-	local names  = decl_names(view) ---@type table<string, boolean>
-	local wrote  = false ---@type boolean
+	local corpus = view.corpus or {}                       ---@type Corpus
+	local names  = decl_names(view)                        ---@type table<string, boolean>
+	local wrote  = false                                   ---@type boolean
 	for phase, entry in pairs(corpus.atom_phases or {}) do ---@type string, AtomPhaseGroup
-		local here = {} ---@type string[]
+		local here = {}                                  ---@type string[]
 		for _, atom_name in ipairs(entry.atoms or {}) do ---@type integer, string
 			if names[atom_name] then here[#here + 1] = atom_name end
 		end
@@ -600,8 +600,8 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_aliases(add, view)
-	local names = {} ---@type string[]
-	local seen  = {} ---@type table<string, AliasEntry>
+	local names = {}                            ---@type string[]
+	local seen  = {}                            ---@type table<string, AliasEntry>
 	for _, src in ipairs(view.sources or {}) do ---@type integer, SourceFile
 		for name, entry in pairs((src.scan and src.scan.register_alias_registry) or {}) do ---@type string, AliasEntry
 			if not seen[name] then
@@ -625,19 +625,19 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_autoreg(add, view)
-	local allowed = decl_names(view) ---@type table<string, boolean>
+	local allowed = decl_names(view)                                              ---@type table<string, boolean>
 	for phase, entry in pairs((view.corpus and view.corpus.atom_phases) or {}) do ---@type string, AtomPhaseGroup
 		for _, atom_name in ipairs(entry.atoms or {}) do ---@type integer, string
 			if allowed[atom_name] then allowed[phase] = true end
 		end
 	end
 	local wrote = false ---@type boolean
-	local seen  = {} ---@type table<string, boolean>  -- bag: label\\0scope -> already dumped
+	local seen  = {}    ---@type table<string, boolean>  -- bag: label\\0scope -> already dumped
 	--- @param label string
 	--- @param table_map table<string, GprAllocMap>|nil
 	--- @return nil
 	local function dump(label, table_map)
-		local scopes = {} ---@type string[]
+		local scopes = {}                      ---@type string[]
 		for scope in pairs(table_map or {}) do ---@type string
 			if allowed[scope] and not seen[label .. "\0" .. scope] then
 				scopes[#scopes + 1] = scope
@@ -647,7 +647,7 @@ local function render_section_autoreg(add, view)
 		for _, scope in ipairs(scopes) do ---@type integer, string
 			seen[label .. "\0" .. scope] = true
 			wrote = true
-			local syms = {} ---@type string[]
+			local syms = {}                                  ---@type string[]
 			for sym, gpr in pairs(table_map[scope] or {}) do ---@type string, string
 				if type(gpr) == "string" and gpr ~= sym then
 					syms[#syms + 1] = string.format("%s → %s", sym, gpr)
@@ -674,9 +674,9 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_collisions(add, view)
-	local rows = {} ---@type CorpusCollision[]
+	local rows = {}                                                       ---@type CorpusCollision[]
 	for _, c in ipairs((view.corpus and view.corpus.collisions) or {}) do ---@type integer, CorpusCollision
-		local first = c.first_site or {} ---@type CollisionSite
+		local first = c.first_site or {}       ---@type CollisionSite
 		local other = c.conflicting_site or {} ---@type CollisionSite
 		if path_in_module(first.path, view) or path_in_module(other.path, view) then
 			rows[#rows + 1] = c
@@ -684,7 +684,7 @@ local function render_section_collisions(add, view)
 	end
 	if #rows == 0 then add("_(none)_"); add(""); return end
 	for _, c in ipairs(rows) do ---@type integer, CorpusCollision
-		local first = c.first_site or {} ---@type CollisionSite
+		local first = c.first_site or {}       ---@type CollisionSite
 		local other = c.conflicting_site or {} ---@type CollisionSite
 		add(string.format("- `%s` `%s` first %s:%s conflict %s:%s",
 			c.kind or "?", c.name or "?",
@@ -698,7 +698,7 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_findings(add, view)
-	local by_atom = {} ---@type table<string, CheckFinding[]>
+	local by_atom = {}                         ---@type table<string, CheckFinding[]>
 	for _, f in ipairs(view.findings or {}) do ---@type integer, CheckFinding
 		local key = f.atom or "?" ---@type string
 		by_atom[key] = by_atom[key] or {}
@@ -712,7 +712,7 @@ local function render_section_findings(add, view)
 	local function emit(name, fs)
 		add("### " .. name)
 		for _, f in ipairs(fs) do ---@type integer, CheckFinding
-			local msg = f.msg or "" ---@type string
+			local msg = f.msg or ""                                       ---@type string
 			local slot = slot_suffix(f.gpr_key or f.producer_destination) ---@type string|nil
 			if slot and not msg:find("(slot ", 1, true) then
 				msg = msg .. " (slot " .. slot .. ")"
@@ -727,7 +727,7 @@ local function render_section_findings(add, view)
 			emit(a.name, by_atom[a.name])
 		end
 	end
-	local leftovers = {} ---@type string[]
+	local leftovers = {}          ---@type string[]
 	for name in pairs(by_atom) do ---@type string
 		if not seen[name] then leftovers[#leftovers + 1] = name end
 	end
@@ -739,7 +739,7 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_relations(add, view)
-	local wrote = false ---@type boolean
+	local wrote = false               ---@type boolean
 	for _, a in ipairs(view.decls) do ---@type integer, AtomEntry
 		local rels = (a.paths and a.paths.relations) or {} ---@type AtomRelation[]
 		if #rels > 0 then
@@ -747,8 +747,8 @@ local function render_section_relations(add, view)
 			add("### " .. a.name)
 			for _, rel in ipairs(rels) do ---@type integer, AtomRelation
 				local dest = rel.destination or rel.producer_destination or "—" ---@type string
-				local slot = slot_suffix(dest) ---@type string|nil
-				local dest_s = tostring(dest) ---@type string
+				local slot = slot_suffix(dest)                                    ---@type string|nil
+				local dest_s = tostring(dest)                                     ---@type string
 				if slot then dest_s = dest_s .. " (slot " .. slot .. ")" end
 				add(string.format("- `%s` words %s → %s dest %s",
 					rel.semantic or "?",
@@ -804,12 +804,12 @@ end
 local function aliases_for_key(key, atom, view)
 	local slot = key:match("^reguse:.+:(.+)$") ---@type string|nil
 	if not slot then return "—" end
-	local schema_name = atom.reg_use_schema_name ---@type string|nil
+	local schema_name = atom.reg_use_schema_name                                                            ---@type string|nil
 	local schema = view.corpus and view.corpus.reg_use_schemas and view.corpus.reg_use_schemas[schema_name] ---@type RegUseSchema|nil
 	if not schema then return "—" end
 	for _, s in ipairs(schema.slots or {}) do ---@type integer, RegUseSlot
 		if s.name == slot then
-			local names = {} ---@type string[]
+			local names = {}                           ---@type string[]
 			for _, alias in ipairs(s.aliases or {}) do ---@type integer, string
 				if alias ~= slot then names[#names + 1] = alias end
 			end
@@ -829,7 +829,7 @@ end
 --- @return string
 local function physical_for_key(key, atom, view)
 	if PHYSICAL_GPR[key] then return key end
-	local corpus = view.corpus or {} ---@type Corpus
+	local corpus = view.corpus or {}                          ---@type Corpus
 	local alias = (corpus.register_alias_registry or {})[key] ---@type AliasEntry|string|nil
 	if type(alias) == "table" then
 		local phys = alias.physical or alias.gpr or alias.code_name ---@type string|nil
@@ -840,7 +840,7 @@ local function physical_for_key(key, atom, view)
 	end
 	local atom_map = (corpus.atom_auto_regs or {})[atom.name] ---@type GprAllocMap|nil
 	if type(atom_map) == "table" then
-		local slot = key:match("^reguse:.+:(.+)$") or key ---@type string
+		local slot = key:match("^reguse:.+:(.+)$") or key      ---@type string
 		local bound = atom_map[slot] or atom_map["R_" .. slot] ---@type string|nil
 		if type(bound) == "string" and PHYSICAL_GPR[bound] then return bound end
 	end
@@ -851,15 +851,15 @@ end
 --- @param atom AtomEntry
 --- @return string
 local function last_relation_for(key, atom)
-	local last = nil ---@type AtomRelation|nil
+	local last = nil                                                     ---@type AtomRelation|nil
 	for _, rel in ipairs((atom.paths and atom.paths.relations) or {}) do ---@type integer, AtomRelation
 		local dest = rel.destination or rel.producer_destination ---@type string|nil
 		if dest == key then last = rel end
 	end
 	if not last then return "—" end
 	local sem = last.semantic or "?" ---@type string
-	local a = last.producer_word ---@type integer|nil
-	local b = last.consumer_word ---@type integer|nil
+	local a = last.producer_word     ---@type integer|nil
+	local b = last.consumer_word     ---@type integer|nil
 	if a and b then return string.format("%s w%s→%s", sem, tostring(a), tostring(b)) end
 	return sem
 end
@@ -868,11 +868,11 @@ end
 --- @param view ModuleView
 --- @return nil
 local function render_section_forward(add, view)
-	local wrote = false ---@type boolean
+	local wrote = false               ---@type boolean
 	for _, a in ipairs(view.decls) do ---@type integer, AtomEntry
 		local gpr = a.paths and a.paths.forward_state and a.paths.forward_state.gpr_values ---@type table<string, GprLatticeSlot>|nil
-		local keys = {} ---@type string[]
-		for k in pairs(gpr or {}) do ---@type string
+		local keys = {}                                                                    ---@type string[]
+		for k in pairs(gpr or {}) do                                                       ---@type string
 			if k == "R_0" then
 				-- hidden
 			elseif HIDDEN_UNLESS_WRITTEN[k] and not encoder_wrote_key(a, k) then
@@ -888,7 +888,7 @@ local function render_section_forward(add, view)
 			add("|---|---|---|---|---|")
 			table.sort(keys)
 			for _, k in ipairs(keys) do ---@type integer, string
-				local slot = gpr[k] ---@type GprLatticeSlot|nil
+				local slot = gpr[k]   ---@type GprLatticeSlot|nil
 				local lattice = "—" ---@type string
 				if slot and slot.kind == "constant" then
 					lattice = tostring(slot.value)
@@ -928,7 +928,7 @@ local SECTION_RENDERERS = { ---@type SectionRenderer[]
 --- @return string
 local function render_module_meta_report(view)
 	local dir_basename = source_basename(view.dir) ---@type string
-	local lines        = { ---@type string[]
+	local lines        = {                         ---@type string[]
 		"# " .. dir_basename .. " — atom meta report",
 		"> Auto-generated by ps1_meta.lua (passes/report.lua). Do not edit.",
 		"",
@@ -937,14 +937,14 @@ local function render_module_meta_report(view)
 	--- @return nil
 	local function add(s) lines[#lines + 1] = s end
 
-	local kinds = count_kinds(view.decls) ---@type KindCounts
+	local kinds = count_kinds(view.decls)      ---@type KindCounts
 	local n_annot, n_binds, n_macros = 0, 0, 0 ---@type integer, integer, integer
-	for _, src in ipairs(view.sources) do ---@type integer, SourceFile
+	for _, src in ipairs(view.sources) do      ---@type integer, SourceFile
 		n_annot  = n_annot  + #((src.scan and src.scan.atom_infos) or {})
 		n_binds  = n_binds  + #((src.scan and src.scan.binds) or {})
 		n_macros = n_macros + #((src.scan and src.scan.macros) or {})
 	end
-	local n_err, n_warn, n_info = 0, 0, 0 ---@type integer, integer, integer
+	local n_err, n_warn, n_info = 0, 0, 0      ---@type integer, integer, integer
 	for _, f in ipairs(view.findings or {}) do ---@type integer, CheckFinding
 		if     f.kind == "error"   then n_err  = n_err  + 1
 		elseif f.kind == "warning" then n_warn = n_warn + 1
@@ -1044,8 +1044,8 @@ local M = {} ---@type ReportPass
 --- @param ctx PassCtx
 --- @return PassResult
 function M.run(ctx)
-	local outputs = {} ---@type PassOutputEntry[]
-	local corpus  = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
+	local outputs = {}                                       ---@type PassOutputEntry[]
+	local corpus  = ctx.shared and ctx.shared.corpus         ---@type Corpus|nil
 	local by_dir  = (corpus and corpus.sources_by_dir) or {} ---@type table<string, SourceFile[]>
 
 	-- `out_path_root`: when the conventional `out_root` is `build/gen` (any spelling — relative, absolute, separator variants).
@@ -1072,7 +1072,7 @@ function M.run(ctx)
 		-- Per-renderer dispatch for the per-module renderers (once = false).
 		for _, renderer in ipairs(REPORT_RENDERERS) do ---@type integer, ReportRenderer
 			if not renderer.once then
-				local body     = renderer.gather(ctx, dir, dir_sources) ---@type string
+				local body     = renderer.gather(ctx, dir, dir_sources)                                              ---@type string
 				local out_path = out_root_effective .. "/" .. renderer.basename(dir_basename) .. "." .. renderer.ext ---@type string
 				duffle.write_file(out_path, body)
 				outputs[#outputs + 1] = { kind = renderer.name, path = out_path }
@@ -1080,13 +1080,13 @@ function M.run(ctx)
 		end
 
 		local view = build_module_view(dir, dir_sources, corpus) ---@type ModuleView
-		local n_annot, n_binds, n_macros = 0, 0, 0 ---@type integer, integer, integer
-		for _, src in ipairs(dir_sources) do ---@type integer, SourceFile
+		local n_annot, n_binds, n_macros = 0, 0, 0               ---@type integer, integer, integer
+		for _, src in ipairs(dir_sources) do                     ---@type integer, SourceFile
 			n_annot  = n_annot  + #((src.scan and src.scan.atom_infos) or {})
 			n_binds  = n_binds  + #((src.scan and src.scan.binds) or {})
 			n_macros = n_macros + #((src.scan and src.scan.macros) or {})
 		end
-		local n_err, n_warn, n_info = 0, 0, 0 ---@type integer, integer, integer
+		local n_err, n_warn, n_info = 0, 0, 0      ---@type integer, integer, integer
 		for _, f in ipairs(view.findings or {}) do ---@type integer, CheckFinding
 			if     f.kind == "error"   then n_err  = n_err  + 1
 			elseif f.kind == "warning" then n_warn = n_warn + 1
@@ -1109,7 +1109,7 @@ function M.run(ctx)
 	-- Project-wide renderer (once = true): write the summary file.
 	for _, renderer in ipairs(REPORT_RENDERERS) do ---@type integer, ReportRenderer
 		if renderer.once then
-			local body     = renderer.gather(ctx, nil, nil, all_modules) ---@type string
+			local body     = renderer.gather(ctx, nil, nil, all_modules)                               ---@type string
 			local out_path = out_root_effective .. "/" .. renderer.basename("") .. "." .. renderer.ext ---@type string
 			duffle.write_file(out_path, body)
 			outputs[#outputs + 1] = { kind = renderer.name, path = out_path }

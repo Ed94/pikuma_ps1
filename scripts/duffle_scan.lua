@@ -78,34 +78,34 @@ local lfs = require("lfs") ---@type LfsMod
 -- ASCII byte constants
 -- ════════════════════════════════════════════════════════════════════════════
 
-local BYTE_SPACE      = 0x20    ---@type integer -- ' '
-local BYTE_TAB        = 0x09    ---@type integer -- '\t'
-local BYTE_NEWLINE    = 0x0A    ---@type integer -- '\n'
-local BYTE_CR         = 0x0D    ---@type integer -- '\r'
-local BYTE_VT         = 0x0B    ---@type integer -- '\v'
-local BYTE_FF         = 0x0C    ---@type integer -- '\f'
+local BYTE_SPACE      = 0x20 ---@type integer -- ' '
+local BYTE_TAB        = 0x09 ---@type integer -- '\t'
+local BYTE_NEWLINE    = 0x0A ---@type integer -- '\n'
+local BYTE_CR         = 0x0D ---@type integer -- '\r'
+local BYTE_VT         = 0x0B ---@type integer -- '\v'
+local BYTE_FF         = 0x0C ---@type integer -- '\f'
 
-local BYTE_UNDERSCORE = 0x5F    ---@type integer -- '_'
-local BYTE_DOT        = 0x2E    ---@type integer -- '.'
-local BYTE_SLASH      = 0x2F    ---@type integer -- '/'
-local BYTE_BACKSLASH  = 0x5C    ---@type integer -- '\\'
-local BYTE_STAR       = 0x2A    ---@type integer -- '*'
-local BYTE_DQUOTE     = 0x22    ---@type integer -- '"'
-local BYTE_SQUOTE     = 0x27    ---@type integer -- '\''
-local BYTE_COMMA      = 0x2C    ---@type integer -- ','
-local BYTE_SEMI       = 0x3B    ---@type integer -- ';'
+local BYTE_UNDERSCORE = 0x5F ---@type integer -- '_'
+local BYTE_DOT        = 0x2E ---@type integer -- '.'
+local BYTE_SLASH      = 0x2F ---@type integer -- '/'
+local BYTE_BACKSLASH  = 0x5C ---@type integer -- '\\'
+local BYTE_STAR       = 0x2A ---@type integer -- '*'
+local BYTE_DQUOTE     = 0x22 ---@type integer -- '"'
+local BYTE_SQUOTE     = 0x27 ---@type integer -- '\''
+local BYTE_COMMA      = 0x2C ---@type integer -- ','
+local BYTE_SEMI       = 0x3B ---@type integer -- ';'
 
-local BYTE_OPEN_PAREN  = 0x28   ---@type integer -- '('
-local BYTE_OPEN_BRACE  = 0x7B   ---@type integer -- '{'
-local BYTE_OPEN_BRACK  = 0x5B   ---@type integer -- '['
+local BYTE_OPEN_PAREN  = 0x28 ---@type integer -- '('
+local BYTE_OPEN_BRACE  = 0x7B ---@type integer -- '{'
+local BYTE_OPEN_BRACK  = 0x5B ---@type integer -- '['
 
-local BYTE_LOWER_A = 0x61       ---@type integer -- 'a'
-local BYTE_LOWER_Z = 0x7A       ---@type integer -- 'z'
-local BYTE_UPPER_A = 0x41       ---@type integer -- 'A'
-local BYTE_UPPER_Z = 0x5A       ---@type integer -- 'Z'
+local BYTE_LOWER_A = 0x61 ---@type integer -- 'a'
+local BYTE_LOWER_Z = 0x7A ---@type integer -- 'z'
+local BYTE_UPPER_A = 0x41 ---@type integer -- 'A'
+local BYTE_UPPER_Z = 0x5A ---@type integer -- 'Z'
 
-local BYTE_DIGIT_0 = 0x30       ---@type integer -- '0'
-local BYTE_DIGIT_9 = 0x39       ---@type integer -- '9'
+local BYTE_DIGIT_0 = 0x30 ---@type integer -- '0'
+local BYTE_DIGIT_9 = 0x39 ---@type integer -- '9'
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Section -1: Bootstrap (path-setup at module load)
@@ -134,17 +134,17 @@ local digit_pat      = R("09")                ---@type LpegPattern
 local lpeg_alnum_pat = alpha_pat + digit_pat  ---@type LpegPattern
 
 -- Identifier: alpha followed by zero+ alnum. Capture as a string.
-local lpeg_alpha_pat = alpha_pat ---@type LpegPattern
+local lpeg_alpha_pat = alpha_pat                            ---@type LpegPattern
 local lpeg_ident_pat = lpeg.C(alpha_pat * lpeg_alnum_pat^0) ---@type LpegPattern
 
-local lpeg_str_pat        = P('"') * (P(1) - S('"\\') + P('\\') * P(1))^0 * P('"') ---@type LpegPattern -- String literal: "..." with backslash escapes.
-local lpeg_chr_pat        = P("'") * (P(1) - S("'\\") + P('\\') * P(1))^0 * P("'") ---@type LpegPattern -- Char literal: '...' with backslash escapes.
-local lpeg_line_cmt_pat   = P("//") * (P(1) - S("\n"))^0                           ---@type LpegPattern -- Line comment: // ... to end-of-line.
-local lpeg_block_cmt_pat  = P("/*") * (P(1) - P("*/"))^0 * P("*/")                 ---@type LpegPattern -- Block comment: /* ... */ (no nesting per C standard).
+local lpeg_str_pat        = P('"') * (P(1) - S('"\\') + P('\\') * P(1))^0 * P('"')               ---@type LpegPattern -- String literal: "..." with backslash escapes.
+local lpeg_chr_pat        = P("'") * (P(1) - S("'\\") + P('\\') * P(1))^0 * P("'")               ---@type LpegPattern -- Char literal: '...' with backslash escapes.
+local lpeg_line_cmt_pat   = P("//") * (P(1) - S("\n"))^0                                         ---@type LpegPattern -- Line comment: // ... to end-of-line.
+local lpeg_block_cmt_pat  = P("/*") * (P(1) - P("*/"))^0 * P("*/")                               ---@type LpegPattern -- Block comment: /* ... */ (no nesting per C standard).
 local lpeg_str_or_cmt_pat = lpeg_str_pat + lpeg_chr_pat + lpeg_line_cmt_pat + lpeg_block_cmt_pat ---@type LpegPattern -- String or comment (any of the four forms).
 
 -- Whitespace + comment skipper: zero+ (whitespace run | string | comment).
-local ws_pat              = S(" \t\n\r\v\f") ---@type LpegPattern
+local ws_pat              = S(" \t\n\r\v\f")                 ---@type LpegPattern
 local lpeg_ws_and_cmt_pat = (ws_pat + lpeg_str_or_cmt_pat)^0 ---@type LpegPattern
 
 -- Generic "skip until target, but step over balanced groups" matcher.
@@ -239,7 +239,7 @@ end
 --- @param path Path
 --- @return Path
 function M.dirname(path)
-	local last_sep = 0 ---@type integer
+	local last_sep = 0    ---@type integer
 	for pos = 1, #path do ---@type integer
 		local b = path:byte(pos) ---@type integer
 		if    b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
@@ -252,14 +252,14 @@ end
 --- @param path Path
 --- @return string
 function M.basename_no_ext(path)
-	local last_sep = 0 ---@type integer
+	local last_sep = 0    ---@type integer
 	for pos = 1, #path do ---@type integer
 		local b = path:byte(pos) ---@type integer
 		if    b == BYTE_SLASH or b == BYTE_BACKSLASH then last_sep = pos end
 	end
 	local a        = last_sep + 1 ---@type integer
 	local last_dot = #path + 1    ---@type integer
-	for pos = #path, a, -1 do ---@type integer
+	for pos = #path, a, -1 do     ---@type integer
 		if path:byte(pos) == BYTE_DOT then last_dot = pos; break end
 	end
 	return path:sub(a, last_dot - 1)
@@ -281,13 +281,13 @@ local function parse_path_root(input)
 	end
 
 	if input:sub(1, 2) == "//" then
-		local server_start = 3 ---@type integer
+		local server_start = 3                                            ---@type integer
 		local server_end   = M.find_byte(input, BYTE_SLASH, server_start) ---@type integer|nil
 		if not server_end or server_end == server_start then
 			error("UNC path requires //server/share: " .. input, 3)
 		end
 		local server      = input:sub(server_start, server_end - 1) ---@type string
-		local share_start = server_end + 1 ---@type integer
+		local share_start = server_end + 1                          ---@type integer
 		while input:sub(share_start, share_start) == "/" do
 			share_start = share_start + 1
 		end
@@ -296,7 +296,7 @@ local function parse_path_root(input)
 			error("UNC path requires //server/share: " .. input, 3)
 		end
 		local share = input:sub(share_start, share_end - 1) ---@type string
-		local rest  = input:sub(share_end + 1) ---@type string
+		local rest  = input:sub(share_end + 1)              ---@type string
 		while rest:sub(1, 1) == "/" do rest = rest:sub(2) end
 		return {
 			kind     = "unc_absolute",
@@ -323,8 +323,8 @@ function M.normalize_path(path)
 	if path == "" then return "" end
 
 	local root     = parse_path_root(path:gsub("\\", "/")) ---@type PathRoot
-	local segments = {} ---@type string[]
-	for segment in root.rest:gmatch("[^/]+") do ---@type string
+	local segments = {}                                    ---@type string[]
+	for segment in root.rest:gmatch("[^/]+") do            ---@type string
 		if segment == "." then
 			-- no-op
 		elseif segment == ".." then
@@ -348,7 +348,7 @@ end
 --- @param path Path
 --- @return Path
 local function absolute_normalized_path(path)
-	local normalized = M.normalize_path(path) ---@type Path
+	local normalized = M.normalize_path(path)      ---@type Path
 	local root       = parse_path_root(normalized) ---@type PathRoot
 	if root.kind == "drive_relative" then
 		error("drive-relative path cannot be resolved without a per-drive cwd: " .. normalized, 3)
@@ -428,7 +428,7 @@ function M.to_absolute_path(path)
 	if not cwd then _absolute_path_cache[path] = path; return path end
 	cwd = cwd:gsub("/", "\\")
 	local tail   = (path:gsub("/", "\\")) ---@type string
-	local result = cwd .. "\\" .. tail ---@type string
+	local result = cwd .. "\\" .. tail    ---@type string
 	_absolute_path_cache[path] = result
 	return result
 end
@@ -452,7 +452,7 @@ end
 --- @param sources SourceFile[]
 --- @return table<string, SourceFile[]>
 function M.group_sources_by_dir(sources)
-	local by_dir = {} ---@type table<string, SourceFile[]>
+	local by_dir = {}                ---@type table<string, SourceFile[]>
 	for _, src in ipairs(sources) do ---@type integer, SourceFile
 		by_dir[src.dir] = by_dir[src.dir] or {}
 		table.insert(by_dir[src.dir], src)
@@ -552,7 +552,7 @@ M.read_brackets = function(s, pos) return M.read_balanced(s, "[", "]", pos) end
 --- @return integer|nil
 function M.scan_to_char(s, target, start)
 	local target_byte = target:byte() ---@type integer
-	local pos = start ---@type integer
+	local pos = start                 ---@type integer
 	while pos <= #s do
 		local   c = s:byte(pos) ---@type integer
 		if      c == target_byte      then return pos end                                          -- scan: ... <target found> | <skipping to target>
@@ -632,7 +632,7 @@ local function splice_c_lines(source)
 	local line           = 1 ---@type integer
 	while pos <= #source do
 		local byte = source:byte(pos) ---@type integer
-		local splice_len = nil ---@type integer|nil
+		local splice_len = nil        ---@type integer|nil
 		if byte == BYTE_BACKSLASH and source:byte(pos + 1) == BYTE_NEWLINE then
 			splice_len = 2
 		elseif byte == BYTE_BACKSLASH and source:byte(pos + 1) == BYTE_CR and source:byte(pos + 2) == BYTE_NEWLINE then
@@ -668,9 +668,9 @@ function M.parse_direct_quoted_includes(source_text)
 	-- Each arm's effect on (pos, line_leading) is annotated at the branch site.
 	-- Arm order: newline / horiz-space / '//' / '/*' / '"' / '\'' / '#' / default.
 	local logical_text, physical_pos, physical_line = splice_c_lines(source_text) ---@type string, integer[], integer[]
-	local includes     = {}   ---@type QuotedInclude[]
-	local pos          = 1    ---@type integer
-	local line_leading = true ---@type boolean
+	local includes     = {}                                                       ---@type QuotedInclude[]
+	local pos          = 1                                                        ---@type integer
+	local line_leading = true                                                     ---@type boolean
 	while pos <= #logical_text do
 		local byte = logical_text:byte(pos) ---@type integer
 		if    byte == BYTE_NEWLINE then
@@ -709,7 +709,7 @@ function M.parse_direct_quoted_includes(source_text)
 			-- Full success pushes the record and jumps to ::directive_done:: without ever entering the not-include path.
 			-- (All locals are pre-declared at the top of this arm because Lua forbids a goto from crossing a local declaration into its scope.)
 			local hash_pos, directive_line, scan, ident, after_ident, after_quote ---@type integer, integer, integer|nil, string|nil, integer, integer
-			local include_path, physical_first, physical_last ---@type string, integer, integer
+			local include_path, physical_first, physical_last                     ---@type string, integer, integer
 			hash_pos       = pos
 			directive_line = physical_line[hash_pos] or 1
 			scan           = skip_directive_space(logical_text, pos + 1)
@@ -802,9 +802,9 @@ function M.resolve_source_corpus(options)
 	local code_root       = M.normalize_path(project_root .. "/code")      ---@type Path
 	local code_root_key   = M.canonical_path_key(code_root)                ---@type string
 	local root            = load_source_record(options.unity_root)         ---@type SourceFile
-	local source_order    = { root } ---@type SourceFile[]
-	local sources_by_path = { [M.canonical_path_key(root.path)] = root, } ---@type table<Path, SourceFile>
-	local resolver = { ---@type SourceResolver
+	local source_order    = { root }                                       ---@type SourceFile[]
+	local sources_by_path = { [M.canonical_path_key(root.path)] = root, }  ---@type table<Path, SourceFile>
+	local resolver = {                                                     ---@type SourceResolver
 		resolved = {
 			{
 				include_path  = nil,
@@ -824,11 +824,11 @@ function M.resolve_source_corpus(options)
 	for _, include in ipairs(M.parse_direct_quoted_includes(root.text)) do ---@type integer, QuotedInclude
 		local candidate_a = absolute_normalized_path(root.dir .. "/" .. include.path)  ---@type Path
 		local candidate_b = absolute_normalized_path(code_root .. "/" .. include.path) ---@type Path
-		local key_a       = M.canonical_path_key(candidate_a) ---@type string
-		local key_b       = M.canonical_path_key(candidate_b) ---@type string
-		local inside_a    = canonical_key_is_within(key_a, code_root_key) ---@type boolean
-		local inside_b    = canonical_key_is_within(key_b, code_root_key) ---@type boolean
-		local evidence = { ---@type ResolverEvidence
+		local key_a       = M.canonical_path_key(candidate_a)                          ---@type string
+		local key_b       = M.canonical_path_key(candidate_b)                          ---@type string
+		local inside_a    = canonical_key_is_within(key_a, code_root_key)              ---@type boolean
+		local inside_b    = canonical_key_is_within(key_b, code_root_key)              ---@type boolean
+		local evidence = {                                                             ---@type ResolverEvidence
 			include_path             = include.path,
 			include_text             = include.include_text,
 			root_source              = root.path,
@@ -854,9 +854,9 @@ function M.resolve_source_corpus(options)
 			-- Boundary checks above deliberately precede every filesystem probe.
 			local exists_a = inside_a and lfs.attributes(candidate_a, "mode") == "file"                                    ---@type boolean
 			local exists_b = inside_b and ((key_b == key_a and exists_a) or lfs.attributes(candidate_b, "mode") == "file") ---@type boolean
-			local selected     = nil ---@type Path|nil
-			local selected_key = nil ---@type string|nil
-			local disposition  = nil ---@type string|nil
+			local selected     = nil                                                                                       ---@type Path|nil
+			local selected_key = nil                                                                                       ---@type string|nil
+			local disposition  = nil                                                                                       ---@type string|nil
 			if exists_a then
 				selected     = candidate_a
 				selected_key = key_a
@@ -1075,7 +1075,7 @@ function M.build_body_line_index(body)
 	local index         = {}    ---@type table<integer, integer>  -- bag: byte offset -> 1-based line
 	local len           = #body ---@type integer
 	local newline_count = 0     ---@type integer
-	for  pos = 1, len do ---@type integer
+	for  pos = 1, len do        ---@type integer
 		if pos > 1 then
 			index[pos] = newline_count + 1
 		end

@@ -38,8 +38,8 @@
 -- (works both standalone + when require'd). `duffle_paths.lua` sets package.path then returns `require("duffle")` 
 -- at the bottom, so the dofile value IS the duffle module.
 local _bootstrap_dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./" ---@type string
-local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua") ---@type DuffleExport
-local elf_dwarf      = require("elf_dwarf") ---@type ElfDwarfMod
+local duffle         = dofile(_bootstrap_dir .. "../duffle_paths.lua")            ---@type DuffleExport
+local elf_dwarf      = require("elf_dwarf")                                       ---@type ElfDwarfMod
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Constants
@@ -103,14 +103,14 @@ local FORMAT_VERSION = 1 ---@type integer
 --- @return WordMapEntry[]
 --- @return integer
 local function canonical_word_entries(atom)
-	local paths      = atom.paths or {} ---@type AtomPaths
-	local events     = paths.word_events or {} ---@type WordEvent[]
-	local word_items = {} ---@type EmissionItem[]
+	local paths      = atom.paths or {}         ---@type AtomPaths
+	local events     = paths.word_events or {}  ---@type WordEvent[]
+	local word_items = {}                       ---@type EmissionItem[]
 	for _, item in ipairs(paths.items or {}) do ---@type integer, EmissionItem
 		if item.kind == "word" then word_items[#word_items + 1] = item end
 	end
 
-	local entries = {} ---@type WordMapEntry[]
+	local entries = {}                    ---@type WordMapEntry[]
 	for index, event in ipairs(events) do ---@type integer, WordEvent
 		local item = word_items[index] or {} ---@type EmissionItem
 		entries[#entries + 1] = {
@@ -138,13 +138,13 @@ end
 --- @return string[]
 --- @return integer
 local function emit_provenance_stanza(src, atom, wc)
-	local lines          = {} ---@type string[]
-	local rel_path       = src.path:gsub("\\\\", "/") ---@type string
+	local lines          = {}                           ---@type string[]
+	local rel_path       = src.path:gsub("\\\\", "/")   ---@type string
 	local entries, total = canonical_word_entries(atom) ---@type WordMapEntry[], integer
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
 
 	for _, entry in ipairs(entries) do ---@type integer, WordMapEntry
-		local inv         = entry.invocation ---@type InvocationRecord|nil
+		local inv         = entry.invocation                         ---@type InvocationRecord|nil
 		local macro_count = inv and wc["mac_" .. inv.component_name] ---@type integer|nil
 		if inv and macro_count ~= nil then
 			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d'
@@ -177,7 +177,7 @@ local function render_provenance(src, wc)
 	--- @param atom AtomEntry
 	--- @return nil
 	local function append(atom)
-		local stanza = emit_provenance_stanza(src, atom, wc) ---@type string[]
+		local stanza = emit_provenance_stanza(src, atom, wc)          ---@type string[]
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end ---@type integer, string
 	end
 	for _, atom in ipairs(src.scan.atoms or {}) do ---@type integer, AtomEntry
@@ -197,8 +197,8 @@ end
 --- @return string[]
 --- @return integer
 local function emit_atom_stanza(src, atom)
-	local lines          = {} ---@type string[]
-	local rel_path       = src.path:gsub("\\\\", "/") ---@type string
+	local lines          = {}                           ---@type string[]
+	local rel_path       = src.path:gsub("\\\\", "/")   ---@type string
 	local entries, total = canonical_word_entries(atom) ---@type WordMapEntry[], integer
 
 	lines[#lines + 1] = string.format('ATOM %s "%s" 0', atom.raw_name or atom.name, rel_path)
@@ -223,7 +223,7 @@ local function render_source_map(src)
 	--- @param atom AtomEntry
 	--- @return nil
 	local function append(atom)
-		local stanza = emit_atom_stanza(src, atom) ---@type string[]
+		local stanza = emit_atom_stanza(src, atom)                    ---@type string[]
 		for _, line in ipairs(stanza) do lines[#lines + 1] = line end ---@type integer, string
 	end
 	for _, atom in ipairs(src.scan.atoms or {}) do ---@type integer, AtomEntry
@@ -253,8 +253,8 @@ end
 --- @return GdbAtomRecord[]
 local function build_atom_table(ctx)
 	local addrs   = elf_dwarf.read_nm(ctx.flags.elf_path) ---@type table<string, NmAddr>
-	local corpus  = ctx.shared and ctx.shared.corpus ---@type Corpus|nil
-	local matched = {} ---@type GdbAtomRecord[]
+	local corpus  = ctx.shared and ctx.shared.corpus      ---@type Corpus|nil
+	local matched = {}                                    ---@type GdbAtomRecord[]
 
 	for _, src in ipairs(corpus.source_order or {}) do ---@type integer, SourceFile
 		local file_base = src.path:match("([^/\\\\]+)$") or src.path ---@type string
@@ -263,7 +263,7 @@ local function build_atom_table(ctx)
 		local function append(atom)
 			if not atom.paths then return end
 			local  name = atom.raw_name or atom.name ---@type string
-			local  info = addrs[name] ---@type NmAddr|nil
+			local  info = addrs[name]                ---@type NmAddr|nil
 			if not info then return end
 			local entries, total = canonical_word_entries(atom) ---@type WordMapEntry[], integer
 			matched[#matched + 1] = {
@@ -276,7 +276,7 @@ local function build_atom_table(ctx)
 				entries    = entries,
 			}
 		end
-		for _, atom in ipairs((src.scan or {}).atoms or {}) do append(atom) end ---@type integer, AtomEntry
+		for _, atom in ipairs((src.scan or {}).atoms or {}) do append(atom) end     ---@type integer, AtomEntry
 		for _, atom in ipairs((src.scan or {}).raw_atoms or {}) do append(atom) end ---@type integer, AtomEntry
 	end
 
@@ -537,12 +537,12 @@ function M.render_atom_source_map(atom)
 	assert(type(atom) == "table", "render_atom_source_map: atom must be a table")
 	assert(type(atom.paths) == "table", "render_atom_source_map: atom.paths must be a table")
 	local entries, total = canonical_word_entries(atom) ---@type WordMapEntry[], integer
-	local lines = {} ---@type string[]
+	local lines = {}                                    ---@type string[]
 	lines[#lines + 1] = string.format("ATOM %s  %d", (atom.raw_name or atom.name), total)
 	for _, entry in ipairs(entries) do ---@type integer, WordMapEntry
 		local word_line = string.format("WORD %d  LINE %d  TEXT %s", ---@type string
 			entry.pos, entry.line, entry.text)
-		local keys = {} ---@type string[]
+		local keys = {}    ---@type string[]
 		for pos = 1, 16 do ---@type integer
 			local k = entry.gpr_keys and entry.gpr_keys[pos] ---@type string|nil
 			if type(k) == "string" and k:sub(1, 7) == "reguse:" then
@@ -571,10 +571,10 @@ function M.render_atom_provenance(atom, wc, rel_path)
 	assert(type(atom.paths) == "table", "render_atom_provenance:  atom.paths must be a table")
 	assert(type(rel_path)   == "string", "render_atom_provenance: rel_path must be a string")
 	local entries, total = canonical_word_entries(atom) ---@type WordMapEntry[], integer
-	local lines = {} ---@type string[]
+	local lines = {}                                    ---@type string[]
 	lines[#lines + 1] = string.format("ATOM %s  %d", (atom.raw_name or atom.name), total)
 	for _, entry in ipairs(entries) do ---@type integer, WordMapEntry
-		local inv         = entry.invocation ---@type InvocationRecord|nil
+		local inv         = entry.invocation                                ---@type InvocationRecord|nil
 		local macro_count = inv and wc and wc["mac_" .. inv.component_name] ---@type integer|nil
 		if inv and macro_count ~= nil then
 			lines[#lines + 1] = string.format('WORD %d  CALL %s:%d  MACRO %s "%s:%d" BODY %d'
