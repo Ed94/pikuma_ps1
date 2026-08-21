@@ -248,11 +248,11 @@ FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ u4_(mem.ptr), mem.len
 FI_ void tb_emit(TapeBuilder* tb, MipsAtom* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
 FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 #define tb_emit_(atom)        tb_emit(& tb, atom)
-#define tb_data_(field, data) tb_data(& tb, u4_(data))
 
 FI_ void tb_bind(TapeBuilder* tb, Slice data) { mem_copy(tb->ptr + tb->used * S_(MipsCode), u4_(data.ptr), data.len); tb->used += data.len / S_(MipsCode); }
 #define tb_bind_(tb,type,...) tb_bind(tb, (Slice){ (B1*)(& (type){__VA_ARGS__}), S_(type) }); static_assert(S_(type) % S_(MipsCode) == 0)
 
+// NOTE(Ed): Wip still ideating convention. Possibly will never use a composite.
 #define tb_emit_wbind_(tb,atom,...)       tb_emit(tb,atom); tb_bind_(tb,tmpl(Binds,atom),__VA_ARGS__)
 #define tb_emit_wbind2_(tb,atom,type,...) tb_emit(tb,atom); tb_bind_(tb,type,__VA_ARGS__)
 

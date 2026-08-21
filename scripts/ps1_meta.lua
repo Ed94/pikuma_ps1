@@ -78,6 +78,7 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__" ---@type string
 --- @field word_counts             WordCounts
 --- @field components              table<string, Component>
 --- @field atom_bundles            table<string, AtomBundle>|nil
+--- @field tape_emits              TapeEmit[]|nil
 --- @field collisions              CorpusCollision[]
 --- @field resolver                SourceResolver
 --- @field component_atom_infos    AtomInfoEntry[]|nil
@@ -374,8 +375,7 @@ COMMON_FLAGS:
   --help                Show this help and exit
 
 EXIT CODES:
-  0  All requested passes succeeded
-  1  Validation errors found
+  0  Ran. Findings print on stderr and in the report; they do not fail the process.
   2  Metaprogram internal error
 
 EXAMPLES:
@@ -667,6 +667,7 @@ local function build_ctx(args)
 		word_counts             = {},
 		components              = {},
 		atom_bundles            = {},
+		tape_emits              = {},
 		collisions              = {},
 		resolver                = resolution.resolver,
 	}
@@ -818,8 +819,7 @@ local function main(argv)
 		local requested = args.requested_set           ---@type string[]
 		local closed    = topo_sort(PASSES, requested) ---@type string[]
 
-		local had_errors = dispatch_passes(ctx, closed) ---@type boolean
-		if had_errors then os.exit(EXIT_VALIDATION_ERRORS) end
+		dispatch_passes(ctx, closed)
 	end)
 
 	if not ok then

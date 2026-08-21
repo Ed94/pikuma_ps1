@@ -4016,6 +4016,66 @@ end
 -- Each check is one table row and one `check_*` function.
 -- This is the plex pattern: the iteration is in ONE place (validate), the variation is in DATA (this table).
 
+--- @param src      SourceFile
+--- @param pipe_ctx PassScratch
+--- @param findings Finding[]
+--- @return nil
+local function check_tb_bind_type_match(src, pipe_ctx, findings)
+	local atoms_by_name = pipe_ctx.atoms_by_name or {} ---@type table<string, AtomEntry>
+	local info_by       = {}                           ---@type table<string, AtomInfoEntry>
+	for _, info in ipairs(pipe_ctx.atom_infos_all or {}) do ---@type integer, AtomInfoEntry
+		info_by[info.atom_name] = info
+	end
+	for name, info in pairs(pipe_ctx.info_by_atom or {}) do ---@type string, AtomInfoEntry
+		info_by[name] = info
+	end
+	for _, emit in ipairs((src.scan and src.scan.tape_emits) or {}) do ---@type integer, TapeEmit
+		if atoms_by_name[emit.name] then
+			local atom_binds = info_by[emit.name] and info_by[emit.name].binds ---@type string|nil
+			if emit.binds and atom_binds and emit.binds ~= atom_binds then
+				findings[#findings + 1] = {
+					atom  = emit.name,
+					line  = emit.line or 0,
+					check = "tb_bind_type_match",
+					kind  = "error",
+					msg   = string.format("tb_emit '%s' binds %s but atom_bind is %s"
+						, emit.name, emit.binds, atom_binds),
+				}
+			end
+		end
+	end
+end
+
+--- @param src      SourceFile
+--- @param pipe_ctx PassScratch
+--- @param findings Finding[]
+--- @return nil
+local function check_tb_bind_required(src, pipe_ctx, findings)
+	local atoms_by_name = pipe_ctx.atoms_by_name or {} ---@type table<string, AtomEntry>
+	local info_by       = {}                           ---@type table<string, AtomInfoEntry>
+	for _, info in ipairs(pipe_ctx.atom_infos_all or {}) do ---@type integer, AtomInfoEntry
+		info_by[info.atom_name] = info
+	end
+	for name, info in pairs(pipe_ctx.info_by_atom or {}) do ---@type string, AtomInfoEntry
+		info_by[name] = info
+	end
+	for _, emit in ipairs((src.scan and src.scan.tape_emits) or {}) do ---@type integer, TapeEmit
+		if atoms_by_name[emit.name] then
+			local atom_binds = info_by[emit.name] and info_by[emit.name].binds ---@type string|nil
+			if atom_binds and emit.binds == nil and (emit.data_words or 0) == 0 then
+				findings[#findings + 1] = {
+					atom  = emit.name,
+					line  = emit.line or 0,
+					check = "tb_bind_required",
+					kind  = "error",
+					msg   = string.format("tb_emit '%s' has atom_bind(%s) but no tb_bind_ or tb_data"
+						, emit.name, atom_binds),
+				}
+			end
+		end
+	end
+end
+
 local CHECK_RULES = { ---@type CheckRule[]
 	{ name = "transfer_hazards",                per_atom   = check_transfer_hazards                },
 	{ name = "gte_input_latch",                 per_atom   = check_gte_input_latch                 },
@@ -4040,6 +4100,8 @@ local CHECK_RULES = { ---@type CheckRule[]
 	{ name = "binds_no_substruct_deref",        per_source = check_binds_no_substruct_deref        },
 	{ name = "component_self_consistency",      per_source = check_component_self_consistency      },
 	{ name = "atom_calls_inferred_traffic",     per_atom   = check_atom_calls_inferred_traffic     },
+	{ name = "tb_bind_type_match",              per_source = check_tb_bind_type_match              },
+	{ name = "tb_bind_required",                per_source = check_tb_bind_required                },
 }
 
 -- ════════════════════════════════════════════════════════════════════════════

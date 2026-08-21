@@ -189,6 +189,14 @@ local parse_enum_int_literal ---@type fun(text: string, start: integer): (intege
 --- @class TapeChain
 --- @field [integer] string  -- ordered atom names in one tb_emit chain
 
+--- @class TapeEmit
+--- @field name       string
+--- @field binds      string|nil
+--- @field line       integer
+--- @field path       string
+--- @field slot       string|nil
+--- @field data_words integer|nil
+
 --- @class RegUseView
 --- @field names string[]
 --- @field lanes boolean
@@ -215,6 +223,7 @@ local parse_enum_int_literal ---@type fun(text: string, start: integer): (intege
 --- @field reg_use_schemas         table<string, RegUseSchema>
 --- @field reg_use_errors          RegUseError[]
 --- @field tape_chains             TapeChain[]
+--- @field tape_emits              TapeEmit[]
 --- @field atom_bundles            table<string, AtomBundle>
 --- @field _source_file            string|nil
 --- @field _code_macros            table<string, integer>|nil  -- bag
@@ -2900,6 +2909,23 @@ local function parse_addrs_assign(source, pos, ident_end, line_of, out)
 	return rhs
 end
 
+--- @param out   SourceScan
+--- @param name  string
+--- @param last  string
+--- @param line  integer
+--- @return nil
+local function push_tape_emit(out, name, last, line)
+	out.tape_emits = out.tape_emits or {}
+	out.tape_emits[#out.tape_emits + 1] = { ---@type TapeEmit
+		name       = name,
+		binds      = nil,
+		line       = line,
+		path       = out._source_file or "",
+		slot       = last:find("->", 1, true) and name or nil,
+		data_words = 0,
+	}
+end
+
 --- @param source string
 --- @param pos integer
 --- @param ident_end integer
@@ -2910,10 +2936,12 @@ local function parse_tb_emit_(source, pos, ident_end, line_of, out)
 	local after = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
 	if source:sub(after, after) ~= "(" then return ident_end end
 	local inner, after_p = duffle.read_parens(source, after)           ---@type string|nil, integer
-	local name           = duffle.trim(inner or ""):match("^([%w_]+)") ---@type string
+	local last           = duffle.trim(inner or "")                    ---@type string
+	local name           = last:match("^([%w_]+)")                     ---@type string
 	if name then
 		out._chain = out._chain or {}
 		out._chain[#out._chain + 1] = name
+		push_tape_emit(out, name, last, line_of(pos))
 	end
 	return after_p or (after + 1)
 end
@@ -2938,6 +2966,49 @@ local function parse_tb_emit(source, pos, ident_end, line_of, out)
 	if name then
 		out._chain = out._chain or {}
 		out._chain[#out._chain + 1] = name
+		push_tape_emit(out, name, last, line_of(pos))
+	end
+	return after_p or (after + 1)
+end
+
+--- @param source string
+--- @param pos integer
+--- @param ident_end integer
+--- @param line_of fun(pos: integer): integer
+--- @param out SourceScan
+--- @return integer
+local function parse_tb_bind_(source, pos, ident_end, line_of, out)
+	local after = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
+	if source:sub(after, after) ~= "(" then return ident_end end
+	local inner, after_p = duffle.read_parens(source, after)          ---@type string|nil, integer
+	local args           = duffle.split_top_level_commas(inner or "") ---@type string[]
+	local typ            = duffle.trim(args[2] or "")                 ---@type string
+	if typ ~= "" then
+		local emits = out.tape_emits or {} ---@type TapeEmit[]
+		for i = #emits, 1, -1 do           ---@type integer
+			if emits[i].binds == nil then
+				emits[i].binds = typ
+				break
+			end
+		end
+	end
+	return after_p or (after + 1)
+end
+
+--- @param source string
+--- @param pos integer
+--- @param ident_end integer
+--- @param line_of fun(pos: integer): integer
+--- @param out SourceScan
+--- @return integer
+local function parse_tb_data(source, pos, ident_end, line_of, out)
+	local after = duffle.skip_ws_and_cmt(source, ident_end) ---@type integer
+	if source:sub(after, after) ~= "(" then return ident_end end
+	local _, after_p = duffle.read_parens(source, after) ---@type string|nil, integer
+	local emits = out.tape_emits or {} ---@type TapeEmit[]
+	local last  = emits[#emits]        ---@type TapeEmit|nil
+	if last then
+		last.data_words = (last.data_words or 0) + 1
 	end
 	return after_p or (after + 1)
 end
@@ -2945,6 +3016,8 @@ end
 local C_STMT_PARSERS = { ---@type table<string, fun(source: string, pos: integer, ident_end: integer, line_of: fun(pos: integer): integer, out: SourceScan): integer>
 	tb_emit_ = parse_tb_emit_,
 	tb_emit  = parse_tb_emit,
+	tb_bind_ = parse_tb_bind_,
+	tb_data  = parse_tb_data,
 	addrs    = parse_addrs_assign,
 }
 
@@ -2998,6 +3071,7 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		raw_atoms            = {},
 		binds                = {},
 		atom_bundles         = {},
+		tape_emits           = {},
 		atom_infos           = {},
 		component_atom_infos = {},
 		macros               = {},
@@ -3313,6 +3387,7 @@ local function merge_corpus_registries(corpus)
 	corpus.reg_use_errors          = corpus.reg_use_errors          or {}
 	corpus.tape_chains             = corpus.tape_chains             or {}
 	corpus.atom_bundles            = corpus.atom_bundles            or {}
+	corpus.tape_emits              = corpus.tape_emits              or {}
 
 	-- Replace the existing corpus collections with empty tables so a re-run on the same corpus produces identical state (deterministic merge).
 	-- This is safe because M.run is the only writer to these tables within a single orchestrator invocation.
@@ -3331,6 +3406,7 @@ local function merge_corpus_registries(corpus)
 		"reg_use_errors",
 		"tape_chains",
 		"atom_bundles",
+		"tape_emits",
 	}) do
 		corpus[key] = {}
 	end
@@ -3438,6 +3514,9 @@ local function merge_corpus_registries(corpus)
 			for _, chain in ipairs(scan.tape_chains or {}) do ---@type integer, TapeChain
 				corpus.tape_chains[#corpus.tape_chains + 1] = chain
 			end
+			for _, emit in ipairs(scan.tape_emits or {}) do ---@type integer, TapeEmit
+				corpus.tape_emits[#corpus.tape_emits + 1] = emit
+			end
 
 			-- atom_bundles: keyed by typedef name. First-wins per name (like components).
 			for name, bundle in pairs(scan.atom_bundles or {}) do ---@type string, AtomBundle
@@ -3460,6 +3539,30 @@ local function merge_corpus_registries(corpus)
 		end
 		if next(entries) then
 			bundle.entries = entries
+		end
+	end
+
+	-- Resolve tb_emit names: atom first, else unique catalog slot → entries[slot].
+	-- Ambiguous slot or missing entry: leave the raw ident (no A/B later).
+	for _, emit in ipairs(corpus.tape_emits) do ---@type integer, TapeEmit
+		if corpus.atoms_by_name[emit.name] == nil then
+			local slot = emit.slot or emit.name ---@type string
+			local hit  = nil                    ---@type AtomBundle|nil
+			local n    = 0                      ---@type integer
+			for _, bundle in pairs(corpus.atom_bundles) do ---@type string, AtomBundle
+				for _, s in ipairs(bundle.slots or {}) do ---@type integer, string
+					if s == slot then
+						n = n + 1
+						hit = bundle
+						break
+					end
+				end
+			end
+			local ident = hit and hit.entries and hit.entries[slot] ---@type string|nil
+			if n == 1 and ident then
+				emit.name = ident
+				emit.slot = slot
+			end
 		end
 	end
 end

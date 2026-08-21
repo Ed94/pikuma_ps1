@@ -573,6 +573,21 @@ local function render_section_atom_bundles(add, view)
 	end
 end
 
+--- @param add  fun(s: string): nil
+--- @param view ModuleView
+--- @return nil
+local function render_section_tape_emits(add, view)
+	local wrote = false ---@type boolean
+	for _, src in ipairs(view.sources or {}) do ---@type integer, SourceFile
+		for _, emit in ipairs((src.scan and src.scan.tape_emits) or {}) do ---@type integer, TapeEmit
+			wrote = true
+			add(string.format("- `%s` `%s`", emit.name or "?", emit.binds or "—"))
+		end
+	end
+	if not wrote then add("_(none)_"); add(""); return end
+	add("")
+end
+
 --- @param add fun(s: string): nil
 --- @param view ModuleView
 --- @return nil
@@ -925,6 +940,7 @@ local SECTION_RENDERERS = { ---@type SectionRenderer[]
 	{ header = "## Component annotations", render = render_section_component_annotations },
 	{ header = "## Binds_* structs",       render = render_section_binds },
 	{ header = "## Atom bundles",          render = render_section_atom_bundles },
+	{ header = "## Tape emits",            render = render_section_tape_emits },
 	{ header = "## Phases / views / ctx",  render = render_section_phases },
 	{ header = "## Register aliases",      render = render_section_aliases },
 	{ header = "## Auto-reg",              render = render_section_autoreg },

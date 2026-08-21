@@ -247,15 +247,15 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		tb.used = 0; tb_scope_run(& tb) {
 			// Grab latest state from bios.
 			tb_emit_(pad_bios_snapshot);
-				tb_data_(raw,   & smem.pad_raw[0]);
-				tb_data_(state, & smem.pad[0]);
+				tb_data(& tb,   u4_(& smem.pad_raw[0]));
+				tb_data(& tb, u4_(& smem.pad[0]));
 			// tb_emit_(pad_bios_snapshot);
 			// 	tb_data_(raw,   & smem.pad_raw[1]);
 			// 	tb_data_(state, & smem.pad[1]);
 
 			tb_emit_(pad_input_cam);
-				tb_data_(state, & smem.pad[0]);
-				tb_data_(cam, & smem.cam);
+				tb_data(& tb, u4_(& smem.pad[0]));
+				tb_data(& tb, u4_(& smem.cam));
 
 			// tb_emit_(pad_input_cube_rotation);
 			// 	tb_data_(state,     & smem.pad[0]);
@@ -288,7 +288,7 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 	if (use_c11_path == false)
 	{
 		tb.used = 0; tb_scope_run(& tb) {
-			resolve_look_at(& tb, & smem.cam.look_at, & smem.cam.pos, & smem.cube.pos, & v3s4(0, -fp_one, 0));
+			camera_look_at(& tb, & smem.cam, & smem.cube.pos, & v3s4(0, -fp_one, 0));
 		}
 	}
 
