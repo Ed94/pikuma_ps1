@@ -277,8 +277,8 @@ typedef Struct_(RegUse_build_normalize_v3s4) {
 	union { Reg r1, dst_ptr; };
 	union { Reg r2, dst_offset, mac1, v_sqr_aligned; };
 	union { Reg r3, src_offset, btarget, shift_count, sqrtbl_index; };
-	union { Reg r4, mac3, v_sqr_sum, scale_exp, inv_len; };
-	union { Reg r5, lzcr, srav_shift; };
+	union { Reg r4, mac3, v_sqr_sum, scale_exp, srav_shift; };
+	union { Reg r5, lzcr, inv_len; };
 };
 /* ─── Full normalize (all 4 stages inline) ───
  * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav). */
@@ -313,7 +313,6 @@ MipsAtom_Proc_(aa, {
 			sub_s(r.shift_count, r.shift_count, r.lzcr),
 			shift_aright_var(r.v_sqr_aligned, r.v_sqr_aligned, r.shift_count),
 	atom_label(aligned_done)
-		or_u(r.srav_shift, r.scale_exp, 0),
 		add_si(     r.v_sqr_aligned, r.v_sqr_aligned, -64),
 		shift_lleft(r.v_sqr_aligned, r.v_sqr_aligned, 1),
 		mac_load_word_imm(r.sqrtbl_index, & gte_normalize_sqr_tbl), add_u_self(r.sqrtbl_index, r.v_sqr_aligned),
