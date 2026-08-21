@@ -167,15 +167,11 @@ internal void compile_init_atoms(void) {
 }
 
 internal void compile_resolve_look_at(void) {
-	AtomArena ab = atomarena_make(slice_ut_arr(smem.resolve_look_at_mem));
 	AtomBundle_resolve_look_at_R bundle = C_(void*, smem.resolve_look_at_bundle);
-
-	/* R_ScratchBase (= R_SP) is a tape carrier preserved across atoms; no carrier
-	 * pin is needed in the regfile. The standard 24-register pool is sufficient. */
-	RegFile rf = regfile(regfile_abi_mask);
+	AtomArena ab = atomarena_make(slice_ut_arr(smem.resolve_look_at_mem));
+	RegFile   rf = regfile(regfile_abi_mask);
 #define ralloc() regfile_alloc(& rf)
 #define ralloc_v3() { ralloc(), ralloc(), ralloc() }
-
 	bundle->input_and_sub = AtomBundleEntry_(resolve_look_at, input_and_sub)(& ab,
 		RegUse_(resolve_look_at_input_and_sub) {
 			.target_ptr = ralloc(),
@@ -203,29 +199,26 @@ internal void compile_resolve_look_at(void) {
 			.r2      = ralloc(),
 		});
 
-	/* Sanity check: arena didn't overflow. */
-	assert(ab.used <= ResolveLookAtArena_Size);
+	assert(ab.used <= ResolveLookAtArena_Size); // Sanity check: arena didn't overflow.
 #undef ralloc
 }
 
-/* Emit the resolve_look_at bundle into the tape. Called once per frame from update(). */
-I_ void resolve_look_at(TapeBuilder_R tb
-	,	MT3_S2S4* look_at
-	,	P3_S4*    eye
-	,	P3_S4*    target
-	,	V3_S4*    up_in
-){
+// Emit the resolve_look_at bundle into the tape. Called once per frame from update().
+I_ void resolve_look_at(TapeBuilder_R tb,	MT3_S2S4* look_at, P3_S4* eye, P3_S4* target,	V3_S4* up_in) {
 	/* Typed view of the scratchpad for field-address arithmetic. */
-	ResolveLookAtScratch* sp = C_scratch(ResolveLookAtScratch*);
+	ResolveLookAtScratch*        sp     = C_scratch(ResolveLookAtScratch*);
 	AtomBundle_resolve_look_at_R bundle = C_(void*, smem.resolve_look_at_bundle);
-
 	tb_emit(tb, bundle->input_and_sub); {
 		tb_data(tb, u4_(target));
 		tb_data(tb, u4_(eye));
 		tb_data(tb, u4_(up_in));
 	}
 	tb_emit(tb, bundle->normalize_fwd_uz); {
-		tb_data(tb, u4_(O_(ResolveLookAtScratch, fwd) | (O_(ResolveLookAtScratch, uz) << 16)));
+		// tb_data(tb, u4_(O_(ResolveLookAtScratch, fwd) | (O_(ResolveLookAtScratch, uz) << 16)));
+		tb_bind_(tb, Binds_NormalizeV3S4,
+				.src_offset = O_(ResolveLookAtScratch,fwd),
+				.dst_offset = O_(ResolveLookAtScratch,uz),
+		);
 	}
 	tb_emit(tb, bundle->cross_to_right); {
 		tb_data(tb, u4_(& sp->uz));
@@ -247,6 +240,7 @@ I_ void resolve_look_at(TapeBuilder_R tb
 		tb_data(tb, u4_(look_at));
 	}
 }
+FI_ void camera_look_at(TapeBuilder_R tb, Camera* c, P3_S4* target, V3_S4* up_in) { resolve_look_at(tb, & c->look_at, & c->pos, target, up_in); }
 
 GCC_OPTIMIZATION_DISABLE
 void update(PrimitiveArena* pa, U4* ordering_buf) 

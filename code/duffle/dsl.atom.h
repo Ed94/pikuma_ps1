@@ -160,6 +160,8 @@
  * ----------------------------------------------------------------------------*/
 #define atom_bind(binds_struct)  /* atom_bind(binds_struct) */
 
+#define Binds_(type) (tmpl(Binds,type) // TODO(Ed): Do we want to use this?
+
 /* ============================================================================
  * atom_label / atom_offset — branch target machinery
  *

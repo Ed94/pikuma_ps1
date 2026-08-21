@@ -244,7 +244,8 @@ FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4
 #define tb_emit_(atom)        tb_emit(& tb, atom)
 #define tb_data_(field, data) tb_data(& tb, u4_(data))
 
-FI_ void tb_emit_bundle(TapeBuilder_R tb, Slice_MipsAtom atoms) { mem_copy(u4_(tb->ptr), u4_(atoms.ptr), S_slice(atoms)); tb->used += atoms.len; }
+FI_ void tb_bind(TapeBuilder* tb, Slice data) { mem_copy(tb->ptr + tb->used * S_(MipsCode), u4_(data.ptr), data.len); tb->used += data.len / S_(MipsCode); }
+#define tb_bind_(tb,type,...) tb_bind(tb, (Slice){ (B1*)(& (type){__VA_ARGS__}), S_(type) }); static_assert(S_(type) % S_(MipsCode) == 0)
 
 FI_ Tape tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Tape){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4*,tb.ptr),  tb.used }; }
