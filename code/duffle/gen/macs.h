@@ -228,21 +228,21 @@ WORD_COUNT(mac_gte_op_cross_v3s4, 13)
 WORD_COUNT(mac_gte_store_f3, 3)
 
 /* atom_dbg_skip */
-#define mac_gte_load_tri_verts(r_vert_base, r_v0, r_v1, r_v2) \
-	shift_lleft(R_AT, r_v0, v3s2_byteoff) \
-,	add_u_self(R_AT, r_vert_base) \
+#define mac_gte_load_tri_verts(vbase, v0, v1, v2) \
+	shift_lleft(R_AT, v0, v3s2_byteoff) \
+,	add_u_self(R_AT, vbase) \
 ,	load_word(R_V0, R_AT, O_(V3_S2,x)) \
 ,	load_word(R_V1, R_AT, O_(V3_S2,z)) \
 ,	LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY0) \
 ,	gte_mv_to_data_r(R_V1, C2_VZ0) \
-,	shift_lleft(R_AT, r_v1, v3s2_byteoff) \
-,	add_u_self(R_AT, r_vert_base) \
+,	shift_lleft(R_AT, v1, v3s2_byteoff) \
+,	add_u_self(R_AT, vbase) \
 ,	load_word(R_V0, R_AT, O_(V3_S2,x)) \
 ,	load_word(R_V1, R_AT, O_(V3_S2,z)) \
 ,	LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY1) \
 ,	gte_mv_to_data_r(R_V1, C2_VZ1) \
-,	shift_lleft(R_AT, r_v2, v3s2_byteoff) \
-,	add_u_self(R_AT, r_vert_base) \
+,	shift_lleft(R_AT, v2, v3s2_byteoff) \
+,	add_u_self(R_AT, vbase) \
 ,	load_word(R_V0, R_AT, O_(V3_S2,x)) \
 ,	load_word(R_V1, R_AT, O_(V3_S2,z)) \
 ,	LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY2) \

@@ -163,6 +163,12 @@ typedef Slice_(MipsAtom);
 // Used for trivial mappings from one atom component proc to the command of a more baser (meant for type-mapping)
 #define MipsAtomComp_ProcMap_(ab, base_command) atom_dbg_skip MipsAtomComp_Proc_(ab, {base_command })
 
+// WIP: Atoms Assocated closely with each other to form a tape procedure. (Maybe also a phase in a procedure/pipeline?)
+
+#define AtomBundle_(name)              Struct_(tmpl(AtomBundle,name))
+#define AtomBundle_Len(name)           S_(tmpl(AtomBundle,name))/S_(MipsAtom*)
+#define AtomBundleEntry_(bundle,entry) tmpl(bundle,entry)
+
 /* Line-table anchor: gcc only adds a file to the .debug_line file table when the contains line-numbered content.
 	Files containing only atoms and atom components.
    Place `ATOM_FILE_LINE_MARKER();` once at file scope in any `.atom.c` that defines atoms.
@@ -246,6 +252,9 @@ FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4
 
 FI_ void tb_bind(TapeBuilder* tb, Slice data) { mem_copy(tb->ptr + tb->used * S_(MipsCode), u4_(data.ptr), data.len); tb->used += data.len / S_(MipsCode); }
 #define tb_bind_(tb,type,...) tb_bind(tb, (Slice){ (B1*)(& (type){__VA_ARGS__}), S_(type) }); static_assert(S_(type) % S_(MipsCode) == 0)
+
+#define tb_emit_wbind_(tb,atom,...)       tb_emit(tb,atom); tb_bind_(tb,tmpl(Binds,atom),__VA_ARGS__)
+#define tb_emit_wbind2_(tb,atom,type,...) tb_emit(tb,atom); tb_bind_(tb,type,__VA_ARGS__)
 
 FI_ Tape tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Tape){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4*,tb.ptr),  tb.used }; }

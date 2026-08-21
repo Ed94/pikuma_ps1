@@ -104,7 +104,7 @@ void gte_matrix_set_translation(MT3_S2S4* mat) asm("SetTransMatrix");
 
 // Einheit, Metrication to unit vector. "Normalization", not Orthogonal "Normal, Normalis". Directionalization.
 // RGA(Lengyel): Normalize the bulk of a zero-weight direction. This is not finite-point unitization (which forces w=1).
-S4 normalize_v3s4(V3_S4* v0, V3_S4* v1) asm("VectorNormal");
+S4 psy_normalize_v3s4(V3_S4* v0, V3_S4* v1) asm("VectorNormal");
 
 // RGA(Lengyel): Apply the matrix expansion of a rigid transformation.
 // Motor antiproduct is equivalent for unitized points; LA form is what GTE consumes.

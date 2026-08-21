@@ -80,9 +80,6 @@ typedef Struct_(SMemory) {
 	PadBiosRaw pad_raw[2];
 	PadState   pad[2];
 
-	// TODO(Ed): We don't need this we can just cast at any point an address to a desired view of scratchpad, we have the address.
-	U4_V scratchpad; // d-cache
-
 	U1 ct_init_atom_mem[CT_InitAtomMem_Size];
 	MipsAtom* normalize_v3s4;
 	MipsAtom* gte_cross_v3s4;
@@ -114,7 +111,7 @@ I_ void resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4*
 	V3_S4 pos, off;
 
 	forward = target[0]; sub_v3s4(& forward, eye[0]); // RGA(Lengyel): Affine point - point = zero-weight direction.
-	normalize_v3s4(& forward, & uz);                  // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.
+	psy_normalize_v3s4(& forward, & uz);              // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.
 
 	cross_v3s4(& uz,   up_in, & right); normalize_v3s4(& right, & ux); // RGA(Lengyel): Complement(Wedge(forward, up_in)) -> right axis.
 	cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy); // RGA(Lengyel): Complement(Wedge(forward, right)) -> up axis.
@@ -149,8 +146,8 @@ internal void compile_init_atoms(void) {
 		});
 	regfile_reset(& rf);
 
-	smem.normalize_v3s4 = build_normalize_v3s4(& ab,
-		RegUse_(build_normalize_v3s4) {
+	smem.normalize_v3s4 = normalize_v3s4(& ab,
+		RegUse_(normalize_v3s4) {
 			.res = ralloc_v3(),
 			.r0     = ralloc(),
 			.r1     = ralloc(),
@@ -208,37 +205,36 @@ I_ void resolve_look_at(TapeBuilder_R tb,	MT3_S2S4* look_at, P3_S4* eye, P3_S4* 
 	/* Typed view of the scratchpad for field-address arithmetic. */
 	ResolveLookAtScratch*        sp     = C_scratch(ResolveLookAtScratch*);
 	AtomBundle_resolve_look_at_R bundle = C_(void*, smem.resolve_look_at_bundle);
-	tb_emit(tb, bundle->input_and_sub); {
-		tb_data(tb, u4_(target));
-		tb_data(tb, u4_(eye));
-		tb_data(tb, u4_(up_in));
-	}
-	tb_emit(tb, bundle->normalize_fwd_uz); {
-		// tb_data(tb, u4_(O_(ResolveLookAtScratch, fwd) | (O_(ResolveLookAtScratch, uz) << 16)));
-		tb_bind_(tb, Binds_NormalizeV3S4,
-				.src_offset = O_(ResolveLookAtScratch,fwd),
-				.dst_offset = O_(ResolveLookAtScratch,uz),
-		);
-	}
-	tb_emit(tb, bundle->cross_to_right); {
-		tb_data(tb, u4_(& sp->uz));
-		tb_data(tb, u4_(& sp->up_in));
-		tb_data(tb, u4_(& sp->right));
-	}
-	tb_emit(tb, bundle->normalize_right_ux); {
-		tb_data(tb, u4_(O_(ResolveLookAtScratch, right) | (O_(ResolveLookAtScratch, ux) << 16)));
-	}
-	tb_emit(tb, bundle->cross_to_up); {
-		tb_data(tb, u4_(& sp->uz));
-		tb_data(tb, u4_(& sp->ux));
-		tb_data(tb, u4_(& sp->up));
-	}
-	tb_emit(tb, bundle->normalize_up_uy); {
-		tb_data(tb, u4_(O_(ResolveLookAtScratch, up) | (O_(ResolveLookAtScratch, uy) << 16)));
-	}
-	tb_emit(tb, bundle->populate_mt3s4s2); {
-		tb_data(tb, u4_(look_at));
-	}
+	tb_emit(tb, bundle->input_and_sub); tb_bind_(tb, Binds_ResolveLookAtSub, 
+		.target = target,
+		.eye    = eye,
+		.up_in  = up_in,
+	);
+	tb_emit(tb, bundle->normalize_fwd_uz); tb_bind_(tb, Binds_normalize_v3s4,
+		.src_offset = O_(ResolveLookAtScratch,fwd),
+		.dst_offset = O_(ResolveLookAtScratch,uz),
+	);
+	tb_emit(tb, bundle->cross_to_right); tb_bind_(tb, Binds_gte_cross_v3s4,
+		.src_a = & sp->uz,
+		.src_b = & sp->up_in,
+		.out   = & sp->right,
+	);
+	tb_emit(tb, bundle->normalize_right_ux); tb_bind_(tb, Binds_normalize_v3s4, 
+		.src_offset = O_(ResolveLookAtScratch,right),
+		.dst_offset = O_(ResolveLookAtScratch,ux),
+	);
+	tb_emit(tb, bundle->cross_to_up); tb_bind_(tb, Binds_gte_cross_v3s4, 
+		.src_a = & sp->uz,
+		.src_b = & sp->ux,
+		.out   = & sp->up,
+	);
+	tb_emit(tb, bundle->normalize_up_uy); tb_bind_(tb, Binds_normalize_v3s4,
+		.src_offset = O_(ResolveLookAtScratch,up),
+		.dst_offset = O_(ResolveLookAtScratch,uy),
+	);
+	tb_emit(tb, bundle->populate_mt3s4s2); tb_bind_(tb, Binds_ResolveLookAt_PopulateMT3S4S2, 
+		.look_at = look_at,
+	);
 }
 FI_ void camera_look_at(TapeBuilder_R tb, Camera* c, P3_S4* target, V3_S4* up_in) { resolve_look_at(tb, & c->look_at, & c->pos, target, up_in); }
 
@@ -397,8 +393,6 @@ GCC_OPTIMIZATION_DISABLE
 int main(void)
 {
 	smem = (SMemory){0};
-	// TODO(Ed): remove this field we don't need it in smem.
-	smem.scratchpad = C_(U4_V, Scratchpad_Loc);
 	// smem.primitives.used = 0;
 	// smem.active_buf_id   = 0;
 	smem.cam.pos = v3s4(500, -1000, -1500);

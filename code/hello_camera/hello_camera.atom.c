@@ -155,7 +155,7 @@ atom_info(atom_bind(Binds_ResolveLookAtSub)) MipsAtom_Proc_(aa, {
 })
 
 typedef Struct_(Binds_ResolveLookAt_PopulateMT3S4S2) {
-	U4 look_at;  /* MT3_S2S4* — destination matrix address */
+	MT3_S2S4* look_at;  /* MT3_S2S4* — destination matrix address */
 };
 typedef Struct_(RegUse_resolve_look_at_populate_mt3s4s2) {
 	Reg         look_at;

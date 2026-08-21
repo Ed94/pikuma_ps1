@@ -4,10 +4,7 @@
 #	include "math.h"
 #endif
 
-/* PSX button bit positions — 1:1 with PSX-SPX docs at docs/psx-spx/docs/controllersandmemorycards.md:405-421.
- * Wire is active-low (0 = pressed).
- * The decoder atom computes buttons = (~raw_buttons) & 0xFFFF; 
- * active-low-to-active-high inversion is applied bit-by-bit. */
+// PSX button bit positions: PSX-SPX docs/psx-spx/docs/controllersandmemorycards.md:405-421.
 typedef Enum_(U2, PadBtns) {
 	Bit_(Pad_Select,    0),
 	Bit_(Pad_L3,        1),
@@ -62,11 +59,7 @@ typedef Enum_(U4, PadStatus) {
 	PadStatus_Invalid,
 };
 
-/* Distinct from the game-facing PadStatus enum: PadRawStatus_Ok and PadRawStatus_Timeout are raw BIOS values;
- * PadStatus_* are game-facing post-decode states. PadUnknownId_Sentinel is written by the decoder 
- * when the controller id does not match any known controller type.
- * PadAxisCentered_Word: Four-byte 0x80 pattern used to clear / center 
- * four byte axes at PadState.left_x through PadState.right_y. */
+// Distinct from the game-facing PadStatus enum: PadRawStatus_Ok and PadRawStatus_Timeout are raw BIOS values
 typedef Enum_(U1, PadRawStatus) {
 	PadRawStatus_Ok      = 0x00,
 	PadRawStatus_Timeout = 0xFF,

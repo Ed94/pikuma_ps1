@@ -160,7 +160,7 @@
  * ----------------------------------------------------------------------------*/
 #define atom_bind(binds_struct)  /* atom_bind(binds_struct) */
 
-#define Binds_(type) (tmpl(Binds,type) // TODO(Ed): Do we want to use this?
+#define Binds_(type) (tmpl(Binds,type)) // TODO(Ed): Do we want to use this?
 
 /* ============================================================================
  * atom_label / atom_offset — branch target machinery
@@ -179,9 +179,3 @@
 #define atom_offset(F, T) atom_offset_ ## F ## _ ## T
 // atom_label is a pure annotation for the metaprogram's offset calculations.
 #define atom_label(name) /* atom_label anchor: name */
-
-// WIP: Atoms Assocated closely with each other to form a tape procedure. (Maybe also a phase in a procedure/pipeline?)
-
-#define AtomBundle_(name)              Struct_(tmpl(AtomBundle,name))
-#define AtomBundle_Len(name)           S_(tmpl(AtomBundle,name))/S_(MipsAtom*)
-#define AtomBundleEntry_(bundle,entry) tmpl(bundle,entry)

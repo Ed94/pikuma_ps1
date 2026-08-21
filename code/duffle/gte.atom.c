@@ -63,10 +63,10 @@ FI_ Slice_MipsCode ac_gte_store_f3(AtomBuilder_R ab, U4 r_primitive_cursor) atom
 })
 
 /* Words: 18; Translates indices to vertex addresses and pushes them to GTE  */
-I_ Slice_MipsCode ac_gte_load_tri_verts(AtomBuilder_R ab, U4 r_vert_base, U4 r_v0, U4 r_v1, U4 r_v2) atom_dbg_skip MipsAtomComp_Proc_(ab, {
-	shift_lleft(R_AT, r_v0, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
-	shift_lleft(R_AT, r_v1, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
-	shift_lleft(R_AT, r_v2, v3s2_byteoff), add_u_self(R_AT, r_vert_base), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
+I_ Slice_MipsCode ac_gte_load_tri_verts(AtomBuilder_R ab, Reg vbase, Reg v0, Reg v1, Reg v2) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	shift_lleft(R_AT, v0, v3s2_byteoff), add_u_self(R_AT, vbase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY0), gte_mv_to_data_r(R_V1, C2_VZ0),
+	shift_lleft(R_AT, v1, v3s2_byteoff), add_u_self(R_AT, vbase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY1), gte_mv_to_data_r(R_V1, C2_VZ1),
+	shift_lleft(R_AT, v2, v3s2_byteoff), add_u_self(R_AT, vbase), load_word(R_V0, R_AT, O_(V3_S2,x)), load_word(R_V1, R_AT, O_(V3_S2,z)), LdSlot_ gte_mv_to_data_r(R_V0, C2_VXY2), gte_mv_to_data_r(R_V1, C2_VZ2),
 })
 
 /* Words: 3; Stores the 3 transformed (V2_S2 screen) vertices of the
@@ -267,11 +267,11 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x0820, 0x081c, 0x0818, 0x0814, 0x0810, 0x080c, 0x0808, 0x0804,
 };
 
-typedef Struct_(Binds_NormalizeV3S4) {
+typedef Struct_(Binds_normalize_v3s4) {
 	U2 src_offset;    /* offset of src V3_S4 within the BIOS scratchpad */
 	U2 dst_offset;    /* offset of dst V3_S4 within the BIOS scratchpad */
 };
-typedef Struct_(RegUse_build_normalize_v3s4) {
+typedef Struct_(RegUse_normalize_v3s4) {
 	union { Reg_(V3_S4) res, src; };
 	union { Reg r0, src_ptr, mac2; };
 	union { Reg r1, dst_ptr; };
@@ -282,13 +282,13 @@ typedef Struct_(RegUse_build_normalize_v3s4) {
 };
 /* ─── Full normalize (all 4 stages inline) ───
  * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav). */
-internal MipsAtom* build_normalize_v3s4(AtomArena_R aa, RegUse_build_normalize_v3s4 r)
+internal MipsAtom* normalize_v3s4(AtomArena_R aa, RegUse_normalize_v3s4 r)
 MipsAtom_Proc_(aa, {
-	load_half(r.src_offset, R_TapePtr, O_(Binds_NormalizeV3S4, src_offset)),
-	load_half(r.dst_offset, R_TapePtr, O_(Binds_NormalizeV3S4, dst_offset)),
+	load_half(r.src_offset, R_TapePtr, O_(Binds_normalize_v3s4, src_offset)),
+	load_half(r.dst_offset, R_TapePtr, O_(Binds_normalize_v3s4, dst_offset)),
 	LdSlot_ add_u(r.src_ptr, R_ScratchBase, r.src_offset),
 	LdSlot_ add_u(r.dst_ptr, R_ScratchBase, r.dst_offset),
-	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_NormalizeV3S4)),
+	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_normalize_v3s4)),
 
 	mac_load_v3s4(r.src, r.src_ptr, 0),
 
