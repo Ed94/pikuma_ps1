@@ -136,7 +136,7 @@ atom_info(atom_bind(Binds_ResolveLookAtSub)) MipsAtom_Proc_(aa, {
 	load_word(r.target_ptr, R_TapePtr, O_(Binds_ResolveLookAtSub,target)),
 	load_word(r.eye_ptr,    R_TapePtr, O_(Binds_ResolveLookAtSub,eye)),
 	load_word(r.up_in_ptr,  R_TapePtr, O_(Binds_ResolveLookAtSub,up_in)),
-	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_ResolveLookAtSub)),
+	LdSlot_ add_ui_self(    R_TapePtr, S_(Binds_ResolveLookAtSub)),
 
 	/* Stage up_in.x/y/z into the scratchpad. R_ScratchBase = R_SP = 0x1F800000. */
 	mac_load_v3s4( r.up_in, r.up_in_ptr, 0), LdSlot_
@@ -182,7 +182,7 @@ internal MipsAtom* AtomBundleEntry_(resolve_look_at,populate_mt3s4s2)(AtomArena_
 atom_info(atom_bind(Binds_ResolveLookAt_PopulateMT3S4S2)) MipsAtom_Proc_(aa, {
 	/* --- Tape pop: look_at pointer --- */
 	load_word(r.look_at, R_TapePtr, O_(Binds_ResolveLookAt_PopulateMT3S4S2,look_at)),
-	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_ResolveLookAt_PopulateMT3S4S2)),
+	LdSlot_ add_ui_self( R_TapePtr, S_(Binds_ResolveLookAt_PopulateMT3S4S2)),
 
 	add_si(r.ux,  R_ScratchBase, O_(ResolveLookAtScratch, ux)), LdSlot_
 	add_si(r.uy,  R_ScratchBase, O_(ResolveLookAtScratch, uy)),
@@ -288,23 +288,6 @@ internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
 	mac_yield(),
 };
 
-/* gp_screen_init's GPR setup. Tests the mixed user-pinning + auto-reg pattern:
- *   - R_IO_BaseAddr = R_T4 (user-pinned via atom_reg; pre-existing)
- *   - R_GP1_Offset  = R_T2 (user-pinned via atom_reg; NEW -- for GPIO_PORT1_OFFSET)
- *   - R_ScreenX     = R_T5 (user-pinned via atom_reg; used as a transfer and GTE setup reg)
- *   - R_GpTmp       = auto-allocated by the lua pass and used for several GPU transfers;
- *                    the C preprocessor resolves it to the chosen free pool GPR.
- *
- * For gp_screen_init, the auto-reg pool exclusions are:
- *   user_pinned (from the corpus register_alias_registry) : R_T0..R_T7 (all 8 user-pinned across hello_camera.atom.c)
- *   body-parsed physical registers                         : aliases resolve through the registry;
- *                                                           the body uses R_ScreenX, not raw R_T5
- *   source_pool after both subtractions                   : {R_V0, R_V1} only
- *   R_GpTmp gets R_V0 (the first-fit choice). Its repeated GPU-transfer use proves that the
- *   auto-reg allocation is active while the R_ScreenX references prove the pinned alias is used.
- *   R_TapePtr (R_T9), R_AtomJmp (R_T8), R_AT are excluded from the POOL by construction in
- *   passes/auto_reg.lua -- see the "obvious exclusions" comment block at the top of that file.
- */
 enum {
 	R_IO_BaseAddr = R_T4 atom_reg, /* Caller-pinned: IO_BASE_ADDR = 0x1F800000 */
 	R_GP1_Offset  = R_T2 atom_reg, /* Caller-pinned: GPIO_PORT1_OFFSET = 0x10 */
@@ -545,11 +528,13 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 	load_half_u(R_T2, R_FaceCursor, 2 * S_(S2)),
 	// load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)),
 
-	LdSlot_ mac_gte_load_tri_verts(R_VertBase, R_T0, R_T1, R_T2), GteDelay_ load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)), LdSlot_
-	GteDelay_ nop, gte_cmdw_rotate_translate_perspective_triple,
+	LdSlot_ mac_gte_load_tri_verts(R_VertBase, R_T0, R_T1, R_T2), 
+		GteDelay_ load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)), LdSlot_
+		GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0),          LdSlot_ //ac_yield: word 2,
+	gte_cmdw_rotate_translate_perspective_triple,
 	gte_cmdw_nclip,
 
-	gte_mv_from_data_r(R_T0, C2_MAC0), GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0), // ac_yield: word 1
+	gte_mv_from_data_r(R_T0, C2_MAC0), GteDelay_ add_ui_self(R_TapePtr, S_(MipsCode)), // ac_yield: word 1
 	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
 		/* BD-slot: Write the prim tag (R_0=0; overwrites the legacy tag word in the prim_buffer).
 		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded —
@@ -568,7 +553,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 		add_ui(      R_AT, R_0,  OrderingTbl_Len),
 		set_lt_u(    R_AT, R_T1, R_AT),
 
-		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), BdSlot_ add_ui_self(R_TapePtr, S_(MipsCode)), // ac_yield: word 2
+		branch_equal(R_AT, R_0,  atom_offset(bounds_chk, cube_g4_face_exit)), BdSlot_ nop,
 			mac_insert_ot_tag(R_OtBase, R_PrimCursor, S_(Poly_G4)),
 			mac_format_g4_color(R_PrimCursor,
 				/* c0 magenta */ 0xFF, 0x00, 0xFF,
@@ -581,7 +566,7 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 atom_label(cube_g4_face_exit)
 	add_ui_self(R_PrimCursor, S_(Poly_G4)),     /* 9 words = Poly_G4 */
 	add_ui_self(R_FaceCursor, S_(S2) * 4),      /* 4 × S2 = 8 bytes */
-	jump_reg(R_TapePtr), BdSlot_ nop // ac_yield: word 3-4
+	jump_reg(R_AtomJmp), BdSlot_ nop      // ac_yield: word 3-4
 };
 
 typedef Struct_(Binds_FloorTri) {
@@ -638,7 +623,7 @@ MipsAtom_(floor_f3_face) atom_info(atom_phase(floor_f3)
 /* Advance Input Cursor & Yield (Both branch targets land here) */
 atom_label(floor_f3_face_exit)
 	add_ui_self(R_FaceCursor, S_(S2) * 4),  /* Advance Face Cursor (4 * S2 = 8 bytes) */
-	jump_reg(R_TapePtr), BdSlot_ nop // ac_yield: word 3-4
+	jump_reg(R_AtomJmp), BdSlot_ nop // ac_yield: word 3-4
 };
 
 typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
