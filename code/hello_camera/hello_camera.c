@@ -113,8 +113,8 @@ I_ void resolve_look_at_c11(MT3_S2S4* look_at, P3_S4* eye, P3_S4* target, V3_S4*
 	forward = target[0]; sub_v3s4(& forward, eye[0]); // RGA(Lengyel): Affine point - point = zero-weight direction.
 	psy_normalize_v3s4(& forward, & uz);              // RGA(Lengyel): Normalize the direction bulk. Not finite-point unitization.
 
-	cross_v3s4(& uz,   up_in, & right); normalize_v3s4(& right, & ux); // RGA(Lengyel): Complement(Wedge(forward, up_in)) -> right axis.
-	cross_v3s4(& uz, & ux,    & up);    normalize_v3s4(& up,    & uy); // RGA(Lengyel): Complement(Wedge(forward, right)) -> up axis.
+	cross_v3s4(& uz,   up_in, & right); psy_normalize_v3s4(& right, & ux); // RGA(Lengyel): Complement(Wedge(forward, up_in)) -> right axis.
+	cross_v3s4(& uz, & ux,    & up);    psy_normalize_v3s4(& up,    & uy); // RGA(Lengyel): Complement(Wedge(forward, right)) -> up axis.
 
 	// RGA(Lengyel): matrix expansion of the world-to-camera rotation (basis rows).
 	look_at->m[0][0] = ux.x; look_at->m[0][1] = ux.y; look_at->m[0][2] = ux.z;
@@ -238,7 +238,6 @@ I_ void resolve_look_at(TapeBuilder_R tb,	MT3_S2S4* look_at, P3_S4* eye, P3_S4* 
 }
 FI_ void camera_look_at(TapeBuilder_R tb, Camera* c, P3_S4* target, V3_S4* up_in) { resolve_look_at(tb, & c->look_at, & c->pos, target, up_in); }
 
-GCC_OPTIMIZATION_DISABLE
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
@@ -372,7 +371,6 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		// smem.floor.rot.y += 5;
 	}
 }
-GCC_OPTIMIZATION_ENABLE
 
 void render(void) {
 }
@@ -389,7 +387,6 @@ void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_
 	active_buf_id[0] = ! active_buf_id[0]; // Swap current buffer
 }
 
-GCC_OPTIMIZATION_DISABLE
 int main(void)
 {
 	smem = (SMemory){0};
@@ -437,4 +434,3 @@ int main(void)
 	};
 	return 0;
 }
-GCC_OPTIMIZATION_ENABLE

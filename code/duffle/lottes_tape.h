@@ -99,8 +99,8 @@ enum {
 	R_Atom7  = R_T7,
 	R_Atom8  = R_T8,
 	R_Atom9  = R_T9,
-	R_Atom10 = R_V0, // Tend to be used with gte DMAs
-	R_Atom11 = R_V1, // Tend to be used with gte DMAs
+	R_Atom10 = R_V0, // Tend to be used with gte moves
+	R_Atom11 = R_V1, // Tend to be used with gte moves
 	R_Atom12 = R_A0,
 	R_Atom13 = R_A1,
 	R_Atom14 = R_A2,
@@ -258,7 +258,7 @@ FI_ void tb_bind(TapeBuilder* tb, Slice data) { mem_copy(tb->ptr + tb->used * S_
 
 FI_ Tape tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Tape){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4*,tb.ptr),  tb.used }; }
-#define tb_scope(tb)     for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,tape_exit))
+#define tb_scope(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_emit(tb,tape_exit))
 
 FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_slice(tb[0])); }
 #define tb_scope_run(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_scope_run_end(tb))
@@ -387,10 +387,6 @@ FI_ Reg regfile__alloc_helper(A2_U2 file, Reg r_id) {
 	}
 	return result; 
 }
-/* regfile_alloc picks the next free GPR from regfile_alloc_order.
- * The table is the first-fit allocation order: T0..T7, V0..V1, A0..A3,
- * S0..S7, T8..T9. The 24 entries leave room for the tape program to use
- * any of them while R0, R1, R26-R31 remain reserved. */
 I_ Reg regfile_alloc(RegFile_R rf) {
 	Reg allocated = 0;
 	for index_iter(U4, r_id, R_V0, <, R_T9) {
