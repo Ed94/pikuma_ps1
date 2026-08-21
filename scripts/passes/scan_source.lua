@@ -127,6 +127,13 @@ local parse_enum_int_literal ---@type fun(text: string, start: integer): (intege
 --- @field body   string
 --- @field bytes  integer|nil
 
+--- @class AtomBundle
+--- @field name    string
+--- @field slots   string[]   -- typedef order
+--- @field line    integer
+--- @field path    string
+--- @field entries table<string, string>|nil  -- slot → B_E when an AtomBundleEntry_ proc exists
+
 --- @class AliasEntry
 --- @field name          string
 --- @field code          integer
@@ -208,6 +215,7 @@ local parse_enum_int_literal ---@type fun(text: string, start: integer): (intege
 --- @field reg_use_schemas         table<string, RegUseSchema>
 --- @field reg_use_errors          RegUseError[]
 --- @field tape_chains             TapeChain[]
+--- @field atom_bundles            table<string, AtomBundle>
 --- @field _source_file            string|nil
 --- @field _code_macros            table<string, integer>|nil  -- bag
 --- @field _code_macro_bodies      table<string, string>|nil  -- bag
@@ -2439,11 +2447,76 @@ local function parse_typedef_array(source, pos, id2_end, line_of, out, after_typ
 	return semi and (semi + 1) or after_paren
 end
 
+--- Parse `MipsAtom *slot, …;` from an AtomBundle_ typedef body.
+--- Ignores the MipsAtom type token. Slot name is the ident after `*`.
+--- @param body string
+--- @return string[]
+local function parse_atom_bundle_slots(body)
+	local slots = {} ---@type string[]
+	local pos   = 1  ---@type integer
+	while pos <= #body do
+		pos = duffle.skip_ws_and_cmt(body, pos)
+		if pos > #body then break end
+		local b = body:byte(pos) ---@type integer
+		if b == BYTE_SEMI then
+			break
+		elseif b == BYTE_COMMA then
+			pos = pos + 1
+		elseif b == BYTE_STAR then
+			local after_star       = duffle.skip_ws_and_cmt(body, pos + 1) ---@type integer
+			local ident, ident_end = duffle.read_ident(body, after_star)   ---@type string|nil, integer
+			if ident then
+				slots[#slots + 1] = ident
+				pos = ident_end
+			else
+				pos = pos + 1
+			end
+		else
+			local ident, ident_end = duffle.read_ident(body, pos) ---@type string|nil, integer
+			if ident then
+				pos = ident_end
+			else
+				pos = pos + 1
+			end
+		end
+	end
+	return slots
+end
+
+-- Shape 5: `typedef AtomBundle_(<name>) { MipsAtom *slot, … };`
+--- @param source string
+--- @param pos integer
+--- @param id2_end integer
+--- @param line_of fun(pos: integer): integer
+--- @param out SourceScan
+--- @param after_typedef integer
+--- @return integer
+local function parse_typedef_atom_bundle(source, pos, id2_end, line_of, out, after_typedef)
+	local inner, after_paren, open_paren = read_parens_after(source, id2_end, id2_end) ---@type string|nil, integer, integer
+	if not inner then return id2_end end
+	local name = duffle.trim(inner) ---@type string
+
+	local body, after_brace = find_body_braces(source, after_paren, open_paren + 1) ---@type string|nil, integer
+	if not body then return after_brace end
+	if name ~= "" and out.atom_bundles[name] == nil then
+		local bundle = { ---@type AtomBundle
+			name  = name,
+			slots = parse_atom_bundle_slots(body),
+			line  = line_of(pos),
+			path  = out._source_file or "",
+		}
+		out.atom_bundles[name] = bundle
+	end
+	attach_debug_skip_marker(out, "unrelated")
+	return after_brace
+end
+
 local TYPE_FORMS = { ---@type table<string, fun(source: string, pos: integer, id2_end: integer, line_of: fun(pos: integer): integer, out: SourceScan, after_typedef: integer): integer>
-	Struct_ = parse_typedef_struct,
-	Enum_   = parse_typedef_enum,
-	TSet_   = parse_typedef_tset,
-	Array_  = parse_typedef_array,
+	Struct_     = parse_typedef_struct,
+	Enum_       = parse_typedef_enum,
+	TSet_       = parse_typedef_tset,
+	Array_      = parse_typedef_array,
+	AtomBundle_ = parse_typedef_atom_bundle,
 }
 
 --- Parse: `typedef` declarations.
@@ -2924,6 +2997,7 @@ local function scan_source(source, source_file, code_macros, code_macro_bodies)
 		atoms                = {},
 		raw_atoms            = {},
 		binds                = {},
+		atom_bundles         = {},
 		atom_infos           = {},
 		component_atom_infos = {},
 		macros               = {},
@@ -3238,6 +3312,7 @@ local function merge_corpus_registries(corpus)
 	corpus.reg_use_schemas         = corpus.reg_use_schemas         or {}
 	corpus.reg_use_errors          = corpus.reg_use_errors          or {}
 	corpus.tape_chains             = corpus.tape_chains             or {}
+	corpus.atom_bundles            = corpus.atom_bundles            or {}
 
 	-- Replace the existing corpus collections with empty tables so a re-run on the same corpus produces identical state (deterministic merge).
 	-- This is safe because M.run is the only writer to these tables within a single orchestrator invocation.
@@ -3255,6 +3330,7 @@ local function merge_corpus_registries(corpus)
 		"reg_use_schemas",
 		"reg_use_errors",
 		"tape_chains",
+		"atom_bundles",
 	}) do
 		corpus[key] = {}
 	end
@@ -3362,6 +3438,28 @@ local function merge_corpus_registries(corpus)
 			for _, chain in ipairs(scan.tape_chains or {}) do ---@type integer, TapeChain
 				corpus.tape_chains[#corpus.tape_chains + 1] = chain
 			end
+
+			-- atom_bundles: keyed by typedef name. First-wins per name (like components).
+			for name, bundle in pairs(scan.atom_bundles or {}) do ---@type string, AtomBundle
+				if corpus.atom_bundles[name] == nil then
+					corpus.atom_bundles[name] = bundle
+				end
+			end
+		end
+	end
+
+	-- Join slot roles to AtomBundleEntry_ identities after catalogs and atoms exist.
+	-- Do not invent a catalog from an entry that has no typedef.
+	for _, bundle in pairs(corpus.atom_bundles) do ---@type string, AtomBundle
+		local entries = {} ---@type table<string, string>
+		for _, slot in ipairs(bundle.slots or {}) do ---@type integer, string
+			local atom_name = bundle.name .. "_" .. slot ---@type string
+			if corpus.atoms_by_name[atom_name] then
+				entries[slot] = atom_name
+			end
+		end
+		if next(entries) then
+			bundle.entries = entries
 		end
 	end
 end

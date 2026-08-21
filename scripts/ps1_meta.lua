@@ -77,6 +77,7 @@ local PASS_FLAG_DISPATCH_KEY   = "__pass__" ---@type string
 --- @field atom_phases             table<string, AtomPhaseGroup>
 --- @field word_counts             WordCounts
 --- @field components              table<string, Component>
+--- @field atom_bundles            table<string, AtomBundle>|nil
 --- @field collisions              CorpusCollision[]
 --- @field resolver                SourceResolver
 --- @field component_atom_infos    AtomInfoEntry[]|nil
@@ -665,6 +666,7 @@ local function build_ctx(args)
 		atom_phases             = {},
 		word_counts             = {},
 		components              = {},
+		atom_bundles            = {},
 		collisions              = {},
 		resolver                = resolution.resolver,
 	}

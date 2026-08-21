@@ -1041,6 +1041,16 @@ function M.find_atom_proc_decl_for(source, before_pos, mips_atom_ptr_len)
 		if source:sub(next_pos, next_pos) == "(" then
 			local inner, after_paren = M.read_parens(source, next_pos) ---@type string|nil, integer
 			if inner then
+				if ident == "AtomBundleEntry_" then
+					local tmpl = M.split_top_level_commas(inner) ---@type string[]
+					if   #tmpl ~= 2 then return nil end
+					local name        = M.trim(tmpl[1]) .. "_" .. M.trim(tmpl[2]) ---@type string
+					local formals_pos = M.skip_ws_and_cmt(source, after_paren)    ---@type integer
+					if source:sub(formals_pos, formals_pos) ~= "(" then return nil end
+					local  real_inner, after_real = M.read_parens(source, formals_pos) ---@type string|nil, integer
+					if not real_inner then return nil end
+					return name, real_inner, name, after_real
+				end
 				return ident, inner, ident, after_paren
 			end
 		end

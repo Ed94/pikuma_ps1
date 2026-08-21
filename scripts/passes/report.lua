@@ -544,6 +544,35 @@ local function render_section_binds(add, view)
 	if not wrote then add("_(none)_"); add("") end
 end
 
+--- @param add  fun(s: string): nil
+--- @param view ModuleView
+--- @return nil
+local function render_section_atom_bundles(add, view)
+	local bundles = (view.corpus and view.corpus.atom_bundles) or {} ---@type table<string, AtomBundle>
+	local names   = {}                                               ---@type string[]
+	for name, bundle in pairs(bundles) do ---@type string, AtomBundle
+		if path_in_module(bundle.path, view) then
+			names[#names + 1] = name
+		end
+	end
+	if #names == 0 then add("_(none)_"); add(""); return end
+	table.sort(names)
+	for _, name in ipairs(names) do ---@type integer, string
+		local bundle  = bundles[name]        ---@type AtomBundle
+		local entries = bundle.entries or {} ---@type table<string, string>
+		add(string.format("### %s", name))
+		for _, slot in ipairs(bundle.slots or {}) do ---@type integer, string
+			local ident = entries[slot] ---@type string|nil
+			if ident then
+				add(string.format("- `%s` `%s`", slot, ident))
+			else
+				add(string.format("- `%s`", slot))
+			end
+		end
+		add("")
+	end
+end
+
 --- @param add fun(s: string): nil
 --- @param view ModuleView
 --- @return nil
@@ -895,6 +924,7 @@ local SECTION_RENDERERS = { ---@type SectionRenderer[]
 	{ header = "## Annotations",           render = render_section_annotations },
 	{ header = "## Component annotations", render = render_section_component_annotations },
 	{ header = "## Binds_* structs",       render = render_section_binds },
+	{ header = "## Atom bundles",          render = render_section_atom_bundles },
 	{ header = "## Phases / views / ctx",  render = render_section_phases },
 	{ header = "## Register aliases",      render = render_section_aliases },
 	{ header = "## Auto-reg",              render = render_section_autoreg },
