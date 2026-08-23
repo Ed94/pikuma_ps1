@@ -61,7 +61,7 @@ I_ void ent_cube128_init(A8_V3_S2* verts, A6_V4_S2* faces) {
 typedef Struct_(Ent_Cube) {
 	V3_S4 accel;
 	V3_S4 vel;
-	V3_S4 pos; // RGA(Lengyel): affine point with implicit weight one. Storage alias of V3_S4.
+	V3_S4 pos;
 	V3_S4 scale;
 	V3_S2 rot;
 	A8_V3_S2 verts;
@@ -88,7 +88,7 @@ I_ void ent_floor_init(A4_V3_S2* verts, A2_V3_S2* faces) {
 };
 typedef Struct_(Ent_Floor) {
 	V3_S4 accel;
-	V3_S4 pos; // RGA(Lengyel): affine point with implicit weight one. Storage alias of V3_S4.
+	V3_S4 pos;
 	V3_S4 scale;
 	V3_S2 rot;
 	A4_V3_S2 verts;
@@ -96,7 +96,7 @@ typedef Struct_(Ent_Floor) {
 };
 
 typedef Struct_(Camera) {
-	P3_S4    pos; // RGA(Lengyel): affine point with implicit weight one. Storage alias of V3_S4.
+	P3_S4    pos;
 	V3_S2    rot;
 	MT3_S2S4 look_at;
 };

@@ -336,21 +336,21 @@ typedef Struct_(Binds_gte_cross_v3s4) { V3_S4* src_a; V3_S4* src_b; V3_S4* out; 
 typedef Struct_(RegUse_gte_cross_v3s4) {
 	Reg_(V3_S4) a;
 	Reg_(V3_S4) b;
-	union { Reg out, t0; } x;
-	union { Reg src_a, t1, rt11; } y;
-	union { Reg src_b, t2, rt22; } z;
+	Reg out;
+	Reg src_a;
+	Reg src_b;
 };
 internal MipsAtom* gte_cross_v3s4(AtomArena_R aa, RegUse_gte_cross_v3s4 r)
 atom_info(atom_bind(Binds_gte_cross_v3s4)) MipsAtom_Proc_(aa, {
-	load_word(r.y.src_a,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_a)),
-	load_word(r.z.src_b,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_b)),
-	load_word(r.x.out,    R_TapePtr, O_(Binds_gte_cross_v3s4,out)),
-	LdSlot_ add_ui_self(  R_TapePtr, S_(Binds_gte_cross_v3s4)),
+	load_word(r.src_a,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_a)),
+	load_word(r.src_b,  R_TapePtr, O_(Binds_gte_cross_v3s4,src_b)),
+	load_word(r.out,    R_TapePtr, O_(Binds_gte_cross_v3s4,out)),
+	LdSlot_ add_ui_self(R_TapePtr, S_(Binds_gte_cross_v3s4)),
 
-	mac_load_v3s4(r.a, r.y.src_a, 0), LdSlot_
-	mac_load_v3s4(r.b, r.z.src_b, 0), LdSlot_
+	mac_load_v3s4(r.a, r.src_a, 0), LdSlot_
+	mac_load_v3s4(r.b, r.src_b, 0), LdSlot_
 	mac_gte_op_cross_v3s4(r.a, r.b), /* RT diagonal + IR + OP + MAC read + shift */
-	mac_store_v3s4(r.a, r.x.out, 0),
+	mac_store_v3s4(r.a, r.out, 0),
 
 	mac_yield()
 })

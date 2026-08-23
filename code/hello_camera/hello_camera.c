@@ -138,11 +138,11 @@ internal void compile_init_atoms(void) {
 
 	smem.gte_cross_v3s4 = gte_cross_v3s4(& ab,
 		RegUse_(gte_cross_v3s4) {
-			.a  = ralloc_v3(),
-			.b  = ralloc_v3(),
-			.x  = ralloc(),
-			.y  = ralloc(),
-			.z  = ralloc(),
+			.a     = ralloc_v3(),
+			.b     = ralloc_v3(),
+			.out   = ralloc(),
+			.src_a = ralloc(),
+			.src_b = ralloc(),
 		});
 	regfile_reset(& rf);
 
