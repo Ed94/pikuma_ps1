@@ -80,14 +80,9 @@ enum {
  *  Every R_* enum below has a parallel R_*_Code `#define` so that the preprocessor can stringify the integer
  *  (e.g. for asm clobber lists and register-variable declarations via `rgcc(R_X)`).
  *  The enum value is bound to the `#define` so the two forms cannot drift apart.
- *
- *  Only registers that get stringified need a `_Code` form; the rest are plain enum values.
- *  If you need to add a new one, follow the pattern:
- *      #define R_T7_Code 15
- *      R_T7 = R_T7_Code,     // in the enum
- *
+ * 
  *  User code should always reference the enum form (`R_T4`) at arithmetic sites and let
- *  `rlit(R_T4_Code)` / `rgcc(R_T4)` handle the stringify cases — never write the bare number `12`.
+ *  `rlit(R_T4_Code)` / `rgcc(R_T4)` handle the stringify cases
  * ============================================================================ */
 #define R_0_Code    0
 #define R_AT_Code   1

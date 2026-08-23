@@ -1,21 +1,10 @@
 ﻿/* ============================================================================
  *  duffle DSL Suffix Conventions
  *  ============================================================================
- *
  *  Every mnemonic in this header follows the same suffix grammar:
  *
  *  Primitive commands: gp0_cmd_poly_f3 = 0x20    (byte opcode)
  *  Packed 32-bit cmd:  gp0_word_poly_f3(r, g, b) (32-bit, shifted)
- *
- *  Type ordering: domain?_(direction)?_action_target_modifier_type?
- *  Examples: add_ui             (add + unsigned + immediate)
- *            add_s              (add + signed, R-type implicit)
- *            shift_lleft        (shift + logical + left)
- *            shift_aright       (shift + arithmetic + right)
- *            call_reg(rs)       (call + register, $ra implicit)
- *            gte_mv_to_data_r   (gte + mv + to + data + register)
- *            gte_lw_v0_xy(base) (gte + lw + v0 + xy)
- *            load_upper_i       (load-upper + immediate, unique verb)
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -29,21 +18,7 @@
 /* ============================================================================
  *  gte.h — Geometry Transformation Engine (COP2) for the PS1
  * ============================================================================
- *
- *  Hand-rolled DSL for emitting GTE/MIPS instruction words from C.
- *  No GCC inline-assembly string syntax in the code body.
- *
- *  STYLE NOTES
- *  -----------
- *  - Per-field encoders are named `enc_gte_<field>(value)` and each one self-masks its argument before shifting.
- *    Mirrors the `enc_op / enc_rs / enc_rt / ...` family in mips.h.
- *  - The composite `enc_gte_cmdw(sf, mx, v, cv, lm, cmd)` is a flat OR of the per-field encoders, plus the COP2/CO base.
- *  - Pre-baked shortcuts (`gte_cmd_rtpt`, `gte_cmd_rtps`, …) are defined for the common cases so call sites read like assembly source.
- *  - All register/field values are enums (not `#define`s) so they show up in debugger symbol tables and IDE autocomplete.
- *
- *  SEE ALSO
- *  --------
- *  - mips.h: The MIPS encoder layer this builds on.
+ *  DSL for emitting GTE/MIPS instruction words from C.
  */
 
 /* C2 data registers */

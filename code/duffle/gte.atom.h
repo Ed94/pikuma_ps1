@@ -96,11 +96,11 @@ FI_ Slice_MipsCode ac_gte_sqr_v3(AtomBuilder_R ab, U4 r_sx, U4 r_sy, U4 r_sz, U4
 })
 
 /* ─── SQR FIRE — mtc2 3 GPRs into IR1/IR2/IR3, then fire SQR. ─── */
-FI_ Slice_MipsCode ac_gte_sqr_v3s4(AtomBuilder_R ab, Reg r_sx, Reg r_sy, Reg r_sz, MipsCode delay_slot)
+FI_ Slice_MipsCode ac_gte_sqr_v3s4(AtomBuilder_R ab, Reg sx, Reg sy, Reg sz, MipsCode delay_slot)
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
-	gte_mv_to_data_r(r_sx, C2_IR1),
-	gte_mv_to_data_r(r_sy, C2_IR2),
-	gte_mv_to_data_r(r_sz, C2_IR3),
+	gte_mv_to_data_r(sx, C2_IR1),
+	gte_mv_to_data_r(sy, C2_IR2),
+	gte_mv_to_data_r(sz, C2_IR3),
 	delay_slot, gte_cmdw_sqr,
 })
 
@@ -157,16 +157,13 @@ FI_ Slice_MipsCode ac_trans_mt3s3s4(AtomBuilder_R ab
  *
  * Note: C2_LZCR (cop2r31) is a fixed read-only C2 data register — the caller must read it via mfc2 from C2_LZCR;
  * there is no register choice at the hardware level. Only the GPR that holds the result is caller-determined. */
-FI_ Slice_MipsCode ac_lzcr_round_even_half_shift(AtomBuilder_R ab,
-	U4 r_shift,
-	U4 r_mag_sq,
-	U4 r_mag_sq_copy)
+FI_ Slice_MipsCode ac_lzcr_round_even_half_shift(AtomBuilder_R ab, Reg shift, Reg mag_sq, Reg mag_sq_copy)
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
-	and_i(r_shift, r_shift, gte_lzcr_even_mask),
-	or_u(r_mag_sq_copy, r_mag_sq, 0),
-	li_s(        r_mag_sq, 31),
-	sub_s(       r_mag_sq, r_mag_sq, r_shift),
-	shift_aright(r_mag_sq, r_mag_sq, 1),
+	and_i(shift, shift, gte_lzcr_even_mask),
+	or_u(mag_sq_copy, mag_sq, 0),
+	li_s(        mag_sq, 31),
+	sub_s(       mag_sq, mag_sq, shift),
+	shift_aright(mag_sq, mag_sq, 1),
 })
 
 FI_ Slice_MipsCode ac_gte_general_purpose_interopolation(AtomBuilder_R ab

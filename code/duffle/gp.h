@@ -6,16 +6,6 @@
  *  Primitive commands: gp0_cmd_poly_f3 = 0x20    (byte opcode)
  *  Packed 32-bit cmd:  gp0_word_poly_f3(r, g, b) (32-bit, shifted)
  *
- *  Type ordering: domain?_(direction)?_action_target_modifier_type?
- *  Examples: add_ui             (add + unsigned + immediate)
- *            add_s              (add + signed, R-type implicit)
- *            shift_lleft        (shift + logical + left)
- *            shift_aright       (shift + arithmetic + right)
- *            call_reg(rs)       (call + register, $ra implicit)
- *            gte_mv_to_data_r   (gte + mv + to + data + register)
- *            gte_lw_v0_xy(base) (gte + lw + v0 + xy)
- *            load_upper_i       (load-upper + immediate, unique verb)
- *
  *  --- GPU-domain layer cake ---
  *  Every gp.h macro follows the same 4-layer composition as mips.h and gte.h:
  *    4. Semantic encoders      gp0_word_poly_f3(r,g,b)
@@ -23,9 +13,6 @@
  *    2. Per-field encoders     enc_gp0_color_r(r), enc_gp0_color_g(g), ...
  *    1. Bitfield layout consts gp0_color_red_pos = 0, gp0_color_red_width = 8
  *    0. Opcode IDs             gp0_cmd_poly_f3 = 0x20
- *
- *  Vendor mnemonics (gte_mtc2, gte_mfc2, etc.) are NOT in this header.
- *  They live in the opt-in `gp_vendor_sym.h` for users who prefer the PSYQ-style names.
  * ============================================================================ */
 
 #ifdef INTELLISENSE_DIRECTIVES
@@ -391,10 +378,8 @@ enum {
  *  Primitive structs (8 polygon variants + tag)
  *  ============================================================================
  *  Each struct follows the GPU-documented memory layout for the corresponding primitive command. 
- *  The PolyTag is the OT-link header; the rest of the struct is the primitive's body.
+ *  PolyTag is an OT-link header. Rest of the struct is the primitive's body.
  *
- *  The current working layouts match the existing demo 
- *  (floor_tri uses Poly_F3; cube_tri uses Poly_G4). 
  *  They are NOT necessarily byte-identical to the PSX-SPX reference layout. 
  *  The demo layout uses color+vertex interleaving that doesn't match the standard PSX SDK file format. 
  *  For PSX-SDK file compatibility, the textured variants (FT*, GT*) would need layout adjustments.

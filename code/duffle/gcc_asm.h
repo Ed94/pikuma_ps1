@@ -79,14 +79,6 @@
  *  Why bundle the `__asm__()` wrapper?
  *  - The integer R_T4 (= 12, via R_T4_Code) already indicates the register.
  *  - The string "$12" is derived from it via reg_str, so they cannot drift apart.
- *  - Spelling `__asm__(reg_str(R_T4_Code))` at every call site is noise.
- *
- *  tmpl defined in dsl.h (token-paste glue). 
- *  rgcc define here (gcc_asm.h) because the `__asm__` keyword is GCC-specific. 
- *  Anyone porting to a different compiler's asm dialect overrides rgcc,
- *  and the integer→string derivation in rlit can be retargeted in one place.
- *
- *  For clobber lists and asm-template strings, use the bare `rlit(R_T4_Code)`.
  * ------------------------------------------------------------------------ */
 #define rgcc(n) __asm__(rlit(n))
 

@@ -34,7 +34,7 @@
 #include "duffle/pad.c"
 #include "duffle/math.atom.h"
 #include "duffle/mips.atom.c"
-#include "duffle/gte.atom.c"
+#include "duffle/gte.atom.h"
 #include "duffle/gp.atom.c"
 #include "duffle/pad.atom.c"
 #include "duffle/psyq.atom.c"

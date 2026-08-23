@@ -6,16 +6,10 @@
 #	include "pad.h"
 #endif
 
-/* Uses ONE 8-byte frame allocated via the compiler's standard prologue.
+/* Uses an 8-byte frame allocated via the compiler's standard prologue.
  * 4 wasted-arg words for B(12h) InitPAD2 are at [SP+0..15] but are not explicitly allocated.
  * Compiler handles the MIPS O32 "wasted stack" convention for us by treating the B-call as a 4-arg call.
- *
- * The buffer pointers are passed as arguments so the compiler keeps them in callee-saved registers;
- * The B(12h) asm volatile block does NOT clobber those registers (it clobbers only the volatile GPRs + B-table arg registers explicitly).
- * The C-level writes after the call re-load the pointers from their callee-saved homes.
- *
- * The clobber list for both B-calls names the full BIOS destroy set documented in kernelbios.md:167-174 (R1..R15, R24..R25, R31, HI/LO).
- * The kernel-ABI "volatile GPRs" subset is clb_mem_drain; the rest of the destroy set is enumerated explicitly here. */
+ */
 NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 {
 	/* Pin raw0 + raw1 to $a0 + $a1 via rgcc; the B(12h) call uses these directly.
@@ -23,9 +17,6 @@ NI_ void pad_bios_init_start(PadBiosRaw* raw0, PadBiosRaw* raw1)
 	register PadBiosRaw* p0 rgcc(R_A0) = raw0;
 	register PadBiosRaw* p1 rgcc(R_A1) = raw1;
 	(void)p0; (void)p1;
-
-	// TODO(Ed): Properly annotate the raw values in the inline asm instructions.
-	// Use enums.
 
 	/* B(12h) InitPAD2(raw0, 0x22, raw1, 0x22)
 	 *   $a0 = raw0 (rgcc-bound; survives the sequence below)

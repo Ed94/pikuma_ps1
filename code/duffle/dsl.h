@@ -29,7 +29,7 @@
 
 #define asm           __asm__
 
-#define A_(data)      (& data)
+#define A_(data)      (& (data))
 #define align_(value) __attribute__((aligned (value)))             // for easy alignment
 #define align_(value) __attribute__((aligned (value)))             // for easy alignment
 #define C_(type,data) ((type)(data))                               // for enforced precedence
@@ -45,7 +45,8 @@
 #define R_    restrict 
 #define V_    volatile 
 
-#pragma region Fictional //, used for intiution
+#pragma region Fictional 
+//, used for intiution
 
 #define EUB_  restrict // Execute Unit Bound:    Data is siloed in the ALU Register File. The Load/Store Unit is bypassed. (Route to Execution Unit.  Keep in registers)
 #define ISO_  restrict // Isolated Provenance:   Alternative to Exu_. Guarantees electrical memory isolation, 
@@ -83,8 +84,8 @@
 
 #define r_(ptr)        C_(T_(ptr[0])*R_, ptr) // Constrain pointer to restrict
 #define v_(ptr)        C_(T_(ptr[0])V_*, ptr) // 
-#define tr_(type, ptr) C_(type *R_, ptr)
-#define tv_(type, ptr) C_(type V_*, ptr)
+#define rt_(type, ptr) C_(type *R_, ptr)
+#define vt_(type, ptr) C_(type V_*, ptr)
 
 #define TypeR_(type)   type *R_ type ## _R  // type *restrict type_R
 #define TypeV_(type)   type V_* type ## _V  // type volatile* type_V

@@ -58,13 +58,13 @@ typedef Struct_(Str8)        { UTF8* ptr; U4 len; };
 typedef Struct_(Slice_Str8)  { Str8* ptr; U4 len; };
 #define slit(string_literal) (Str8){ (UTF8*) string_literal, S_(string_literal) - 1 }
 
-typedef Struct_(Slice) { B1* ptr; U4 len; }; // Untyped Slice (byte-addressable; .len in elements)
+typedef Struct_(Slice) { B1* ptr; U4 len; };
 FI_ Slice slice_ut_(U4 ptr, U4 len) { return (Slice){(B1*)ptr, len}; }
 
 #define Slice_(type)       Struct_(tmpl(Slice,type)) { type* ptr; U4 len; }
 typedef Slice_(B1);
 #define slice_assert(s)    do { assert((s).ptr != 0); assert((s).len > 0); } while(0)
-#define slice_end(slice)   ((slice).ptr + S_slice(slice) / S_(B1))  /* byte-ptr arithmetic; .len is in elements per slice convention */
+#define slice_end(slice)   ((slice).ptr + S_slice(slice) / S_(B1))
 #define S_slice(s)         ((s).len * S_((s).ptr[0]))
 
 #define slice_ut(ptr,len)  slice_ut_(u4_(ptr),     u4_(len))
@@ -134,8 +134,7 @@ FI_ U4 farena_unused_start(FArena arena) { return arena.start + arena.used; }
 
 #pragma region BIOS Scratchpad
 /* BIOS scratchpad location. 1 KB at 0x1F800000.
- * TapeHostFrame occupies the final 44 bytes while tape code executes.
- * Atom scratch is bounded by the TapeHostFrame_Loc declaration in lottes_tape.h. */
+ * TapeHostFrame occupies the final 44 bytes while tape code executes. */
 enum {
 	Scratchpad_Loc = 0x1F800000,
 	Scratchpad_Len = 0x400,                             /* 1 KB */

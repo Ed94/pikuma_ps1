@@ -21,7 +21,7 @@ const TOKEN_TYPES = [
 	"tapeGprRegister",
 	"tapeCop2Register",
 	"tapeDuffleType",
-	"tapeAttribute",
+	"tapeAt__ibute",
 	"keyword",
 	"macro",
 ];
@@ -43,7 +43,7 @@ const DSL_KEYWORDS = new Set([
 	"Slice_", "TypeR_", "TypeV_", "align_", "internal", "local_persist", "global",
 	"RO_", "LP_", "gknown", "expect_", "cexpr_",
 	"asm", "asm_words", "asm_rpins", "asm_clobber",
-	"O_", "S_", "C_", "T_", "tmpl", "glue", "r_", "v_", "tr_", "tv_",
+	"O_", "S_", "C_", "T_", "tmpl", "glue", "r_", "v_", "rt_", "vt_",
 	"rgcc", "r_use", "r_set", "r_mod", "r_imm", "r_mem",
 	"u1_", "u2_", "u4_", "u8_", "s1_", "s2_", "s4_", "s8_",
 	"u1_r", "u2_r", "u4_r", "u8_r", "u1_v", "u2_v", "u4_v", "u8_v",

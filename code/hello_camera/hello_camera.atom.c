@@ -11,8 +11,8 @@
 #	include "duffle/word_count.metadata.h"
 #	include "duffle/psyq.h"
 #	include "duffle/math.atom.h"
+#	include "duffle/gte.atom.h"
 #	include "duffle/mips.atom.c"
-#	include "duffle/gte.atom.c"
 #	include "duffle/gp.atom.c"
 #	include "duffle/psyq.atom.c"
 #		include "gen/offsets.h"
@@ -21,7 +21,7 @@
 #	include "hello_camera.h"
 #endif
 
-ATOM_FILE_DEBUGGER_LINE_MARKER(hello_joypad_atom_c);
+ATOM_FILE_DEBUGGER_LINE_MARKER(hello_camera_atom_c);
 
 #pragma region MACs (Mips Atom components)
 

@@ -19,7 +19,7 @@
 //   source: C:\projects\Pikuma\ps1\code\duffle\pad.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\math.atom.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\mips.atom.c
-//   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.c
+//   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\gp.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\pad.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\psyq.atom.c
@@ -270,10 +270,10 @@ WORD_COUNT(mac_gte_store_g4_p3, 1)
 WORD_COUNT(mac_gte_sqr_v3, 8)
 
 /* atom_dbg_skip */
-#define mac_gte_sqr_v3s4(r_sx, r_sy, r_sz, delay_slot) \
-	gte_mv_to_data_r(r_sx, C2_IR1) \
-,	gte_mv_to_data_r(r_sy, C2_IR2) \
-,	gte_mv_to_data_r(r_sz, C2_IR3) \
+#define mac_gte_sqr_v3s4(sx, sy, sz, delay_slot) \
+	gte_mv_to_data_r(sx, C2_IR1) \
+,	gte_mv_to_data_r(sy, C2_IR2) \
+,	gte_mv_to_data_r(sz, C2_IR3) \
 ,	delay_slot \
 ,	gte_cmdw_sqr
 WORD_COUNT(mac_gte_sqr_v3s4, 5)
@@ -304,12 +304,12 @@ WORD_COUNT(mac_gte_gpf_scale, 13)
 WORD_COUNT(mac_trans_mt3s3s4, 6)
 
 /* atom_dbg_skip */
-#define mac_lzcr_round_even_half_shift(r_shift, r_mag_sq, r_mag_sq_copy) \
-	and_i(r_shift, r_shift, gte_lzcr_even_mask) \
-,	or_u(r_mag_sq_copy, r_mag_sq, 0) \
-,	li_s(        r_mag_sq, 31) \
-,	sub_s(       r_mag_sq, r_mag_sq, r_shift) \
-,	shift_aright(r_mag_sq, r_mag_sq, 1)
+#define mac_lzcr_round_even_half_shift(shift, mag_sq, mag_sq_copy) \
+	and_i(shift, shift, gte_lzcr_even_mask) \
+,	or_u(mag_sq_copy, mag_sq, 0) \
+,	li_s(        mag_sq, 31) \
+,	sub_s(       mag_sq, mag_sq, shift) \
+,	shift_aright(mag_sq, mag_sq, 1)
 WORD_COUNT(mac_lzcr_round_even_half_shift, 5)
 
 #define mac_gte_general_purpose_interopolation(to_ir0, to_ir1, to_ir2, to_ir3, fr_mac1, fr_mac2, fr_mac3, nop_slot1, nop_slot2) \

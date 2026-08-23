@@ -44,7 +44,7 @@
  *
  *  Annotation rules
  *  ----------------
- *      1. atom_info(...) is OPTIONAL. Atoms without atom_info are silently skipped by the metaprogram.
+ *      1. atom_info(...) is optional. Atoms without atom_info are silently skipped by the metaprogram.
  *      2. If present, atom_info takes up to three sub-calls, all order-independent within the arg list:
  *           - atom_bind(Binds_X)
  *           - atom_reads(...)

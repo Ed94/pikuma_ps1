@@ -16,7 +16,7 @@
 //   source: C:\projects\Pikuma\ps1\code\duffle\pad.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\math.atom.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\mips.atom.c
-//   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.c
+//   source: C:\projects\Pikuma\ps1\code\duffle\gte.atom.h
 //   source: C:\projects\Pikuma\ps1\code\duffle\gp.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\pad.atom.c
 //   source: C:\projects\Pikuma\ps1\code\duffle\psyq.atom.c
