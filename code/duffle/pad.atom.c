@@ -3,7 +3,7 @@
 #		include "gen/offsets.h"
 #	include "mips.h"
 #	include "dsl.atom.h"
-#	include "lottes_tape.h"
+#	include "tape.h"
 #	include "pad.h"
 #endif
 

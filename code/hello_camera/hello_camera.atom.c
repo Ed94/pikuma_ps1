@@ -3,7 +3,7 @@
 #		include "duffle/gen/macs.h"
 #		include "duffle/gen/offsets.h"
 #	include "duffle/dsl.atom.h"
-#	include "duffle/lottes_tape.h"
+#	include "duffle/tape.h"
 #	include "duffle/mips.h"
 #	include "duffle/gte.h"
 #	include "duffle/gp.h"

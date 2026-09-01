@@ -24,7 +24,7 @@
 #include "duffle/pad.h"
 
 #include "duffle/dsl.atom.h"
-#include "duffle/lottes_tape.h"
+#include "duffle/tape.h"
 
 #include "duffle/bios.h"
 #include "duffle/psyq.h"

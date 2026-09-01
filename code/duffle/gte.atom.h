@@ -3,7 +3,7 @@
 #	include "gen/offsets.h"
 #	include "gte.h"
 #	include "gp.h"
-#	include "lottes_tape.h"	
+#	include "tape.h"	
 #endif
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(gte_atom_c);
@@ -264,10 +264,7 @@ internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x0820, 0x081c, 0x0818, 0x0814, 0x0810, 0x080c, 0x0808, 0x0804,
 };
 
-typedef Struct_(Binds_normalize_v3s4) {
-	U2 src_offset;    /* offset of src V3_S4 within the BIOS scratchpad */
-	U2 dst_offset;    /* offset of dst V3_S4 within the BIOS scratchpad */
-};
+typedef Struct_(Binds_normalize_v3s4) { U2 src_offset; U2 dst_offset; };
 typedef Struct_(RegUse_normalize_v3s4) {
 	union { Reg_(V3_S4) res, src; };
 	union { Reg r0, src_ptr, mac2; };

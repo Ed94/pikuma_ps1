@@ -2,7 +2,7 @@
 #	include "gen/macs.h"
 #	include "gen/offsets.h"
 #	include "math.h"
-#	include "lottes_tape.h"
+#	include "tape.h"
 #endif
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(math_atom_c);

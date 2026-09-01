@@ -1,7 +1,7 @@
 #ifdef INTELLISENSE_DIRECTIVES
 #	include "dsl.h"
 #	include "gp.h"
-#	include "lottes_tape.h"
+#	include "tape.h"
 #endif
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(gp_atom_c);

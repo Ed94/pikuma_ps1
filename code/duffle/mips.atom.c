@@ -3,7 +3,7 @@
 #		include "gen/offsets.h"
 #	include "bios.h"
 #	include "mips.h"
-#	include "lottes_tape.h"
+#	include "tape.h"
 #endif
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(mips_atom_c);
