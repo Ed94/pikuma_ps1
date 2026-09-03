@@ -499,17 +499,17 @@ enum {
 #define R_OtBase_Code      R_T6_Code
 };
 typedef Struct_(Binds_CubeTri) {
-	U4     PrimCursor;
-	V4_S2* FaceCursor;
-	V3_S2* VertBase;
-	U4*    OtBase;
+	U1*    prim_cursor;
+	V4_S2* face_cursor;
+	V3_S2* vert_base;
+	U4*    ot_base;
 };
 internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri), atom_phase(cube_g4)){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)),
-	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)),
-	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,VertBase)),
-	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,OtBase)),
+	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,prim_cursor)),
+	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,face_cursor)),
+	load_word(R_VertBase,   R_TapePtr, O_(Binds_CubeTri,vert_base)),
+	load_word(R_OtBase,     R_TapePtr, O_(Binds_CubeTri,ot_base)),
 	LdSlot_ add_ui_self(    R_TapePtr, S_(Binds_CubeTri)),
 	mac_yield()
 };
@@ -561,16 +561,16 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 // end: branch(cull)
 
 atom_label(cube_g4_face_exit)
-	add_ui_self(R_PrimCursor, S_(Poly_G4)),     /* 9 words = Poly_G4 */
-	add_ui_self(R_FaceCursor, S_(S2) * 4),      /* 4 × S2 = 8 bytes */
+	add_ui_self(R_PrimCursor, S_(Poly_G4)), // 9 words = Poly_G4
+	add_ui_self(R_FaceCursor, S_(S2) * 4),  // 4 × S2 = 8 bytes
 	jump_reg(R_AtomJmp), BdSlot_ nop      // ac_yield: word 3-4
 };
 
 typedef Struct_(Binds_FloorTri) {
-	U4     PrimCursor;
-	V3_S2* FaceCursor;
-	V3_S2* VertBase;
-	U4*    OtBase;
+	U1*    prim_cursor;
+	V3_S2* face_cursor;
+	V3_S2* vert_base;
+	U4*    ot_base;
 };
 internal
 MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri), atom_phase(floor_f3)
@@ -578,10 +578,10 @@ MipsAtom_(rbind_floor_f3_face) atom_info(atom_bind(Binds_FloorTri), atom_phase(f
 	, atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase, R_TapePtr)
 ){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
-	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,PrimCursor)),
-	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,FaceCursor)),
-	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,VertBase)),
-	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,OtBase)),
+	load_word(R_PrimCursor, R_TapePtr, O_(Binds_FloorTri,prim_cursor)),
+	load_word(R_FaceCursor, R_TapePtr, O_(Binds_FloorTri,face_cursor)),
+	load_word(R_VertBase,   R_TapePtr, O_(Binds_FloorTri,vert_base)),
+	load_word(R_OtBase,     R_TapePtr, O_(Binds_FloorTri,ot_base)),
 	LdSlot_ add_ui_self(    R_TapePtr, S_(Binds_FloorTri)),
 	mac_yield()
 };
@@ -623,7 +623,7 @@ atom_label(floor_f3_face_exit)
 	jump_reg(R_AtomJmp), BdSlot_ nop // ac_yield: word 3-4
 };
 
-typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
+typedef Struct_(Binds_SyncPrimitiveArena) { U4* used; U1* cursor; };
 internal MipsAtom_(sync_primitive_arena) atom_info(atom_bind(Binds_SyncPrimitiveArena)
 	, atom_reads(R_PrimCursor), atom_writes(R_AT)
 ){

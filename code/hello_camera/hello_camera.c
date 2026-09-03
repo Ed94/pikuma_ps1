@@ -241,7 +241,6 @@ FI_ void camera_look_at(TapeBuilder_R tb, Camera* c, P3_S4* target, V3_S4* up_in
 void update(PrimitiveArena* pa, U4* ordering_buf) 
 {
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
-
 	/*Pad Input*/ {
 		tb.used = 0; tb_scope_run(& tb) {
 			// Grab latest state from bios.
@@ -288,33 +287,28 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		mt3s2s4_rotation   (& smem.cube.rot,    & smem.tform_world);
 		mt3s2s4_translation(& smem.tform_world, & smem.cube.pos);
 		mt3s2s4_scale      (& smem.tform_world, & smem.cube.scale);
-
 		// Combine world and look_at matrix.
 		gte_comp_coord_m3s2(& smem.cam.look_at, & smem.tform_world, & smem.tform_view);
 		gte_matrix_set_rotation   (& smem.tform_view);
 		gte_matrix_set_translation(& smem.tform_view);
 
-		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
-		U4 prim_cursor = prim_base + pa->used;
-
-		tb.used = 0; tb_scope(& tb) {
-			tb_emit(& tb, rbind_cube_g4_face);
-				tb_data(& tb, prim_cursor);
-				tb_data(& tb, u4_(smem.cube.faces));
-				tb_data(& tb, u4_(smem.cube.verts));
-				tb_data(& tb, u4_(ordering_buf));
-
+		U1* prim_base   = u1_r(pa->buf[smem.active_buf_id]);
+		U1* prim_cursor = prim_base + pa->used;
+		tb.used = 0; tb_scope_run(& tb) {
+			tb_emit(& tb, rbind_cube_g4_face); tb_bind_(& tb, Binds_CubeTri, 
+				.prim_cursor = prim_cursor,
+				.face_cursor = smem.cube.faces,
+				.vert_base   = smem.cube.verts,
+				.ot_base     = ordering_buf,
+			);
 			for (U4 i = 0; i < Cube_num_faces; i++) {
-				// Two triangles per quad face: (x,y,z) and (x,z,w)
-				tb_emit(& tb, cube_g4_face);
+				tb_emit(& tb, cube_g4_face); // Two triangles per quad face: (x,y,z) and (x,z,w)
 			}
-
-			tb_emit(& tb, sync_primitive_arena);
-				tb_data(& tb, u4_(& pa->used));
-				tb_data(& tb, prim_base);
+			tb_emit(& tb, sync_primitive_arena); tb_bind_(& tb, Binds_SyncPrimitiveArena,
+				.used   = & pa->used,
+				.cursor = prim_base,
+			);
 		}
-		tape_run(tb_slice(tb));// Fire off the tape (bigger-clobber variant).
-
 		// smem.cube.rot.y += 30;
 	}
 	// Draw floor
@@ -330,33 +324,29 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		gte_matrix_set_rotation   (& smem.tform_view);
 		gte_matrix_set_translation(& smem.tform_view);
 
-		U4 prim_base   = u4_(pa->buf[smem.active_buf_id]);
-		U4 prim_cursor = prim_base + pa->used;
+		U1_R prim_base   = u1_r(pa->buf[smem.active_buf_id]);
+		U1_R prim_cursor = prim_base + pa->used;
 
 		// TODO(Ed): We should do a bounds check beforehand to confirm pa can hold all tris?
 		// The tape atoms in-flight should not need to care.
 
 		// Prepare the tape. (Push protocol to tape)
-		tb.used = 0; tb_scope(& tb) {
-			// tb_emit(& tb, set_gte_mt3s2s4);
-			// 	tb_data(& tb, u4_(& smem.tform_view));
-
-			tb_emit(& tb, rbind_floor_f3_face);
-			// TODO(Ed): Just use a single context struct ref?
-				tb_data(& tb, prim_cursor);
-				tb_data(& tb, u4_(smem.floor.faces));
-				tb_data(& tb, u4_(smem.floor.verts));
-				tb_data(& tb, u4_(ordering_buf));
+		tb.used = 0; tb_scope_run(& tb) {
+			tb_emit(& tb, rbind_floor_f3_face); tb_bind_(& tb, Binds_FloorTri,
+				.prim_cursor = prim_cursor,
+				.face_cursor = smem.floor.faces,
+				.vert_base   = smem.floor.verts,
+				.ot_base     = ordering_buf,
+			);
 			for (U4 i = 0; i < Floor_num_faces; i++) {
 				tb_emit(& tb, floor_f3_face);
 			}
 			// After floor_f3_face iterations complete, the primitive arena's used counter needs updating.
-			tb_emit(& tb, sync_primitive_arena);
-				tb_data(& tb, u4_(& pa->used));
-				tb_data(& tb, prim_base);
+			tb_emit(& tb, sync_primitive_arena); tb_bind_(& tb, Binds_SyncPrimitiveArena,
+				.used   = & pa->used,
+				.cursor = prim_base,
+			);
 		}
-		tape_run(tb_slice(tb));// Fire off the tape (bigger-clobber variant).
-
 		// C-side state (pa->used) has already been updated by the tape!
 		// smem.floor.rot.y += 5;
 	}

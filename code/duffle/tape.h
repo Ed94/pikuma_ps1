@@ -356,24 +356,16 @@ internal Reg const regfile_alloc_order[] = {
 	R_T8, R_T9,
 };
 
-typedef Struct_(RegFile) {
-	A2_U2 GPR;
-	A2_U2 GTE;
-};
+typedef Struct_(RegFile) { A2_U2 GPR; };
 #define regfile(pin_mask) {.GPR={u4_lo(pin_mask), u4_hi(pin_mask)} }
 FI_ void regfile_init(RegFile_R rf) {
 	/* pack the 32-bit ABI mask into the two U2s */
 	rf->GPR[0] = u4_lo(regfile_abi_mask);
 	rf->GPR[1] = u4_hi(regfile_abi_mask);
-	rf->GTE[0] = rf->GTE[1] = 0;
 }
 FI_ RegFile regfile_make(void) { RegFile rf; regfile_init(& rf); return rf; }
 
-typedef Struct_(RegFile_RInfo) {
-	U2_R section;
-	U2   mask;
-	B2   occupied;
-};
+typedef Struct_(RegFile_RInfo) { U2_R section; U2 mask; B2 occupied; };
 FI_ RegFile_RInfo regfile_rinfo(A2_U2 file, Reg r_id) {
 	U2   s_id     = r_id >> 4;
 	U2_R section  = & file[s_id];
@@ -383,15 +375,11 @@ FI_ RegFile_RInfo regfile_rinfo(A2_U2 file, Reg r_id) {
 }
 FI_ Reg regfile__alloc_helper(A2_U2 file, Reg r_id) {
 	Reg result = 0; RegFile_RInfo info = regfile_rinfo(file, r_id);
-	if (info.occupied == false) {
-		info.section[0] |= info.mask;
-		result           = r_id;
-	}
+	if (info.occupied == false) { info.section[0] |= info.mask; result = r_id; }
 	return result; 
 }
-I_ Reg regfile_alloc(RegFile_R rf) {
-	Reg allocated = 0;
-	for index_iter(U4, r_id, R_V0, <, R_T9) {
+I_ Reg regfile_alloc(RegFile_R rf) { 
+	Reg allocated = 0; for index_iter(U4, r_id, R_V0, <, R_T9) {
 		allocated = regfile__alloc_helper(rf->GPR, r_id);
 		Jmp_nZero_(allocated,resolved);
 	}
@@ -400,13 +388,12 @@ resolved: return allocated;
 }
 FI_ Reg regfile_pin(RegFile_R rf, Reg r_id) {
 	RegFile_RInfo info = regfile_rinfo(rf->GPR, r_id);
-	assert(info.occupied == false);
+	assert(info.occupied == false); 
 	info.section[0] |= info.mask;
 	return r_id;
 }
 FI_ void regfile_pin_mask(RegFile_R rf, U4 mask) {
-	B4 occupied = u4_r(rf->GPR)[0] & mask;
-	assert(occupied == false);
+	B4 occupied = u4_r(rf->GPR)[0] & mask; assert(occupied == false);
 	u4_r(rf->GPR)[0] |= mask;
 }
 FI_ void regfile_free_mask(RegFile_R rf, U4 mask) {
@@ -414,8 +401,7 @@ FI_ void regfile_free_mask(RegFile_R rf, U4 mask) {
 	u4_r(rf->GPR)[0] &= ~mask;
 }
 FI_ void regfile_free_reg(RegFile_R rf, Reg r_id) {
-	/* never free the ABI set */
-	if (regfile_abi_mask & (1u << r_id)) return;
+	if (regfile_abi_mask & (1u << r_id)) return; // never free the ABI set
 	RegFile_RInfo info = regfile_rinfo(rf->GPR, r_id);
 	info.section[0] &= ~info.mask;
 }
@@ -449,7 +435,6 @@ FI_ void regfile_reset_to_mask(RegFile_R rf, U4 mask) {
 		add_si(r.t1.view_3, r.usual_modifiable, 10),
 		mac_yield(),
 	})
-
 #pragma endregion Mips Atom Procs
 
 #pragma region Baked Mips Atoms
