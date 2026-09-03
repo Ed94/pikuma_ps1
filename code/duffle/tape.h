@@ -121,7 +121,7 @@ typedef U2 Reg; // Register parameter used with atom or atom component procedure
 typedef U4 const MipsCode; // Underlying type to mips asm words.
 typedef Slice_(MipsCode);
 
-typedef U4 const MipsAtom; // Underlying type to a mips atom defnition 
+typedef U4 const MipsAtom; // Underlying type to a mips atom definition 
 typedef Slice_(MipsAtom);
 
 // Sometimes a user will define a bundle of atoms that represent a procedure of work as:
@@ -176,7 +176,7 @@ typedef Slice_(MipsAtom);
 	 The constant is in `.rodata` so the linker may eliminate it. */
 #define ATOM_FILE_DEBUGGER_LINE_MARKER(file_name) internal U4 const tmpl(atom_file_debugger_line_marker,file_name) = 0
 
-typedef Slice_MipsAtom Tape;
+typedef Struct_(Tape) { union { MipsAtom* ptr; U4* inlaid_data; }; U4 len; };
 
 typedef Struct_(TapeHostFrame) {
 	U4 s0;
@@ -249,12 +249,8 @@ FI_ void tb_emit(TapeBuilder* tb, MipsAtom* atom) { u4_r(tb->ptr)[tb->used] = u4
 FI_ void tb_data(TapeBuilder* tb, U4        data) { u4_r(tb->ptr)[tb->used] = u4_(data); ++ tb->used; }
 #define tb_emit_(atom)        tb_emit(& tb, atom)
 
-FI_ void tb_bind(TapeBuilder* tb, Slice data) { mem_copy(tb->ptr + tb->used * S_(MipsCode), u4_(data.ptr), data.len); tb->used += data.len / S_(MipsCode); }
-#define tb_bind_(tb,type,...) tb_bind(tb, (Slice){ (B1*)(& (type){__VA_ARGS__}), S_(type) }); static_assert(S_(type) % S_(MipsCode) == 0)
-
-// NOTE(Ed): Wip still ideating convention. Possibly will never use a composite.
-#define tb_emit_wbind_(tb,atom,...)       tb_emit(tb,atom); tb_bind_(tb,tmpl(Binds,atom),__VA_ARGS__)
-#define tb_emit_wbind2_(tb,atom,type,...) tb_emit(tb,atom); tb_bind_(tb,type,__VA_ARGS__)
+FI_ void tb_bind(TapeBuilder* tb, Slice data) { mem_copy(b1_r(tb->ptr + tb->used * S_(MipsCode)), data.ptr, data.len); tb->used += data.len / S_(MipsCode); }
+#define tb_bind_(tb,type,...) tb_bind(tb, (Slice){ (U1*)(& (type){__VA_ARGS__}), S_(type) }); static_assert(S_(type) % S_(MipsCode) == 0)
 
 FI_ Tape tb_end  (TapeBuilder* tb) { tb_emit(tb,tape_exit); return (Tape){ C_(U4*,tb->ptr), tb->used }; }
 FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4*,tb.ptr),  tb.used }; }
@@ -262,6 +258,12 @@ FI_ Tape tb_slice(TapeBuilder  tb) {                        return (Tape){ C_(U4
 
 FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_slice(tb[0])); }
 #define tb_scope_run(tb) for(U4 tbs_once=0;tbs_once==0;++tbs_once,tb_scope_run_end(tb))
+
+
+// NOTE(Ed): Wip still ideating convention. Possibly will never use a composite.
+#define tb_emit_wbind_(tb,atom,...)       tb_emit(tb,atom); tb_bind_(tb,tmpl(Binds,atom),__VA_ARGS__)
+#define tb_emit_wbind2_(tb,atom,type,...) tb_emit(tb,atom); tb_bind_(tb,type,__VA_ARGS__)
+
 #pragma endregion Tape Drive
 
 #pragma region Macro Mips Atom Components
@@ -299,7 +301,7 @@ typedef Relative_(FArena) Struct_(AtomBuilder) { U4 start; U4 capacity; U4 used;
 FI_ void atombuilder_push(AtomBuilder_R ab, Slice_MipsCode code) {
 	assert(ab->capacity - ab->used - code.len);
 	U4 dest = ab->start + ab->used * S_(MipsCode); U4 size = S_slice(code);
-	mem_copy(dest, u4_(code.ptr), size); ab->used += size;
+	mem_copy(b1_r(dest), b1_r(code.ptr), size); ab->used += size;
 }
 #define atombuilder_push_mac(ab, mac) atombuilder_push(ab, slice_arg_from_array(Slice_MipsCode, mac))
 
@@ -323,7 +325,7 @@ FI_ AtomArena atomarena_make(Slice mem) { AtomArena a; atomarena_init(& a, mem);
 FI_ MipsAtom* atomarena_push(AtomArena_R aa, Slice_MipsCode code) {
 	assert(aa->capacity - aa->used - code.len);
 	U4 dest = atomarena_unused_start(aa[0]); U4 size = S_slice(code);
-	mem_copy(dest, u4_(code.ptr), size); aa->used += size;
+	mem_copy(b1_r(dest), b1_r(code.ptr), size); aa->used += size;
 	return C_(MipsAtom*, dest);
 }
 FI_ void atomarena_reset(AtomArena_R aa) { aa->used = 0; }

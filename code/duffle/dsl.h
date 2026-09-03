@@ -121,12 +121,24 @@ typedef unsigned char   TSet_(B1);
 typedef __UINT16_TYPE__ TSet_(B2); 
 typedef __UINT32_TYPE__ TSet_(B4);
 
+
+#define b1_(value)  C_(B1, value)
+#define b2_(value)  C_(B2, value)
+#define b4_(value)  C_(B4, value)
+
 #define u1_(value)  C_(U1, value)
 #define u2_(value)  C_(U2, value)
 #define u4_(value)  C_(U4, value)
 #define s1_(value)  C_(S1, value)
 #define s2_(value)  C_(S2, value)
 #define s4_(value)  C_(S4, value)
+
+#define b1_r(value) C_(B1*R_, value)
+#define b2_r(value) C_(B2*R_, value)
+#define b4_r(value) C_(B4*R_, value)
+#define b1_v(value) C_(B1 V_*, value)
+#define b2_v(value) C_(B2 V_*, value)
+#define b4_v(value) C_(B4 V_*, value)
 
 #define u1_r(value) C_(U1 *R_, value)
 #define u2_r(value) C_(U2 *R_, value)

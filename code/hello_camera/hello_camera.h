@@ -24,7 +24,7 @@ enum {
 typedef U4 OrderingTable_Buffer[OrderingTbl_Len];
 typedef Array_(OrderingTable_Buffer, 2);
 
-typedef B1 PrimitiveBuffer[PrimitiveBuff_Len];
+typedef U1 PrimitiveBuffer[PrimitiveBuff_Len];
 typedef Array_(PrimitiveBuffer, 2);
 typedef Struct_(PrimitiveArena) {
 	A2_PrimitiveBuffer buf;
@@ -54,8 +54,8 @@ I_ void ent_cube128_init(A8_V3_S2* verts, A6_V4_S2* faces) {
 		{ 2, 3, 6, 7 },
 		{ 3, 0, 7, 4 },
 	};
-	mem_copy(u4_(verts), u4_(& baked_verts), S_(A8_V3_S2) );
-	mem_copy(u4_(faces), u4_(& baked_faces), S_(A6_V4_S2) );
+	mem_copy(b1_r(verts), b1_r(& baked_verts), S_(A8_V3_S2) );
+	mem_copy(b1_r(faces), b1_r(& baked_faces), S_(A6_V4_S2) );
 	return;
 }
 typedef Struct_(Ent_Cube) {
@@ -83,8 +83,8 @@ I_ void ent_floor_init(A4_V3_S2* verts, A2_V3_S2* faces) {
 		{ 0, 1, 2 },
 		{ 1, 3, 2 },
 	};
-	mem_copy(u4_(verts), u4_(& baked_verts), S_(A4_V3_S2));
-	mem_copy(u4_(faces), u4_(& baked_faces), S_(A2_V3_S2));
+	mem_copy(b1_r(verts), b1_r(& baked_verts), S_(A4_V3_S2));
+	mem_copy(b1_r(faces), b1_r(& baked_faces), S_(A2_V3_S2));
 };
 typedef Struct_(Ent_Floor) {
 	V3_S4 accel;

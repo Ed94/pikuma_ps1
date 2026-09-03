@@ -8,7 +8,7 @@ ATOM_FILE_DEBUGGER_LINE_MARKER(gp_atom_c);
 
 #pragma region MACs (Mips Atom Components)
 
-FI_ Slice_MipsCode ac_gcmd_push(AtomBuilder_R ab, U4 cmd, U4 reg_transfer, U4 reg_base, U2 port)
+FI_ Slice_MipsCode ac_gcmd_push(AtomBuilder_R ab, U2 cmd, Reg reg_transfer, Reg reg_base, U2 port)
 atom_dbg_skip MipsAtomComp_Proc_(ab, {
 	mac_load_word_imm(reg_transfer, cmd),
 	store_word(       reg_transfer, reg_base, port),

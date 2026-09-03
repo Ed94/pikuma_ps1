@@ -93,11 +93,11 @@ extern SMemory smem;
 #define pad0_btn_(btn) btn & smem.pad[0].buttons
 #define pad1_btn_(btn) btn & smem.pad[1].buttons
 
-I_ B1* prim__alloc(U4 type_width, Str8 type_name) {
+I_ U1* prim__alloc(U4 type_width, Str8 type_name) {
 	gknown PrimitiveArena* pa  = & smem.primitives;
-	gknown B1*             buf = (B1*) r_(smem.primitives.buf)[smem.active_buf_id];
+	gknown U1*             buf = (U1*) r_(smem.primitives.buf)[smem.active_buf_id];
 	assert(pa->used + type_width < PrimitiveBuff_Len);
-	B1* next  = buf + pa->used;
+	U1* next  = buf + pa->used;
 	pa->used += type_width;
 	return next;
 }
@@ -242,28 +242,18 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 {
 	TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
 
-	// Pad Input
-	{
+	/*Pad Input*/ {
 		tb.used = 0; tb_scope_run(& tb) {
 			// Grab latest state from bios.
 			tb_emit_(pad_bios_snapshot);
-				tb_data(& tb,   u4_(& smem.pad_raw[0]));
+				tb_data(& tb, u4_(& smem.pad_raw[0]));
 				tb_data(& tb, u4_(& smem.pad[0]));
-			// tb_emit_(pad_bios_snapshot);
-			// 	tb_data_(raw,   & smem.pad_raw[1]);
-			// 	tb_data_(state, & smem.pad[1]);
-
 			tb_emit_(pad_input_cam);
 				tb_data(& tb, u4_(& smem.pad[0]));
 				tb_data(& tb, u4_(& smem.cam));
-
-			// tb_emit_(pad_input_cube_rotation);
-			// 	tb_data_(state,     & smem.pad[0]);
-			// 	tb_data_(cube_rot,  & smem.cube.rot);
-			// 	tb_data_(floor_rot, & smem.floor.rot);
 		}
 	}
-
+	
 	orderingtbl_clear_reverse(ordering_buf, OrderingTbl_Len);
 
 	// Update the position based on acceleration and velocity
@@ -390,6 +380,19 @@ void gp_display_frame(DoubleBuffer* screen_buf, S4* active_buf_id, U4* ordering_
 int main(void)
 {
 	smem = (SMemory){0};
+
+	B4 basic_sample = false; if (basic_sample) {
+		// We will be defining the tape here along with its atom, then running the tape after.
+		TapeBuilder tb = tb_make(slice_ut_arr(smem.MemTape));
+		MipsCode add_one_to_R_T1[] = {
+			add_ui_self(R_T1, 1),
+			mac_yield(),
+		};
+		tb_emit(& tb, C_(MipsAtom*, add_one_to_R_T1));
+		Tape tape = tb_end(& tb);
+		tape_run(tape);
+	}
+
 	// smem.primitives.used = 0;
 	// smem.active_buf_id   = 0;
 	smem.cam.pos = v3s4(500, -1000, -1500);

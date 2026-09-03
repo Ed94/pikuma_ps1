@@ -386,7 +386,7 @@ enum {
  * ============================================================================ */
 
 /* ---------- RGB8 (3-byte packed color) ---------- */
-typedef Struct_(RGB8) { B1 r; B1 g; B1 b; };
+typedef Struct_(RGB8) { U1 r; U1 g; U1 b; };
 #define rgb8(r,g,b) ((RGB8){r,g,b})
 
 /* ---------- PolyTag (the OT-link header; 1 word) ---------- */
@@ -416,7 +416,7 @@ typedef Struct_(PolyTag) {
 typedef Struct_(Poly_F3) {
 	U4   tag;
 	RGB8 color;
-	B1   code;
+	U1   code;
 	union {
 		struct { V2_S2 p0; V2_S2 p1; V2_S2 p2; };
 		A3_V2_S2 points;
@@ -427,7 +427,7 @@ typedef Struct_(Poly_F3) {
 typedef Struct_(Poly_F4) {
 	U4   tag;
 	RGB8 color;
-	B1   code;
+	U1   code;
 	union {
 		struct { V2_S2 p0; V2_S2 p1; V2_S2 p2; V2_S2 p3; };
 		A4_V2_S2 points;
@@ -436,18 +436,18 @@ typedef Struct_(Poly_F4) {
 
 /* ---------- Poly_G3 (Gouraud Triangle; 7 words) ---------- */
 typedef Struct_(Poly_G3) {
-	U4    tag; RGB8 c0; B1 code;
-	V2_S2 p0;  RGB8 c1; B1 pad1;
-	V2_S2 p1;  RGB8 c2; B1 pad2;
+	U4    tag; RGB8 c0; U1 code;
+	V2_S2 p0;  RGB8 c1; U1 pad1;
+	V2_S2 p1;  RGB8 c2; U1 pad2;
 	V2_S2 p2;
 };
 
 /* ---------- Poly_G4 (Gouraud Quad; 9 words) ---------- */
 typedef Struct_(Poly_G4) {
-	U4    tag; RGB8 c0; B1 code;
-	V2_S2 p0;  RGB8 c1; B1 pad1;
-	V2_S2 p1;  RGB8 c2; B1 pad2;
-	V2_S2 p2;  RGB8 c3; B1 pad3;
+	U4    tag; RGB8 c0; U1 code;
+	V2_S2 p0;  RGB8 c1; U1 pad1;
+	V2_S2 p1;  RGB8 c2; U1 pad2;
+	V2_S2 p2;  RGB8 c3; U1 pad3;
 	V2_S2 p3;
 };
 
@@ -456,7 +456,7 @@ typedef Struct_(Poly_G4) {
 typedef Struct_(Poly_FT3) {
 	U4   tag;
 	RGB8 color;
-	B1   code;
+	U1   code;
 	U4   tpage;
 	U4   clut;
 	V2_S2 p0; U1 u0; U1 v0;
@@ -468,7 +468,7 @@ typedef Struct_(Poly_FT3) {
 typedef Struct_(Poly_FT4) {
 	U4   tag;
 	RGB8 color;
-	B1   code;
+	U1   code;
 	U4   tpage;
 	U4   clut;
 	V2_S2 p0; U1 u0; U1 v0;
@@ -479,9 +479,9 @@ typedef Struct_(Poly_FT4) {
 
 /* ---------- Poly_GT3 (Gouraud Textured Triangle) ---------- */
 typedef Struct_(Poly_GT3) {
-	U4    tag; RGB8 c0; B1 code;
-	V2_S2 p0;  RGB8 c1; B1 pad1;
-	V2_S2 p1;  RGB8 c2; B1 pad2;
+	U4    tag; RGB8 c0; U1 code;
+	V2_S2 p0;  RGB8 c1; U1 pad1;
+	V2_S2 p1;  RGB8 c2; U1 pad2;
 	V2_S2 p2;
 	U4    tpage;
 	U4    clut;
@@ -492,10 +492,10 @@ typedef Struct_(Poly_GT3) {
 
 /* ---------- Poly_GT4 (Gouraud Textured Quad) ---------- */
 typedef Struct_(Poly_GT4) {
-	U4    tag; RGB8 c0; B1 code;
-	V2_S2 p0;  RGB8 c1; B1 pad1;
-	V2_S2 p1;  RGB8 c2; B1 pad2;
-	V2_S2 p2;  RGB8 c3; B1 pad3;
+	U4    tag; RGB8 c0; U1 code;
+	V2_S2 p0;  RGB8 c1; U1 pad1;
+	V2_S2 p1;  RGB8 c2; U1 pad2;
+	V2_S2 p2;  RGB8 c3; U1 pad3;
 	V2_S2 p3;
 	U4    tpage;
 	U4    clut;

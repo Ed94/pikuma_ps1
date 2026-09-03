@@ -237,8 +237,8 @@ enum {
 };
 //screen_env_init. Mirrors the libpsyx's SetDefDispEnv + SetDefDrawEnv + the manual enable_auto_clear / initial_bg_color writes.
 internal MipsAtom_(screen_env_init) atom_info(atom_phase(screen_init)
-,	atom_reads(R_T0, R_ScreenX, R_ScreenY, R_ScreenBuf)
-, atom_writes(R_T0, R_ScreenX, R_ScreenY)
+,	atom_reads(R_ScreenBuf)
+, atom_writes(R_ScreenBuf)
 ) {
 	/* display[0] = (0, 0, 320, 240); rest of struct zeroed. */
 	add_ui(R_ScreenX, R_0, ScreenRes_X), add_ui(R_ScreenY, R_0, ScreenRes_Y),
@@ -441,7 +441,7 @@ typedef Struct_(Binds_PadInputCam) {
 	Camera*   cam;
 };
 internal MipsAtom_(pad_input_cam) atom_info(atom_bind(Binds_PadInputCam)
-, atom_reads( R_Cam, R_CamPadState, R_TapePtr)
+, atom_reads( R_Cam, R_CamPadState)
 , atom_writes(R_Cam)
 ) {
 	/* Bind pop: state → R_CamPadState (R_T5), cam → R_Cam (R_T4), advance R_TapePtr by 8. */
@@ -504,10 +504,7 @@ typedef Struct_(Binds_CubeTri) {
 	V3_S2* VertBase;
 	U4*    OtBase;
 };
-internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri), atom_phase(cube_g4)
-,	atom_reads(R_TapePtr)
-,	atom_writes(R_PrimCursor, R_FaceCursor, R_VertBase, R_OtBase, R_TapePtr)
-){
+internal MipsAtom_(rbind_cube_g4_face) atom_info(atom_bind(Binds_CubeTri), atom_phase(cube_g4)){
 	/* Pop 4 arguments from the tape directly into the workspace registers */
 	load_word(R_PrimCursor, R_TapePtr, O_(Binds_CubeTri,PrimCursor)),
 	load_word(R_FaceCursor, R_TapePtr, O_(Binds_CubeTri,FaceCursor)),
@@ -530,11 +527,11 @@ MipsAtom_(cube_g4_face) atom_info(atom_phase(cube_g4),
 
 	LdSlot_ mac_gte_load_tri_verts(R_VertBase, R_T0, R_T1, R_T2), 
 		GteDelay_ load_half_u(R_T3, R_FaceCursor, 3 * S_(S2)), LdSlot_
-		GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0),          LdSlot_ //ac_yield: word 2,
+		GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0),          LdSlot_ //ac_yield: word 1,
 	gte_cmdw_rotate_translate_perspective_triple,
 	gte_cmdw_nclip,
 
-	gte_mv_from_data_r(R_T0, C2_MAC0), GteDelay_ add_ui_self(R_TapePtr, S_(MipsCode)), // ac_yield: word 1
+	gte_mv_from_data_r(R_T0, C2_MAC0), GteDelay_ add_ui_self(R_TapePtr, S_(MipsCode)), // ac_yield: word 2
 	branch_le_zero(R_T0, atom_offset(cull, cube_g4_face_exit)),
 		/* BD-slot: Write the prim tag (R_0=0; overwrites the legacy tag word in the prim_buffer).
 		 * If branch IS taken (face culled), the body is skipped and this 0-tag is stranded —
@@ -628,8 +625,7 @@ atom_label(floor_f3_face_exit)
 
 typedef Struct_(Binds_SyncPrimitiveArena) { U4 used; U4 cursor; };
 internal MipsAtom_(sync_primitive_arena) atom_info(atom_bind(Binds_SyncPrimitiveArena)
-	, atom_reads( R_TapePtr, R_PrimCursor)
-	, atom_writes(R_TapePtr)
+	, atom_reads(R_PrimCursor), atom_writes(R_AT)
 ){
 	load_word(R_AT, R_TapePtr, O_(Binds_SyncPrimitiveArena,used)),
 	load_word(R_T0, R_TapePtr, O_(Binds_SyncPrimitiveArena,cursor)), LdSlot_
