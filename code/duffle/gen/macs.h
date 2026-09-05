@@ -35,6 +35,7 @@
  *  These do NOT yield. They are expanded inline inside Tape Atoms.
  * ---------------------------------------------------------------------------*/
 // The 'Yield' sequence for Tape Atoms (mac_yield).
+// In Forth this is considered the "NEXT" mechanism.
 #define mac_yield(...) \
 	load_word(R_AtomJmp, R_TapePtr, 0) \
 	LdSlot_ \
@@ -54,6 +55,12 @@ WORD_COUNT(mac_yield_load, 1)
 ,	jump_reg( R_AtomJmp) \
 ,	BdSlot_ nop
 WORD_COUNT(mac_yield_tail, 3)
+
+/* atom_dbg_skip */
+#define mac_yield_to(code_ptr) \
+	jump_reg(code_ptr) \
+,	BdSlot_ nop
+WORD_COUNT(mac_yield_to, 2)
 
 /* atom_dbg_skip */
 #define mac_load_half_v3(tx, ty, tz, base, offset) \

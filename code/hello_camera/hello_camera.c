@@ -292,6 +292,8 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		gte_matrix_set_rotation   (& smem.tform_view);
 		gte_matrix_set_translation(& smem.tform_view);
 
+		// TODO(Ed): We should do a bounds check beforehand to confirm pa can hold all tris?
+		// The tape atoms in-flight should not need to care.
 		U1* prim_base   = u1_r(pa->buf[smem.active_buf_id]);
 		U1* prim_cursor = prim_base + pa->used;
 		tb.used = 0; tb_scope_run(& tb) {
@@ -317,21 +319,16 @@ void update(PrimitiveArena* pa, U4* ordering_buf)
 		mt3s2s4_rotation   (& smem.floor.rot,   & smem.tform_world);
 		mt3s2s4_translation(& smem.tform_world, & smem.floor.pos);
 		mt3s2s4_scale      (& smem.tform_world, & smem.floor.scale);
-
 		// Combine world and look_at matrix.
 		gte_comp_coord_m3s2(& smem.cam.look_at, & smem.tform_world, & smem.tform_view);
-
 		gte_matrix_set_rotation   (& smem.tform_view);
 		gte_matrix_set_translation(& smem.tform_view);
 
-		U1_R prim_base   = u1_r(pa->buf[smem.active_buf_id]);
-		U1_R prim_cursor = prim_base + pa->used;
-
 		// TODO(Ed): We should do a bounds check beforehand to confirm pa can hold all tris?
 		// The tape atoms in-flight should not need to care.
-
-		// Prepare the tape. (Push protocol to tape)
-		tb.used = 0; tb_scope_run(& tb) {
+		U1_R prim_base   = u1_r(pa->buf[smem.active_buf_id]);
+		U1_R prim_cursor = prim_base + pa->used;
+		tb.used = 0; tb_scope_run(& tb) { // Prepare the tape. (Push protocol to tape)
 			tb_emit(& tb, rbind_floor_f3_face); tb_bind_(& tb, Binds_FloorTri,
 				.prim_cursor = prim_cursor,
 				.face_cursor = smem.floor.faces,

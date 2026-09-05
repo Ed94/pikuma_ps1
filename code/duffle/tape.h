@@ -13,49 +13,57 @@
 
 #pragma region Tape Drive
 /* -----------------------------------------------------------------------------------------------------------
- *  TAPE DRIVE ABI
+ *  THREADED ATOMS - TAPE EXECUTION & ABI
+ *  _________
+ * |   ___   |         
+ * |  o___o  |              ,-----<-----.
+ * |__/___\__|              V           ^
+ *          \_[Enter]_[A]->[A]->[A]->[A(B)]->[A]->[Exit]
  * -----------------------------------------------------------------------------------------------------------
- * Note(Ed): One of the main purposes of this codebase is to help me learn this, 
- * as such the information below may not* be entirely realized or finalized conceptually.
- * -----------------------------------------------------------------------------------------------------------
- * This ABI and its associated legos were directly inspired by researching the work of 
- * Timothy Lottes and Onat Türkçüoğlu; along with many others. It's the simplest bootstrap of a 
- * directly executed chain of assemby arrays (Atoms) that terminate with a yield sequence to the next atom.
- * These eventually lead to a terminal atom for the tape which is defined below as "tape_exit".
+ * This ABI and its associated legos were directly inspired by researching the work of Timothy Lottes and
+ * Onat Türkçüoğlu; Forth, threaded code system, and various other people or programming techniques.
+ * 
+ * The setup is simple: 
+ * A tape is a linear stream containing addresses of directly executable native-code fragments ("Atoms").
+ * Most atoms terminate in a small yield sequence which loads the next atom address from the tape.
+ * It's a runtime composed of directly executed native machine-code sequences (Atoms) that usually terminate 
+ * in a yield sequence to the next atom. These eventually lead to a terminal atom for the tape
+ * which is defined below as "tape_exit". Traditionally referred to as Direct Threaded Execution.
  * 
  * It behaves as one of the simplest runtime harnesses ontop of a host-enviornment's execution engine 
  * to author and compose programs with. From here various conventions can be further applied. 
- * To make things easier  to understand it may be better to focus on what this ABI does not have. 
- * It does not have have any branching within the tape but relative branches within atoms or between atoms.
- * Branching nearly is always downstream. Automatic stack usage is non-existent.
- * Push/Pop, FIFO, or Arena/Bump data structures are used by atoms explicitly.
- * In it's current form with the C11 macro DSL, the user also has fullfill manual register allocation per atom.
+ * To make things easier to understand it may be better to focus on what this ABI does not have. 
+ * The tape itself does not have have any branching behavior.
+ * Branches, loops, skips, or other control-flow policies must be implemented explicitly by atoms.
+ * Push/Pop, FIFO, or Arena/Bump data structures are utilized by atoms explicitly.
+ * There is no implicit call-stack, return stack, or per-atom stack-frame.
+ * The user must also explictly handle register allocation per atom (by default). 
+ * However they could procedurally automate it using metaprogramming functionality.
  * 
- * One of the remarkable things about utilizing this ABI is its essentially interopable with CPUs, GPUs, FPGA, 
- * or, basically anything from the 5th generation consoles and onward.
- * The ABI directly reflects how all computational hardware must be architected in order to execute 
- * digital logic effectively on current era tech.
+ * One of the remarkable things about utilizing this ABI's composition model is that its essentially interopable 
+ * with all modern general purpose machines, or, basically anything from the 5th generation consoles and onward.
+ * This model does not try resolve some optimal runtime for one particular modern machine,
+ * but adheres the the most bare constraints shared our most common kinds of hardware may all execute.
  * On the PS1 we don't have access to a few features like multi-threading, speculative execution, or L3 cache;
  * but, we can set the foundation for legoing whats required for eventually expanding this ABI's paradigm 
  * and core atoms to take those newer hardware features into account. For example, you can easily expand 
- * this to support wave-based execution model on a PS2 or PS3. Not having a stack or 
- * automatic register allocation means the user cannot ignore excessive argument shuffle across workload or
- * waves and thier phases. Crossing ABI boundaries to other runtimes that do has obviouss penalties.
+ * this to support multi-threaded execution model on a PS2 or PS3 (or modern machines).
+ * Not having an implicit-call-frame boundary means register lifetime and data movement remain visible.
+ * Any poor composition becomes obvious and will convey to the initiated user register shuffling,
+ * spills, reloads, or any unnecessary traffic they may not have intended (no need to dig through disassembly).
  * 
  * Learning data-oriented code becomes a natural progression. Your not fighting a stack-based procedural 
  * paradigm that wants to argument shuffle. There is no ambiguity due to the lack of constraints, for example,
  * on how the user may "call" a procedure in traditional random dispatch runtimes. The user does have to
- * hammer down "rules" or patterns for massaging the compiler to dissolve those call frames; just to get 
+ * hammer down "rules" or Ifpatterns for massaging the compiler to dissolve those call frames; just to get 
  * the asesmbly into its desired form. The form is obvious, and once the user gets to author these compoonents
  * it becomes a game of tetris.
  * 
  * Another feature is this ABI is very compatible with bootstrapping and developing simple toolchains built off
  * of bit-packed annotated command streams the user can directly author, maintatain, and immediately execute.
  * That being like a color forth, or maybe something more familar like an immediate mode library 
- * for various systems such as GUIs. This can make the tetris less of a chore with some helpful policy
+ * (for various systems such as GUIs). This can make the tetris less of a chore with some helpful policy
  * generation for allocation of registers, helping to choose resuable components, designing DSL on the fly, etc.
- * -----------------------------------------------------------------------------------------------------------
- * TODO(Ed): We need pretty ascii diagrams and proper guides, articles, etc.
  * -----------------------------------------------------------------------------------------------------------
  * For now this ideation has just started functioning. I'm abusing C11 & a lua metaprogram to help establish 
  * a hybrid toolchain to ideate on a traditional text-based authoring UX for this paradigm.
@@ -239,6 +247,9 @@ typedef void Proc_(TapeEntryFn)(MipsAtom* tape_ptr);
 
 FI_ void tape_run(Tape tape) { C_(TapeEntryFn*, tape_enter)(tape.ptr); }
 
+
+
+
 // Procedural authoring of tapes:
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
 FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->used = 0; }
@@ -272,7 +283,8 @@ FI_ void tb_scope_run_end(TapeBuilder* tb) { tb_emit(tb,tape_exit); tape_run(tb_
  *  These do NOT yield. They are expanded inline inside Tape Atoms.
  * ---------------------------------------------------------------------------*/
 
-// The 'Yield' sequence for Tape Atoms (mac_yield).
+// The 'Yield' sequence for Tape Atoms (mac_yield). 
+// In Forth this is considered the "NEXT" mechanism.
 
 atom_dbg_skip MipsAtomComp_(ac_yield) {
 	load_word(R_AtomJmp, R_TapePtr, 0), LdSlot_
@@ -360,8 +372,7 @@ typedef Struct_(RegFile) { A2_U2 GPR; };
 #define regfile(pin_mask) {.GPR={u4_lo(pin_mask), u4_hi(pin_mask)} }
 FI_ void regfile_init(RegFile_R rf) {
 	/* pack the 32-bit ABI mask into the two U2s */
-	rf->GPR[0] = u4_lo(regfile_abi_mask);
-	rf->GPR[1] = u4_hi(regfile_abi_mask);
+	rf->GPR[0] = u4_lo(regfile_abi_mask); rf->GPR[1] = u4_hi(regfile_abi_mask);
 }
 FI_ RegFile regfile_make(void) { RegFile rf; regfile_init(& rf); return rf; }
 
@@ -405,15 +416,18 @@ FI_ void regfile_free_reg(RegFile_R rf, Reg r_id) {
 	RegFile_RInfo info = regfile_rinfo(rf->GPR, r_id);
 	info.section[0] &= ~info.mask;
 }
-FI_ void regfile_reset(RegFile_R rf) {
-	rf->GPR[0] = u4_lo(regfile_abi_mask);
-	rf->GPR[1] = u4_hi(regfile_abi_mask);
-}
-FI_ void regfile_reset_to_mask(RegFile_R rf, U4 mask) {
-	rf->GPR[0] = u4_lo(mask);
-	rf->GPR[1] = u4_hi(mask);
-}
+FI_ void regfile_reset        (RegFile_R rf)          { rf->GPR[0] = u4_lo(regfile_abi_mask); rf->GPR[1] = u4_hi(regfile_abi_mask); }
+FI_ void regfile_reset_to_mask(RegFile_R rf, U4 mask) { rf->GPR[0] = u4_lo(mask);             rf->GPR[1] = u4_hi(mask); }
 #pragma endregion RegFileArena (Register File Allocator)
+
+#pragma region Mips Atom Components (Procedures)
+
+// For doing direct-chaining of "atoms or fragments".
+FI_ Slice_MipsCode ac_yield_to(AtomBuilder_R ab, Reg code_ptr) atom_dbg_skip MipsAtomComp_Proc_(ab, {
+	jump_reg(code_ptr), BdSlot_ nop,
+})
+
+#pragma endregion Mips Atom Components (Procedures)
 
 #pragma region Mips Atom Procs
 /* RegUse structs are a convention to organize register allocations for a mips atom procedure.

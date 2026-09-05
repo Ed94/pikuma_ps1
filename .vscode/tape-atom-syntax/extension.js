@@ -2,10 +2,10 @@
 
 const vscode = require("vscode");
 const { TOKEN_MODIFIERS, TOKEN_TYPES, classifyDocument } = require("./classifier");
-const { createIndex, mergeIndexes, scanSource } = require("./source-index");
+const { createIndex, mergeIndexes, scanSource }          = require("./source-index");
 
-const SOURCE_GLOB = "**/*.{c,h,cc,cpp,cxx,hh,hpp,hxx}";
-const EXCLUDE_GLOB = "**/{gen,build,.slop_cache,toolchain,node_modules}/**";
+const SOURCE_GLOB        = "**/*.{c,h,cc,cpp,cxx,hh,hpp,hxx}";
+const EXCLUDE_GLOB       = "**/{gen,build,.slop_cache,toolchain,node_modules}/**";
 const EXCLUDED_SEGMENTS = new Set(["gen", "build", ".slop_cache", "toolchain", "node_modules"]);
 
 function isExcluded(uri) {
@@ -18,28 +18,29 @@ function formatError(filePath, error) {
 }
 
 async function activate(context) {
-	const output = vscode.window.createOutputChannel("Tape Atom DSL");
+	const output  = vscode.window.createOutputChannel("Tape Atom DSL");
 	const emitter = new vscode.EventEmitter();
-	const legend = new vscode.SemanticTokensLegend(TOKEN_TYPES, TOKEN_MODIFIERS);
-	let workspaceIndex = createIndex();
+	const legend  = new vscode.SemanticTokensLegend(TOKEN_TYPES, TOKEN_MODIFIERS);
+	let workspaceIndex    = createIndex();
 	let rebuildGeneration = 0;
-	let debounceHandle = null;
+	let debounceHandle    = null;
 
 	async function rebuildIndex() {
 		const generation = ++rebuildGeneration;
-		const files = await vscode.workspace.findFiles(SOURCE_GLOB, EXCLUDE_GLOB);
-		let nextIndex = createIndex();
+		const files      = await vscode.workspace.findFiles(SOURCE_GLOB, EXCLUDE_GLOB);
+		let nextIndex    = createIndex();
 
 		for (const uri of files) {
 			if (generation !== rebuildGeneration) return;
 			if (isExcluded(uri)) continue;
 			try {
-				const bytes = await vscode.workspace.fs.readFile(uri);
+				const bytes  = await vscode.workspace.fs.readFile(uri);
 				const source = Buffer.from(bytes).toString("utf8");
 				const result = scanSource(source, uri.fsPath);
-				nextIndex = mergeIndexes(nextIndex, result.index);
+				nextIndex    = mergeIndexes(nextIndex, result.index);
 				for (const error of result.errors) output.appendLine(formatError(uri.fsPath, error));
-			} catch (error) {
+			} 
+			catch (error) {
 				output.appendLine(`${uri.fsPath}: ${error.stack || error.message || error}`);
 			}
 		}
@@ -53,9 +54,11 @@ async function activate(context) {
 		if (uri && isExcluded(uri)) return;
 		if (debounceHandle !== null) clearTimeout(debounceHandle);
 		debounceHandle = setTimeout(() => {
-			debounceHandle = null;
-			rebuildIndex().catch((error) => output.appendLine(error.stack || String(error)));
-		}, 100);
+				debounceHandle = null;
+				rebuildIndex().catch((error) => output.appendLine(error.stack || String(error)));
+			}, 
+			100
+		);
 	}
 
 	const provider = {
@@ -77,7 +80,8 @@ async function activate(context) {
 					output.appendLine(formatError(document.uri.fsPath || document.uri.toString(), error));
 				}
 				return builder.build();
-			} catch (error) {
+			}
+			catch (error) {
 				output.appendLine(`${document.uri}: ${error.stack || error.message || error}`);
 				return new vscode.SemanticTokensBuilder(legend).build();
 			}
@@ -85,8 +89,8 @@ async function activate(context) {
 	};
 
 	const selector = [
-		{ language: "c", scheme: "file" },
-		{ language: "c", scheme: "untitled" },
+		{ language: "c",   scheme: "file" },
+		{ language: "c",   scheme: "untitled" },
 		{ language: "cpp", scheme: "file" },
 		{ language: "cpp", scheme: "untitled" },
 	];

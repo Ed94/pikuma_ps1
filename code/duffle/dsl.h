@@ -14,8 +14,8 @@
 #define glue(A, B)         glue_impl(A, B)
 #define tmpl(prefix, type) prefix ## _ ## type
 
-#define stringify_impl(S)        #S
-#define stringify(S)             stringify_impl(S)
+#define stringify_impl(S) #S
+#define stringify(S)      stringify_impl(S)
 
 #define VA_Sel_1( _1, ... ) _1 // <-- Of all th args passed pick _1.
 #define VA_Sel_2( _1, _2, ... ) _2 // <-- Of all the args passed pick _2.
@@ -121,7 +121,6 @@ typedef unsigned char   TSet_(B1);
 typedef __UINT16_TYPE__ TSet_(B2); 
 typedef __UINT32_TYPE__ TSet_(B4);
 
-
 #define b1_(value)  C_(B1, value)
 #define b2_(value)  C_(B2, value)
 #define b4_(value)  C_(B4, value)
@@ -196,12 +195,12 @@ def_signed_ops(le, <=)
 #undef def_generic_sop
 #endif
 
-#define alignas                             _Alignas
-#define alignof                             _Alignof
-#define byte_pad(amount, ...)               B1 glue(_PAD_, __VA_ARGS__) [amount]
-#define C_ptr(type, data)                   (C_(type*, & (data)) [0])
+#define alignas               _Alignas
+#define alignof               _Alignof
+#define byte_pad(amount, ...) B1 glue(_PAD_, __VA_ARGS__) [amount]
+#define C_ptr(type, data)     (C_(type*, & (data)) [0])
 
-#define dbg_args(...)                      __VA_ARGS__
+#define dbg_args(...) __VA_ARGS__
 
 #pragma region Control Flow & Iteration
 #define each_iter(type, iter, end)             (type iter = 0; iter < end; ++ iter)

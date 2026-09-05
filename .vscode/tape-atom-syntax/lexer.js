@@ -10,29 +10,30 @@ function isIdentifierContinue(code) {
 	return isIdentifierStart(code) || (code >= 48 && code <= 57);
 }
 
-function lex(source) {
+function lex(source)
+{
 	if (typeof source !== "string") throw new TypeError("source must be a string");
 
-	const tokens = [];
-	const errors = [];
-	let offset = 0;
-	let line = 0;
-	let character = 0;
+	const tokens    = [];
+	const errors    = [];
+	let   offset    = 0;
+	let   line      = 0;
+	let   character = 0;
 
 	function advance() {
 		if (source[offset] === "\r" && source[offset + 1] === "\n") {
-			offset += 2;
-			line += 1;
+			offset   += 2;
+			line     += 1;
 			character = 0;
 			return;
 		}
 		if (source[offset] === "\n") {
-			offset += 1;
-			line += 1;
+			offset   += 1;
+			line     += 1;
 			character = 0;
 			return;
 		}
-		offset += 1;
+		offset    += 1;
 		character += 1;
 	}
 
@@ -47,7 +48,8 @@ function lex(source) {
 		});
 	}
 
-	while (offset < source.length) {
+	while (offset < source.length)
+	{
 		const ch = source[offset];
 
 		if (/\s/.test(ch)) {
@@ -60,12 +62,14 @@ function lex(source) {
 			continue;
 		}
 
-		if (ch === "/" && source[offset + 1] === "*") {
+		if (ch === "/" && source[offset + 1] === "*")
+		{
 			const start = offset;
 			advance();
 			advance();
 			let closed = false;
-			while (offset < source.length) {
+			while (offset < source.length)
+			{
 				if (source[offset] === "*" && source[offset + 1] === "/") {
 					advance();
 					advance();
@@ -78,12 +82,14 @@ function lex(source) {
 			continue;
 		}
 
-		if (ch === "\"" || ch === "'") {
+		if (ch === "\"" || ch === "'")
+		{
 			const quote = ch;
 			const start = offset;
 			advance();
 			let closed = false;
-			while (offset < source.length) {
+			while (offset < source.length)
+			{
 				if (source[offset] === "\\") {
 					advance();
 					if (offset < source.length) advance();
@@ -97,14 +103,14 @@ function lex(source) {
 				if (source[offset] === "\n" || source[offset] === "\r") break;
 				advance();
 			}
-			if (!closed) errors.push({ kind: "unterminated-literal", offset: start });
+			if (! closed) errors.push({ kind: "unterminated-literal", offset: start });
 			continue;
 		}
 
 		const code = source.charCodeAt(offset);
 		if (isIdentifierStart(code)) {
-			const start = offset;
-			const startLine = line;
+			const start          = offset;
+			const startLine      = line;
 			const startCharacter = character;
 			advance();
 			while (offset < source.length && isIdentifierContinue(source.charCodeAt(offset))) advance();
@@ -112,8 +118,8 @@ function lex(source) {
 			continue;
 		}
 
-		const start = offset;
-		const startLine = line;
+		const start          = offset;
+		const startLine      = line;
 		const startCharacter = character;
 		advance();
 		pushToken("punctuation", start, startLine, startCharacter);
@@ -124,9 +130,9 @@ function lex(source) {
 
 function buildCallContexts(tokens) {
 	const contexts = Array.from({ length: tokens.length }, () => []);
-	const calls = [];
+	const calls  = [];
 	const errors = [];
-	const stack = [];
+	const stack  = [];
 
 	for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
 		const token = tokens[tokenIndex];
@@ -134,7 +140,8 @@ function buildCallContexts(tokens) {
 		if (token.text === ")") {
 			if (stack.length === 0) {
 				errors.push({ kind: "unmatched-close-paren", offset: token.start });
-			} else {
+			}
+			else {
 				const frame = stack.pop();
 				if (frame.callee !== null) calls.push({ ...frame, closeTokenIndex: tokenIndex });
 			}
@@ -143,20 +150,20 @@ function buildCallContexts(tokens) {
 		contexts[tokenIndex] = stack
 			.filter((frame) => frame.callee !== null)
 			.map((frame) => ({
-				callee: frame.callee,
+				callee:           frame.callee,
 				calleeTokenIndex: frame.calleeTokenIndex,
-				openTokenIndex: frame.openTokenIndex,
-				argIndex: frame.argIndex,
+				openTokenIndex:   frame.openTokenIndex,
+				argIndex:         frame.argIndex,
 			}));
 
 		if (token.text === "(") {
-			const previous = tokens[tokenIndex - 1];
+			const previous  = tokens[tokenIndex - 1];
 			const hasCallee = previous && previous.kind === "identifier";
 			stack.push({
-				callee: hasCallee ? previous.text : null,
+				callee:           hasCallee ? previous.text : null,
 				calleeTokenIndex: hasCallee ? tokenIndex - 1 : -1,
-				openTokenIndex: tokenIndex,
-				argIndex: 0,
+				openTokenIndex:   tokenIndex,
+				argIndex:         0,
 			});
 			continue;
 		}

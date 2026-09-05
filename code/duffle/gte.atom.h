@@ -271,7 +271,7 @@ typedef Struct_(RegUse_normalize_v3s4) {
 	union { Reg r1, dst_ptr; };
 	union { Reg r2, dst_offset, mac1, v_sqr_aligned; };
 	union { Reg r3, src_offset, btarget, shift_count, sqrtbl_index; };
-	union { Reg r4, mac3, v_sqr_sum, scale_exp, srav_shift; };
+	union { Reg r4, mac3, v_sqr_sum, srav_shift; };
 	union { Reg r5, lzcr, inv_len; };
 };
 /* ─── Full normalize (all 4 stages inline) ───
