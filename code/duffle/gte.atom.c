@@ -4,6 +4,7 @@
 #	include "gte.h"
 #	include "gp.h"
 #	include "tape.h"	
+#	include "math.atom.h"
 #endif
 
 ATOM_FILE_DEBUGGER_LINE_MARKER(gte_atom_c);
@@ -183,14 +184,12 @@ MipsAtomComp_Proc_(ab, {
 	gte_mv_from_data_r(fr_mac3, C2_MAC3),
 })
 
-FI_ Slice_MipsCode ac_gte_mv_from_data_r_mac123(AtomBuilder_R ab
-	, Reg fr_mac1, Reg fr_mac2, Reg fr_mac3)
+FI_ Slice_MipsCode ac_gte_mv_from_data_r_mac123(AtomBuilder_R ab, Reg fr_mac1, Reg fr_mac2, Reg fr_mac3) 
 MipsAtomComp_Proc_(ab, {
 	gte_mv_from_data_r(fr_mac1, C2_MAC1),
 	gte_mv_from_data_r(fr_mac2, C2_MAC2),
 	gte_mv_from_data_r(fr_mac3, C2_MAC3),
 })
-
 
 FI_ Slice_MipsCode ac_gte_mv_from_mac123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) MipsAtomComp_ProcMap_(ab, mac_gte_mv_from_data_r_mac123(v.x, v.y, v.z))
 
@@ -198,45 +197,82 @@ FI_ Slice_MipsCode ac_gte_mv_from_mac123_v3s4(AtomBuilder_R ab, Reg_(V3_S4) v) M
 
 #pragma region Atom Procs
 
-/* ─── Local copy of PSYQ's sqrtbl (1/sqrt lookup table for VectorNormal). ───
- * Source: PSYQ 4.7 libgte sqrtbl at 0x800185B4 in hello_camera.elf.
- *   objdump -s --start-address=0x800185B4 --stop-address=0x800185F4 hello_camera.elf → 192 entries × 16-bit signed, in 1.12 fixed-point (max value 0x1000 = 1.0).
- *
- * Data is identical to the libgte original (byte-for-byte verified).
+/* Normalize V3_S4 using the PSYQ/libgte reciprocal-sqrt method:
+ *   |v|² = x² + y² + z²
+ *   LZCR determines the exponent of |v|².
+ *   Round that exponent even and shift |v|² into [1, 4).
+ *   sqrtbl approximates 1/sqrt(mantissa).
+ *   GPF multiplies v by that reciprocal-sqrt mantissa.
+ *   srav_shift restores the exponent scale.
+ * Effectively: v_normalized = v * (1 / sqrt(|v|²)).
  * 
- * ─── Per-entry semantics (decoded from libgte msc02 VectorNormal) ───
- * Each entry is `1/sqrt(x)` in 1.12 fixed point (value / 4096).
- * The 192 entries span 4 octaves of the input magnitude, with 48 entries per octave:
- *   Octave 0 (entries  0- 47): mantissa in [0x8000,  0x10000)  output ~[1.000, 0.707]
- *   Octave 1 (entries 48- 95): mantissa in [0x10000, 0x20000)  output ~[0.707, 0.500]
- *   Octave 2 (entries 96-143): mantissa in [0x20000, 0x40000)  output ~[0.500, 0.354]
- *   Octave 3 (entries144-191): mantissa in [0x40000, 0x80000)  output ~[0.354, 0.251]
- * Within each octave, 8 sub-entries interpolate over the 8 fractional bits of the mantissa
- * (the byte `(0x80 | (i mod 8))` for the lower-byte of the aligned value).
- * Sampling the first value of each octave:
- *   [0]   0x1000 = 1.0000                 ; 1 / sqrt(1.0000)
- *   [48]  0x0e4f = 0.8940                 ; 1 / sqrt(1.2500)
- *   [96]  0x0d10 = 0.8164                 ; 1 / sqrt(1.5000)
- *   [144] 0x0c0a = 0.7520                 ; 1 / sqrt(1.7500)
- * And representative sub-entries within octave 0 (mantissa in [0x8000, 0x8100)):
- *   [0]   0x1000 = 1.0000                 ; 1 / sqrt(0x8000)
- *   [1]   0x0fe0 = 0.9922                 ; 1 / sqrt(0x8100)
- *   [2]   0x0fc1 = 0.9846                 ; 1 / sqrt(0x8200)
- *   [3]   0x0fa3 = 0.9773                 ; 1 / sqrt(0x8300)
- *   [4]   0x0f85 = 0.9700                 ; 1 / sqrt(0x8400)
- *   [5]   0x0f68 = 0.9629                 ; 1 / sqrt(0x8500)
- *   [6]   0x0f4c = 0.9561                 ; 1 / sqrt(0x8600)
- *   [7]   0x0f30 = 0.9492                 ; 1 / sqrt(0x8700)
+ * ─── Local port of PSYQ's sqrtbl (1/sqrt lookup table for VectorNormal). ───
+ * Source: PSYQ 4.7 libgte sqrtbl at 0x800185B4 in hello_camera.elf.
+ *   objdump -s --start-address=0x800185B4 --stop-address=0x800185F4 hello_camera.elf -> 192 entries x 16-bit signed, stored in 1.12 fixed point.
+ * Data is identical to the libgte original (byte-for-byte verified).
  *
- * The algorithm's `addi -64 / sll 1 / lh` selects the entry at `(aligned - 64) * 2` for the case where `aligned` has its top bit at bit 24.
- * After the sllv/srav pair, `aligned` always lands in `[0x80, 0x100)` 
- * (with top bit at bit 24 → after `sub $aligned - 64`, the index sits in `[0x40, 0x80) * 2 = [0x80, 0x100)` bytes = entries [64, 128) within the sqrtbl).
- * The earlier 64 entries (octave 0) are reached when the magnitude after shifting puts the top bit below bit 24 (the `sllv` branch),
- * and the load upper_halves of the table bracket the input range.
- * The later 64 entries (octaves 2-3) are the `srav` branch when the magnitude's top bit is well above bit 24.
+ * ─── Table semantics ───
+ * For table index i in [0, 192):
+ *     x      = 1 + i / 64
+ *     tbl[i] = floor(4096 / sqrt(x))
+ * Thus the table uniformly samples 1/sqrt(x) over:
+ *     x in [1.0, 4.0)
+ * at steps of 1/64, with the result represented in 1.12 fixed point (0x1000 = 1.0).
  *
- * Reproduced verbatim from libgte (verified against libpsn00b/psxgte/vector.s:100-123 — 24 rows × 8 halfwords, last entry 0x0804).
- * */
+ * Representative entries:
+ *     [  0] 0x1000 = 1.000000   ; 1 / sqrt(1.000000)
+ *     [ 16] 0x0e4f = 0.894287   ; 1 / sqrt(1.250000)
+ *     [ 32] 0x0d10 = 0.816406   ; 1 / sqrt(1.500000)
+ *     [ 48] 0x0c18 = 0.755859   ; 1 / sqrt(1.750000)
+ *     [ 64] 0x0b50 = 0.707031   ; 1 / sqrt(2.000000)
+ *     [128] 0x093c = 0.577148   ; 1 / sqrt(3.000000)
+ *     [191] 0x0804 = 0.500977   ; 1 / sqrt(3.984375)
+ *
+ * ─── How VectorNormal indexes it ───
+ * Let:
+ *     mag_sq = x*x + y*y + z*z
+ *     lzcr   = leading-zero count of mag_sq
+ * For a non-zero magnitude, libgte first rounds LZCR down to an even number:
+ *     lzcr_even = lzcr & ~1
+ *
+ * It then shifts mag_sq so that its significant bits land in one of two
+ * adjacent normalized ranges:
+ *     if lzcr_even >= 24:
+ *         aligned = mag_sq << (lzcr_even - 24)
+ *     else:
+ *         aligned = mag_sq >> (24 - lzcr_even)
+ *
+ * Because lzcr_even differs from the true LZCR by at most one bit:
+ *     raw LZCR even -> aligned in [0x80, 0x100)
+ *     raw LZCR odd  -> aligned in [0x40, 0x080)
+ * therefore:
+ *     aligned in [0x40, 0x100)
+ *
+ * Dividing this normalized integer by 64 gives exactly the table domain:
+ *     x = aligned / 64
+ *     x in [1.0, 4.0)
+ *
+ * The lookup is therefore:
+ *     index       = aligned - 0x40
+ *     byte_offset = index * sizeof(S2)
+ *     inv_len     = sqrtbl[index]
+ * or equivalently, matching the libgte instructions:
+ *     addi aligned, -64
+ *     sll  aligned, 1
+ *     lh   inv_len, sqrtbl + aligned
+ *
+ * ─── Why the domain spans [1, 4) instead of [1, 2) ───
+ * Square-root scaling depends on the parity of the exponent.
+ * Rounding LZCR to even absorbs exponent changes in pairs of bits, leaving the lookup mantissa normalized over a factor-of-four interval [1, 4).
+ *
+ * The corresponding exponent correction is retained separately as:
+ *     srav_shift = (31 - lzcr_even) >> 1
+ *
+ * After GPF multiplies the original vector components by the table's reciprocal-square-root coefficient,
+ * this shift restores the exponent scale and yields the normalized vector.
+ *
+ * Reproduced verbatim from libgte; also matches PSn00bSDK VectorNormalS _norm_table (24 rows x 8 halfwords, final entry 0x0804).
+ **/
 internal S2 const gte_normalize_sqr_tbl[192] align_(2) = {
 	0x1000, 0x0fe0, 0x0fc1, 0x0fa3, 0x0f85, 0x0f68, 0x0f4c, 0x0f30,
 	0x0f15, 0x0efb, 0x0ee1, 0x0ec7, 0x0eae, 0x0e96, 0x0e7e, 0x0e66,
@@ -269,10 +305,10 @@ typedef Struct_(RegUse_normalize_v3s4) {
 	union { Reg_(V3_S4) res, src; };
 	union { Reg r0, src_ptr, mac2; };
 	union { Reg r1, dst_ptr; };
-	union { Reg r2, dst_offset, mac1, v_sqr_aligned; };
-	union { Reg r3, src_offset, btarget, shift_count, sqrtbl_index; };
+	union { Reg r2, dst_offset, mac1, v_sqr_aligned, sqrtbl_byte_offset; };
+	union { Reg r3, src_offset, align_delta, shift_count, sqrtbl_lookup; };
 	union { Reg r4, mac3, v_sqr_sum, srav_shift; };
-	union { Reg r5, lzcr, inv_len; };
+	union { Reg r5, lzcr_raw, lzcr_even, inv_len; };
 };
 /* ─── Full normalize (all 4 stages inline) ───
  * Generic 4-stage GTE normalize (SQR → sum+LZCR → align+sqrtbl → GPF+srav). */
@@ -294,30 +330,30 @@ MipsAtom_Proc_(aa, {
 	add_u_self(        r.v_sqr_sum, r.mac1),
 	add_u_self(        r.v_sqr_sum, r.mac2),
 	gte_mv_to_data_r(  r.v_sqr_sum, C2_LZCS), GteDelay_ nop2,
-	gte_mv_from_data_r(r.lzcr,      C2_LZCR), GteDelay_ nop,
+	gte_mv_from_data_r(r.lzcr_raw,  C2_LZCR), GteDelay_ nop,
 
 	/* Stage 3: even(LZCR), half-shift, align |v|² to bit 24. */
-	mac_lzcr_round_even_half_shift(r.lzcr, r.v_sqr_sum, r.v_sqr_aligned),
-	add_si(        r.btarget, r.lzcr, -24),
-	branch_lt_zero(r.btarget, atom_offset(aligned_done, srav_path)), BdSlot_ nop, /* bltz → srav_path (LZCR <  24 path) */
+	mac_lzcr_round_even_half_shift(r.lzcr_raw, r.v_sqr_sum, r.v_sqr_aligned),
+	add_si(        r.align_delta, r.lzcr_even, -24),
+	branch_lt_zero(r.align_delta, atom_offset(aligned_done, srav_path)), BdSlot_ nop, /* bltz → srav_path (LZCR <  24 path) */
 		jump_rel(atom_offset(srav_path, aligned_done)),                             /* b → aligned_done (LZCR >= 24 path) */
-		BdSlot_ shift_lleft_var(r.v_sqr_aligned, r.v_sqr_aligned, r.btarget),
+		BdSlot_ shift_lleft_var(r.v_sqr_aligned, r.v_sqr_aligned, r.align_delta),
 		atom_label(srav_path)
 			li_s( r.shift_count, 24),
-			sub_s(r.shift_count, r.shift_count, r.lzcr),
+			sub_s(r.shift_count, r.shift_count, r.lzcr_even),
 			shift_aright_var(r.v_sqr_aligned, r.v_sqr_aligned, r.shift_count),
 	atom_label(aligned_done)
-		add_si(     r.v_sqr_aligned, r.v_sqr_aligned, -64),
-		shift_lleft(r.v_sqr_aligned, r.v_sqr_aligned, 1),
-		mac_load_word_imm(r.sqrtbl_index, & gte_normalize_sqr_tbl), add_u_self(r.sqrtbl_index, r.v_sqr_aligned),
-		load_half(r.inv_len, r.sqrtbl_index, 0),
+		add_si(     r.sqrtbl_byte_offset, r.v_sqr_aligned,    -64),
+		shift_lleft(r.sqrtbl_byte_offset, r.sqrtbl_byte_offset, 1),
+		mac_load_word_imm(r.sqrtbl_lookup, & gte_normalize_sqr_tbl), add_u_self(r.sqrtbl_lookup, r.sqrtbl_byte_offset),
+		load_half(r.inv_len, r.sqrtbl_lookup, 0),
 		LdSlot_ nop,
 
 	mac_gte_general_purpose_interopolation(r.inv_len,
 		r.src.x, r.src.y, r.src.z,
 		r.res.x, r.res.y, r.res.z,
 		GteDelay_ load_word(R_AtomJmp, R_TapePtr, 0), LdSlot_   // ac_yield: word 1
-		GteDelay_ add_ui_self(         R_TapePtr, S_(MipsCode)) // ac_yield: word 2
+		GteDelay_ add_ui_self(         R_TapePtr, S_(MipsCode)) // ac_yield: word 
 	),
 	mac_shift_aright_var_v3s4_self(r.res, r.srav_shift),
 	mac_store_v3s4(r.res, r.dst_ptr, 0),

@@ -11,7 +11,7 @@
 #	include "duffle/word_count.metadata.h"
 #	include "duffle/psyq.h"
 #	include "duffle/math.atom.h"
-#	include "duffle/gte.atom.h"
+#	include "duffle/gte.atom.c"
 #	include "duffle/mips.atom.c"
 #	include "duffle/gp.atom.c"
 #	include "duffle/psyq.atom.c"
