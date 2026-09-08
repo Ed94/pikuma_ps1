@@ -5,7 +5,7 @@
 
 #define MEM_ALIGNMENT_DEFAULT  4
 
-#define assert_bounds(point, start, end) for(;0;){ \
+#define assert_bounds(point, start, end) do{ \
 	assert((start) <= (point)); \
 	assert((point) <= (end));   \
 } while(0)

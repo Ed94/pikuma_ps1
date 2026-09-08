@@ -39,38 +39,6 @@
  * There is no implicit call-stack, return stack, or per-atom stack-frame.
  * The user must also explictly handle register allocation per atom (by default). 
  * However they could procedurally automate it using metaprogramming functionality.
- * 
- * One of the remarkable things about utilizing this ABI's composition model is that its essentially interopable 
- * with all modern general purpose machines, or, basically anything from the 5th generation consoles and onward.
- * This model does not try resolve some optimal runtime for one particular modern machine,
- * but adheres the the most bare constraints shared our most common kinds of hardware may all execute.
- * On the PS1 we don't have access to a few features like multi-threading, speculative execution, or L3 cache;
- * but, we can set the foundation for legoing whats required for eventually expanding this ABI's paradigm 
- * and core atoms to take those newer hardware features into account. For example, you can easily expand 
- * this to support multi-threaded execution model on a PS2 or PS3 (or modern machines).
- * Not having an implicit-call-frame boundary means register lifetime and data movement remain visible.
- * Any poor composition becomes obvious and will convey to the initiated user register shuffling,
- * spills, reloads, or any unnecessary traffic they may not have intended (no need to dig through disassembly).
- * 
- * Learning data-oriented code becomes a natural progression. Your not fighting a stack-based procedural 
- * paradigm that wants to argument shuffle. There is no ambiguity due to the lack of constraints, for example,
- * on how the user may "call" a procedure in traditional random dispatch runtimes. The user does have to
- * hammer down "rules" or Ifpatterns for massaging the compiler to dissolve those call frames; just to get 
- * the asesmbly into its desired form. The form is obvious, and once the user gets to author these compoonents
- * it becomes a game of tetris.
- * 
- * Another feature is this ABI is very compatible with bootstrapping and developing simple toolchains built off
- * of bit-packed annotated command streams the user can directly author, maintatain, and immediately execute.
- * That being like a color forth, or maybe something more familar like an immediate mode library 
- * (for various systems such as GUIs). This can make the tetris less of a chore with some helpful policy
- * generation for allocation of registers, helping to choose resuable components, designing DSL on the fly, etc.
- * -----------------------------------------------------------------------------------------------------------
- * For now this ideation has just started functioning. I'm abusing C11 & a lua metaprogram to help establish 
- * a hybrid toolchain to ideate on a traditional text-based authoring UX for this paradigm.
- * If pcsx-redux provides viable hot-reload and persistent data storage beyond save-states
- * (just copying ram to filesystem), I can author a color forth to mess around with.
- * With either an editor in-emulator or on the actual machine itself. Assembly is tedius,
- * but I think this codebase most likely has a pretty ergonomic flavor worst case...
  * */
 /* Register Allocation Info */
 enum {
@@ -247,13 +215,9 @@ typedef void Proc_(TapeEntryFn)(MipsAtom* tape_ptr);
 
 FI_ void tape_run(Tape tape) { C_(TapeEntryFn*, tape_enter)(tape.ptr); }
 
-
-
-
 // Procedural authoring of tapes:
 typedef Relative_(FArena) Struct_(TapeBuilder) { U4 ptr; U4 capacity; U4 used; };
 FI_ void        tb_init(TapeBuilder* tb, FArena* arena) { tb->ptr = arena->start; tb->used = 0; }
-FI_ TapeBuilder tb_make_old(             FArena* arena) { return (TapeBuilder){ arena->start, 0 }; }
 FI_ TapeBuilder tb_make(Slice mem) { return (TapeBuilder){ u4_(mem.ptr), mem.len, 0 }; }  /* capacity in elements (matches used units) */
 
 FI_ void tb_emit(TapeBuilder* tb, MipsAtom* atom) { u4_r(tb->ptr)[tb->used] = u4_(atom); ++ tb->used; }
@@ -371,7 +335,6 @@ internal Reg const regfile_alloc_order[] = {
 typedef Struct_(RegFile) { A2_U2 GPR; };
 #define regfile(pin_mask) {.GPR={u4_lo(pin_mask), u4_hi(pin_mask)} }
 FI_ void regfile_init(RegFile_R rf) {
-	/* pack the 32-bit ABI mask into the two U2s */
 	rf->GPR[0] = u4_lo(regfile_abi_mask); rf->GPR[1] = u4_hi(regfile_abi_mask);
 }
 FI_ RegFile regfile_make(void) { RegFile rf; regfile_init(& rf); return rf; }
